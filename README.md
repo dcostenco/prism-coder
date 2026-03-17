@@ -109,10 +109,10 @@ Benchmark data from [`test_pipeline_benchmark.ts`](vertex-ai/test_pipeline_bench
 
 | Metric | 🌐 Brave (MCP) | 🔍 Discovery Engine | Hybrid Total |
 |--------|----------------|---------------------|--------------|
-| **Avg latency** | 202ms | 921ms | ~1.1s (sequential) |
-| **Avg raw payload** | 42.3 KB | 28.9 KB | 71.2 KB total input |
-| **Avg reduced payload** | 2.9 KB | 1.2 KB | **4.1 KB total** (94% reduction) |
-| **Token savings** | ~10,074 | ~7,087 | **~17,161 tokens saved / query** |
+| **Avg latency** | 220ms | 1,193ms | ~1.4s (sequential) |
+| **Avg raw payload** | 42.4 KB | 28.9 KB | 71.3 KB total input |
+| **Avg reduced payload** | 3.0 KB | 1.2 KB | **4.2 KB total** (94% reduction) |
+| **Token savings** | ~10,103 | ~7,097 | **~17,200 tokens saved / query** |
 
 End-to-end pipeline results from [`test_hybrid_search_pipeline.ts`](vertex-ai/test_hybrid_search_pipeline.ts):
 
@@ -145,6 +145,39 @@ Results from [`test_realworld_comparison.ts`](vertex-ai/test_realworld_compariso
 | **Avg academic sources** | 2.0 | 12.0 | **+10 per query** |
 | **Source overlap** | — | 0% | Fully complementary |
 | **Unique DE contributions** | — | 30 total | 10 per query |
+
+<details>
+<summary><strong>Sample output: RAG Architecture query — Brave-only vs Hybrid</strong></summary>
+
+**Brave Search returned** (0 academic sources):
+```
+[1] 🌐 Retrieval-augmented generation - Wikipedia (en.wikipedia.org)
+[2] 🌐 Retrieval-Augmented Generation (RAG) | Pinecone (pinecone.io)
+[3] 🌐 Introduction to RAG and Vector Databases (medium.com)
+[4] 🌐 What is RAG? - AWS (aws.amazon.com)
+[5] 🌐 RAG and vector databases - GitHub (github.com)
+[6] 🌐 What is RAG? | Databricks (databricks.com)
+[7] 🌐 What is RAG? | NVIDIA (nvidia.com)
+[8] 🌐 What is RAG? | IBM (ibm.com)
+[9] 🌐 What is RAG? | Confluent (confluent.io)
+[10] 🌐 What is RAG? | Google Cloud (cloud.google.com)
+```
+
+**Discovery Engine added** (10 academic sources, 0 overlap):
+```
+[+1] 📚 Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks (arxiv.org)
+[+2] 📚 Benchmarking Vector, Graph and Hybrid RAG (arxiv.org)
+[+3] 📚 HybridRAG: Integrating Knowledge Graphs and Vector Retrieval (arxiv.org)
+[+4] 📚 Adversarial Threat Vectors and Risk Mitigation for RAG (arxiv.org)
+[+5] 📚 RAGdb: A Zero-Dependency, Embeddable Architecture (arxiv.org)
+[+6] 📚 Building Scalable AI-Powered Applications with Cloud Databases (arxiv.org)
+[+7] 📚 Federated Retrieval-Augmented Generation (FRAG) (arxiv.org)
+[+8] 📚 A Systematic Review of Key RAG Components (arxiv.org)
+[+9] 📚 From Traditional RAG to Agentic and Graph RAG (arxiv.org)
+[+10] 📚 Accelerating Retrieval-Augmented Generation (arxiv.org)
+```
+
+</details>
 
 ### 3. Search & Data Extraction Tools
 
