@@ -1,3 +1,32 @@
+/**
+ * QuickJS Sandbox Executor
+ *
+ * This module runs user-provided JavaScript code in a secure, isolated
+ * environment using QuickJS (a lightweight JavaScript engine compiled to WASM).
+ *
+ * Why a sandbox?
+ *   The "code mode" tools let the AI write JavaScript to extract specific
+ *   fields from large API responses. Running untrusted code directly in
+ *   Node.js would be a security risk. QuickJS provides:
+ *     - Memory isolation (50MB limit, separate heap)
+ *     - Execution timeout (10 seconds default)
+ *     - No access to Node.js APIs, filesystem, or network
+ *
+ * How it works:
+ *   1. The raw data (e.g., Brave Search API response) is injected as a
+ *      global variable called "DATA" (a JSON string)
+ *   2. The user's code reads DATA, parses it, extracts what it needs
+ *   3. The code calls console.log() to output the result
+ *   4. We capture the console.log output and return it
+ *
+ * Example user code:
+ *   const r = JSON.parse(DATA);
+ *   console.log(r.web.results.map(x => x.title).join('\\n'));
+ *
+ * Returns:
+ *   { stdout: "captured output", error?: "if something went wrong", executionTimeMs: 42 }
+ */
+
 import { getQuickJS } from "quickjs-emscripten";
 
 export interface SandboxResult {

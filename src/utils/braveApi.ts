@@ -1,6 +1,39 @@
+/**
+ * Brave Search API Client
+ *
+ * This module handles all communication with Brave's Search APIs.
+ * Brave offers three search endpoints used by this server:
+ *
+ *   1. Web Search API (/v1/web/search)
+ *      - Standard internet search returning titles, descriptions, URLs
+ *      - Used by: brave_web_search, brave_web_search_code_mode
+ *
+ *   2. Local/POI Search API (/v1/local/pois + /v1/local/descriptions)
+ *      - Business/place search returning addresses, ratings, hours, etc.
+ *      - Uses a 3-step pipeline:  web search (to get location IDs)
+ *                                  → POI details (address, phone, hours)
+ *                                  → descriptions (business text)
+ *      - Used by: brave_local_search, brave_local_search_code_mode
+ *
+ *   3. AI Grounding / Chat Completions API (/v1/chat/completions)
+ *      - OpenAI-compatible endpoint for AI-grounded answers
+ *      - Used by: brave_answers
+ *
+ * Each function comes in two variants:
+ *   - "Raw" version (e.g., performWebSearchRaw): Returns raw JSON string from API
+ *     Used by code-mode handlers that need to pass raw data to the QuickJS sandbox
+ *   - "Formatted" version (e.g., performWebSearch): Returns human-readable text
+ *     Used by standard search handlers
+ *
+ * Authentication: All requests use the BRAVE_API_KEY via X-Subscription-Token header.
+ * The Brave Answers endpoint uses a separate BRAVE_ANSWERS_API_KEY via Bearer token.
+ */
+
 import { BRAVE_API_KEY, BRAVE_ANSWERS_API_KEY } from "../config.js";
 
-// API response types
+// ─── TypeScript Interfaces for Brave API Responses ────────────
+// These types match the shape of Brave's JSON responses so we get
+// type safety when accessing fields like data.web.results[0].title
 export interface BraveWeb {
   web?: {
     results?: Array<{

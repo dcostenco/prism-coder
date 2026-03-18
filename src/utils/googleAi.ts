@@ -1,3 +1,25 @@
+/**
+ * Google Gemini AI Client
+ *
+ * This module integrates with Google's Gemini AI models for research
+ * paper analysis. It uses the @google/generative-ai SDK (Google AI Studio).
+ *
+ * Current model: gemini-2.0-flash (fast, high-quality, good for long documents)
+ *
+ * The main function (analyzePaperWithGemini) takes a paper's full text and
+ * generates a detailed analysis based on the requested type:
+ *   - "summary"           → research question, methodology, findings, conclusions
+ *   - "critique"          → methodology assessment, validity, limitations
+ *   - "literature review" → how it fits in the broader research landscape
+ *   - "key findings"      → most significant results and implications
+ *   - "comprehensive"     → all of the above combined (default)
+ *
+ * Requires: GOOGLE_API_KEY environment variable
+ *
+ * Note: This module also exports an MCP client factory (createMcpClient)
+ * which can be used for testing or inter-server communication.
+ */
+
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Readable } from "stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";

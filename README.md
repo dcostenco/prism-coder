@@ -15,8 +15,9 @@ This repository contains two complementary AI systems:
 |---|---|
 | **MCP Server Architecture** | Multi-tool server with `@modelcontextprotocol/sdk`, structured request handling, and extensible tool registration |
 | **Vertex AI Search / Discovery Engine** | Enterprise search index with document ingestion, serving configs, and structured query APIs |
+| **Session Memory** *(optional)* | Progressive context loading (quick / standard / deep), work ledgers, and session handoff via Supabase |
 | **LLM Integration** | Claude Desktop, Google Gemini, and Claude-on-Vertex AI with secure prompt patterns |
-| **API Orchestration** | Brave Search, Gemini, Gmail, Chrome DevTools Protocol, and GCP Discovery Engine APIs |
+| **API Orchestration** | Brave Search, Gemini, Gmail, Chrome DevTools Protocol, GCP Discovery Engine, and Supabase REST APIs |
 | **Data Pipelines** | JavaScript-based extraction transforms over raw JSON/CSV payloads |
 | **Security & IP Protection** | GCP Application Default Credentials, OAuth 2.0, encrypted credential management, env-based secrets |
 | **Testing & Validation** | Cross-MCP integration tests, Vertex AI verification scripts, schema validation, and benchmarks |
@@ -43,6 +44,16 @@ This repository contains two complementary AI systems:
                     │  │ Discovery    │  │ Gemini SDK  │  │ Claude on  │  │
                     │  │ Engine /     │  │ (Vertex AI) │  │ Vertex AI  │  │
                     │  │ AI Search    │  │             │  │ (Anthropic)│  │
+                    │  └──────────────┘  └─────────────┘  └────────────┘  │
+                    └──────────────────────────────────────────────────────┘
+
+                    ┌──────────────────────────────────────────────────────┐
+                    │              Supabase (Optional)                    │
+                    │                                                      │
+                    │  ┌──────────────┐  ┌─────────────┐  ┌────────────┐  │
+                    │  │ session_     │  │ session_    │  │ get_session│  │
+                    │  │ ledger       │  │ handoffs    │  │ _context() │  │
+                    │  │ (append-only)│  │ (upsert)    │  │ (RPC)      │  │
                     │  └──────────────┘  └─────────────┘  └────────────┘  │
                     └──────────────────────────────────────────────────────┘
 ```
@@ -181,7 +192,7 @@ Results from [`test_realworld_comparison.ts`](vertex-ai/test_realworld_compariso
 
 ### 3. Search & Data Extraction Tools
 
-Six specialized tools for heterogeneous data retrieval and transformation:
+Seven core tools plus three optional session memory tools:
 
 | Tool | Purpose | Input | Output |
 |------|---------|-------|--------|
@@ -191,6 +202,15 @@ Six specialized tools for heterogeneous data retrieval and transformation:
 | `brave_local_search_code_mode` | JS extraction over local results | Query + JS transform | Filtered fields |
 | `code_mode_transform` | Universal post-processing | Raw data + JS transform | Normalized output |
 | `gemini_research_paper_analysis` | Academic paper analysis | Paper text + analysis type | Structured analysis |
+| `brave_answers` | AI-grounded answers | Question | Concise answer |
+
+**Optional: Session Memory Tools** *(enabled when Supabase is configured)*
+
+| Tool | Purpose | Input | Output |
+|------|---------|-------|--------|
+| `session_save_ledger` | Append immutable session log | Project + summary + TODOs | Confirmation |
+| `session_save_handoff` | Upsert latest project state | Project + context | Confirmation |
+| `session_load_context` | Progressive context loading | Project + level (quick/standard/deep) | Session context |
 
 ### 4. Data Pipeline Integrations (Python)
 
@@ -225,31 +245,33 @@ A powerful **post-processing layer** designed to normalize and extract specific 
 
 ```
 ├── src/
-│   ├── server.ts                # MCP server core implementation
-│   ├── config.ts                # Configuration & environment management
+│   ├── server.ts                        # MCP server core (conditional tool registration)
+│   ├── config.ts                        # Configuration & environment management
 │   ├── tools/
-│   │   ├── definitions.ts       # Tool schemas & parameter validation
-│   │   ├── handlers.ts          # Tool execution logic
-│   │   └── index.ts             # Tool registration
-│   └── utils/                   # API clients & shared utilities
+│   │   ├── definitions.ts               # Search & analysis tool schemas
+│   │   ├── handlers.ts                  # Search & analysis handlers
+│   │   ├── sessionMemoryDefinitions.ts  # Session memory tool schemas (optional)
+│   │   ├── sessionMemoryHandlers.ts     # Session memory handlers (optional)
+│   │   └── index.ts                     # Tool registration & re-exports
+│   └── utils/
+│       ├── braveApi.ts                  # Brave Search REST client
+│       ├── googleAi.ts                  # Google Gemini SDK wrapper
+│       ├── executor.ts                  # QuickJS sandbox executor
+│       └── supabaseApi.ts               # Supabase REST client (optional)
+├── supabase/
+│   └── migrations/
+│       └── 015_session_memory.sql       # Session memory schema (tables + RPC)
 ├── vertex-ai/
 │   ├── verify_discovery_engine.ts       # Vertex AI Search index verification
-│   ├── test_hybrid_search_pipeline.ts   # End-to-end hybrid pipeline test (MCP + DE)
+│   ├── test_hybrid_search_pipeline.ts   # End-to-end hybrid pipeline test
 │   ├── test_pipeline_benchmark.ts       # Performance benchmark: Brave vs DE
-│   ├── test_realworld_comparison.ts     # Real-world side-by-side: Brave-only vs Hybrid
+│   ├── test_realworld_comparison.ts     # Real-world side-by-side comparison
 │   ├── test_gemini_vertex.py            # Gemini model via Vertex AI SDK
-│   └── test_claude_vertex.py            # Claude model via Vertex AI (Anthropic)
+│   └── test_claude_vertex.py            # Claude model via Vertex AI
 ├── index.ts                     # Server entry point
 ├── benchmark.ts                 # Performance benchmarking suite
 ├── test_mcp_schema.js           # MCP schema validation tests
 ├── test_cross_mcp.js            # Cross-MCP integration test suite
-├── call_chrome_mcp.py           # Chrome DevTools MCP automation
-├── execute_via_chrome_mcp.py    # Browser-driven MCP execution
-├── list_chrome_tools.py         # MCP tool introspection utility
-├── gmail_auth_test.py           # Gmail OAuth integration tests
-├── gmail_list_latest_5.py       # Gmail data pipeline example
-├── patch_cgc_mcp.py             # MCP compatibility patches
-├── run_server.sh                # Server launch script
 ├── package.json                 # Dependencies & build config
 └── tsconfig.json                # TypeScript configuration
 ```
@@ -327,12 +349,16 @@ Add the server to your Claude Desktop MCP config (credentials are passed via env
         "BRAVE_API_KEY": "${BRAVE_API_KEY}",
         "GEMINI_API_KEY": "${GEMINI_API_KEY}",
         "DISCOVERY_ENGINE_PROJECT_ID": "${DISCOVERY_ENGINE_PROJECT_ID}",
-        "DISCOVERY_ENGINE_ENGINE_ID": "${DISCOVERY_ENGINE_ENGINE_ID}"
+        "DISCOVERY_ENGINE_ENGINE_ID": "${DISCOVERY_ENGINE_ENGINE_ID}",
+        "SUPABASE_URL": "${SUPABASE_URL}",
+        "SUPABASE_KEY": "${SUPABASE_KEY}"
       }
     }
   }
 }
 ```
+
+> **Note:** `SUPABASE_URL` and `SUPABASE_KEY` are optional. If not set, the server runs with 7 tools (search + analysis). When set, 3 session memory tools are added (10 total).
 
 ## Key Design Decisions
 
@@ -342,7 +368,353 @@ Add the server to your Claude Desktop MCP config (credentials are passed via env
 - **Separation of concerns** — Tool definitions, handlers, and configuration are cleanly separated for maintainability
 - **Security by design** — No hardcoded credentials; all secrets flow through environment variables, ADC, or encrypted stores
 - **Extensibility** — New tools can be registered by adding a definition + handler without modifying the server core
+- **Optional modules** — Session memory tools only register when Supabase is configured — zero impact on users who don't need them
 - **Cross-system interoperability** — Universal transform layer enables output normalization across heterogeneous MCP servers
+
+---
+
+## Session Memory Module (Optional)
+
+Persistent session memory for AI agents — save work logs, hand off state between sessions, and progressively load context on boot. **Completely optional**: if you don't configure Supabase, the server runs exactly as before with 7 tools.
+
+### Why Session Memory?
+
+AI agents forget everything between sessions. Session memory solves this:
+
+```
+Session 1: Agent works on feature → saves ledger + handoff
+                                          │
+Session 2: Agent boots → loads context ← ─┘ → continues seamlessly
+```
+
+### How It Works
+
+Three complementary tools:
+
+| Tool | When to Use | What It Does |
+|------|-------------|---------------|
+| `session_save_ledger` | End of every session | Appends an **immutable** log entry (summary, TODOs, files changed, decisions) |
+| `session_save_handoff` | End of every session | **Upserts** the latest project state for next session boot |
+| `session_load_context` | Start of every session | **Loads** context at the requested depth level |
+
+### Progressive Context Loading
+
+Load only what you need — saves tokens and speeds up boot:
+
+| Level | What You Get | Approximate Size | When to Use |
+|-------|-------------|-------------------|-------------|
+| **quick** | Open TODOs and keywords from the last session | ~50 tokens (very small) | Fast check-ins — "what was I working on?" |
+| **standard** | Everything in *quick*, plus a summary of recent work and key decisions | ~200 tokens (small) | **Recommended for most sessions** — gives the agent enough context to continue working |
+| **deep** | Everything in *standard*, plus full logs from the last 5 sessions including all files changed | ~1000+ tokens (larger) | After a long break or when you need the complete history |
+
+### Real-Life Usage Examples
+
+#### Example 1: Saving a Session (End of Work)
+
+After completing a feature implementation session, the agent saves both a ledger entry and a handoff:
+
+**Save Ledger** — permanent record of what happened:
+```json
+{
+  "name": "session_save_ledger",
+  "arguments": {
+    "project": "ecommerce-api",
+    "conversation_id": "conv-2026-03-18-a1b2c3",
+    "summary": "Implemented Stripe webhook handler for subscription lifecycle events. Added idempotency keys to prevent duplicate processing. Fixed race condition in concurrent webhook delivery.",
+    "todos": [
+      "Add retry logic for failed Stripe API calls (currently fails silently)",
+      "Write integration tests for subscription upgrade/downgrade flows",
+      "Update API docs with new webhook endpoint schema"
+    ],
+    "files_changed": [
+      "src/webhooks/stripe.ts",
+      "src/services/subscription.ts",
+      "src/middleware/idempotency.ts",
+      "tests/webhooks/stripe.test.ts"
+    ],
+    "decisions": [
+      "Used database-backed idempotency keys instead of Redis (simpler ops, acceptable latency for webhook volume)",
+      "Chose to process webhooks synchronously rather than queue — volume is under 100/min",
+      "Deferred retry logic to next session — needs design review for exponential backoff strategy"
+    ]
+  }
+}
+```
+
+**Save Handoff** — live state for next session:
+```json
+{
+  "name": "session_save_handoff",
+  "arguments": {
+    "project": "ecommerce-api",
+    "open_todos": [
+      "Add retry logic for failed Stripe API calls",
+      "Write integration tests for subscription flows",
+      "Update API docs with webhook endpoint schema"
+    ],
+    "active_branch": "feature/stripe-webhooks",
+    "last_summary": "Stripe webhook handler implemented with idempotency. Race condition fixed. Tests passing. Retry logic deferred.",
+    "key_context": "Webhook endpoint is POST /api/webhooks/stripe. Using stripe.webhooks.constructEvent() for signature verification. Idempotency table is 'webhook_events' with unique constraint on stripe_event_id."
+  }
+}
+```
+
+#### Example 2: Booting a New Session (Start of Work)
+
+The next session (possibly hours or days later) loads context to resume:
+
+**Load Context (L2 — recommended default):**
+```json
+{
+  "name": "session_load_context",
+  "arguments": {
+    "project": "ecommerce-api",
+    "level": "standard"
+  }
+}
+```
+
+**What the agent gets back:**
+```json
+{
+  "handoff": {
+    "project": "ecommerce-api",
+    "open_todos": [
+      "Add retry logic for failed Stripe API calls",
+      "Write integration tests for subscription flows",
+      "Update API docs with webhook endpoint schema"
+    ],
+    "active_branch": "feature/stripe-webhooks",
+    "last_summary": "Stripe webhook handler implemented with idempotency. Race condition fixed. Tests passing. Retry logic deferred.",
+    "key_context": "Webhook endpoint is POST /api/webhooks/stripe. Using stripe.webhooks.constructEvent() for signature verification. Idempotency table is 'webhook_events' with unique constraint on stripe_event_id."
+  },
+  "recent_sessions": [
+    {
+      "summary": "Stripe webhook handler implemented with idempotency. Race condition fixed.",
+      "created_at": "2026-03-18T16:30:00Z"
+    },
+    {
+      "summary": "Set up Stripe SDK integration and customer portal. Created subscription model.",
+      "created_at": "2026-03-17T14:00:00Z"
+    },
+    {
+      "summary": "Designed payment architecture. Chose Stripe over Paddle for webhook flexibility.",
+      "created_at": "2026-03-16T10:00:00Z"
+    }
+  ]
+}
+```
+
+The agent now knows exactly where to pick up — it can immediately start on the retry logic without asking the user to re-explain the project.
+
+#### Example 3: Multi-Day Workflow (Full Lifecycle)
+
+A realistic multi-day development workflow showing how session memory accumulates:
+
+```
+Day 1 (Monday) — Architecture & Setup
+├── Agent designs auth system architecture
+├── session_save_ledger: "Designed JWT auth with refresh tokens. Chose bcrypt over argon2."
+└── session_save_handoff: branch=feature/auth, todos=["implement signup endpoint"]
+
+Day 2 (Tuesday) — Implementation
+├── session_load_context("standard"): Gets Day 1 handoff + summary
+├── Agent implements signup/login endpoints
+├── session_save_ledger: "Built signup + login. Added rate limiting. 12 tests passing."
+└── session_save_handoff: branch=feature/auth, todos=["add password reset flow"]
+
+Day 3 (Wednesday) — Bug Fix (Different Agent Session)
+├── session_load_context("standard"): Gets Day 2 handoff + Day 1-2 summaries
+├── Agent fixes token refresh race condition
+├── session_save_ledger: "Fixed refresh token rotation bug (was invalidating too early)."
+└── session_save_handoff: todos=["add password reset", "deploy to staging"]
+
+Day 5 (Friday) — Deep Recovery After Break
+├── session_load_context("deep"): Gets FULL history — all summaries, all TODOs, all decisions
+├── Agent sees complete project context despite 2-day gap
+└── Continues with password reset implementation
+```
+
+**A "deep" recovery response** includes aggregated data across all sessions:
+```json
+{
+  "handoff": { "...": "latest state" },
+  "recent_sessions": [ "...3 most recent..." ],
+  "all_todos_aggregated": [
+    "add password reset flow",
+    "deploy to staging",
+    "add password complexity validation"
+  ],
+  "all_decisions": [
+    "JWT auth with refresh tokens (Day 1)",
+    "bcrypt over argon2 for password hashing (Day 1)",
+    "Rate limiting: 5 attempts per 15 min window (Day 2)",
+    "Refresh token rotation: invalidate after use, not on issue (Day 3)"
+  ],
+  "session_count": 4,
+  "first_session": "2026-03-16T10:00:00Z",
+  "last_session": "2026-03-19T09:00:00Z"
+}
+```
+
+### Supabase Setup (Step-by-Step)
+
+#### 1. Create a Supabase Project
+
+1. Go to [supabase.com](https://supabase.com) and sign in (free tier works)
+2. Click **New Project** → choose a name and password → select a region close to you
+3. Wait for the project to be provisioned (~30 seconds)
+
+#### 2. Apply the Migration
+
+1. In your Supabase dashboard, go to **SQL Editor** (left sidebar)
+2. Click **New query**
+3. Copy the contents of [`supabase/migrations/015_session_memory.sql`](supabase/migrations/015_session_memory.sql) and paste into the editor
+4. Click **Run** (or press `Cmd+Enter`)
+5. You should see: `Success. No rows returned`
+
+This creates:
+- `session_ledger` table — append-only session logs
+- `session_handoffs` table — latest project state (one per project)
+- `get_session_context()` RPC function — progressive context loading
+
+#### 3. Get Your Credentials
+
+1. Go to **Settings → API** in your Supabase dashboard
+2. Copy the **Project URL** (e.g. `https://abcdefg.supabase.co`)
+3. Copy the **anon public** key (starts with `eyJ...`)
+
+#### 4. Set Environment Variables
+
+```bash
+# Add to your shell profile (.zshrc, .bashrc) or .env file
+export SUPABASE_URL="https://your-project.supabase.co"
+export SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+#### 5. Rebuild and Restart
+
+```bash
+npm run build
+# Restart your MCP client (Claude Desktop, etc.)
+```
+
+On startup you'll see:
+```
+Session memory enabled (Supabase configured)
+Registering 10 tools (7 base + 3 session memory)
+```
+
+### Verifying the Setup
+
+After configuring, verify the tables exist by running this in the Supabase SQL Editor:
+
+```sql
+-- Should return 3 rows: session_ledger, session_handoffs, get_session_context
+SELECT
+  CASE
+    WHEN routine_type IS NOT NULL THEN 'function'
+    ELSE 'table'
+  END AS type,
+  COALESCE(table_name, routine_name) AS name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+  AND table_name IN ('session_ledger', 'session_handoffs')
+UNION ALL
+SELECT 'function', routine_name
+FROM information_schema.routines
+WHERE routine_schema = 'public'
+  AND routine_name = 'get_session_context';
+```
+
+### Maintenance Guide
+
+#### Cleaning Up Old Ledger Entries
+
+The ledger grows over time. To prune entries older than 30 days:
+
+```sql
+DELETE FROM session_ledger
+WHERE created_at < NOW() - INTERVAL '30 days';
+```
+
+#### Backing Up Session Data
+
+```sql
+-- Export all session data as JSON
+SELECT json_agg(t) FROM (
+  SELECT * FROM session_ledger ORDER BY created_at
+) t;
+
+SELECT json_agg(t) FROM (
+  SELECT * FROM session_handoffs ORDER BY updated_at
+) t;
+```
+
+#### Restoring from Backup
+
+Paste the JSON arrays into INSERT statements:
+
+```sql
+INSERT INTO session_ledger (project, conversation_id, summary, todos, files_changed, decisions)
+SELECT project, conversation_id, summary, todos, files_changed, decisions
+FROM json_populate_recordset(NULL::session_ledger, '<paste JSON array>');
+```
+
+#### Monitoring Table Size
+
+```sql
+SELECT
+  relname AS table_name,
+  pg_size_pretty(pg_total_relation_size(relid)) AS total_size,
+  n_live_tup AS row_count
+FROM pg_stat_user_tables
+WHERE schemaname = 'public'
+  AND relname IN ('session_ledger', 'session_handoffs')
+ORDER BY pg_total_relation_size(relid) DESC;
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `Session memory disabled` on startup | `SUPABASE_URL` or `SUPABASE_KEY` not set | Set both env vars and restart |
+| `Supabase POST failed: 404` | Migration not applied | Run `015_session_memory.sql` in SQL Editor |
+| `Supabase POST failed: 401` | Wrong API key | Use the **anon public** key from Settings → API |
+| `Supabase POST failed: 42501` | RLS blocking inserts | Ensure RLS policies allow inserts (see Security below) |
+| `No session context found` | No prior sessions saved | Expected for new projects — save a ledger entry first |
+| `session_save_handoff` returns empty | First-time upsert | Normal — the handoff is created, subsequent loads will work |
+
+### Security Recommendations
+
+1. **Use the anon key** for MCP server config — it's safe for client-side use
+2. **Enable Row Level Security (RLS)** on both tables:
+
+```sql
+-- Enable RLS
+ALTER TABLE session_ledger ENABLE ROW LEVEL SECURITY;
+ALTER TABLE session_handoffs ENABLE ROW LEVEL SECURITY;
+
+-- Allow inserts and reads for authenticated and anon users
+CREATE POLICY "Allow all for session_ledger" ON session_ledger
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Allow all for session_handoffs" ON session_handoffs
+  FOR ALL USING (true) WITH CHECK (true);
+```
+
+3. **For multi-user setups**, restrict policies to specific projects:
+
+```sql
+-- Example: only allow access to your own projects
+CREATE POLICY "User-scoped access" ON session_ledger
+  FOR ALL USING (project = current_setting('request.jwt.claims')::json->>'project')
+  WITH CHECK (project = current_setting('request.jwt.claims')::json->>'project');
+```
+
+4. **Never commit** your `SUPABASE_KEY` to version control — use environment variables
+
+---
 
 ## License
 

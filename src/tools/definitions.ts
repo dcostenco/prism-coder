@@ -1,6 +1,41 @@
+/**
+ * Tool Definitions (Schemas)
+ *
+ * This file defines the SHAPE of each tool — its name, description, and
+ * what input arguments it accepts. These definitions are sent to the AI client
+ * (e.g., Claude Desktop) so it knows what tools are available and how to call them.
+ *
+ * Each tool definition has:
+ *   - name:         Unique identifier used to route calls in server.ts
+ *   - description:  Human-readable text shown to the AI so it knows when to use the tool
+ *   - inputSchema:  JSON Schema describing the accepted arguments (types, required fields, defaults)
+ *
+ * The corresponding IMPLEMENTATIONS (what the tools actually do) are in handlers.ts.
+ *
+ * Tool Categories:
+ *   1. Search Tools       — brave_web_search, brave_local_search
+ *   2. Code Mode Tools    — brave_web_search_code_mode, brave_local_search_code_mode, code_mode_transform
+ *   3. AI Analysis Tools  — brave_answers, gemini_research_paper_analysis
+ *   4. Session Memory     — defined separately in sessionMemoryDefinitions.ts (optional)
+ *
+ * Adding a new tool:
+ *   1. Define it here (schema + type guard)
+ *   2. Implement the handler in handlers.ts
+ *   3. Export both from tools/index.ts
+ *   4. Add a case to the switch statement in server.ts
+ */
+
 import { type Tool } from "@modelcontextprotocol/sdk/types.js";
 
-// Web Search Code Mode Tool Definition
+// ─── Search Tools ─────────────────────────────────────────────
+
+// Code Mode: Search + JavaScript extraction
+// The "code mode" pattern works like this:
+//   1. Perform a regular Brave search to get raw API JSON
+//   2. Run user-provided JavaScript code against that JSON in a QuickJS sandbox
+//   3. Return only the extracted/transformed output (much smaller than the full response)
+// This dramatically reduces token usage when the AI only needs specific fields from search results.
+
 export const BRAVE_WEB_SEARCH_CODE_MODE_TOOL: Tool = {
   name: "brave_web_search_code_mode",
   description:
@@ -39,7 +74,8 @@ export const BRAVE_WEB_SEARCH_CODE_MODE_TOOL: Tool = {
   },
 };
 
-// Web Search Tool Definition
+// Standard web search — returns formatted text results (title, description, URL).
+// This is the simplest search tool. For extracting specific fields, use the code mode variant above.
 export const WEB_SEARCH_TOOL: Tool = {
   name: "brave_web_search",
   description:
@@ -69,7 +105,11 @@ export const WEB_SEARCH_TOOL: Tool = {
   },
 };
 
-// Local Search Tool Definition
+// ─── Local/Business Search Tools ──────────────────────────────
+
+// Searches for physical businesses and places (restaurants, stores, services).
+// Returns structured data: name, address, phone, rating, hours, price range.
+// If no local results are found, automatically falls back to a regular web search.
 export const LOCAL_SEARCH_TOOL: Tool = {
   name: "brave_local_search",
   description:
@@ -98,7 +138,8 @@ export const LOCAL_SEARCH_TOOL: Tool = {
   },
 };
 
-// Local Search Code Mode Tool Definition
+// Code mode variant for local search — same pattern as web search code mode.
+// Useful when you only need specific fields from the detailed POI (Point of Interest) data.
 export const BRAVE_LOCAL_SEARCH_CODE_MODE_TOOL: Tool = {
   name: "brave_local_search_code_mode",
   description:
@@ -132,7 +173,11 @@ export const BRAVE_LOCAL_SEARCH_CODE_MODE_TOOL: Tool = {
   },
 };
 
-// Generic Code Mode Transform Tool Definition
+// ─── Universal Transform Tool ─────────────────────────────────
+
+// This is NOT tied to Brave Search — it works with output from ANY MCP tool.
+// Pass it raw data from any source + a JavaScript extraction script,
+// and it returns only the fields you need. Great for reducing token usage.
 export const CODE_MODE_TRANSFORM_TOOL: Tool = {
   name: "code_mode_transform",
   description:
@@ -168,7 +213,11 @@ export const CODE_MODE_TRANSFORM_TOOL: Tool = {
   },
 };
 
-// Brave Answers Tool Definition
+// ─── AI Analysis Tools ────────────────────────────────────────
+
+// AI-grounded answers — uses Brave's AI grounding endpoint (OpenAI-compatible API).
+// Returns concise, web-grounded answers rather than raw search results.
+// Requires a separate BRAVE_ANSWERS_API_KEY.
 export const BRAVE_ANSWERS_TOOL: Tool = {
   name: "brave_answers",
   description:
@@ -191,7 +240,9 @@ export const BRAVE_ANSWERS_TOOL: Tool = {
   },
 };
 
-// Research Paper Analysis Tool Definition
+// Analyzes academic research papers using Google's Gemini model.
+// Supports multiple analysis types: summary, critique, literature review, key findings.
+// Requires GOOGLE_API_KEY to be configured.
 export const RESEARCH_PAPER_ANALYSIS_TOOL: Tool = {
   name: "gemini_research_paper_analysis",
   description:
@@ -222,7 +273,16 @@ export const RESEARCH_PAPER_ANALYSIS_TOOL: Tool = {
   },
 };
 
-// Type guards for arguments
+// ─── Type Guards ──────────────────────────────────────────────
+//
+// Type guards validate that incoming tool arguments match the expected shape.
+// They are used by handlers to safely access argument properties without
+// runtime errors. Each guard checks that required fields exist and are
+// the correct type.
+//
+// Pattern: if (!isMyToolArgs(args)) throw new Error("Invalid arguments");
+
+/** Validates arguments for brave_web_search */
 export function isBraveWebSearchArgs(
   args: unknown
 ): args is { query: string; count?: number; offset?: number } {

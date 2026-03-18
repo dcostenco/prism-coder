@@ -1,8 +1,33 @@
+/**
+ * Tool Handlers (Implementations)
+ *
+ * This file contains the actual LOGIC for each tool. Each handler:
+ *   1. Validates arguments using a type guard from definitions.ts
+ *   2. Calls the appropriate API client from utils/
+ *   3. Returns a formatted MCP response { content: [...], isError: boolean }
+ *
+ * Handler pattern:
+ *   - Every handler returns { content: [{ type: "text", text: "..." }], isError: false }
+ *   - On error, either throw (caught by server.ts) or return { isError: true }
+ *   - All logging goes to console.error (stderr) to avoid corrupting the MCP protocol on stdout
+ *
+ * Code Mode handlers follow a 3-step pipeline:
+ *   Step 1: Fetch raw API data (full JSON response from Brave Search)
+ *   Step 2: Run user-provided JavaScript against that data in a QuickJS sandbox
+ *   Step 3: Return only the script's output + size reduction metrics
+ *
+ * The size reduction header (e.g., "12.5KB -> 0.3KB (97.6% reduction)")
+ * helps the AI understand how much token budget was saved.
+ */
+
 import { performWebSearch, performWebSearchRaw, performLocalSearch, performLocalSearchRaw, performBraveAnswers } from "../utils/braveApi.js";
 import { analyzePaperWithGemini } from "../utils/googleAi.js";
 import { isBraveWebSearchArgs, isBraveLocalSearchArgs, isBraveAnswersArgs, isGeminiResearchPaperAnalysisArgs, isBraveWebSearchCodeModeArgs, isBraveLocalSearchCodeModeArgs, isCodeModeTransformArgs } from "./definitions.js";
 import { runInSandbox } from "../utils/executor.js";
 
+// ─── Simple Search Handlers ──────────────────────────────────
+
+/** Performs a standard web search and returns formatted text results. */
 // Web search handler
 export async function webSearchHandler(args: unknown) {
   if (!isBraveWebSearchArgs(args)) {
@@ -18,7 +43,14 @@ export async function webSearchHandler(args: unknown) {
   };
 }
 
-// Web search code mode handler
+// ─── Code Mode Handlers ──────────────────────────────────────
+// These handlers use the 3-step pipeline: fetch → sandbox → reduce
+
+/**
+ * Web search + JavaScript extraction.
+ * Fetches raw search results, runs user code in QuickJS sandbox,
+ * and returns the extracted output with size reduction metrics.
+ */
 export async function braveWebSearchCodeModeHandler(args: unknown) {
   if (!isBraveWebSearchCodeModeArgs(args)) {
     throw new Error("Invalid arguments for brave_web_search_code_mode");
@@ -62,7 +94,10 @@ export async function braveWebSearchCodeModeHandler(args: unknown) {
   };
 }
 
-// Local search code mode handler
+/**
+ * Local search + JavaScript extraction.
+ * Same pattern as web search code mode, but uses Brave's local/POI search.
+ */
 export async function braveLocalSearchCodeModeHandler(args: unknown) {
   if (!isBraveLocalSearchCodeModeArgs(args)) {
     throw new Error("Invalid arguments for brave_local_search_code_mode");
@@ -103,7 +138,13 @@ export async function braveLocalSearchCodeModeHandler(args: unknown) {
   };
 }
 
-// Generic code mode transform handler (works with any MCP tool output)
+// ─── Universal Transform Handler ─────────────────────────────
+
+/**
+ * Takes raw output from ANY MCP tool + a JavaScript extraction script.
+ * Runs the script in a sandboxed environment and returns the output.
+ * Not tied to Brave Search — works with any text/JSON data.
+ */
 export async function codeModeTransformHandler(args: unknown) {
   if (!isCodeModeTransformArgs(args)) {
     throw new Error("Invalid arguments for code_mode_transform");
@@ -142,7 +183,9 @@ export async function codeModeTransformHandler(args: unknown) {
   };
 }
 
-// Local search handler
+// ─── Simple Lookup Handlers ─────────────────────────────────
+
+/** Searches for local businesses and returns formatted POI details. */
 export async function localSearchHandler(args: unknown) {
   if (!isBraveLocalSearchArgs(args)) {
     throw new Error("Invalid arguments for brave_local_search");
@@ -157,7 +200,7 @@ export async function localSearchHandler(args: unknown) {
   };
 }
 
-// Brave answers handler
+/** Returns AI-grounded answers using Brave's chat completions endpoint. */
 export async function braveAnswersHandler(args: unknown) {
   if (!isBraveAnswersArgs(args)) {
     throw new Error("Invalid arguments for brave_answers");
@@ -172,7 +215,13 @@ export async function braveAnswersHandler(args: unknown) {
   };
 }
 
-// Research paper analysis handler
+// ─── Research Paper Analysis ─────────────────────────────────
+
+/**
+ * Analyzes a research paper using Google Gemini.
+ * Supports multiple analysis types (summary, critique, etc.).
+ * Validates minimum paper length (100 chars) to avoid meaningless analysis.
+ */
 export async function researchPaperAnalysisHandler(args: unknown) {
   if (!isGeminiResearchPaperAnalysisArgs(args)) {
     throw new Error("Invalid arguments for gemini_research_paper_analysis");

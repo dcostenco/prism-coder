@@ -1,2 +1,26 @@
+/**
+ * Tool Re-exports
+ *
+ * This file acts as the public API for all tools in the project.
+ * Instead of importing from individual files, other modules can import
+ * everything they need from this single file:
+ *
+ *   import { WEB_SEARCH_TOOL, webSearchHandler } from "./tools/index.js";
+ *
+ * This pattern keeps imports clean and makes it easy to add new tools —
+ * just add a new export line here when you create a new tool file.
+ */
+
+// ── Search & Analysis Tools ──
+// These are the 7 base tools that are always available.
+// Definitions = tool schemas (name, description, input parameters)
+// Handlers = the actual implementation logic
 export { WEB_SEARCH_TOOL, BRAVE_WEB_SEARCH_CODE_MODE_TOOL, LOCAL_SEARCH_TOOL, BRAVE_LOCAL_SEARCH_CODE_MODE_TOOL, CODE_MODE_TRANSFORM_TOOL, BRAVE_ANSWERS_TOOL, RESEARCH_PAPER_ANALYSIS_TOOL } from "./definitions.js";
 export { webSearchHandler, braveWebSearchCodeModeHandler, localSearchHandler, braveLocalSearchCodeModeHandler, codeModeTransformHandler, braveAnswersHandler, researchPaperAnalysisHandler } from "./handlers.js";
+
+// ── Session Memory Tools (Optional) ──
+// These 3 tools are only active when Supabase is configured (SUPABASE_URL + SUPABASE_KEY).
+// The conditional registration happens in server.ts, not here.
+// This file always exports them — server.ts decides whether to include them in the tool list.
+export { SESSION_SAVE_LEDGER_TOOL, SESSION_SAVE_HANDOFF_TOOL, SESSION_LOAD_CONTEXT_TOOL } from "./sessionMemoryDefinitions.js";
+export { sessionSaveLedgerHandler, sessionSaveHandoffHandler, sessionLoadContextHandler } from "./sessionMemoryHandlers.js";
