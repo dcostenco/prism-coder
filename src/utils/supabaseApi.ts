@@ -140,6 +140,35 @@ export async function supabaseRpc(
 }
 
 /**
+ * Partially update rows in a Supabase table using PostgREST filters.
+ *
+ * REVIEWER NOTE: Added in v0.4.0 for the semantic search enhancement.
+ * After inserting a ledger entry, we fire-and-forget an embedding
+ * generation call, then PATCH the row to add the embedding vector.
+ * This avoids blocking the main save operation on embedding latency.
+ *
+ * Example: supabasePatch("session_ledger", { embedding: "[0.1,0.2,...]" }, { id: "eq.abc123" })
+ *   → PATCH /rest/v1/session_ledger?id=eq.abc123  with JSON body { embedding: [...] }
+ */
+export async function supabasePatch(
+  table: string,
+  data: unknown,
+  params: Record<string, string>,
+  extraHeaders?: Record<string, string>
+): Promise<unknown> {
+  return supabaseRequest({
+    method: "PATCH",
+    path: `/rest/v1/${table}`,
+    body: data,
+    params,
+    headers: {
+      "Prefer": "return=representation",
+      ...(extraHeaders || {}),
+    },
+  });
+}
+
+/**
  * Delete rows from a Supabase table using PostgREST filters.
  *
  * Example: supabaseDelete("session_ledger", { project: "eq.my-app" })

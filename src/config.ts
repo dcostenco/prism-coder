@@ -18,9 +18,13 @@
 
 // ─── Server Identity ──────────────────────────────────────────
 
+// REVIEWER NOTE: v0.4.0 introduces MCP Prompts, Resources, semantic search,
+// ledger compaction, and optimistic concurrency control.
+// Server name updated from "brave-gemini-research-mcp" to "prism-mcp"
+// to match the public rebrand completed in v0.3.0.
 export const SERVER_CONFIG = {
-  name: "brave-gemini-research-mcp",
-  version: "0.2.0",
+  name: "prism-mcp",
+  version: "0.4.0",
 };
 
 // ─── Required: Brave Search API Key ───────────────────────────

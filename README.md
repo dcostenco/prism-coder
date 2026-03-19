@@ -1,6 +1,40 @@
-# Prism MCP — Session Memory, Knowledge & Multi-Engine Search
+# Prism MCP — Enterprise-Grade AI Agent Memory & Multi-Engine Search
 
-> Production-grade **Model Context Protocol (MCP)** server combining **persistent session memory**, **brain-inspired knowledge accumulation**, and **multi-engine search** (Brave + Vertex AI Discovery Engine) with sandboxed code transforms and Gemini-powered analysis.
+> Production-grade **Model Context Protocol (MCP)** server with **persistent session memory**, **semantic search (pgvector)**, **optimistic concurrency control**, **MCP Prompts & Resources**, **brain-inspired knowledge accumulation**, and **multi-engine search** (Brave + Vertex AI) with sandboxed code transforms and Gemini-powered analysis.
+
+---
+
+## What's New in v0.4.0
+
+| Feature | Description |
+|---|---|
+| 🧠 **MCP Prompts** | `/resume_session` slash command — inject context before the LLM thinks. Zero tool calls. |
+| 📎 **MCP Resources** | Attach `memory://project/handoff` via paperclip — auto-refresh on state changes. |
+| 🔒 **Optimistic Concurrency** | Version-tracked handoffs prevent multi-client data loss. |
+| 🧹 **Ledger Compaction** | Gemini-powered rollup of old entries — keeps ledger lean with soft-delete archiving. |
+| 🔍 **Semantic Search** | pgvector embeddings — find sessions by meaning, not just keywords. |
+| ♻️ **Resource Subscriptions** | Attached memory auto-refreshes when handoff state changes mid-conversation. |
+
+---
+
+## How Prism MCP Compares
+
+| Capability | **Prism MCP** | **Mem0** | **Zep** | **Basic Memory** |
+|---|---|---|---|---|
+| **Architecture** | MCP-native (single npm package) | Standalone service + MCP adapter | Standalone service + API | MCP-native (local files) |
+| **Storage** | Supabase (PostgreSQL) | Hybrid (vector + graph DBs) | PostgreSQL + Neo4j | Local markdown files |
+| **Cold Start Fix** | ✅ MCP Prompts + Resources inject context before LLM thinks | ❌ Requires tool call | ❌ Requires tool call | ❌ Requires tool call |
+| **Progressive Loading** | ✅ quick / standard / deep levels | ❌ All-or-nothing | ❌ Fixed context window | ❌ All-or-nothing |
+| **Semantic Search** | ✅ pgvector + HNSW | ✅ Qdrant/Chroma | ✅ Built-in embeddings | ❌ No embeddings |
+| **Concurrency Control** | ✅ OCC with version tracking | ❌ Last write wins | ❌ Last write wins | ❌ Single user only |
+| **Auto-Compaction** | ✅ Gemini-powered rollup | ❌ Manual management | ✅ Auto-summarization | ❌ No compaction |
+| **Resource Subscriptions** | ✅ Live refresh on state change | ❌ Not MCP-native | ❌ Not MCP-native | ❌ Not supported |
+| **Knowledge Accumulation** | ✅ Auto-extracted keywords + categories | ✅ User/agent memories | ✅ Fact extraction | ❌ Manual tagging |
+| **Infrastructure Cost** | Free tier (Supabase + Gemini) | Free tier available, paid for scale | Self-hosted or cloud ($$$) | Free (local only) |
+| **Setup Complexity** | 2 env vars (Supabase URL + Key) | Docker + API keys + vector DB | Docker + PostgreSQL + Neo4j | No setup needed |
+| **Multi-Project** | ✅ Built-in project isolation | ✅ User-scoped memories | ✅ Session-scoped | ❌ Single knowledge base |
+
+> **When to choose Prism MCP**: You want MCP-native memory with zero infrastructure overhead, progressive context loading, and enterprise features (OCC, compaction, semantic search) that work directly in Claude Desktop — without running separate services.
 
 ---
 
@@ -8,14 +42,14 @@
 
 Prism MCP is a unified AI agent platform with two core pillars:
 
-1. **Session Memory & Knowledge System** — Persistent session memory with progressive context loading, brain-inspired knowledge accumulation, cross-project knowledge transfer, and selective memory pruning
+1. **Session Memory & Knowledge System** — Persistent session memory with progressive context loading, MCP Prompts for cold-start fix, MCP Resources for zero-tool-call context, semantic search via pgvector embeddings, optimistic concurrency control, auto-compaction, cross-project knowledge transfer, and selective memory pruning
 2. **Multi-Engine Search & Analysis** — Brave Search + Vertex AI Discovery Engine hybrid pipeline with 94% context reduction, Gemini research analysis, and sandboxed code transforms
 
 | Capability | Implementation |
 |---|---|
-| **Session Memory & Knowledge** | Progressive context loading (quick / standard / deep), work ledgers, session handoff, knowledge accumulation, search, and pruning via Supabase |
+| **Session Memory & Knowledge** | Progressive context loading (quick / standard / deep), MCP Prompts (/resume_session), MCP Resources (memory://), OCC (version tracking), ledger compaction, semantic search (pgvector), knowledge accumulation, and memory pruning via Supabase |
 | **Multi-Engine Search** | Brave Search (real-time web) + Vertex AI Discovery Engine (curated enterprise index) with hybrid merge/dedup pipeline |
-| **MCP Server Architecture** | Multi-tool server with `@modelcontextprotocol/sdk`, structured request handling, and extensible tool registration |
+| **MCP Server Architecture** | Multi-tool server with `@modelcontextprotocol/sdk`, structured request handling, MCP Prompts, Resources with subscriptions, and extensible tool registration |
 | **LLM Integration** | Claude Desktop, Google Gemini, and Claude-on-Vertex AI with secure prompt patterns |
 | **API Orchestration** | Brave Search, Gemini, Gmail, Chrome DevTools Protocol, GCP Discovery Engine, and Supabase REST APIs |
 | **Code-Mode Transforms** | Sandboxed JavaScript extraction over raw JSON/CSV payloads — 85-95% token reduction |

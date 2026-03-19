@@ -1,12 +1,12 @@
 {
-  "name": "bcba-mcp-server",
-  "version": "0.3.0",
-  "description": "Production-ready MCP server with session memory, knowledge accumulation, Vertex AI Discovery Engine, Brave Search, and Google Gemini — progressive context loading, brain-inspired knowledge search/forget, and multi-model orchestration for AI agents",
+  "name": "prism-mcp-server",
+  "version": "0.4.0",
+  "description": "Enterprise-grade MCP server with session memory, semantic search (pgvector), optimistic concurrency control, ledger compaction, MCP Prompts & Resources, knowledge accumulation, Brave Search, and Google Gemini — progressive context loading, brain-inspired knowledge search/forget, and multi-model orchestration for AI agents",
   "module": "index.ts",
   "type": "module",
   "main": "build/server.js",
   "bin": {
-    "bcba-mcp-server": "./build/server.js"
+    "prism-mcp-server": "./build/server.js"
   },
   "scripts": {
     "build": "tsc",
@@ -20,7 +20,11 @@
     "ai-agent",
     "session-memory",
     "agent-memory",
-    "vertex-ai",
+    "semantic-search",
+    "pgvector",
+    "concurrency-control",
+    "mcp-prompts",
+    "mcp-resources",
     "google-gemini",
     "brave-search",
     "llm",
@@ -33,7 +37,7 @@
     "ai-tools",
     "typescript",
     "rag",
-    "discovery-engine"
+    "embeddings"
   ],
   "homepage": "https://github.com/dcostenco/BCBA",
   "repository": {

@@ -9,6 +9,10 @@
  *
  * This pattern keeps imports clean and makes it easy to add new tools —
  * just add a new export line here when you create a new tool file.
+ *
+ * REVIEWER NOTE: v0.4.0 adds 2 new tool definitions and 2 new handlers:
+ *   - SESSION_COMPACT_LEDGER_TOOL + compactLedgerHandler (from compactionHandler.ts)
+ *   - SESSION_SEARCH_MEMORY_TOOL + sessionSearchMemoryHandler (from sessionMemoryHandlers.ts)
  */
 
 // ── Search & Analysis Tools ──
@@ -19,8 +23,16 @@ export { WEB_SEARCH_TOOL, BRAVE_WEB_SEARCH_CODE_MODE_TOOL, LOCAL_SEARCH_TOOL, BR
 export { webSearchHandler, braveWebSearchCodeModeHandler, localSearchHandler, braveLocalSearchCodeModeHandler, codeModeTransformHandler, braveAnswersHandler, researchPaperAnalysisHandler } from "./handlers.js";
 
 // ── Session Memory Tools (Optional) ──
-// These 3 tools are only active when Supabase is configured (SUPABASE_URL + SUPABASE_KEY).
+// These tools are only active when Supabase is configured (SUPABASE_URL + SUPABASE_KEY).
 // The conditional registration happens in server.ts, not here.
 // This file always exports them — server.ts decides whether to include them in the tool list.
-export { SESSION_SAVE_LEDGER_TOOL, SESSION_SAVE_HANDOFF_TOOL, SESSION_LOAD_CONTEXT_TOOL, KNOWLEDGE_SEARCH_TOOL, KNOWLEDGE_FORGET_TOOL } from "./sessionMemoryDefinitions.js";
-export { sessionSaveLedgerHandler, sessionSaveHandoffHandler, sessionLoadContextHandler, knowledgeSearchHandler, knowledgeForgetHandler } from "./sessionMemoryHandlers.js";
+//
+// v0.4.0: Added SESSION_COMPACT_LEDGER_TOOL and SESSION_SEARCH_MEMORY_TOOL
+export { SESSION_SAVE_LEDGER_TOOL, SESSION_SAVE_HANDOFF_TOOL, SESSION_LOAD_CONTEXT_TOOL, KNOWLEDGE_SEARCH_TOOL, KNOWLEDGE_FORGET_TOOL, SESSION_COMPACT_LEDGER_TOOL, SESSION_SEARCH_MEMORY_TOOL } from "./sessionMemoryDefinitions.js";
+export { sessionSaveLedgerHandler, sessionSaveHandoffHandler, sessionLoadContextHandler, knowledgeSearchHandler, knowledgeForgetHandler, sessionSearchMemoryHandler } from "./sessionMemoryHandlers.js";
+
+// ── Compaction Handler (v0.4.0 — Enhancement #2) ──
+// The compaction handler is in a separate file because it's significantly
+// more complex than the other session memory handlers (chunked Gemini
+// API calls, recursive summarization, etc.).
+export { compactLedgerHandler } from "./compactionHandler.js";

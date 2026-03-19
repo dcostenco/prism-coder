@@ -45,19 +45,35 @@ export const SESSION_SAVE_LEDGER_TOOL: Tool = {
 };
 
 // ─── Session Save Handoff ─────────────────────────────────────
+// REVIEWER NOTE: v0.4.0 adds expected_version for Optimistic Concurrency
+// Control (OCC). See Enhancement #5 in the implementation plan.
+//
+// UPGRADE PATH: The expected_version field is optional so v0.3.0
+// clients still work without changes. When omitted, the version
+// check is skipped entirely (backward compatible).
 
 export const SESSION_SAVE_HANDOFF_TOOL: Tool = {
   name: "session_save_handoff",
   description:
     "Upsert the latest project handoff state for the next session to consume on boot. " +
     "This is the 'live context' that gets loaded when a new session starts. " +
-    "Calling this replaces the previous handoff for the same project (upsert on project).",
+    "Calling this replaces the previous handoff for the same project (upsert on project).\n\n" +
+    "**v0.4.0 OCC**: If you received a version number from session_load_context, " +
+    "/resume_session prompt, or memory resource attachment, you MUST pass it as " +
+    "expected_version to prevent overwriting another session's changes.",
   inputSchema: {
     type: "object",
     properties: {
       project: {
         type: "string",
         description: "Project identifier — must match the project used in session_save_ledger.",
+      },
+      expected_version: {
+        type: "integer",
+        description:
+          "v0.4.0: The version number you received when loading context. " +
+          "Pass this to enable optimistic concurrency control. " +
+          "If omitted, version check is skipped (backward compatible).",
       },
       open_todos: {
         type: "array",
@@ -191,6 +207,92 @@ export const KNOWLEDGE_FORGET_TOOL: Tool = {
   },
 };
 
+// ─── v0.4.0: Session Compact Ledger (Enhancement #2) ─────────
+// REVIEWER NOTE: This tool triggers Gemini-powered summarization
+// of old ledger entries into rollup records. See compactionHandler.ts
+// for the implementation and migration 017 for the DB schema.
+
+export const SESSION_COMPACT_LEDGER_TOOL: Tool = {
+  name: "session_compact_ledger",
+  description:
+    "Auto-compact old session ledger entries by rolling them up into AI-generated summaries. " +
+    "This prevents the ledger from growing indefinitely and keeps deep context loading fast.\n\n" +
+    "How it works:\n" +
+    "1. Finds projects with more entries than the threshold\n" +
+    "2. Summarizes old entries using Gemini (keeps recent entries intact)\n" +
+    "3. Inserts a rollup entry and archives the originals (soft-delete)\n\n" +
+    "Use dry_run=true to preview what would be compacted without executing.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project: {
+        type: "string",
+        description: "Optional: compact a specific project. If omitted, auto-detects all candidates.",
+      },
+      threshold: {
+        type: "integer",
+        description: "Minimum entries before compaction triggers (default: 50).",
+        default: 50,
+      },
+      keep_recent: {
+        type: "integer",
+        description: "Number of recent entries to keep intact (default: 10).",
+        default: 10,
+      },
+      dry_run: {
+        type: "boolean",
+        description: "If true, only preview what would be compacted without executing. Default: false.",
+      },
+    },
+  },
+};
+
+// ─── v0.4.0: Session Search Memory (Enhancement #4) ──────────
+// REVIEWER NOTE: This tool uses pgvector embeddings for semantic
+// (meaning-based) search. Unlike knowledge_search which uses keyword
+// overlap, this finds results by meaning similarity.
+//
+// Example where this beats keyword search:
+//   Query: "that weird API key error we fixed"
+//   Match: "Resolved authentication failure by rotating credentials"
+//   → Keyword search: MISS (no shared words)
+//   → Semantic search: HIT (meaning overlap is high)
+
+export const SESSION_SEARCH_MEMORY_TOOL: Tool = {
+  name: "session_search_memory",
+  description:
+    "Search session history semantically (by meaning, not just keywords). " +
+    "Uses vector embeddings to find sessions with similar context, even when " +
+    "the exact wording differs. Requires pgvector extension in Supabase.\n\n" +
+    "Complements knowledge_search (keyword-based) — use this when keyword " +
+    "search returns no results or when the query is phrased differently " +
+    "from stored summaries.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "Natural language search query describing what you're looking for.",
+      },
+      project: {
+        type: "string",
+        description: "Optional: limit search to a specific project.",
+      },
+      limit: {
+        type: "integer",
+        description: "Maximum results to return (default: 5, max: 20).",
+        default: 5,
+      },
+      similarity_threshold: {
+        type: "number",
+        description: "Minimum similarity score 0-1 (default: 0.7). Higher = more relevant, fewer results.",
+        default: 0.7,
+      },
+    },
+    required: ["query"],
+  },
+};
+
 // ─── Type Guards ──────────────────────────────────────────────
 
 export function isKnowledgeForgetArgs(
@@ -239,10 +341,13 @@ export function isSessionSaveLedgerArgs(
   );
 }
 
+// REVIEWER NOTE: v0.4.0 adds expected_version to the type guard
+// for optimistic concurrency control. It's optional for backward compat.
 export function isSessionSaveHandoffArgs(
   args: unknown
 ): args is {
   project: string;
+  expected_version?: number;
   open_todos?: string[];
   active_branch?: string;
   last_summary?: string;
@@ -253,6 +358,23 @@ export function isSessionSaveHandoffArgs(
     args !== null &&
     "project" in args &&
     typeof (args as { project: string }).project === "string"
+  );
+}
+
+// ─── v0.4.0: Type guard for semantic search ──────────────────
+export function isSessionSearchMemoryArgs(
+  args: unknown
+): args is {
+  query: string;
+  project?: string;
+  limit?: number;
+  similarity_threshold?: number;
+} {
+  return (
+    typeof args === "object" &&
+    args !== null &&
+    "query" in args &&
+    typeof (args as { query: string }).query === "string"
   );
 }
 
