@@ -1,10 +1,10 @@
 # Prism MCP — Enterprise-Grade AI Agent Memory & Multi-Engine Search
 
-> Production-grade **Model Context Protocol (MCP)** server with **persistent session memory**, **semantic search (pgvector)**, **optimistic concurrency control**, **MCP Prompts & Resources**, **brain-inspired knowledge accumulation**, and **multi-engine search** (Brave + Vertex AI) with sandboxed code transforms and Gemini-powered analysis.
+> Production-grade **Model Context Protocol (MCP)** server with **persistent session memory**, **multi-tenant RLS**, **semantic search (pgvector)**, **optimistic concurrency control**, **MCP Prompts & Resources**, **brain-inspired knowledge accumulation**, and **multi-engine search** (Brave + Vertex AI) with sandboxed code transforms and Gemini-powered analysis.
 
 ---
 
-## What's New in v0.4.0
+## What's New in v1.5.0
 
 | Feature | Description |
 |---|---|
@@ -14,6 +14,7 @@
 | 🧹 **Ledger Compaction** | Gemini-powered rollup of old entries — keeps ledger lean with soft-delete archiving. |
 | 🔍 **Semantic Search** | pgvector embeddings — find sessions by meaning, not just keywords. |
 | ♻️ **Resource Subscriptions** | Attached memory auto-refreshes when handoff state changes mid-conversation. |
+| 🛡️ **Multi-Tenant RLS** | `PRISM_USER_ID` env var — Row Level Security isolates data per user on shared Supabase. |
 
 ---
 
@@ -33,6 +34,7 @@
 | **Infrastructure Cost** | Free tier (Supabase + Gemini) | Free tier available, paid for scale | Self-hosted or cloud ($$$) | Free (local only) |
 | **Setup Complexity** | 2 env vars (Supabase URL + Key) | Docker + API keys + vector DB | Docker + PostgreSQL + Neo4j | No setup needed |
 | **Multi-Project** | ✅ Built-in project isolation | ✅ User-scoped memories | ✅ Session-scoped | ❌ Single knowledge base |
+| **Multi-Tenant RLS** | ✅ user_id + RLS policies | ❌ Not built-in | ❌ Not built-in | ❌ Single user only |
 
 > **When to choose Prism MCP**: You want MCP-native memory with zero infrastructure overhead, progressive context loading, and enterprise features (OCC, compaction, semantic search) that work directly in Claude Desktop — without running separate services.
 
@@ -83,7 +85,8 @@ Copy this into your `claude_desktop_config.json` (replace the paths and API keys
         "BRAVE_API_KEY": "your-brave-api-key",
         "GOOGLE_API_KEY": "your-google-gemini-key",
         "SUPABASE_URL": "https://your-project.supabase.co",
-        "SUPABASE_KEY": "your-supabase-anon-key"
+        "SUPABASE_KEY": "your-supabase-anon-key",
+        "PRISM_USER_ID": "your-unique-user-id"
       }
     }
   }

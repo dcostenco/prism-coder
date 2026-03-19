@@ -1,6 +1,6 @@
 {
   "name": "prism-mcp-server",
-  "version": "0.4.0",
+  "version": "1.5.0",
   "description": "Enterprise-grade MCP server with session memory, semantic search (pgvector), optimistic concurrency control, ledger compaction, MCP Prompts & Resources, knowledge accumulation, Brave Search, and Google Gemini — progressive context loading, brain-inspired knowledge search/forget, and multi-model orchestration for AI agents",
   "module": "index.ts",
   "type": "module",

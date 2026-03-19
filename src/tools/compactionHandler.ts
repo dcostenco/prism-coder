@@ -1,5 +1,5 @@
 /**
- * Ledger Compaction Handler (v0.4.0 — Enhancement #2)
+ * Ledger Compaction Handler (v1.5.0 — Enhancement #2)
  *
  * ═══════════════════════════════════════════════════════════════════
  * REVIEWER NOTE: This module implements automatic rollup of old
@@ -34,7 +34,7 @@
  */
 
 import { supabaseRpc, supabaseGet, supabasePost, supabasePatch } from "../utils/supabaseApi.js";
-import { GOOGLE_API_KEY } from "../config.js";
+import { GOOGLE_API_KEY, PRISM_USER_ID } from "../config.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // ─── Constants ────────────────────────────────────────────────
@@ -139,8 +139,10 @@ export async function compactLedgerHandler(args: unknown) {
   let candidates: any[];
   if (project) {
     // If specific project, check it directly
+    // v1.5.0: Scope direct query to user_id
     const entries = await supabaseGet("session_ledger", {
       project: `eq.${project}`,
+      user_id: `eq.${PRISM_USER_ID}`,
       "archived_at": "is.null",
       "is_rollup": "eq.false",
       select: "id",
@@ -159,9 +161,11 @@ export async function compactLedgerHandler(args: unknown) {
     candidates = [{ project, total_entries: count, to_compact: count - keep_recent }];
   } else {
     // Auto-detect candidates using the RPC
+    // v1.5.0: Pass p_user_id for multi-tenant isolation
     const result = await supabaseRpc("get_compaction_candidates", {
       p_threshold: threshold,
       p_keep_recent: keep_recent,
+      p_user_id: PRISM_USER_ID,
     });
     candidates = Array.isArray(result) ? result : [];
   }
@@ -203,8 +207,10 @@ export async function compactLedgerHandler(args: unknown) {
     console.error(`[compact_ledger] Compacting ${toCompact} entries for "${proj}"`);
 
     // Fetch oldest entries (the ones to be rolled up)
+    // v1.5.0: Scope to user_id
     const oldEntries = await supabaseGet("session_ledger", {
       project: `eq.${proj}`,
+      user_id: `eq.${PRISM_USER_ID}`,
       "archived_at": "is.null",
       "is_rollup": "eq.false",
       order: "created_at.asc",
@@ -263,8 +269,10 @@ export async function compactLedgerHandler(args: unknown) {
     )];
 
     // Step 4: Insert rollup entry
+    // v1.5.0: Include user_id in rollup entry
     await supabasePost("session_ledger", {
       project: proj,
+      user_id: PRISM_USER_ID,
       summary: `[ROLLUP of ${oldEntries.length} sessions] ${finalSummary}`,
       keywords: allKeywords,
       files_changed: allFiles,

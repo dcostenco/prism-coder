@@ -1,5 +1,5 @@
 /**
- * Session Memory Handlers (v0.4.0)
+ * Session Memory Handlers (v1.5.0)
  *
  * ═══════════════════════════════════════════════════════════════════
  * REVIEWER NOTE: v0.4.0 CHANGES IN THIS FILE
@@ -25,7 +25,7 @@
 import { supabasePost, supabaseRpc, supabaseDelete, supabaseGet, supabasePatch } from "../utils/supabaseApi.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { generateEmbedding } from "../utils/embeddingApi.js";
-import { GOOGLE_API_KEY } from "../config.js";
+import { GOOGLE_API_KEY, PRISM_USER_ID } from "../config.js";
 import {
   isSessionSaveLedgerArgs,
   isSessionSaveHandoffArgs,
@@ -79,10 +79,12 @@ export async function sessionSaveLedgerHandler(args: unknown) {
   console.error(`[session_save_ledger] Extracted ${keywords.length} keywords: ${keywords.slice(0, 5).join(", ")}...`);
 
   // Build the record to insert into the session_ledger table
+  // v1.5.0: Include user_id for multi-tenant isolation
   const record = {
     project,
     conversation_id,
     summary,
+    user_id: PRISM_USER_ID,
     todos: todos || [],
     files_changed: files_changed || [],
     decisions: decisions || [],
@@ -207,6 +209,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   //   1. No existing handoff → INSERT (version = 1)
   //   2. Version match (or no check) → UPDATE (version++)
   //   3. Version mismatch → CONFLICT (return error with recovery data)
+  // v1.5.0: Pass p_user_id for multi-tenant isolation
   const result = await supabaseRpc("save_handoff_with_version", {
     p_project: project,
     p_expected_version: expected_version ?? null,
@@ -216,6 +219,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     p_keywords: keywords ?? null,
     p_key_context: key_context ?? null,
     p_active_branch: active_branch ?? null,
+    p_user_id: PRISM_USER_ID,
   });
 
   const data = Array.isArray(result) ? result[0] : result;
@@ -321,9 +325,11 @@ export async function sessionLoadContextHandler(args: unknown) {
 
   console.error(`[session_load_context] Loading ${level} context for project="${project}"`);
 
+  // v1.5.0: Pass p_user_id for multi-tenant isolation
   const result = await supabaseRpc("get_session_context", {
     p_project: project,
     p_level: level,
+    p_user_id: PRISM_USER_ID,
   });
 
   const data = Array.isArray(result) ? result[0] : result;
@@ -377,12 +383,14 @@ export async function knowledgeSearchHandler(args: unknown) {
   // Extract keywords from the query text to use in array-overlap search
   const searchKeywords = query ? toKeywordArray(query) : [];
 
+  // v1.5.0: Pass p_user_id for multi-tenant isolation
   const result = await supabaseRpc("search_knowledge", {
     p_project: project || null,
     p_keywords: searchKeywords,
     p_category: category || null,
     p_query_text: query || null,
     p_limit: Math.min(limit, 50),
+    p_user_id: PRISM_USER_ID,
   });
 
   const data = Array.isArray(result) ? result[0] : result;
@@ -448,6 +456,8 @@ export async function knowledgeForgetHandler(args: unknown) {
     `older_than=${older_than_days || "any"}d, clear_handoff=${clear_handoff}`);
 
   const ledgerParams: Record<string, string> = {};
+  // v1.5.0: Always scope to user_id
+  ledgerParams.user_id = `eq.${PRISM_USER_ID}`;
   if (project) {
     ledgerParams.project = `eq.${project}`;
   }
@@ -472,7 +482,7 @@ export async function knowledgeForgetHandler(args: unknown) {
     ledgerCount = Array.isArray(result) ? result.length : 0;
 
     if (clear_handoff && project) {
-      await supabaseDelete("session_handoffs", { project: `eq.${project}` });
+      await supabaseDelete("session_handoffs", { project: `eq.${project}`, user_id: `eq.${PRISM_USER_ID}` });
       handoffCleared = true;
     }
   }
@@ -568,11 +578,13 @@ export async function sessionSearchMemoryHandler(args: unknown) {
 
   // Step 2: Call pgvector semantic search RPC
   try {
+    // v1.5.0: Pass p_user_id for multi-tenant isolation
     const result = await supabaseRpc("semantic_search_ledger", {
       p_query_embedding: JSON.stringify(queryEmbedding),
       p_project: project || null,
       p_limit: Math.min(limit, 20),
       p_similarity_threshold: similarity_threshold,
+      p_user_id: PRISM_USER_ID,
     });
 
     const results = Array.isArray(result) ? result : [];

@@ -1,5 +1,5 @@
 /**
- * MCP Server — Core Entry Point (v0.4.0)
+ * MCP Server — Core Entry Point (v1.5.0)
  *
  * This file sets up the Model Context Protocol (MCP) server, registers all
  * tools, prompts, and resources, then handles incoming requests from the
@@ -68,7 +68,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import { SERVER_CONFIG, SESSION_MEMORY_ENABLED } from "./config.js";
+import { SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID } from "./config.js";
 
 // ─── v0.4.0: Supabase API imports for Prompts/Resources handlers ───
 // REVIEWER NOTE: The prompt and resource handlers need direct access
@@ -315,9 +315,11 @@ export function createServer() {
       console.error(`[prompt:resume_session] Loading ${level} context for "${project}"`);
 
       // Fetch context using the same RPC as session_load_context
+      // v1.5.0: Pass p_user_id for multi-tenant isolation
       const result = await supabaseRpc("get_session_context", {
         p_project: project,
         p_level: level,
+        p_user_id: PRISM_USER_ID,
       });
 
       const data = Array.isArray(result) ? result[0] : result;
@@ -430,9 +432,11 @@ export function createServer() {
       // gives a good balance of info without being too large.
       // REVIEWER NOTE: The RPC response includes `version` (added in
       // migration 019), which the LLM needs for OCC when saving later.
+      // v1.5.0: Pass p_user_id for multi-tenant isolation
       const result = await supabaseRpc("get_session_context", {
         p_project: project,
         p_level: "standard",
+        p_user_id: PRISM_USER_ID,
       });
 
       const data = Array.isArray(result) ? result[0] : result;
