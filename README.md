@@ -1,24 +1,24 @@
-# Prism MCP — AI-Driven Server Platform & Vertex AI Integration
+# Prism MCP — Session Memory, Knowledge & Multi-Engine Search
 
-> Production-grade **Model Context Protocol (MCP)** infrastructure and **Google Cloud Vertex AI** applications — combining LLM-powered data retrieval, research analysis, and cross-system API orchestration with enterprise search and discovery capabilities.
+> Production-grade **Model Context Protocol (MCP)** server combining **persistent session memory**, **brain-inspired knowledge accumulation**, and **multi-engine search** (Brave + Vertex AI Discovery Engine) with sandboxed code transforms and Gemini-powered analysis.
 
 ---
 
 ## Overview
 
-This repository contains two complementary AI systems:
+Prism MCP is a unified AI agent platform with two core pillars:
 
-1. **MCP Server Platform** — A multi-tool TypeScript/Python server that integrates Large Language Models with heterogeneous data sources through the standardized Model Context Protocol
-2. **Vertex AI Applications** — Google Cloud–based AI services including Discovery Engine (Vertex AI Search), Gemini model integration, and Claude-on-Vertex deployment
+1. **Session Memory & Knowledge System** — Persistent session memory with progressive context loading, brain-inspired knowledge accumulation, cross-project knowledge transfer, and selective memory pruning
+2. **Multi-Engine Search & Analysis** — Brave Search + Vertex AI Discovery Engine hybrid pipeline with 94% context reduction, Gemini research analysis, and sandboxed code transforms
 
 | Capability | Implementation |
 |---|---|
+| **Session Memory & Knowledge** | Progressive context loading (quick / standard / deep), work ledgers, session handoff, knowledge accumulation, search, and pruning via Supabase |
+| **Multi-Engine Search** | Brave Search (real-time web) + Vertex AI Discovery Engine (curated enterprise index) with hybrid merge/dedup pipeline |
 | **MCP Server Architecture** | Multi-tool server with `@modelcontextprotocol/sdk`, structured request handling, and extensible tool registration |
-| **Vertex AI Search / Discovery Engine** | Enterprise search index with document ingestion, serving configs, and structured query APIs |
-| **Session Memory** *(optional)* | Progressive context loading (quick / standard / deep), work ledgers, session handoff, and **knowledge accumulation** via Supabase |
 | **LLM Integration** | Claude Desktop, Google Gemini, and Claude-on-Vertex AI with secure prompt patterns |
 | **API Orchestration** | Brave Search, Gemini, Gmail, Chrome DevTools Protocol, GCP Discovery Engine, and Supabase REST APIs |
-| **Data Pipelines** | JavaScript-based extraction transforms over raw JSON/CSV payloads |
+| **Code-Mode Transforms** | Sandboxed JavaScript extraction over raw JSON/CSV payloads — 85-95% token reduction |
 | **Security & IP Protection** | GCP Application Default Credentials, OAuth 2.0, encrypted credential management, env-based secrets |
 | **Testing & Validation** | Cross-MCP integration tests, Vertex AI verification scripts, schema validation, and benchmarks |
 
@@ -42,7 +42,7 @@ Copy this into your `claude_desktop_config.json` (replace the paths and API keys
 ```json
 {
   "mcpServers": {
-    "athena-public": {
+    "prism-mcp": {
       "command": "node",
       "args": ["/absolute/path/to/BCBA/build/server.js"],
       "env": {
@@ -264,7 +264,7 @@ Results from [`test_realworld_comparison.ts`](vertex-ai/test_realworld_compariso
 
 ### 3. Search & Data Extraction Tools
 
-Seven core tools plus six optional session memory & knowledge tools:
+Seven search/analysis tools plus five session memory & knowledge tools (12 total):
 
 | Tool | Purpose | Input | Output |
 |------|---------|-------|--------|
@@ -418,7 +418,7 @@ Add the server to your Claude Desktop MCP config (credentials are passed via env
 ```json
 {
   "mcpServers": {
-    "research-platform": {
+    "prism-mcp": {
       "command": "node",
       "args": ["<path>/build/index.js"],
       "env": {
@@ -434,7 +434,7 @@ Add the server to your Claude Desktop MCP config (credentials are passed via env
 }
 ```
 
-> **Note:** `SUPABASE_URL` and `SUPABASE_KEY` are optional. If not set, the server runs with 7 tools (search + analysis). When set, 5 session memory + knowledge tools are added (**12 total**).
+> **Note:** All 12 tools are available when both Brave and Supabase keys are configured. `SUPABASE_URL` and `SUPABASE_KEY` enable the 5 session memory + knowledge tools. Without them, the server runs with 7 search & analysis tools.
 
 ## Key Design Decisions
 
@@ -449,9 +449,9 @@ Add the server to your Claude Desktop MCP config (credentials are passed via env
 
 ---
 
-## Session Memory & Knowledge System (Optional)
+## Session Memory & Knowledge System
 
-Persistent session memory and brain-inspired knowledge accumulation for AI agents — save work logs, hand off state between sessions, progressively load context on boot, search accumulated knowledge, and prune bad memories. **Completely optional**: if you don't configure Supabase, the server runs exactly as before with 7 tools.
+Prism's core differentiator: persistent session memory and brain-inspired knowledge accumulation for AI agents — save work logs, hand off state between sessions, progressively load context on boot, search accumulated knowledge, and prune bad memories. This is what makes Prism more than just another search server.
 
 ### Knowledge Accumulation System *(v0.3.0)*
 
