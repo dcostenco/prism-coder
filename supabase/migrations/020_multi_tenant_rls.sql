@@ -81,13 +81,24 @@ EXCEPTION WHEN OTHERS THEN
   NULL;
 END $$;
 
--- Add new composite unique constraint
--- REVIEWER NOTE: This ensures project names are unique PER USER,
--- not globally. User A and User B can both have project "my-app".
-ALTER TABLE session_handoffs
-  ADD CONSTRAINT uq_handoffs_user_project UNIQUE (user_id, project);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'uq_handoffs_user_project'
+  ) THEN
+    ALTER TABLE session_handoffs
+      ADD CONSTRAINT uq_handoffs_user_project UNIQUE (user_id, project);
+  END IF;
+END $$;
 
 -- ─── Step 3: Update RPCs with user_id parameter ─────────────────
+
+-- Drop old function signatures first to avoid overload conflicts
+DROP FUNCTION IF EXISTS get_session_context(TEXT, TEXT);
+DROP FUNCTION IF EXISTS save_handoff_with_version(TEXT, INT, TEXT, TEXT[], TEXT[], TEXT[], TEXT, TEXT);
+DROP FUNCTION IF EXISTS get_compaction_candidates(INT, INT);
+DROP FUNCTION IF EXISTS semantic_search_ledger(vector, TEXT, INT, FLOAT);
 
 -- 3a. get_session_context — add p_user_id parameter
 -- REVIEWER NOTE: All WHERE clauses now filter by user_id + project.
@@ -254,7 +265,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION get_session_context IS
+COMMENT ON FUNCTION get_session_context(TEXT, TEXT, TEXT) IS
     'Progressive context loading with OCC, knowledge cache, and multi-tenant isolation. '
     'v0.4.0: user_id scopes all queries to a single tenant. '
     'quick=keywords+todo+version, standard=+summary+decisions+cache, '
@@ -343,7 +354,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION save_handoff_with_version IS
+COMMENT ON FUNCTION save_handoff_with_version(TEXT, INT, TEXT, TEXT[], TEXT[], TEXT[], TEXT, TEXT, TEXT) IS
   'OCC handoff save with multi-tenant isolation. '
   'Scoped by user_id + project. '
   'Returns: created | updated | conflict.';
@@ -368,7 +379,7 @@ AS $$
   HAVING COUNT(*) > p_threshold;
 $$;
 
-COMMENT ON FUNCTION get_compaction_candidates IS
+COMMENT ON FUNCTION get_compaction_candidates(INT, INT, TEXT) IS
   'Finds projects needing compaction, scoped to a single user_id.';
 
 -- 3d. semantic_search_ledger — add p_user_id parameter
@@ -409,7 +420,7 @@ AS $$
   LIMIT p_limit;
 $$;
 
-COMMENT ON FUNCTION semantic_search_ledger IS
+COMMENT ON FUNCTION semantic_search_ledger(vector, TEXT, INT, FLOAT, TEXT) IS
   'Semantic search with multi-tenant isolation. '
   'Results scoped to p_user_id.';
 
@@ -439,11 +450,13 @@ ALTER TABLE session_handoffs ENABLE ROW LEVEL SECURITY;
 -- (in RPC parameters and PostgREST query filters). RLS here serves
 -- as a safety net — even if a handler bug forgets the user_id filter,
 -- PostgREST requests include user_id in all queries.
+DROP POLICY IF EXISTS "ledger_user_isolation" ON session_ledger;
 CREATE POLICY "ledger_user_isolation" ON session_ledger
   FOR ALL
   USING (true)
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "handoffs_user_isolation" ON session_handoffs;
 CREATE POLICY "handoffs_user_isolation" ON session_handoffs
   FOR ALL
   USING (true)

@@ -205,7 +205,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION get_session_context IS
+COMMENT ON FUNCTION get_session_context(TEXT, TEXT) IS
     'Progressive context loading with OCC version tracking and knowledge cache. '
     'v0.4.0: includes version field at all levels, excludes archived entries. '
     'quick=keywords+todo+version, standard=+summary+decisions+knowledge_cache, '
@@ -309,7 +309,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION save_handoff_with_version IS
+COMMENT ON FUNCTION save_handoff_with_version(TEXT, INT, TEXT, TEXT[], TEXT[], TEXT[], TEXT, TEXT) IS
   'Saves handoff state with optimistic concurrency control. '
   'Pass expected_version to enable conflict detection. '
   'Returns status: created | updated | conflict. '

@@ -100,7 +100,7 @@ AS $$
   LIMIT p_limit;
 $$;
 
-COMMENT ON FUNCTION semantic_search_ledger IS
+COMMENT ON FUNCTION semantic_search_ledger(vector, TEXT, INT, FLOAT) IS
   'Semantic (meaning-based) search of session ledger using pgvector embeddings. '
   'Takes a pre-computed 768-dim query embedding and returns top-N similar entries. '
   'Uses HNSW index for fast approximate nearest neighbor search with cosine distance.';

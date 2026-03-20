@@ -138,7 +138,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION get_session_context IS 'Progressive context loading: quick=keywords+todo, standard=+summary+decisions, deep=+recent ledger entries';
+COMMENT ON FUNCTION get_session_context(TEXT, TEXT) IS 'Progressive context loading: quick=keywords+todo, standard=+summary+decisions, deep=+recent ledger entries';
 
 -- ==============================================================================
 -- MIGRATION COMPLETE

@@ -139,7 +139,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION search_knowledge IS
+COMMENT ON FUNCTION search_knowledge(TEXT, TEXT[], TEXT, TEXT, INT) IS
     'Search accumulated session knowledge by keywords, category, or free text. '
     'Uses GIN indexes for fast array-overlap and full-text search queries.';
 
@@ -305,7 +305,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION get_session_context IS
+COMMENT ON FUNCTION get_session_context(TEXT, TEXT) IS
     'Progressive context loading with knowledge cache. '
     'quick=keywords+todo, standard=+summary+decisions+knowledge_cache, '
     'deep=+recent sessions+cross-project knowledge.';

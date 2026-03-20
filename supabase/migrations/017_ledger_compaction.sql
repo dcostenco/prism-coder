@@ -64,7 +64,7 @@ AS $$
   HAVING COUNT(*) > p_threshold;
 $$;
 
-COMMENT ON FUNCTION get_compaction_candidates IS
+COMMENT ON FUNCTION get_compaction_candidates(INT, INT) IS
   'Identifies projects with ledger entries exceeding the threshold. '
   'Returns project name, total active entries, and how many to compact. '
   'Used by the session_compact_ledger tool to decide what needs rollup.';
