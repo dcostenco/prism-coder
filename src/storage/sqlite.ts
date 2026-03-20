@@ -386,7 +386,7 @@ export class SqliteStorage implements StorageBackend {
           sql: `INSERT INTO session_handoffs
             (id, project, user_id, last_summary, pending_todo, active_decisions,
              keywords, key_context, active_branch, version, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '{}')`,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
           args: [
             randomUUID(),
             handoff.project,
@@ -397,6 +397,7 @@ export class SqliteStorage implements StorageBackend {
             JSON.stringify(handoff.keywords ?? []),
             handoff.key_context ?? null,
             handoff.active_branch ?? null,
+            JSON.stringify(handoff.metadata ?? {}),
           ],
         });
         return { status: "created", version: 1 };
@@ -408,7 +409,7 @@ export class SqliteStorage implements StorageBackend {
             sql: `UPDATE session_handoffs
               SET last_summary = ?, pending_todo = ?, active_decisions = ?,
                   keywords = ?, key_context = ?, active_branch = ?,
-                  version = version + 1, updated_at = datetime('now')
+                  metadata = ?, version = version + 1, updated_at = datetime('now')
               WHERE project = ? AND user_id = ?
               RETURNING version`,
             args: [
@@ -418,6 +419,7 @@ export class SqliteStorage implements StorageBackend {
               JSON.stringify(handoff.keywords ?? []),
               handoff.key_context ?? null,
               handoff.active_branch ?? null,
+              JSON.stringify(handoff.metadata ?? {}),
               handoff.project,
               handoff.user_id,
             ],
@@ -434,7 +436,7 @@ export class SqliteStorage implements StorageBackend {
       sql: `UPDATE session_handoffs
         SET last_summary = ?, pending_todo = ?, active_decisions = ?,
             keywords = ?, key_context = ?, active_branch = ?,
-            version = version + 1, updated_at = datetime('now')
+            metadata = ?, version = version + 1, updated_at = datetime('now')
         WHERE project = ? AND user_id = ? AND version = ?
         RETURNING version`,
       args: [
@@ -444,6 +446,7 @@ export class SqliteStorage implements StorageBackend {
         JSON.stringify(handoff.keywords ?? []),
         handoff.key_context ?? null,
         handoff.active_branch ?? null,
+        JSON.stringify(handoff.metadata ?? {}),
         handoff.project,
         handoff.user_id,
         expectedVersion,
@@ -504,6 +507,7 @@ export class SqliteStorage implements StorageBackend {
       keywords: this.parseJsonColumn(handoff.keywords),
       pending_todo: this.parseJsonColumn(handoff.pending_todo),
       version: handoff.version,
+      metadata: this.parseJsonColumn(handoff.metadata) || {},
     };
 
     if (level === "quick") {

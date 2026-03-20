@@ -19,6 +19,7 @@
 import { getStorage } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { generateEmbedding } from "../utils/embeddingApi.js";
+import { getCurrentGitState, getGitDrift } from "../utils/git.js";
 import { GOOGLE_API_KEY, PRISM_USER_ID } from "../config.js";
 import {
   isSessionSaveLedgerArgs,
@@ -141,6 +142,17 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     console.error(`[session_save_handoff] Extracted ${keywords.length} keywords: ${keywords.slice(0, 5).join(", ")}...`);
   }
 
+  // Auto-capture Git state for Reality Drift Detection (v2.0 Step 5)
+  const gitState = getCurrentGitState();
+  const metadata: Record<string, unknown> = {};
+  if (gitState.isRepo) {
+    metadata.git_branch = gitState.branch;
+    metadata.last_commit_sha = gitState.commitSha;
+    console.error(
+      `[session_save_handoff] Git state captured: branch=${gitState.branch}, sha=${gitState.commitSha?.substring(0, 8)}`
+    );
+  }
+
   // Save via storage backend (OCC-aware)
   const data = await storage.saveHandoff(
     {
@@ -152,6 +164,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
       keywords: keywords ?? null,
       key_context: key_context ?? null,
       active_branch: active_branch ?? null,
+      metadata,
     },
     expected_version ?? null
   );
@@ -281,10 +294,45 @@ export async function sessionLoadContextHandler(args: unknown) {
     ? `\n\n🔑 Session version: ${version}. Pass expected_version: ${version} when saving handoff.`
     : "";
 
+  // ─── Reality Drift Detection (v2.0 Step 5) ───
+  // Check if the developer changed code since the last handoff save.
+  let driftReport = "";
+  const meta = (data as any)?.metadata;
+
+  if (meta?.last_commit_sha) {
+    const currentGit = getCurrentGitState();
+
+    if (currentGit.isRepo) {
+      if (meta.git_branch && currentGit.branch !== meta.git_branch) {
+        // Branch switch — inform but don't panic
+        driftReport = `\n\n⚠️ **CONTEXT SHIFT:** This memory was saved on branch ` +
+          `\`${meta.git_branch}\`, but you are currently on branch \`${currentGit.branch}\`. ` +
+          `Code may have diverged — review carefully before making changes.`;
+        console.error(
+          `[session_load_context] Context shift detected: ${meta.git_branch} → ${currentGit.branch}`
+        );
+      } else if (currentGit.commitSha !== meta.last_commit_sha) {
+        // Same branch, different commits — calculate drift
+        const changes = getGitDrift(meta.last_commit_sha as string);
+        if (changes) {
+          driftReport = `\n\n⚠️ **REALITY DRIFT DETECTED**\n` +
+            `Since this memory was saved (commit ${(meta.last_commit_sha as string).substring(0, 8)}), ` +
+            `the following files were modified outside of agent sessions:\n\`\`\`\n${changes}\n\`\`\`\n` +
+            `Please review these files if they overlap with your current task.`;
+          console.error(
+            `[session_load_context] Reality drift detected! ${changes.split("\n").length} files changed`
+          );
+        }
+      } else {
+        console.error(`[session_load_context] No drift — repo matches saved state`);
+      }
+    }
+  }
+
   return {
     content: [{
       type: "text",
-      text: `📋 Session context for "${project}" (${level}):\n\n${JSON.stringify(data, null, 2)}${versionNote}`,
+      text: `📋 Session context for "${project}" (${level}):\n\n${JSON.stringify(data, null, 2)}${driftReport}${versionNote}`,
     }],
     isError: false,
   };
