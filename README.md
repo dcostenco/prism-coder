@@ -44,17 +44,15 @@ Add this to your `claude_desktop_config.json` or `.cursor/mcp.json`:
   "mcpServers": {
     "prism-mcp": {
       "command": "npx",
-      "args": ["-y", "prism-mcp-server"],
-      "env": {
-        "PRISM_STORAGE": "local",
-        "BRAVE_API_KEY": "your-brave-api-key"
-      }
+      "args": ["-y", "prism-mcp-server"]
     }
   }
 }
 ```
 
-> **Note:** `BRAVE_API_KEY` is required for search features. To enable semantic search, Morning Briefings, and paper analysis, add `GOOGLE_API_KEY`. Everything else works out of the box with zero config.
+That's it — **zero env vars needed** for local memory, Mind Palace dashboard, Time Travel, and Telepathy.
+
+> **Optional API keys:** Add `BRAVE_API_KEY` for web search, `GOOGLE_API_KEY` for semantic search + Morning Briefings + paper analysis. See [Environment Variables](#environment-variables) for the full list.
 
 ### Option B: Cloud Sync Mode (Supabase)
 
@@ -68,7 +66,6 @@ To share memory across multiple machines or teams, switch to Supabase:
       "args": ["-y", "prism-mcp-server"],
       "env": {
         "PRISM_STORAGE": "supabase",
-        "BRAVE_API_KEY": "your-brave-api-key",
         "SUPABASE_URL": "https://your-project.supabase.co",
         "SUPABASE_KEY": "your-supabase-anon-key"
       }
@@ -95,7 +92,6 @@ Then add to your MCP config:
       "command": "node",
       "args": ["/absolute/path/to/prism-mcp/dist/server.js"],
       "env": {
-        "PRISM_STORAGE": "local",
         "BRAVE_API_KEY": "your-brave-api-key",
         "GOOGLE_API_KEY": "your-google-gemini-key"
       }
@@ -159,10 +155,7 @@ Add to your `claude_desktop_config.json`:
     "prism-mcp": {
       "command": "npx",
       "args": ["-y", "prism-mcp-server"],
-      "env": {
-        "PRISM_STORAGE": "local",
-        "BRAVE_API_KEY": "your-brave-api-key"
-      }
+      "env": {}
     }
   }
 }
@@ -181,10 +174,7 @@ Add to `.cursor/mcp.json` in your project root (or `~/.cursor/mcp.json` for glob
     "prism-mcp": {
       "command": "npx",
       "args": ["-y", "prism-mcp-server"],
-      "env": {
-        "PRISM_STORAGE": "local",
-        "BRAVE_API_KEY": "your-brave-api-key"
-      }
+      "env": {}
     }
   }
 }
@@ -203,10 +193,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
     "prism-mcp": {
       "command": "npx",
       "args": ["-y", "prism-mcp-server"],
-      "env": {
-        "PRISM_STORAGE": "local",
-        "BRAVE_API_KEY": "your-brave-api-key"
-      }
+      "env": {}
     }
   }
 }
@@ -348,7 +335,7 @@ Instead of writing custom JavaScript, pass a `template` name for instant extract
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `BRAVE_API_KEY` | Yes (for search) | Brave Search Pro API key |
+| `BRAVE_API_KEY` | No | Brave Search Pro API key (enables web/local search tools) |
 | `PRISM_STORAGE` | No | `"local"` (default) or `"supabase"` |
 | `GOOGLE_API_KEY` | No | Google AI / Gemini — enables paper analysis, Morning Briefings, compaction |
 | `BRAVE_ANSWERS_API_KEY` | No | Separate Brave Answers key for AI-grounded answers |

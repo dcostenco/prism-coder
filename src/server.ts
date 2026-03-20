@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * MCP Server — Core Entry Point (v1.5.0)
  *
