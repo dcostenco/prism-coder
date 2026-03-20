@@ -1,6 +1,6 @@
 {
   "name": "prism-mcp-server",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "mcpName": "io.github.dcostenco/prism-mcp",
   "description": "Enterprise-grade MCP server with session memory, semantic search (pgvector), optimistic concurrency control, ledger compaction, MCP Prompts & Resources, knowledge accumulation, Brave Search, and Google Gemini — progressive context loading, brain-inspired knowledge search/forget, and multi-model orchestration for AI agents",
   "module": "index.ts",
@@ -38,7 +38,13 @@
     "ai-tools",
     "typescript",
     "rag",
-    "embeddings"
+    "embeddings",
+    "cursor",
+    "windsurf",
+    "cline",
+    "persistent-memory",
+    "session-management",
+    "context-window"
   ],
   "homepage": "https://github.com/dcostenco/prism-mcp",
   "repository": {

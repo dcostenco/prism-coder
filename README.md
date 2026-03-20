@@ -1,13 +1,16 @@
-# Prism MCP — Enterprise-Grade AI Agent Memory & Multi-Engine Search
+# Prism MCP — Persistent Memory for Claude Desktop, Cursor & AI Agents
 
 [![npm version](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm)](https://www.npmjs.com/package/prism-mcp-server)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTUtMTAtNXpNMiAxN2wxMCA1IDEwLTV2LTJMMTI0djJMMiA5djh6Ii8+PC9zdmc+)](https://registry.modelcontextprotocol.io)
 [![Glama](https://img.shields.io/badge/Glama-listed-FF5601)](https://glama.ai/mcp/servers/@dcostenco/prism-mcp)
+[![Smithery](https://img.shields.io/badge/Smithery-listed-6B4FBB)](https://smithery.ai/server/prism-mcp-server)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 
-> Production-grade **Model Context Protocol (MCP)** server with **persistent session memory**, **multi-tenant RLS**, **semantic search (pgvector)**, **optimistic concurrency control**, **MCP Prompts & Resources**, **brain-inspired knowledge accumulation**, and **multi-engine search** (Brave + Vertex AI) with sandboxed code transforms and Gemini-powered analysis.
+> **Give your AI agent memory that survives between sessions.** Prism MCP is a Model Context Protocol server that adds **persistent session memory**, **progressive context loading**, and **multi-engine search** to Claude Desktop, Cursor, Windsurf, and any MCP-compatible client. No more re-explaining your project every time you start a new chat.
+>
+> Built with **semantic search (pgvector)**, **optimistic concurrency control**, **MCP Prompts & Resources**, **auto-compaction**, and **multi-tenant RLS** on Supabase free tier.
 
 ---
 
@@ -69,7 +72,25 @@ Prism MCP is a unified AI agent platform with two core pillars:
 
 Get the MCP server running with Claude Desktop in under 2 minutes:
 
-### 1. Clone & Build
+### Option A: npx (Fastest — No Clone Needed)
+
+```json
+{
+  "mcpServers": {
+    "prism-mcp": {
+      "command": "npx",
+      "args": ["-y", "prism-mcp-server"],
+      "env": {
+        "BRAVE_API_KEY": "your-brave-api-key"
+      }
+    }
+  }
+}
+```
+
+Paste into your Claude Desktop config and restart. That's it.
+
+### Option B: Clone & Build (Full Control)
 
 ```bash
 git clone https://github.com/dcostenco/prism-mcp.git
@@ -78,16 +99,14 @@ npm install
 npm run build
 ```
 
-### 2. Add to Claude Desktop
-
-Copy this into your `claude_desktop_config.json` (replace the paths and API keys):
+Then add to your `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "prism-mcp": {
       "command": "node",
-      "args": ["/absolute/path/to/BCBA/build/server.js"],
+      "args": ["/absolute/path/to/prism-mcp/build/server.js"],
       "env": {
         "BRAVE_API_KEY": "your-brave-api-key",
         "GOOGLE_API_KEY": "your-google-gemini-key",
@@ -117,6 +136,119 @@ cat supabase/migrations/*.sql | docker compose exec -T db psql -U prism -d prism
 ```
 
 Then set `SUPABASE_URL=http://localhost:3000` in your MCP config.
+
+---
+
+## Integration Examples
+
+Copy-paste configs for popular MCP clients. All configs use the `npx` method — replace with the `node` path if you cloned the repo.
+
+<details>
+<summary><strong>Cursor</strong></summary>
+
+Add to `.cursor/mcp.json` in your project root (or `~/.cursor/mcp.json` for global):
+
+```json
+{
+  "mcpServers": {
+    "prism-mcp": {
+      "command": "npx",
+      "args": ["-y", "prism-mcp-server"],
+      "env": {
+        "BRAVE_API_KEY": "your-brave-api-key",
+        "SUPABASE_URL": "https://your-project.supabase.co",
+        "SUPABASE_KEY": "your-supabase-anon-key"
+      }
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Windsurf</strong></summary>
+
+Add to `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "prism-mcp": {
+      "command": "npx",
+      "args": ["-y", "prism-mcp-server"],
+      "env": {
+        "BRAVE_API_KEY": "your-brave-api-key",
+        "SUPABASE_URL": "https://your-project.supabase.co",
+        "SUPABASE_KEY": "your-supabase-anon-key"
+      }
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>VS Code + Continue</strong></summary>
+
+Add to your Continue `config.json` (usually `~/.continue/config.json`):
+
+```json
+{
+  "mcpServers": [
+    {
+      "name": "prism-mcp",
+      "command": "npx",
+      "args": ["-y", "prism-mcp-server"],
+      "env": {
+        "BRAVE_API_KEY": "your-brave-api-key",
+        "SUPABASE_URL": "https://your-project.supabase.co",
+        "SUPABASE_KEY": "your-supabase-anon-key"
+      }
+    }
+  ]
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Cline (VS Code)</strong></summary>
+
+In VS Code, open Cline settings → MCP Servers → Add Server:
+
+```json
+{
+  "mcpServers": {
+    "prism-mcp": {
+      "command": "npx",
+      "args": ["-y", "prism-mcp-server"],
+      "env": {
+        "BRAVE_API_KEY": "your-brave-api-key",
+        "SUPABASE_URL": "https://your-project.supabase.co",
+        "SUPABASE_KEY": "your-supabase-anon-key"
+      }
+    }
+  }
+}
+```
+
+</details>
+
+---
+
+## Use Cases
+
+| Scenario | How Prism MCP Helps |
+|----------|-------------------|
+| **Long-running feature development** | Save session state at end of day, restore full context the next morning — no re-explaining |
+| **Multi-agent workflows** | Shared Supabase backend with RLS lets multiple agents collaborate on the same project |
+| **Consulting / multi-project work** | Switch between client projects with progressive context loading (quick / standard / deep) |
+| **Research & analysis** | Multi-engine search (Brave + Vertex AI) with 94% context reduction via sandboxed code transforms |
+| **Team onboarding** | New team member's agent loads full project history via `session_load_context("deep")` |
+| **Claude Desktop memory** | The `/resume_session` MCP Prompt injects context *before* Claude starts thinking — zero tool calls |
+| **Knowledge management** | Auto-extracted keywords + categories turn session logs into a searchable knowledge base |
 
 ---
 
@@ -975,3 +1107,7 @@ CREATE POLICY "User-scoped access" ON session_ledger
 ## License
 
 MIT
+
+---
+
+<sub>**Keywords:** MCP server, Model Context Protocol, Claude Desktop memory, persistent session memory, AI agent memory, Claude context window, MCP session persistence, Cursor MCP server, Windsurf MCP server, Cline MCP server, pgvector semantic search, Supabase MCP, progressive context loading, MCP Prompts, MCP Resources, knowledge management AI, multi-engine search, Brave Search MCP, Gemini analysis, optimistic concurrency control, session handoff, AI agent state management</sub>
