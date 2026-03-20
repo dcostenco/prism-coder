@@ -592,6 +592,13 @@ export function createServer() {
   return server;
 }
 
+// ─── Smithery Sandbox Export ─────────────────────────────────────
+// Smithery uses this to scan capabilities (tools, prompts, resources)
+// without requiring real credentials or starting a transport.
+export function createSandboxServer() {
+  return createServer();
+}
+
 // ─── Server Startup ─────────────────────────────────────────────
 
 /**
@@ -621,7 +628,11 @@ export async function startServer() {
   }, 10000);
 }
 
-startServer().catch((error) => {
-  console.error('Fatal error running server:', error);
-  process.exit(1);
-});
+// Only auto-start when this module is executed directly (not imported by Smithery scanner)
+const isDirectExecution = process.argv[1]?.endsWith('server.js') || process.argv[1]?.endsWith('server.ts');
+if (isDirectExecution) {
+  startServer().catch((error) => {
+    console.error('Fatal error running server:', error);
+    process.exit(1);
+  });
+}

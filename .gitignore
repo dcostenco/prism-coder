@@ -35,3 +35,10 @@ restore/
 memory/
 bcba/
 .agent/
+
+# MCP Registry tokens
+.mcpregistry_github_token
+.mcpregistry_registry_token
+
+# Smithery build artifacts
+.smithery/

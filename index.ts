@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-import { startServer } from "./src/server.js";
+import { startServer, createSandboxServer } from "./src/server.js";
+
+// Re-export for Smithery capability scanning
+export { createSandboxServer };
 
 console.error("Starting Brave-Gemini Research MCP Server...");
 
