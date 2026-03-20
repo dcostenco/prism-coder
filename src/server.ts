@@ -69,6 +69,8 @@ import {
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 import { SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID } from "./config.js";
+import { getSyncBus } from "./sync/factory.js";
+import type { SyncBus, SyncEvent } from "./sync/index.js";
 
 // ─── v0.4.0: Supabase API imports for Prompts/Resources handlers ───
 // REVIEWER NOTE: The prompt and resource handlers need direct access
@@ -635,6 +637,37 @@ export async function startServer() {
 
   console.error("Connecting server to transport...");
   await server.connect(transport);
+
+  // ─── v2.0 Step 6: Initialize SyncBus (Telepathy) ───
+  if (SESSION_MEMORY_ENABLED) {
+    try {
+      const syncBus = await getSyncBus();
+      await syncBus.startListening();
+
+      syncBus.on("update", (event: SyncEvent) => {
+        console.error(
+          `[Telepathy] Memory for project '${event.project}' ` +
+          `updated to v${event.version} by another agent!`
+        );
+
+        // Send an MCP logging notification to the IDE
+        try {
+          server.sendLoggingMessage({
+            level: "info",
+            data: `[Prism Telepathy] \u{1F9E0} Another agent just updated the memory for ` +
+              `'${event.project}' to version ${event.version}. ` +
+              `You may want to run session_load_context to sync up.`,
+          });
+        } catch (err) {
+          console.error(`[Telepathy] Failed to send notification: ${err}`);
+        }
+      });
+
+      console.error("[Telepathy] SyncBus active — multi-client sync enabled");
+    } catch (err) {
+      console.error(`[Telepathy] SyncBus init failed (non-fatal): ${err}`);
+    }
+  }
 
   console.error(`Prism MCP Server v${SERVER_CONFIG.version} running on stdio`);
 

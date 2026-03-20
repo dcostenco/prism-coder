@@ -235,6 +235,16 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     }
   }
 
+  // ─── TELEPATHY: Broadcast to other Prism MCP instances (v2.0 Step 6) ───
+  if (data.status === "created" || data.status === "updated") {
+    import("../sync/factory.js")
+      .then(({ getSyncBus }) => getSyncBus())
+      .then(bus => bus.broadcastUpdate(project, newVersion ?? 1))
+      .catch(err =>
+        console.error(`[session_save_handoff] SyncBus broadcast failed (non-fatal): ${err}`)
+      );
+  }
+
   return {
     content: [{
       type: "text",
