@@ -63,6 +63,7 @@
   "dependencies": {
     "@google-cloud/discoveryengine": "^2.5.3",
     "@google/generative-ai": "^0.24.1",
+    "@libsql/client": "^0.17.2",
     "@modelcontextprotocol/sdk": "^1.9.0",
     "dotenv": "^16.5.0",
     "quickjs-emscripten": "^0.32.0"

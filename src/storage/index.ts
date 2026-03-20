@@ -31,13 +31,8 @@ export async function getStorage(): Promise<StorageBackend> {
   console.error(`[Prism Storage] Initializing backend: ${PRISM_STORAGE}`);
 
   if (PRISM_STORAGE === "local") {
-    // Step 2–3: Will be implemented with @libsql/client
-    // import { SqliteStorage } from "./sqlite.js";
-    // storageInstance = new SqliteStorage();
-    throw new Error(
-      "Local SQLite storage is not yet implemented (coming in v2.0-alpha Step 2).\n" +
-      "Use PRISM_STORAGE=supabase or leave PRISM_STORAGE unset with SUPABASE_URL + SUPABASE_KEY configured."
-    );
+    const { SqliteStorage } = await import("./sqlite.js");
+    storageInstance = new SqliteStorage();
   } else if (PRISM_STORAGE === "supabase") {
     storageInstance = new SupabaseStorage();
   } else {
