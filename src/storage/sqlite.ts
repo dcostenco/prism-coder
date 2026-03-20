@@ -85,7 +85,7 @@ export class SqliteStorage implements StorageBackend {
         files_changed TEXT DEFAULT '[]',
         decisions TEXT DEFAULT '[]',
         keywords TEXT DEFAULT '[]',
-        embedding TEXT DEFAULT NULL,
+        embedding F32_BLOB(768),  -- libSQL native 768-dim vector (Gemini text-embedding-004)
         is_rollup INTEGER DEFAULT 0,
         rollup_count INTEGER DEFAULT 0,
         archived_at TEXT DEFAULT NULL,
@@ -116,6 +116,12 @@ export class SqliteStorage implements StorageBackend {
       CREATE INDEX IF NOT EXISTS idx_ledger_user ON session_ledger(user_id);
       CREATE INDEX IF NOT EXISTS idx_ledger_created ON session_ledger(created_at);
       CREATE INDEX IF NOT EXISTS idx_ledger_archived ON session_ledger(archived_at);
+
+      -- ─── Vector ANN Index (libSQL DiskANN) ───
+      -- Accelerates cosine similarity search on large datasets.
+      -- Gracefully ignored if libSQL version doesn't support it.
+      CREATE INDEX IF NOT EXISTS idx_ledger_embedding
+        ON session_ledger(libsql_vector_idx(embedding));
 
       -- ─── FTS5 Virtual Table for full-text search on ledger ───
       -- content= means this is a "contentless" external-content table
@@ -292,8 +298,15 @@ export class SqliteStorage implements StorageBackend {
     const args: InValue[] = [];
 
     for (const [key, value] of Object.entries(data)) {
-      sets.push(`${key} = ?`);
-      args.push((typeof value === "object" && value !== null ? JSON.stringify(value) : value) as InValue);
+      if (key === "embedding") {
+        // Use libSQL's native vector() function for F32_BLOB columns.
+        // The value is a JSON-stringified number[] from the handler.
+        sets.push(`${key} = vector(?)`);
+        args.push((typeof value === "string" ? value : JSON.stringify(value)) as InValue);
+      } else {
+        sets.push(`${key} = ?`);
+        args.push((typeof value === "object" && value !== null ? JSON.stringify(value) : value) as InValue);
+      }
     }
 
     if (sets.length === 0) return;
@@ -657,22 +670,71 @@ export class SqliteStorage implements StorageBackend {
   }
 
   async searchMemory(params: {
-    queryEmbedding: string;
+    queryEmbedding: string; // JSON-stringified number[]
     project?: string | null;
     limit: number;
     similarityThreshold: number;
     userId: string;
   }): Promise<SemanticSearchResult[]> {
-    // Step 2: FTS5 keyword fallback — true vector search comes in Step 3.
-    // We extract words from the embedding query context (the handler already
-    // generated an embedding, but we can't use it without sqlite-vec).
-    // Instead, we search using FTS5 on recent non-archived entries.
-    console.error("[SqliteStorage] searchMemory: using FTS5 fallback (vector search coming in Step 3)");
+    // ─── VECTOR SEARCH (cosine similarity via libSQL) ───
+    // vector_distance_cos() returns distance (0 to 2).
+    // Similarity = 1 - distance. Higher is better.
+    try {
+      let sql: string;
+      const args: InValue[] = [];
 
-    // Without the original query text, we can't do FTS5.
-    // Return empty — the handler already warns about this gracefully.
-    // Step 3 will add true cosine similarity search using F32_BLOB.
-    return [];
+      if (params.project) {
+        sql = `
+          SELECT l.id, l.project, l.summary, l.decisions, l.files_changed,
+                 l.session_date, l.created_at,
+                 (1 - vector_distance_cos(l.embedding, vector(?))) AS similarity
+          FROM session_ledger l
+          WHERE l.embedding IS NOT NULL
+            AND l.user_id = ?
+            AND l.project = ?
+            AND l.archived_at IS NULL
+          ORDER BY similarity DESC
+          LIMIT ?
+        `;
+        args.push(params.queryEmbedding, params.userId, params.project, params.limit);
+      } else {
+        sql = `
+          SELECT l.id, l.project, l.summary, l.decisions, l.files_changed,
+                 l.session_date, l.created_at,
+                 (1 - vector_distance_cos(l.embedding, vector(?))) AS similarity
+          FROM session_ledger l
+          WHERE l.embedding IS NOT NULL
+            AND l.user_id = ?
+            AND l.archived_at IS NULL
+          ORDER BY similarity DESC
+          LIMIT ?
+        `;
+        args.push(params.queryEmbedding, params.userId, params.limit);
+      }
+
+      const result = await this.db.execute({ sql, args });
+
+      // Filter by similarity threshold and format results
+      return result.rows
+        .filter(r => (r.similarity as number) >= params.similarityThreshold)
+        .map(r => ({
+          id: r.id as string,
+          project: r.project as string,
+          summary: r.summary as string,
+          similarity: r.similarity as number,
+          session_date: (r.session_date || r.created_at) as string,
+          decisions: this.parseJsonColumn(r.decisions) as string[],
+          files_changed: this.parseJsonColumn(r.files_changed) as string[],
+        }));
+    } catch (err) {
+      // Graceful degradation: if vector functions aren't supported,
+      // log the error and return empty (handler already has fallback messaging).
+      console.error(
+        `[SqliteStorage] Vector search failed (libSQL version may not support F32_BLOB): ${err}`
+      );
+      console.error("[SqliteStorage] Tip: Ensure you're using libSQL ≥ 0.4.0 for native vector support.");
+      return [];
+    }
   }
 
   // ─── Compaction ────────────────────────────────────────────
