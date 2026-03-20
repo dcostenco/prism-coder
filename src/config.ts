@@ -67,6 +67,18 @@ if (SESSION_MEMORY_ENABLED) {
   console.error("Info: Session memory disabled (set SUPABASE_URL + SUPABASE_KEY to enable)");
 }
 
+// ─── v2.0: Storage Backend Selection ─────────────────────────
+// REVIEWER NOTE: Step 1 of v2.0 introduces a storage abstraction.
+// Currently only "supabase" is implemented. "local" (SQLite) is
+// coming in Step 2. Default is "supabase" for backward compat.
+//
+// Set PRISM_STORAGE=local to use SQLite (once implemented).
+// Set PRISM_STORAGE=supabase to use Supabase REST API (default).
+
+export const PRISM_STORAGE: "local" | "supabase" =
+  (process.env.PRISM_STORAGE as "local" | "supabase") || "supabase";
+console.error(`Storage backend: ${PRISM_STORAGE}`);
+
 // ─── Optional: Multi-Tenant User ID ──────────────────────────
 // REVIEWER NOTE: When multiple users share the same Supabase instance,
 // PRISM_USER_ID isolates their data. Each user sets a unique ID in their

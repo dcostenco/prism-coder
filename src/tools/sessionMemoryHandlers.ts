@@ -1,28 +1,22 @@
 /**
- * Session Memory Handlers (v1.5.0)
+ * Session Memory Handlers (v2.0 — StorageBackend Refactor)
  *
  * ═══════════════════════════════════════════════════════════════════
- * REVIEWER NOTE: v0.4.0 CHANGES IN THIS FILE
+ * v2.0 CHANGES IN THIS FILE (Step 1: Pure Refactor)
  *
- * 1. sessionSaveLedgerHandler:
- *    - NOW generates embeddings via fire-and-forget for semantic search
- *    - Embedding failure is non-fatal (logged, not thrown)
+ * BEFORE: All handlers called supabasePost/Get/Rpc/Patch/Delete directly.
+ * AFTER:  All handlers call StorageBackend methods via `getStorage()`.
  *
- * 2. sessionSaveHandoffHandler:
- *    - NOW uses save_handoff_with_version RPC for OCC
- *    - Handles version conflicts gracefully with recovery instructions
- *    - Includes LLM's attempted data in conflict errors (so it's not lost)
- *    - Triggers resource subscription notifications on success
+ * This refactor changes ZERO behavior. Every method call maps 1:1 to
+ * the same Supabase API call (see src/storage/supabase.ts for mapping).
  *
- * 3. sessionLoadContextHandler:
- *    - NOW returns version field from get_session_context (for OCC)
- *
- * 4. NEW: sessionSearchMemoryHandler
- *    - Semantic search via pgvector embeddings
+ * WHY: This enables Step 2 (SQLite local mode) — once SqliteStorage
+ * implements the same interface, the handlers work with both backends
+ * without any code changes.
  * ═══════════════════════════════════════════════════════════════════
  */
 
-import { supabasePost, supabaseRpc, supabaseDelete, supabaseGet, supabasePatch } from "../utils/supabaseApi.js";
+import { getStorage } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { generateEmbedding } from "../utils/embeddingApi.js";
 import { GOOGLE_API_KEY, PRISM_USER_ID } from "../config.js";
@@ -37,10 +31,6 @@ import {
 } from "./sessionMemoryDefinitions.js";
 
 // ─── v0.4.0: Import server type for resource notifications ───
-// REVIEWER NOTE: The handoff handler needs to call
-// notifyResourceUpdate() after a successful save. The server
-// instance is passed as a second argument from the call_tool
-// handler in server.ts.
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { notifyResourceUpdate } from "../server.js";
 
@@ -52,18 +42,7 @@ import { notifyResourceUpdate } from "../server.js";
  * Think of the ledger as a "commit log" for agent work — once written, entries
  * are never modified. This creates a permanent audit trail of all work done.
  *
- * v0.4.0 ADDITION: After saving, generates an embedding vector for the entry
- * via fire-and-forget. The embedding is used by session_search_memory for
- * semantic search. Embedding failure is non-fatal — the entry is saved
- * regardless of whether the embedding succeeds.
- *
- * WHY FIRE-AND-FORGET: Embedding generation takes 200-500ms. We don't want
- * to block the tool response on this. Instead, we:
- *   1. Save the entry immediately (fast, no embedding)
- *   2. Return success to the LLM
- *   3. Generate the embedding in the background
- *   4. PATCH the entry with the embedding when it's ready
- *   5. If it fails, log the error and move on
+ * After saving, generates an embedding vector for the entry via fire-and-forget.
  */
 export async function sessionSaveLedgerHandler(args: unknown) {
   if (!isSessionSaveLedgerArgs(args)) {
@@ -71,6 +50,7 @@ export async function sessionSaveLedgerHandler(args: unknown) {
   }
 
   const { project, conversation_id, summary, todos, files_changed, decisions } = args;
+  const storage = await getStorage();
 
   console.error(`[session_save_ledger] Saving ledger entry for project="${project}"`);
 
@@ -79,9 +59,8 @@ export async function sessionSaveLedgerHandler(args: unknown) {
   const keywords = toKeywordArray(combinedText);
   console.error(`[session_save_ledger] Extracted ${keywords.length} keywords: ${keywords.slice(0, 5).join(", ")}...`);
 
-  // Build the record to insert into the session_ledger table
-  // v1.5.0: Include user_id for multi-tenant isolation
-  const record = {
+  // Save via storage backend
+  const result = await storage.saveLedger({
     project,
     conversation_id,
     summary,
@@ -90,50 +69,28 @@ export async function sessionSaveLedgerHandler(args: unknown) {
     files_changed: files_changed || [],
     decisions: decisions || [],
     keywords,
-  };
+  });
 
-  const result = await supabasePost("session_ledger", record);
-
-  // ─── v0.4.0: Fire-and-forget embedding generation ───
-  // REVIEWER NOTE: We deliberately don't await this promise.
-  // The main save is already complete. The embedding is a bonus
-  // for semantic search — if it fails, we log and move on.
-  //
-  // TRUNCATION: The embedding API has a token limit. We combine
-  // summary + decisions into a single text and rely on
-  // generateEmbedding() to truncate if needed (see embeddingApi.ts).
+  // ─── Fire-and-forget embedding generation ───
   if (GOOGLE_API_KEY && result) {
     const embeddingText = [summary, ...(decisions || [])].join("\n");
     const savedEntry = Array.isArray(result) ? result[0] : result;
-    const entryId = savedEntry?.id;
+    const entryId = (savedEntry as any)?.id;
 
     if (entryId) {
-      // Fire-and-forget: generate embedding and update the row
       generateEmbedding(embeddingText)
         .then(async (embedding) => {
-          // PATCH the ledger entry with the generated embedding
-          await supabasePatch(
-            "session_ledger",
-            { embedding: JSON.stringify(embedding) },
-            { id: `eq.${entryId}` }
-          );
+          await storage.patchLedger(entryId, {
+            embedding: JSON.stringify(embedding),
+          });
           console.error(`[session_save_ledger] Embedding saved for entry ${entryId}`);
         })
         .catch((err) => {
-          // REVIEWER NOTE: Non-fatal. The entry is already saved.
-          // This can fail if:
-          //   1. Gemini API is temporarily unavailable
-          //   2. The text is somehow malformed
-          //   3. pgvector extension isn't enabled yet
-          // In all cases, the entry works fine without an embedding —
-          // it just won't appear in semantic search results until
-          // the embedding is backfilled.
           console.error(`[session_save_ledger] Embedding generation failed (non-fatal): ${err.message}`);
         });
     }
   }
 
-  // Return a human-readable confirmation with key stats
   return {
     content: [{
       type: "text",
@@ -153,31 +110,6 @@ export async function sessionSaveLedgerHandler(args: unknown) {
 
 /**
  * Upserts the latest project handoff state with OCC.
- *
- * ═══════════════════════════════════════════════════════════════════
- * REVIEWER NOTE: v0.4.0 MAJOR CHANGES
- *
- * BEFORE (v0.3.0):
- *   Used PostgREST upsert with "merge-duplicates" →
- *   Last write wins → data loss if two clients save simultaneously.
- *
- * AFTER (v0.4.0):
- *   Uses save_handoff_with_version RPC →
- *   Optimistic concurrency control → rejects stale writes →
- *   Conflict error includes the LLM's attempted data so it's not lost.
- *
- * RESOURCE NOTIFICATIONS:
- *   On successful save, calls notifyResourceUpdate() to push a
- *   silent refresh to any Claude Desktop instance that has this
- *   project's memory resource attached via paperclip.
- *
- * VERSION CONFLICT HANDLING:
- *   When a conflict is detected, the error message includes:
- *   1. What happened (version mismatch explanation)
- *   2. The LLM's attempted data (so regeneration isn't needed)
- *   3. Instructions to reload and merge
- *   This prevents the LLM from losing its generated summary/TODOs.
- * ═══════════════════════════════════════════════════════════════════
  */
 export async function sessionSaveHandoffHandler(args: unknown, server?: Server) {
   if (!isSessionSaveHandoffArgs(args)) {
@@ -193,6 +125,8 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     key_context,
   } = args;
 
+  const storage = await getStorage();
+
   console.error(
     `[session_save_handoff] Saving handoff for project="${project}" ` +
     `(expected_version=${expected_version ?? "none"})`
@@ -205,32 +139,23 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     console.error(`[session_save_handoff] Extracted ${keywords.length} keywords: ${keywords.slice(0, 5).join(", ")}...`);
   }
 
-  // ─── v0.4.0: Call save_handoff_with_version RPC instead of raw upsert ───
-  // REVIEWER NOTE: The RPC handles three cases:
-  //   1. No existing handoff → INSERT (version = 1)
-  //   2. Version match (or no check) → UPDATE (version++)
-  //   3. Version mismatch → CONFLICT (return error with recovery data)
-  // v1.5.0: Pass p_user_id for multi-tenant isolation
-  const result = await supabaseRpc("save_handoff_with_version", {
-    p_project: project,
-    p_expected_version: expected_version ?? null,
-    p_last_summary: last_summary ?? null,
-    p_pending_todo: open_todos ?? null,
-    p_active_decisions: null,
-    p_keywords: keywords ?? null,
-    p_key_context: key_context ?? null,
-    p_active_branch: active_branch ?? null,
-    p_user_id: PRISM_USER_ID,
-  });
-
-  const data = Array.isArray(result) ? result[0] : result;
+  // Save via storage backend (OCC-aware)
+  const data = await storage.saveHandoff(
+    {
+      project,
+      user_id: PRISM_USER_ID,
+      last_summary: last_summary ?? null,
+      pending_todo: open_todos ?? null,
+      active_decisions: null,
+      keywords: keywords ?? null,
+      key_context: key_context ?? null,
+      active_branch: active_branch ?? null,
+    },
+    expected_version ?? null
+  );
 
   // ─── Handle version conflict ───
-  // REVIEWER NOTE: When a conflict is detected, we include the LLM's
-  // attempted save data in the error. This is critical because the LLM
-  // may have spent 30 seconds generating this data — if we just say
-  // "conflict, try again", those thoughts are lost forever.
-  if (data?.status === "conflict") {
+  if (data.status === "conflict") {
     console.error(
       `[session_save_handoff] VERSION CONFLICT for "${project}": ` +
       `expected=${expected_version}, current=${data.current_version}`
@@ -264,18 +189,13 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   }
 
   // ─── Success: handoff created or updated ───
-  const newVersion = data?.version;
+  const newVersion = data.version;
 
-  // ─── v0.4.0: Trigger resource subscription notification ───
-  // REVIEWER NOTE: If any Claude Desktop instance has
-  // memory://project/handoff attached via paperclip, this
-  // silently refreshes their attached context so it's never stale.
-  if (server && (data?.status === "created" || data?.status === "updated")) {
+  // ─── Trigger resource subscription notification ───
+  if (server && (data.status === "created" || data.status === "updated")) {
     try {
       notifyResourceUpdate(project, server);
     } catch (err) {
-      // Non-fatal: subscription notification failure shouldn't
-      // prevent a successful save from being reported
       console.error(`[session_save_handoff] Resource notification failed (non-fatal): ${err}`);
     }
   }
@@ -283,7 +203,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   return {
     content: [{
       type: "text",
-      text: `✅ Handoff ${data?.status || "saved"} for project "${project}" ` +
+      text: `✅ Handoff ${data.status || "saved"} for project "${project}" ` +
         `(version: ${newVersion})\n` +
         (last_summary ? `Last summary: ${last_summary}\n` : "") +
         (open_todos?.length ? `Open TODOs: ${open_todos.length} items\n` : "") +
@@ -299,20 +219,14 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
 
 /**
  * Loads session context for a project at the requested depth level.
- *
- * v0.4.0 CHANGE: The response now includes a `version` field from
- * session_handoffs. The LLM should note this version and pass it
- * back as `expected_version` when calling session_save_handoff.
  */
 export async function sessionLoadContextHandler(args: unknown) {
   if (!isSessionLoadContextArgs(args)) {
     throw new Error("Invalid arguments for session_load_context");
   }
 
-  // Default to "standard" if no level specified — best balance of context vs token cost
   const { project, level = "standard" } = args;
 
-  // Validate the level before making the API call
   const validLevels = ["quick", "standard", "deep"];
   if (!validLevels.includes(level)) {
     return {
@@ -326,14 +240,8 @@ export async function sessionLoadContextHandler(args: unknown) {
 
   console.error(`[session_load_context] Loading ${level} context for project="${project}"`);
 
-  // v1.5.0: Pass p_user_id for multi-tenant isolation
-  const result = await supabaseRpc("get_session_context", {
-    p_project: project,
-    p_level: level,
-    p_user_id: PRISM_USER_ID,
-  });
-
-  const data = Array.isArray(result) ? result[0] : result;
+  const storage = await getStorage();
+  const data = await storage.loadContext(project, level, PRISM_USER_ID);
 
   if (!data) {
     return {
@@ -346,10 +254,7 @@ export async function sessionLoadContextHandler(args: unknown) {
     };
   }
 
-  // REVIEWER NOTE: v0.4.0 adds explicit version reminder in the response.
-  // The version is already in the JSON data, but we call it out explicitly
-  // to make sure the LLM notices and uses it.
-  const version = data?.version;
+  const version = (data as any)?.version;
   const versionNote = version
     ? `\n\n🔑 Session version: ${version}. Pass expected_version: ${version} when saving handoff.`
     : "";
@@ -367,10 +272,6 @@ export async function sessionLoadContextHandler(args: unknown) {
 
 /**
  * Searches accumulated knowledge across all past sessions.
- *
- * This is the "brain query" tool — it searches keywords that were
- * automatically extracted from every saved ledger and handoff entry.
- * Results are ranked by relevance (keyword overlap + full-text match).
  */
 export async function knowledgeSearchHandler(args: unknown) {
   if (!isKnowledgeSearchArgs(args)) {
@@ -381,22 +282,19 @@ export async function knowledgeSearchHandler(args: unknown) {
 
   console.error(`[knowledge_search] Searching: project=${project || "all"}, query="${query || ""}", category=${category || "any"}, limit=${limit}`);
 
-  // Extract keywords from the query text to use in array-overlap search
   const searchKeywords = query ? toKeywordArray(query) : [];
+  const storage = await getStorage();
 
-  // v1.5.0: Pass p_user_id for multi-tenant isolation
-  const result = await supabaseRpc("search_knowledge", {
-    p_project: project || null,
-    p_keywords: searchKeywords,
-    p_category: category || null,
-    p_query_text: query || null,
-    p_limit: Math.min(limit, 50),
-    p_user_id: PRISM_USER_ID,
+  const data = await storage.searchKnowledge({
+    project: project || null,
+    keywords: searchKeywords,
+    category: category || null,
+    queryText: query || null,
+    limit: Math.min(limit, 50),
+    userId: PRISM_USER_ID,
   });
 
-  const data = Array.isArray(result) ? result[0] : result;
-
-  if (!data || !data.results || data.count === 0) {
+  if (!data) {
     return {
       content: [{
         type: "text",
@@ -424,7 +322,6 @@ export async function knowledgeSearchHandler(args: unknown) {
 
 /**
  * Selectively forget (delete) accumulated knowledge entries.
- * Unchanged from v0.3.0 — see in-line comments for details.
  */
 export async function knowledgeForgetHandler(args: unknown) {
   if (!isKnowledgeForgetArgs(args)) {
@@ -456,8 +353,9 @@ export async function knowledgeForgetHandler(args: unknown) {
     `project=${project || "ALL"}, category=${category || "any"}, ` +
     `older_than=${older_than_days || "any"}d, clear_handoff=${clear_handoff}`);
 
+  const storage = await getStorage();
+
   const ledgerParams: Record<string, string> = {};
-  // v1.5.0: Always scope to user_id
   ledgerParams.user_id = `eq.${PRISM_USER_ID}`;
   if (project) {
     ledgerParams.project = `eq.${project}`;
@@ -476,14 +374,14 @@ export async function knowledgeForgetHandler(args: unknown) {
 
   if (dry_run) {
     const selectParams = { ...ledgerParams, select: "id" };
-    const entries = await supabaseGet("session_ledger", selectParams);
-    ledgerCount = Array.isArray(entries) ? entries.length : 0;
+    const entries = await storage.getLedgerEntries(selectParams);
+    ledgerCount = entries.length;
   } else {
-    const result = await supabaseDelete("session_ledger", ledgerParams);
-    ledgerCount = Array.isArray(result) ? result.length : 0;
+    const result = await storage.deleteLedger(ledgerParams);
+    ledgerCount = result.length;
 
     if (clear_handoff && project) {
-      await supabaseDelete("session_handoffs", { project: `eq.${project}`, user_id: `eq.${PRISM_USER_ID}` });
+      await storage.deleteHandoff(project, PRISM_USER_ID);
       handoffCleared = true;
     }
   }
@@ -507,31 +405,10 @@ export async function knowledgeForgetHandler(args: unknown) {
   };
 }
 
-// ─── v0.4.0: Semantic Search Handler (Enhancement #4) ─────────
+// ─── Semantic Search Handler ──────────────────────────────────
 
 /**
- * Searches session history semantically using pgvector embeddings.
- *
- * ═══════════════════════════════════════════════════════════════════
- * REVIEWER NOTE: This complements the keyword-based knowledge_search.
- *
- * HOW IT WORKS:
- *   1. Takes the user's natural language query
- *   2. Generates a 768-dim embedding via Gemini's text-embedding-004
- *   3. Calls semantic_search_ledger RPC (Supabase/pgvector)
- *   4. Returns results ranked by cosine similarity
- *
- * WHEN TO USE (vs knowledge_search):
- *   - knowledge_search: best when you know the exact keywords
- *     ("supabase migration", "authentication bug")
- *   - session_search_memory: best when the phrasing differs
- *     ("that thing we fixed with the login last week")
- *
- * PREREQUISITES:
- *   - pgvector extension enabled in Supabase
- *   - GOOGLE_API_KEY configured (for embedding generation)
- *   - Ledger entries with embeddings (generated at save time)
- * ═══════════════════════════════════════════════════════════════════
+ * Searches session history semantically using embeddings.
  */
 export async function sessionSearchMemoryHandler(args: unknown) {
   if (!isSessionSearchMemoryArgs(args)) {
@@ -577,18 +454,16 @@ export async function sessionSearchMemoryHandler(args: unknown) {
     };
   }
 
-  // Step 2: Call pgvector semantic search RPC
+  // Step 2: Search via storage backend
   try {
-    // v1.5.0: Pass p_user_id for multi-tenant isolation
-    const result = await supabaseRpc("semantic_search_ledger", {
-      p_query_embedding: JSON.stringify(queryEmbedding),
-      p_project: project || null,
-      p_limit: Math.min(limit, 20),
-      p_similarity_threshold: similarity_threshold,
-      p_user_id: PRISM_USER_ID,
+    const storage = await getStorage();
+    const results = await storage.searchMemory({
+      queryEmbedding: JSON.stringify(queryEmbedding),
+      project: project || null,
+      limit: Math.min(limit, 20),
+      similarityThreshold: similarity_threshold,
+      userId: PRISM_USER_ID,
     });
-
-    const results = Array.isArray(result) ? result : [];
 
     if (results.length === 0) {
       return {
@@ -626,8 +501,6 @@ export async function sessionSearchMemoryHandler(args: unknown) {
       isError: false,
     };
   } catch (err) {
-    // REVIEWER NOTE: If pgvector isn't enabled, the RPC will fail.
-    // Provide a clear error message guiding the user to enable it.
     const errorMsg = err instanceof Error ? err.message : String(err);
     if (errorMsg.includes("vector") || errorMsg.includes("does not exist")) {
       return {
@@ -649,17 +522,6 @@ export async function sessionSearchMemoryHandler(args: unknown) {
 
 /**
  * Repair ledger entries with missing embeddings.
- *
- * REVIEWER NOTE (v1.5.0 — Edge Case B fix):
- * If the Gemini API was temporarily down when a ledger entry was saved,
- * the fire-and-forget catch() fires and the row is saved without an
- * embedding. This handler scans for those orphaned rows and batch-
- * generates the missing embeddings.
- *
- * Design choices:
- *   - Default limit of 20 to keep API costs predictable
- *   - Errors on individual entries are caught and counted, not thrown
- *   - Dry run mode for safe preview
  */
 export async function backfillEmbeddingsHandler(args: unknown) {
   if (!isBackfillEmbeddingsArgs(args)) {
@@ -684,6 +546,8 @@ export async function backfillEmbeddingsHandler(args: unknown) {
     `project=${project || "all"}, limit=${safeLimit}`
   );
 
+  const storage = await getStorage();
+
   // Find entries missing embeddings
   const params: Record<string, string> = {
     "embedding": "is.null",
@@ -697,8 +561,7 @@ export async function backfillEmbeddingsHandler(args: unknown) {
     params.project = `eq.${project}`;
   }
 
-  const missing = await supabaseGet("session_ledger", params);
-  const entries = Array.isArray(missing) ? missing : [];
+  const entries = await storage.getLedgerEntries(params);
 
   if (entries.length === 0) {
     return {
@@ -730,31 +593,29 @@ export async function backfillEmbeddingsHandler(args: unknown) {
 
   for (const entry of entries) {
     try {
+      const e = entry as any;
       const textToEmbed = [
-        entry.summary || "",
-        ...(entry.decisions || []),
+        e.summary || "",
+        ...(e.decisions || []),
       ].filter(Boolean).join(" | ");
 
       if (!textToEmbed.trim()) {
-        console.error(`[backfill] Skipping entry ${entry.id}: no text content`);
+        console.error(`[backfill] Skipping entry ${e.id}: no text content`);
         failed++;
         continue;
       }
 
       const embedding = await generateEmbedding(textToEmbed);
 
-      // Patch the row with the generated embedding
-      await supabasePatch(
-        "session_ledger",
-        { embedding: JSON.stringify(embedding) },
-        { id: `eq.${entry.id}` }
-      );
+      await storage.patchLedger(e.id, {
+        embedding: JSON.stringify(embedding),
+      });
 
       repaired++;
-      console.error(`[backfill] ✅ Repaired ${entry.id} (${entry.project})`);
+      console.error(`[backfill] ✅ Repaired ${e.id} (${e.project})`);
     } catch (err) {
       failed++;
-      console.error(`[backfill] ❌ Failed ${entry.id}: ${err instanceof Error ? err.message : err}`);
+      console.error(`[backfill] ❌ Failed ${(entry as any).id}: ${err instanceof Error ? err.message : err}`);
     }
   }
 
