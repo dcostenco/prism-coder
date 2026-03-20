@@ -1,0 +1,269 @@
+{
+  "serverInfo": {
+    "name": "prism-mcp",
+    "version": "2.1.0"
+  },
+  "tools": [
+    {
+      "name": "brave_web_search",
+      "description": "Performs a web search using the Brave Search API, ideal for general queries, news, articles, and online content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query (max 400 chars, 50 words)" },
+          "count": { "type": "number", "description": "Number of results (1-20, default 10)", "default": 10 },
+          "offset": { "type": "number", "description": "Pagination offset (max 9, default 0)", "default": 0 }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "brave_web_search_code_mode",
+      "description": "Performs a web search then runs custom JavaScript against the raw API response in a secure QuickJS sandbox. Drastically reduces context window usage.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query (max 400 chars, 50 words)" },
+          "count": { "type": "number", "description": "Number of results (1-20, default 10)", "default": 10 },
+          "offset": { "type": "number", "description": "Pagination offset (max 9, default 0)", "default": 0 },
+          "code": { "type": "string", "description": "JavaScript code to execute against the 'DATA' variable." },
+          "language": { "type": "string", "description": "Language of the code. Only 'javascript' is supported.", "default": "javascript" }
+        },
+        "required": ["query", "code"]
+      }
+    },
+    {
+      "name": "brave_local_search",
+      "description": "Searches for local businesses and places using Brave's Local Search API. Returns names, addresses, ratings, phone numbers, and opening hours.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Local search query (e.g. 'pizza near Central Park')" },
+          "count": { "type": "number", "description": "Number of results (1-20, default 5)", "default": 5 }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "brave_local_search_code_mode",
+      "description": "Performs a local search then runs custom JavaScript against the raw API response in a secure QuickJS sandbox.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Local search query" },
+          "count": { "type": "number", "description": "Number of results (1-20, default 5)", "default": 5 },
+          "code": { "type": "string", "description": "JavaScript code to execute against the 'DATA' variable." },
+          "language": { "type": "string", "description": "Language of the code. Only 'javascript' is supported.", "default": "javascript" }
+        },
+        "required": ["query", "code"]
+      }
+    },
+    {
+      "name": "code_mode_transform",
+      "description": "Universal code-mode transformer. Takes raw text or JSON from any MCP tool and runs JavaScript in a QuickJS sandbox. Supports pre-built templates: github_issues, github_prs, jira_tickets, dom_links, dom_headings, api_endpoints, slack_messages, csv_summary.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "data": { "type": "string", "description": "The raw text or JSON output to process." },
+          "code": { "type": "string", "description": "JavaScript code to execute. Optional if using a template." },
+          "template": { "type": "string", "description": "Pre-built extraction template name." },
+          "language": { "type": "string", "description": "Language of the code. Only 'javascript' is supported.", "default": "javascript" },
+          "source_tool": { "type": "string", "description": "Optional. Name of the MCP tool that produced the data." }
+        },
+        "required": ["data"]
+      }
+    },
+    {
+      "name": "brave_answers",
+      "description": "Returns direct AI answers grounded in Brave Search using Brave AI Grounding. Uses an OpenAI-compatible chat completions endpoint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Question or prompt to answer" },
+          "model": { "type": "string", "description": "Model name for Brave AI Grounding (default: brave)", "default": "brave" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "gemini_research_paper_analysis",
+      "description": "In-depth analysis of research papers using Google's Gemini-2.0-flash model. Supports summary, critique, literature review, key findings, and comprehensive analysis.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "paperContent": { "type": "string", "description": "The full text of the research paper to analyze" },
+          "analysisType": { "type": "string", "description": "Type of analysis", "enum": ["summary", "critique", "literature review", "key findings", "comprehensive"], "default": "comprehensive" },
+          "additionalContext": { "type": "string", "description": "Optional additional context or questions to guide the analysis" }
+        },
+        "required": ["paperContent"]
+      }
+    },
+    {
+      "name": "session_save_ledger",
+      "description": "Save an immutable session log entry to the session ledger. Append-only audit trail of all agent work sessions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project identifier" },
+          "conversation_id": { "type": "string", "description": "Unique conversation/session identifier" },
+          "summary": { "type": "string", "description": "Brief summary of what was accomplished" },
+          "todos": { "type": "array", "items": { "type": "string" }, "description": "Open TODO items" },
+          "files_changed": { "type": "array", "items": { "type": "string" }, "description": "Files created or modified" },
+          "decisions": { "type": "array", "items": { "type": "string" }, "description": "Key decisions made" }
+        },
+        "required": ["project", "conversation_id", "summary"]
+      }
+    },
+    {
+      "name": "session_save_handoff",
+      "description": "Upsert the latest project handoff state for the next session. Supports optimistic concurrency control via expected_version.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project identifier" },
+          "expected_version": { "type": "integer", "description": "Version for optimistic concurrency control" },
+          "open_todos": { "type": "array", "items": { "type": "string" }, "description": "Open TODO items for the next session" },
+          "active_branch": { "type": "string", "description": "Git branch for the next session" },
+          "last_summary": { "type": "string", "description": "Summary of the most recent session" },
+          "key_context": { "type": "string", "description": "Critical context the next session needs" }
+        },
+        "required": ["project"]
+      }
+    },
+    {
+      "name": "session_load_context",
+      "description": "Load session context for a project using progressive context loading. Levels: quick (~50 tokens), standard (~200 tokens), deep (~1000+ tokens).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project identifier" },
+          "level": { "type": "string", "enum": ["quick", "standard", "deep"], "description": "Context depth level" }
+        },
+        "required": ["project"]
+      }
+    },
+    {
+      "name": "knowledge_search",
+      "description": "Search accumulated knowledge across all sessions by keywords, category, or free text. Categories: debugging, architecture, deployment, testing, configuration, api-integration, data-migration, security, performance, documentation, ai-ml, ui-frontend, resume.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Optional project filter" },
+          "query": { "type": "string", "description": "Free-text search query" },
+          "category": { "type": "string", "description": "Category filter" },
+          "limit": { "type": "integer", "description": "Maximum results (default: 10, max: 50)", "default": 10 }
+        }
+      }
+    },
+    {
+      "name": "knowledge_forget",
+      "description": "Selectively forget (delete) accumulated knowledge entries. Supports forget by project, category, age, or full reset. Supports dry_run preview.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project to forget entries for" },
+          "category": { "type": "string", "description": "Category filter" },
+          "older_than_days": { "type": "integer", "description": "Forget entries older than N days" },
+          "clear_handoff": { "type": "boolean", "description": "Also clear handoff state" },
+          "confirm_all": { "type": "boolean", "description": "Required for full wipe" },
+          "dry_run": { "type": "boolean", "description": "Preview mode" }
+        }
+      }
+    },
+    {
+      "name": "session_compact_ledger",
+      "description": "Auto-compact old session ledger entries by rolling them up into AI-generated summaries using Gemini. Prevents indefinite growth.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Optional specific project to compact" },
+          "threshold": { "type": "integer", "description": "Minimum entries before compaction (default: 50)", "default": 50 },
+          "keep_recent": { "type": "integer", "description": "Recent entries to keep intact (default: 10)", "default": 10 },
+          "dry_run": { "type": "boolean", "description": "Preview mode" }
+        }
+      }
+    },
+    {
+      "name": "session_search_memory",
+      "description": "Search session history semantically using vector embeddings. Finds sessions by meaning, not just keywords. Requires pgvector in Supabase.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Natural language search query" },
+          "project": { "type": "string", "description": "Optional project filter" },
+          "limit": { "type": "integer", "description": "Maximum results (default: 5, max: 20)", "default": 5 },
+          "similarity_threshold": { "type": "number", "description": "Minimum similarity 0-1 (default: 0.7)", "default": 0.7 }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "session_backfill_embeddings",
+      "description": "Repair ledger entries missing vector embeddings due to temporary API outages. Batch-generates missing embeddings via Gemini.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Optional project filter" },
+          "limit": { "type": "integer", "description": "Max entries to repair (default: 20, max: 50)", "default": 20 },
+          "dry_run": { "type": "boolean", "description": "Preview mode" }
+        }
+      }
+    },
+    {
+      "name": "memory_history",
+      "description": "View the timeline of past memory states for a project. Use before memory_checkout to find the correct version to revert to.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project identifier" },
+          "limit": { "type": "number", "description": "Max history entries (default: 10, max: 50)", "default": 10 }
+        },
+        "required": ["project"]
+      }
+    },
+    {
+      "name": "memory_checkout",
+      "description": "Time travel — restores project memory to a specific past version. Non-destructive; the version number moves forward. Call memory_history first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project identifier" },
+          "target_version": { "type": "number", "description": "Version to restore from history" }
+        },
+        "required": ["project", "target_version"]
+      }
+    },
+    {
+      "name": "session_save_image",
+      "description": "Save a local image file into the project's permanent visual memory. Supports png, jpg, jpeg, webp, gif, svg.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project identifier" },
+          "file_path": { "type": "string", "description": "Path to the image file" },
+          "description": { "type": "string", "description": "What the image shows (for indexing)" }
+        },
+        "required": ["project", "file_path", "description"]
+      }
+    },
+    {
+      "name": "session_view_image",
+      "description": "Retrieve an image from visual memory by ID. Returns Base64 inline content for LLM analysis.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project identifier" },
+          "image_id": { "type": "string", "description": "Short image ID from visual memory index" }
+        },
+        "required": ["project", "image_id"]
+      }
+    }
+  ],
+  "prompts": [
+    {
+      "name": "resume_session",
+      "description": "Load previous session context for a project. Automatically fetches handoff state and injects it before the LLM starts thinking."
+    }
+  ],
+  "resources": []
+}
