@@ -43,3 +43,4 @@ bcba/
 # Smithery build artifacts
 .smithery/
 repomix-output.xml
+supabase/.temp/
