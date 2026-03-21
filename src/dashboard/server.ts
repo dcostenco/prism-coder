@@ -79,6 +79,96 @@ export async function startDashboardServer(): Promise<void> {
         return res.end(JSON.stringify({ context, ledger, history }));
       }
 
+      // ─── API: Brain Health Check (v2.2.0) ───
+      if (url.pathname === "/api/health") {
+        try {
+          const { runHealthCheck } = await import("../utils/healthCheck.js");
+          const stats = await storage.getHealthStats(PRISM_USER_ID);
+          const report = runHealthCheck(stats);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify(report));
+        } catch (err) {
+          console.error("[Dashboard] Health check error:", err);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({
+            status: "unknown",
+            summary: "Health check unavailable",
+            issues: [],
+            counts: { errors: 0, warnings: 0, infos: 0 },
+            totals: { activeEntries: 0, handoffs: 0, rollups: 0 },
+            timestamp: new Date().toISOString(),
+          }));
+        }
+      }
+
+      // ─── API: Knowledge Graph Data (v2.3.0) ───
+      if (url.pathname === "/api/graph") {
+        // Fetch recent ledger entries to build the graph
+        // We look at the last 100 entries to keep the graph relevant but performant
+        const entries = await storage.getLedgerEntries({
+          limit: "100",
+          order: "created_at.desc",
+          select: "project,keywords",
+        });
+
+        // Deduplication sets for nodes and edges
+        const nodes: { id: string; label: string; group: string }[] = [];
+        const edges: { from: string; to: string }[] = [];
+        const nodeIds = new Set<string>();   // track unique node IDs
+        const edgeIds = new Set<string>();   // track unique edges
+
+        // Helper: add a node only if it doesn't already exist
+        const addNode = (id: string, group: string, label?: string) => {
+          if (!nodeIds.has(id)) {
+            nodes.push({ id, label: label || id, group });
+            nodeIds.add(id);
+          }
+        };
+
+        // Helper: add an edge only if it doesn't already exist
+        const addEdge = (from: string, to: string) => {
+          const id = `${from}-${to}`;  // deterministic edge ID
+          if (!edgeIds.has(id)) {
+            edges.push({ from, to });
+            edgeIds.add(id);
+          }
+        };
+
+        // Transform relational data into graph nodes & edges
+        (entries as any[]).forEach(row => {
+          if (!row.project) return;  // skip rows without project
+
+          // 1. Project node (hub — large purple dot)
+          addNode(row.project, "project");
+
+          // 2. Keyword nodes (spokes — small dots)
+          let keywords: string[] = [];
+
+          // Handle SQLite (JSON string) vs Supabase (native array)
+          if (Array.isArray(row.keywords)) {
+            keywords = row.keywords;
+          } else if (typeof row.keywords === "string") {
+            try { keywords = JSON.parse(row.keywords); } catch { /* skip malformed */ }
+          }
+
+          // Create nodes + edges for each keyword
+          keywords.forEach((kw: string) => {
+            if (kw.length < 3) return;  // skip noise like "a", "is"
+
+            // Handle categories (cat:debugging) vs raw keywords
+            const isCat = kw.startsWith("cat:");
+            const group = isCat ? "category" : "keyword";
+            const label = isCat ? kw.replace("cat:", "") : kw;
+
+            addNode(kw, group, label);  // keyword/category node
+            addEdge(row.project, kw);   // edge: project → keyword
+          });
+        });
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ nodes, edges }));
+      }
+
       // ─── 404 ───
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not found");

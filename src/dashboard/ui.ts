@@ -1,5 +1,5 @@
 /**
- * Mind Palace Dashboard — UI Renderer (v2.0 — Step 8)
+ * Mind Palace Dashboard — UI Renderer (v2.2.0)
  *
  * Pure CSS + Vanilla JS single-page dashboard.
  * No build step, no Tailwind, no framework — served as a template literal.
@@ -23,6 +23,8 @@ export function renderDashboardHTML(): string {
   <title>Prism MCP — Mind Palace</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Vis.js for Neural Graph (v2.3.0) -->
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -225,6 +227,50 @@ export function renderDashboardHTML(): string {
     /* ─── Fade in animation ─── */
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+
+    /* ─── Brain Health Indicator (v2.2.0) ─── */
+    .health-status {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.75rem 1rem; border-radius: var(--radius-sm);
+      background: rgba(15,23,42,0.6); margin-bottom: 1rem;
+    }
+    .health-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      flex-shrink: 0; position: relative;
+    }
+    .health-dot::after {
+      content: ''; position: absolute; inset: -3px;
+      border-radius: 50%; animation: healthPulse 2s ease-in-out infinite;
+    }
+    .health-dot.healthy { background: var(--accent-green); }
+    .health-dot.healthy::after { border: 2px solid rgba(16,185,129,0.3); }
+    .health-dot.degraded { background: var(--accent-amber); }
+    .health-dot.degraded::after { border: 2px solid rgba(245,158,11,0.3); }
+    .health-dot.unhealthy { background: var(--accent-rose); }
+    .health-dot.unhealthy::after { border: 2px solid rgba(244,63,94,0.3); }
+    .health-dot.unknown { background: var(--text-muted); }
+    .health-dot.unknown::after { border: 2px solid rgba(100,116,139,0.3); }
+    @keyframes healthPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .health-label { font-size: 0.8rem; font-weight: 500; }
+    .health-summary { font-size: 0.75rem; color: var(--text-muted); }
+    .health-issues { font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.5rem; }
+    .health-issues .issue-row {
+      padding: 0.3rem 0; display: flex; gap: 0.5rem; align-items: flex-start;
+    }
+
+    /* ─── Neural Graph (v2.3.0) ─── */
+    #network-container {
+      width: 100%; height: 300px;
+      border-radius: var(--radius);
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--border-glass);
+    }
+    .refresh-btn {
+      margin-left: auto; background: none; border: none;
+      color: var(--text-muted); cursor: pointer; font-size: 0.85rem;
+      transition: color 0.2s;
+    }
+    .refresh-btn:hover { color: var(--accent-purple); }
   </style>
 </head>
 <body>
@@ -234,7 +280,7 @@ export function renderDashboardHTML(): string {
       <div class="logo">
         <span class="logo-icon">🧠</span>
         Prism Mind Palace
-        <span class="version-badge">v2.0</span>
+        <span class="version-badge">v2.2.0</span>
       </div>
       <div class="selector">
         <select id="projectSelect">
@@ -272,6 +318,19 @@ export function renderDashboardHTML(): string {
           <div class="git-row"><span class="git-label">Key Context</span><span class="git-value" id="keyContext" style="font-family:var(--font-sans);max-width:200px;text-align:right">—</span></div>
         </div>
 
+        <!-- Brain Health (v2.2.0) -->
+        <div class="card" id="healthCard" style="display:none">
+          <div class="card-title"><span class="dot" style="background:var(--accent-green)"></span> Brain Health 🩺</div>
+          <div class="health-status">
+            <div class="health-dot unknown" id="healthDot"></div>
+            <div>
+              <div class="health-label" id="healthLabel">Scanning...</div>
+              <div class="health-summary" id="healthSummary"></div>
+            </div>
+          </div>
+          <div class="health-issues" id="healthIssues"></div>
+        </div>
+
         <!-- Morning Briefing -->
         <div class="card" id="briefingCard" style="display:none">
           <div class="card-title"><span class="dot" style="background:var(--accent-amber)"></span> Morning Briefing 🌅</div>
@@ -287,6 +346,17 @@ export function renderDashboardHTML(): string {
 
       <!-- Right Column -->
       <div class="grid" style="align-content: start;">
+
+        <!-- Neural Graph (v2.3.0) -->
+        <div class="card">
+          <div class="card-title">
+            <span class="dot" style="background:var(--accent-blue)"></span>
+            Neural Graph 🕸️
+            <button onclick="loadGraph()" class="refresh-btn">↻</button>
+          </div>
+          <div id="network-container">Loading nodes...</div>
+        </div>
+
         <!-- Time Travel -->
         <div class="card">
           <div class="card-title"><span class="dot" style="background:var(--accent-purple)"></span> Time Travel History 🕰️</div>
@@ -414,6 +484,49 @@ export function renderDashboardHTML(): string {
           ledgerEl.innerHTML = '<div style="color:var(--text-muted);font-size:0.85rem;padding:1rem;text-align:center">No ledger entries yet.</div>';
         }
 
+        // ─── Brain Health (v2.2.0) ───
+        try {
+          var healthRes = await fetch('/api/health');
+          var healthData = await healthRes.json();
+          var healthCard = document.getElementById('healthCard');
+          var healthDot = document.getElementById('healthDot');
+          var healthLabel = document.getElementById('healthLabel');
+          var healthSummary = document.getElementById('healthSummary');
+          var healthIssues = document.getElementById('healthIssues');
+
+          // Set the dot color based on status
+          healthDot.className = 'health-dot ' + (healthData.status || 'unknown');
+
+          // Map status to emoji + label
+          var statusMap = { healthy: '✅ Healthy', degraded: '⚠️ Degraded', unhealthy: '🔴 Unhealthy' };
+          healthLabel.textContent = statusMap[healthData.status] || '❓ Unknown';
+
+          // Stats summary line
+          var t = healthData.totals || {};
+          healthSummary.textContent = (t.activeEntries || 0) + ' entries · ' +
+            (t.handoffs || 0) + ' handoffs · ' +
+            (t.rollups || 0) + ' rollups';
+
+          // Issue rows
+          var issues = healthData.issues || [];
+          if (issues.length > 0) {
+            var sevIcons = { error: '🔴', warning: '🟡', info: '🔵' };
+            healthIssues.innerHTML = issues.map(function(i) {
+              return '<div class="issue-row">' +
+                '<span>' + (sevIcons[i.severity] || '❓') + '</span>' +
+                '<span>' + escapeHtml(i.message) + '</span>' +
+                '</div>';
+            }).join('');
+          } else {
+            healthIssues.innerHTML = '<div style="color:var(--accent-green);font-size:0.8rem">🎉 No issues found</div>';
+          }
+
+          healthCard.style.display = 'block';
+        } catch(he) {
+          // Health check not available — silently skip
+          console.warn('Health check unavailable:', he);
+        }
+
         document.getElementById('content').className = 'grid grid-main fade-in';
         document.getElementById('content').style.display = 'grid';
       } catch(e) {
@@ -439,6 +552,73 @@ export function renderDashboardHTML(): string {
 
     // Allow Enter key in select to trigger load
     document.getElementById('projectSelect').addEventListener('change', loadProject);
+
+    // ─── Neural Graph (v2.3.0) ───
+    // Renders a force-directed graph of projects ↔ keywords ↔ categories
+    async function loadGraph() {
+      var container = document.getElementById('network-container');
+      if (!container) return;
+
+      try {
+        var res = await fetch('/api/graph');
+        var data = await res.json();
+
+        // Empty state — no ledger entries yet
+        if (data.nodes.length === 0) {
+          container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.85rem">No knowledge associations found yet.</div>';
+          return;
+        }
+
+        // Vis.js dark-theme config matching the glassmorphism palette
+        var options = {
+          nodes: {
+            shape: 'dot',           // all nodes are circles
+            borderWidth: 0,         // no borders for clean look
+            font: { color: '#94a3b8', face: 'Inter', size: 12 }
+          },
+          edges: {
+            width: 1,               // thin edges for subtlety
+            color: { color: 'rgba(139,92,246,0.15)', highlight: '#8b5cf6' },
+            smooth: { type: 'continuous' }  // smooth curves
+          },
+          groups: {
+            project: {              // Hub nodes — large purple
+              color: { background: '#8b5cf6', border: '#7c3aed' },
+              size: 20,
+              font: { size: 14, color: '#f1f5f9', face: 'Inter' }
+            },
+            category: {             // Category nodes — cyan diamonds
+              color: { background: '#06b6d4', border: '#0891b2' },
+              size: 10,
+              shape: 'diamond'
+            },
+            keyword: {              // Keyword nodes — small dark dots
+              color: { background: '#1e293b', border: '#334155' },
+              size: 6,
+              font: { size: 10, color: '#64748b' }
+            }
+          },
+          physics: {
+            stabilization: false,   // animate on load for visual pop
+            barnesHut: {
+              gravitationalConstant: -3000,  // spread nodes apart
+              springConstant: 0.04,          // gentle spring force
+              springLength: 80               // default edge length
+            }
+          },
+          interaction: { hover: true }  // highlight on hover
+        };
+
+        // Create the network visualization
+        new vis.Network(container, data, options);
+      } catch (e) {
+        console.error('Graph error', e);
+        container.innerHTML = '<div style="padding:1rem;color:var(--accent-rose)">Graph failed to load</div>';
+      }
+    }
+
+    // Initialize the graph on page load
+    loadGraph();
   </script>
 </body>
 </html>`;

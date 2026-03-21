@@ -591,3 +591,43 @@ export function isSessionViewImageArgs(
   );
 }
 
+// ─── v2.2.0: Health Check (fsck) Tool Definition ─────────────
+
+/**
+ * MCP tool definition for the brain integrity checker.
+ * Inspired by Mnemory's health check + Unix fsck.
+ * Absorbs session_backfill_embeddings when auto_fix is true.
+ */
+export const SESSION_HEALTH_CHECK_TOOL: Tool = {
+  name: "session_health_check",
+  description:
+    "Run integrity checks on the agent's memory (like fsck for filesystems). " +
+    "Scans for missing embeddings, duplicate entries, orphaned handoffs, and stale rollups.\\n\\n" +
+    "Checks performed:\\n" +
+    "1. **Missing embeddings** — entries that can't be found via semantic search\\n" +
+    "2. **Duplicate entries** — near-identical summaries wasting context tokens\\n" +
+    "3. **Orphaned handoffs** — handoff state with no backing ledger entries\\n" +
+    "4. **Stale rollups** — compaction artifacts with no archived originals\\n\\n" +
+    "Use auto_fix=true to automatically repair missing embeddings and clean up orphans.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      auto_fix: {
+        type: "boolean",
+        description:
+          "If true, automatically repair issues (backfill embeddings, remove orphaned handoffs). Default: false.",
+      },
+    },
+  },
+};
+
+/**
+ * Type guard for session_health_check arguments.
+ * Only optional auto_fix boolean — no required fields.
+ */
+export function isSessionHealthCheckArgs(
+  args: unknown
+): args is { auto_fix?: boolean } {
+  return typeof args === "object" && args !== null;  // any object is valid
+}
+

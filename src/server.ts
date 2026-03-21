@@ -110,13 +110,14 @@ import {
   // ─── v0.4.0: New tool definitions (Enhancements #2 and #4) ───
   SESSION_COMPACT_LEDGER_TOOL,
   SESSION_SEARCH_MEMORY_TOOL,
-  SESSION_BACKFILL_EMBEDDINGS_TOOL,
   // ─── v2.0: Time Travel tool definitions ───
   MEMORY_HISTORY_TOOL,
   MEMORY_CHECKOUT_TOOL,
   // ─── v2.0: Visual Memory tool definitions ───
   SESSION_SAVE_IMAGE_TOOL,
   SESSION_VIEW_IMAGE_TOOL,
+  // ─── v2.2.0: Health Check tool definition ───
+  SESSION_HEALTH_CHECK_TOOL,
   sessionSaveLedgerHandler,
   sessionSaveHandoffHandler,
   sessionLoadContextHandler,
@@ -132,6 +133,8 @@ import {
   // ─── v2.0: Visual Memory handlers ───
   sessionSaveImageHandler,
   sessionViewImageHandler,
+  // ─── v2.2.0: Health Check handler ───
+  sessionHealthCheckHandler,
 } from "./tools/index.js";
 
 // ─── Dynamic Tool Registration ───────────────────────────────────
@@ -159,12 +162,13 @@ const SESSION_MEMORY_TOOLS: Tool[] = [
   KNOWLEDGE_FORGET_TOOL,       // knowledge_forget — prune bad/old memories
   SESSION_COMPACT_LEDGER_TOOL, // session_compact_ledger — auto-compact old ledger entries (v0.4.0)
   SESSION_SEARCH_MEMORY_TOOL,  // session_search_memory — semantic search via embeddings (v0.4.0)
-  SESSION_BACKFILL_EMBEDDINGS_TOOL, // session_backfill_embeddings — repair missing embeddings
   MEMORY_HISTORY_TOOL,         // memory_history — view version timeline (v2.0)
   MEMORY_CHECKOUT_TOOL,        // memory_checkout — revert to past version (v2.0)
   // ─── v2.0: Visual Memory tools ───
   SESSION_SAVE_IMAGE_TOOL,     // session_save_image — save image to media vault (v2.0)
   SESSION_VIEW_IMAGE_TOOL,     // session_view_image — retrieve image from vault (v2.0)
+  // ─── v2.2.0: Health Check tool ───
+  SESSION_HEALTH_CHECK_TOOL,   // session_health_check — brain integrity checker (v2.2.0)
 ];
 
 // Combine: if session memory is enabled, add those tools too
@@ -585,10 +589,6 @@ export function createServer() {
           if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
           return await sessionSearchMemoryHandler(args);
 
-        case "session_backfill_embeddings":
-          if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
-          return await backfillEmbeddingsHandler(args);
-
         // ─── v2.0: Time Travel Tools ───
 
         case "memory_history":
@@ -608,6 +608,12 @@ export function createServer() {
         case "session_view_image":
           if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
           return await sessionViewImageHandler(args);
+
+        // ─── v2.2.0: Health Check Tool ───
+
+        case "session_health_check":
+          if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
+          return await sessionHealthCheckHandler(args);
 
         default:
           return {

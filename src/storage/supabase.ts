@@ -30,6 +30,7 @@ import type {
   KnowledgeSearchResult,
   SemanticSearchResult,
   HistorySnapshot,
+  HealthStats,        // v2.2.0: Health check (fsck) aggregate type
 } from "./interface.js";
 
 export class SupabaseStorage implements StorageBackend {
@@ -254,5 +255,113 @@ export class SupabaseStorage implements StorageBackend {
     const rows = Array.isArray(data) ? data : [];
     // Deduplicate on the client side since Supabase doesn't support DISTINCT via REST
     return [...new Set(rows.map((r: any) => r.project as string))];
+  }
+
+  // ─── v2.2.0 Health Check (fsck) ─────────────────────────────
+
+  /**
+   * Gather raw health statistics via Supabase REST API.
+   *
+   * Supabase REST (PostgREST) doesn't support complex JOINs,
+   * so we fetch raw data and let healthCheck.ts do the analysis
+   * in pure JS — same approach as SQLite for consistency.
+   */
+  async getHealthStats(userId: string): Promise<HealthStats> {
+
+    // ── Check 1: Entries missing embeddings ────────────────────
+    // Fetch active entries where embedding column is null.
+    // PostgREST filter: archived_at=is.null AND embedding=is.null
+    const missingData = await supabaseGet("session_ledger", {
+      select: "id",                    // only need count
+      user_id: `eq.${userId}`,          // scope to this user
+      archived_at: "is.null",           // only active entries
+      embedding: "is.null",             // missing embedding
+    });
+    // Count the returned rows (PostgREST returns array)
+    const missingEmbeddings = Array.isArray(missingData) ? missingData.length : 0;
+
+    // ── Check 2: All active summaries for JS duplicate detection ─
+    // Pull id + project + summary so healthCheck.ts can run
+    // Jaccard similarity comparison in-memory.
+    const summData = await supabaseGet("session_ledger", {
+      select: "id,project,summary",     // minimal columns needed
+      user_id: `eq.${userId}`,          // scope to this user
+      archived_at: "is.null",           // only active entries
+    });
+    // Map to typed array for the health check engine
+    const activeLedgerSummaries = (Array.isArray(summData) ? summData : []).map(
+      (r: any) => ({
+        id: r.id as string,             // unique entry ID
+        project: r.project as string,   // project name
+        summary: r.summary as string,   // text for dupe comparison
+      })
+    );
+
+    // ── Check 3: Find orphaned handoffs ──────────────────────────
+    // Fetch all handoff projects, then all ledger projects.
+    // Difference = orphaned handoffs (handoff but no ledger entries).
+    const handoffData = await supabaseGet("session_handoffs", {
+      select: "project",               // only need project names
+      user_id: `eq.${userId}`,          // scope to this user
+    });
+    const handoffProjects = new Set(         // set for O(1) lookup
+      (Array.isArray(handoffData) ? handoffData : [])
+        .map((r: any) => r.project as string)
+    );
+    const ledgerData = await supabaseGet("session_ledger", {
+      select: "project",               // only need project names
+      user_id: `eq.${userId}`,          // scope to this user
+      archived_at: "is.null",           // only active entries
+    });
+    const ledgerProjects = new Set(          // projects that have entries
+      (Array.isArray(ledgerData) ? ledgerData : [])
+        .map((r: any) => r.project as string)
+    );
+    // Orphaned = in handoffs but NOT in ledger
+    const orphanedHandoffs = [...handoffProjects]
+      .filter(p => !ledgerProjects.has(p))   // keep only orphans
+      .map(project => ({ project }));         // wrap in object
+
+    // ── Check 4: Count stale rollups ─────────────────────────────
+    // PostgREST can't do self-joins. Fetch rollups and archived
+    // entries separately, then compute in JS.
+    const rollupData = await supabaseGet("session_ledger", {
+      select: "id,project",            // rollup ID and project
+      user_id: `eq.${userId}`,          // scope to this user
+      is_rollup: "eq.true",             // only rollup entries
+      archived_at: "is.null",           // still active
+    });
+    const archivedData = await supabaseGet("session_ledger", {
+      select: "project",               // just need project names
+      user_id: `eq.${userId}`,          // scope to this user
+      "archived_at": "not.is.null",     // only archived entries
+    });
+    // Build a set of projects that have archived entries
+    const archivedProjects = new Set(
+      (Array.isArray(archivedData) ? archivedData : [])
+        .map((r: any) => r.project as string)
+    );
+    // Stale = rollup exists but project has no archived originals
+    const rollups = Array.isArray(rollupData) ? rollupData : [];
+    const staleRollups = rollups.filter(
+      (r: any) => !archivedProjects.has(r.project)  // no originals
+    ).length;
+
+    // ── Totals ───────────────────────────────────────────────────
+    // Reuse data already fetched above to avoid extra API calls
+    const totalActiveEntries = activeLedgerSummaries.length;
+    const totalHandoffs = handoffProjects.size;
+    const totalRollups = rollups.length;
+
+    // ── Return raw health stats for the JS engine ────────────────
+    return {
+      missingEmbeddings,     // entries needing embedding repair
+      activeLedgerSummaries, // raw summaries for JS dupe detection
+      orphanedHandoffs,      // projects with handoff but no ledger
+      staleRollups,          // rollups with no archived originals
+      totalActiveEntries,    // grand total of active entries
+      totalHandoffs,         // grand total of handoff records
+      totalRollups,          // grand total of rollup entries
+    };
   }
 }

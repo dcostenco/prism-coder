@@ -31,6 +31,7 @@ import type {
   KnowledgeSearchResult,
   SemanticSearchResult,
   HistorySnapshot,
+  HealthStats,        // v2.2.0: Health check (fsck) aggregate type
 } from "./interface.js";
 
 export class SqliteStorage implements StorageBackend {
@@ -842,4 +843,133 @@ export class SqliteStorage implements StorageBackend {
     );
     return result.rows.map(row => row.project as string);
   }
+
+  // ─── v2.2.0 Health Check (fsck) ─────────────────────────────
+
+  /**
+   * Gather raw health statistics for the integrity checker.
+   *
+   * This method runs 5 lightweight SQL queries and returns raw data.
+   * The heavy analysis (duplicate detection via Jaccard similarity)
+   * happens in healthCheck.ts in pure JS — keeping SQLite free of
+   * C-extension dependencies like Levenshtein.
+   */
+  async getHealthStats(userId: string): Promise<HealthStats> {
+
+    // ── Check 1: Count entries with no embedding vector ──────────
+    // When Gemini API is down during save, the fire-and-forget
+    // embedding call fails silently. These rows need backfill.
+    const missingResult = await this.db.execute({
+      sql: `
+        SELECT COUNT(*) as cnt
+        FROM session_ledger
+        WHERE user_id = ?
+          AND archived_at IS NULL
+          AND embedding IS NULL
+      `,
+      args: [userId],  // bind user_id to the ? placeholder
+    });
+    const missingEmbeddings = Number(  // extract count, default 0
+      missingResult.rows[0]?.cnt ?? 0
+    );
+
+    // ── Check 2: Fetch active summaries for JS duplicate detection ─
+    // We pull id + project + summary into memory so healthCheck.ts
+    // can run Jaccard similarity in pure JS (~5ms for typical sets).
+    // The Compactor keeps the active ledger small, so this is safe.
+    const summariesResult = await this.db.execute({
+      sql: `
+        SELECT id, project, summary
+        FROM session_ledger
+        WHERE user_id = ?
+          AND archived_at IS NULL
+      `,
+      args: [userId],  // bind user_id to the ? placeholder
+    });
+    // Map raw DB rows to typed objects for the health engine
+    const activeLedgerSummaries = summariesResult.rows.map(row => ({
+      id: row.id as string,         // unique entry identifier
+      project: row.project as string, // project this entry belongs to
+      summary: row.summary as string, // text we compare for duplicates
+    }));
+
+    // ── Check 3: Find orphaned handoffs ──────────────────────────
+    // An orphaned handoff = handoff state exists but zero active
+    // ledger entries back it. Usually from testing or bugs.
+    // LEFT JOIN + HAVING COUNT = 0 finds projects with no entries.
+    const orphanResult = await this.db.execute({
+      sql: `
+        SELECT h.project
+        FROM session_handoffs h
+        LEFT JOIN session_ledger l
+          ON h.project = l.project
+          AND h.user_id = l.user_id
+          AND l.archived_at IS NULL
+        WHERE h.user_id = ?
+        GROUP BY h.project
+        HAVING COUNT(l.id) = 0
+      `,
+      args: [userId],  // bind user_id to the ? placeholder
+    });
+    // Map to simple project name objects
+    const orphanedHandoffs = orphanResult.rows.map(row => ({
+      project: row.project as string,  // the orphaned project name
+    }));
+
+    // ── Check 4: Count stale rollups ─────────────────────────────
+    // A rollup entry should have archived originals backing it.
+    // If those originals were hard-deleted, the rollup is stale.
+    // Self-join: rollups (is_rollup=1) LEFT JOIN archived entries.
+    const staleResult = await this.db.execute({
+      sql: `
+        SELECT r.id
+        FROM session_ledger r
+        LEFT JOIN session_ledger a
+          ON a.archived_at IS NOT NULL
+          AND a.project = r.project
+          AND a.user_id = r.user_id
+        WHERE r.user_id = ?
+          AND r.is_rollup = 1
+          AND r.archived_at IS NULL
+        GROUP BY r.id
+        HAVING COUNT(a.id) = 0
+      `,
+      args: [userId],  // bind user_id to the ? placeholder
+    });
+    // Count how many rollups have zero archived originals
+    const staleRollups = staleResult.rows.length;
+
+    // ── Totals: aggregate counts for health report summary ───────
+    // Three scalar subqueries in one shot for efficiency.
+    const totalsResult = await this.db.execute({
+      sql: `
+        SELECT
+          (SELECT COUNT(*) FROM session_ledger
+            WHERE user_id = ? AND archived_at IS NULL) as active,
+          (SELECT COUNT(*) FROM session_handoffs
+            WHERE user_id = ?) as handoffs,
+          (SELECT COUNT(*) FROM session_ledger
+            WHERE user_id = ? AND is_rollup = 1
+            AND archived_at IS NULL) as rollups
+      `,
+      args: [userId, userId, userId],  // bind user_id 3x (one per subquery)
+    });
+    // Extract each total, fallback to 0 if undefined
+    const totalActiveEntries = Number(totalsResult.rows[0]?.active ?? 0);
+    const totalHandoffs = Number(totalsResult.rows[0]?.handoffs ?? 0);
+    const totalRollups = Number(totalsResult.rows[0]?.rollups ?? 0);
+
+    // ── Return the complete raw health stats ─────────────────────
+    // healthCheck.ts engine will analyze this + produce HealthReport
+    return {
+      missingEmbeddings,     // entries needing embedding repair
+      activeLedgerSummaries, // raw summaries for JS dupe detection
+      orphanedHandoffs,      // projects with handoff but no ledger
+      staleRollups,          // rollups with no archived originals
+      totalActiveEntries,    // grand total of active entries
+      totalHandoffs,         // grand total of handoff records
+      totalRollups,          // grand total of rollup entries
+    };
+  }
 }
+

@@ -14,9 +14,26 @@
 
 ---
 
-## What's New in v2.0 "Mind Palace" 🧠
+## What's New in v2.3.0 — AI Reasoning Engine 🧠
 
-Prism MCP has been completely rebuilt from the ground up to support **local-first workflows**, **visual agent memory**, and **multi-client synchronization**.
+| Feature | Description |
+|---|---|
+| 🕸️ **Neural Graph** | Interactive knowledge graph on the Mind Palace Dashboard — visualize how projects connect through shared keywords and categories using Vis.js force-directed layout. |
+| 🛡️ **Prompt Injection Shield** | Gemini-powered security scan in `session_health_check` — detects system override attempts, jailbreaks, and data exfiltration hidden in agent memory. Tuned to avoid false positives on normal dev commands. |
+| 🧬 **Fact Merger** | Async LLM contradiction resolution on every handoff save — if old context says "Postgres" and new says "MySQL", Gemini silently merges the facts in the background. Zero latency impact (fire-and-forget). |
+
+<details>
+<summary><strong>What's in v2.2.0</strong></summary>
+
+| Feature | Description |
+|---|---|
+| 🩺 **Brain Health Check** | `session_health_check` — like Unix `fsck` for your agent's memory. Detects missing embeddings, duplicate entries, orphaned handoffs, and stale rollups. Use `auto_fix: true` to repair automatically. |
+| 📊 **Mind Palace Health** | Brain health indicator on the Mind Palace Dashboard — see your memory integrity at a glance. |
+
+</details>
+
+<details>
+<summary><strong>What's in v2.0 "Mind Palace"</strong></summary>
 
 | Feature | Description |
 |---|---|
@@ -28,6 +45,8 @@ Prism MCP has been completely rebuilt from the ground up to support **local-firs
 | 🌅 **Morning Briefing** | Gemini auto-synthesizes a 3-bullet action plan if it's been >4 hours since your last session. |
 | 📝 **Code Mode Templates** | 8 pre-built QuickJS extraction templates for GitHub, Jira, OpenAPI, Slack, CSV, and DOM parsing — zero reasoning tokens. |
 | 🔍 **Reality Drift Detection** | Prism captures Git state on save and warns if files changed outside the agent's view. |
+
+</details>
 
 ---
 
@@ -301,7 +320,7 @@ graph TB
 | `knowledge_search` | Semantic search across accumulated knowledge |
 | `knowledge_forget` | Prune outdated or incorrect memories (4 modes + dry_run) |
 | `session_search_memory` | Vector similarity search across all sessions |
-| `backfill_embeddings` | Retroactively generate embeddings for existing entries |
+| `session_compact_ledger` | Auto-compact old ledger entries via Gemini-powered summarization |
 
 ### v2.0 Advanced Memory Tools
 
@@ -311,6 +330,12 @@ graph TB
 | `memory_checkout` | Revert to any previous version (non-destructive, like `git revert`) |
 | `session_save_image` | Save a screenshot/image to the visual memory vault |
 | `session_view_image` | Retrieve and display a saved image from the vault |
+
+### v2.2 Brain Health Tools
+
+| Tool | Purpose | Key Args | Returns |
+|------|---------|----------|---------|
+| `session_health_check` | Scan brain for integrity issues (`fsck`) | `auto_fix` (boolean) | Health report & auto-repairs |
 
 ### Code Mode Templates (v2.1)
 
@@ -560,6 +585,8 @@ See [`vertex-ai/`](vertex-ai/) for setup and benchmarks.
 │       ├── googleAi.ts                  # Gemini SDK wrapper
 │       ├── executor.ts                  # QuickJS sandbox executor
 │       ├── autoCapture.ts               # Dev server HTML snapshot utility
+│       ├── healthCheck.ts               # Brain integrity engine (v2.2.0) + security scanner (v2.3.0)
+│       ├── factMerger.ts                # Async LLM contradiction resolution (v2.3.0)
 │       ├── git.ts                       # Git state capture + drift detection
 │       ├── embeddingApi.ts              # Embedding generation (Gemini)
 │       └── keywordExtractor.ts          # Zero-dependency NLP keyword extraction

@@ -126,6 +126,36 @@ export interface HistorySnapshot {
   created_at: string;
 }
 
+// ─── v2.2.0: Health Check Types ──────────────────────────────
+
+/**
+ * Raw health statistics returned by the storage layer.
+ *
+ * The storage backend only runs simple aggregate queries —
+ * all analysis logic (duplicate detection, severity scoring)
+ * lives in healthCheck.ts to keep the DB layer agnostic.
+ */
+export interface HealthStats {
+  // Count of active ledger entries with no embedding vector
+  missingEmbeddings: number;
+
+  // All active ledger entries (id + project + summary) — used
+  // for in-memory duplicate detection via JS Jaccard similarity
+  // (avoids Levenshtein SQL dependency that SQLite doesn't have)
+  activeLedgerSummaries: Array<{ id: string; project: string; summary: string }>;
+
+  // Projects that have handoff state but zero active ledger entries
+  orphanedHandoffs: Array<{ project: string }>;
+
+  // Rollup entries whose archived originals no longer exist
+  staleRollups: number;
+
+  // Total counts for the health report summary
+  totalActiveEntries: number;
+  totalHandoffs: number;
+  totalRollups: number;
+}
+
 // ─── Storage Backend Interface ────────────────────────────────
 
 /**
@@ -248,4 +278,14 @@ export interface StorageBackend {
    * Used by the Mind Palace Dashboard for project discovery.
    */
   listProjects(): Promise<string[]>;
+
+  // ─── v2.2.0 Health Check (fsck) ─────────────────────────────
+
+  /**
+   * Gather raw health statistics for the integrity checker.
+   * Returns aggregate counts + raw data for JS-side analysis.
+   * The health check engine (healthCheck.ts) does all the
+   * smart analysis — this just runs simple SQL queries.
+   */
+  getHealthStats(userId: string): Promise<HealthStats>;
 }
