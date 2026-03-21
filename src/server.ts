@@ -69,7 +69,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import { SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID } from "./config.js";
+import { SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID, debug } from "./config.js";
 import { getSyncBus } from "./sync/factory.js";
 import type { SyncBus, SyncEvent } from "./sync/index.js";
 import { startDashboardServer } from "./dashboard/server.js";
@@ -202,7 +202,7 @@ const activeSubscriptions = new Set<string>();
 export function notifyResourceUpdate(project: string, server: Server) {
   const uri = `memory://${project}/handoff`;
   if (activeSubscriptions.has(uri)) {
-    console.error(`[resource-subscription] Notifying update for ${uri}`);
+    debug(`[resource-subscription] Notifying update for ${uri}`);
     server.notification({
       method: "notifications/resources/updated",
       params: { uri },
@@ -222,8 +222,8 @@ export function notifyResourceUpdate(project: string, server: Server) {
  *                with subscribe support for live refresh
  */
 export function createServer() {
-  console.error(`Creating Prism MCP server v${SERVER_CONFIG.version}`);
-  console.error(`Registering ${ALL_TOOLS.length} tools (${BASE_TOOLS.length} base + ${SESSION_MEMORY_ENABLED ? SESSION_MEMORY_TOOLS.length : 0} session memory)`);
+  debug(`Creating Prism MCP server v${SERVER_CONFIG.version}`);
+  debug(`Registering ${ALL_TOOLS.length} tools (${BASE_TOOLS.length} base + ${SESSION_MEMORY_ENABLED ? SESSION_MEMORY_TOOLS.length : 0} session memory)`);
 
   const server = new Server(
     {
@@ -258,7 +258,7 @@ export function createServer() {
   // REVIEWER NOTE: The initialize handler is unchanged from v0.3.0
   // except that it now reports the expanded capabilities.
   server.setRequestHandler(InitializeRequestSchema, async (request) => {
-    console.error(`Client connected: ${request.params.clientInfo?.name || 'unknown'}`);
+    debug(`Client connected: ${request.params.clientInfo?.name || 'unknown'}`);
 
     return {
       protocolVersion: request.params.protocolVersion,
@@ -278,7 +278,7 @@ export function createServer() {
 
   // ── Handler: List Tools ──
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    console.error("Received list tools request");
+    debug("Received list tools request");
     return {
       tools: ALL_TOOLS,
     };
@@ -343,7 +343,7 @@ export function createServer() {
       const project = promptArgs?.project || "default";
       const level = promptArgs?.level || "standard";
 
-      console.error(`[prompt:resume_session] Loading ${level} context for "${project}"`);
+      debug(`[prompt:resume_session] Loading ${level} context for "${project}"`);
 
       // v2.3.6 FIX: Use storage abstraction instead of direct supabaseRpc
       const storage = await getStorage();
@@ -448,7 +448,7 @@ export function createServer() {
       }
 
       const project = decodeURIComponent(match[1]);
-      console.error(`[resource:read] Fetching handoff for "${project}"`);
+      debug(`[resource:read] Fetching handoff for "${project}"`);
 
       try {
         // v2.3.6 FIX: Use storage abstraction instead of direct supabaseRpc
@@ -491,14 +491,14 @@ export function createServer() {
 
     server.setRequestHandler(SubscribeRequestSchema, async (request) => {
       const uri = request.params.uri;
-      console.error(`[resource-subscription] Client subscribed to ${uri}`);
+      debug(`[resource-subscription] Client subscribed to ${uri}`);
       activeSubscriptions.add(uri);
       return {};
     });
 
     server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
       const uri = request.params.uri;
-      console.error(`[resource-subscription] Client unsubscribed from ${uri}`);
+      debug(`[resource-subscription] Client unsubscribed from ${uri}`);
       activeSubscriptions.delete(uri);
       return {};
     });
@@ -511,7 +511,7 @@ export function createServer() {
   // The server reference is passed to sessionSaveHandoffHandler so it
   // can trigger resource update notifications on successful saves.
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    console.error(`Tool call: ${request.params.name}`);
+    debug(`Tool call: ${request.params.name}`);
 
     try {
       const { name, arguments: args } = request.params;
@@ -520,7 +520,7 @@ export function createServer() {
         throw new Error("No arguments provided");
       }
 
-      console.error(`Processing ${name} with arguments: ${JSON.stringify(args)}`);
+      debug(`Processing ${name} with arguments: ${JSON.stringify(args)}`);
 
       switch (name) {
         // ── Search & Analysis Tools (always available) ──
@@ -715,13 +715,13 @@ export function createSandboxServer() {
  * responses to stdout. Log messages go to stderr.
  */
 export async function startServer() {
-  console.error("Initializing Prism MCP server...");
+  debug("Initializing Prism MCP server...");
   const server = createServer();
 
-  console.error("Creating stdio transport...");
+  debug("Creating stdio transport...");
   const transport = new StdioServerTransport();
 
-  console.error("Connecting server to transport...");
+  debug("Connecting server to transport...");
   await server.connect(transport);
 
   // ─── v2.0 Step 6: Initialize SyncBus (Telepathy) ───
@@ -731,7 +731,7 @@ export async function startServer() {
       await syncBus.startListening();
 
       syncBus.on("update", (event: SyncEvent) => {
-        console.error(
+        debug(
           `[Telepathy] Memory for project '${event.project}' ` +
           `updated to v${event.version} by another agent!`
         );
@@ -749,7 +749,7 @@ export async function startServer() {
         }
       });
 
-      console.error("[Telepathy] SyncBus active — multi-client sync enabled");
+      debug("[Telepathy] SyncBus active — multi-client sync enabled");
     } catch (err) {
       console.error(`[Telepathy] SyncBus init failed (non-fatal): ${err}`);
     }
@@ -760,7 +760,7 @@ export async function startServer() {
     console.error(`[Dashboard] Mind Palace startup failed (non-fatal): ${err}`);
   });
 
-  console.error(`Prism MCP Server v${SERVER_CONFIG.version} running on stdio`);
+  debug(`Prism MCP Server v${SERVER_CONFIG.version} running on stdio`);
 
   // Keep the process alive — without this, Node.js would exit
   // because there are no active event loop handles after the

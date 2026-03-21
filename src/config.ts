@@ -60,9 +60,9 @@ if (!BRAVE_ANSWERS_API_KEY) {
 export const SUPABASE_URL = process.env.SUPABASE_URL;
 export const SUPABASE_KEY = process.env.SUPABASE_KEY;
 export const SESSION_MEMORY_ENABLED = !!(SUPABASE_URL && SUPABASE_KEY);
-if (SESSION_MEMORY_ENABLED) {
-  console.error("Session memory enabled (Supabase configured)");
-} else {
+// Note: debug() is defined at the bottom of this file; these lines
+// execute at import time after the full module is loaded by Node.
+if (!SESSION_MEMORY_ENABLED) {
   console.error("Info: Session memory disabled (set SUPABASE_URL + SUPABASE_KEY to enable)");
 }
 
@@ -76,7 +76,7 @@ if (SESSION_MEMORY_ENABLED) {
 
 export const PRISM_STORAGE: "local" | "supabase" =
   (process.env.PRISM_STORAGE as "local" | "supabase") || "supabase";
-console.error(`Storage backend: ${PRISM_STORAGE}`);
+// Logged at debug level — see debug() at bottom of file
 
 // ─── Optional: Multi-Tenant User ID ──────────────────────────
 // REVIEWER NOTE: When multiple users share the same Supabase instance,
@@ -90,9 +90,7 @@ console.error(`Storage backend: ${PRISM_STORAGE}`);
 // For personal use: any unique string works (e.g., "alice", "bob")
 
 export const PRISM_USER_ID = process.env.PRISM_USER_ID || "default";
-if (PRISM_USER_ID !== "default") {
-  console.error(`Multi-tenant mode: user_id="${PRISM_USER_ID}"`);
-}
+// Multi-tenant info logged at debug level in startServer()
 
 // ─── v2.1: Auto-Capture Feature ─────────────────────────────
 // REVIEWER NOTE: Automatically captures HTML snapshots of local dev servers
@@ -107,4 +105,17 @@ export const PRISM_CAPTURE_PORTS = (process.env.PRISM_CAPTURE_PORTS || "3000,300
 
 if (PRISM_AUTO_CAPTURE) {
   console.error(`[AutoCapture] Enabled for ports: ${PRISM_CAPTURE_PORTS.join(", ")}`);
+}
+
+// ─── Debug Logging ──────────────────────────────────────────────
+// Set PRISM_DEBUG=true to enable verbose startup and operational logs.
+// When disabled (default), only warnings and errors are printed.
+
+export const PRISM_DEBUG = process.env.PRISM_DEBUG === "true";
+
+/** Conditional debug logger — only prints when PRISM_DEBUG=true. */
+export function debug(...args: unknown[]): void {
+  if (PRISM_DEBUG) {
+    console.error(...args);
+  }
 }
