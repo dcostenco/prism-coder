@@ -171,10 +171,12 @@ const SESSION_MEMORY_TOOLS: Tool[] = [
   SESSION_HEALTH_CHECK_TOOL,   // session_health_check — brain integrity checker (v2.2.0)
 ];
 
-// Combine: if session memory is enabled, add those tools too
+// Combine: always list ALL tools so scanners (Glama, Smithery, MCP Registry)
+// can enumerate the full capability set. Runtime guards in the CallTool handler
+// still prevent execution without valid Supabase credentials.
 const ALL_TOOLS: Tool[] = [
   ...BASE_TOOLS,
-  ...(SESSION_MEMORY_ENABLED ? SESSION_MEMORY_TOOLS : []),
+  ...SESSION_MEMORY_TOOLS,
 ];
 
 // ─── v0.4.0: Resource Subscription Tracking ──────────────────────
