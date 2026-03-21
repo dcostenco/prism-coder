@@ -24,7 +24,7 @@
 // multi-tenant Row Level Security (RLS) for production hosting.
 export const SERVER_CONFIG = {
   name: "prism-mcp",
-  version: "2.3.7",
+  version: "2.3.9",
 };
 
 // ─── Required: Brave Search API Key ───────────────────────────
