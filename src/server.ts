@@ -74,12 +74,13 @@ import { getSyncBus } from "./sync/factory.js";
 import type { SyncBus, SyncEvent } from "./sync/index.js";
 import { startDashboardServer } from "./dashboard/server.js";
 
-// ─── v0.4.0: Supabase API imports for Prompts/Resources handlers ───
-// REVIEWER NOTE: The prompt and resource handlers need direct access
-// to supabaseRpc and supabaseGet to fetch context. In v0.3.0, only
-// the handler files imported from supabaseApi. Now server.ts needs
-// them too for the prompt/resource request handlers.
-import { supabaseRpc, supabaseGet } from "./utils/supabaseApi.js";
+// ─── v2.3.6 FIX: Use Storage Abstraction for Prompts/Resources ───
+// CRITICAL FIX: Previously imported supabaseRpc/supabaseGet directly,
+// which bypassed the storage abstraction layer and caused the server
+// to crash (EOF) when the Supabase REST call failed without a proper
+// error wrapper. Now uses getStorage() which routes through the
+// correct backend (Supabase or SQLite) with proper error handling.
+import { getStorage } from "./storage/index.js";
 
 // ─── Import Tool Definitions (schemas) and Handlers (implementations) ─────
 
@@ -344,15 +345,11 @@ export function createServer() {
 
       console.error(`[prompt:resume_session] Loading ${level} context for "${project}"`);
 
-      // Fetch context using the same RPC as session_load_context
-      // v1.5.0: Pass p_user_id for multi-tenant isolation
-      const result = await supabaseRpc("get_session_context", {
-        p_project: project,
-        p_level: level,
-        p_user_id: PRISM_USER_ID,
-      });
+      // v2.3.6 FIX: Use storage abstraction instead of direct supabaseRpc
+      const storage = await getStorage();
+      const result = await storage.loadContext(project, level, PRISM_USER_ID);
 
-      const data = Array.isArray(result) ? result[0] : result;
+      const data = result;
 
       // REVIEWER NOTE: We include the version in the prompt text so
       // the LLM knows to pass it back when saving. This is critical
@@ -423,30 +420,26 @@ export function createServer() {
 
     // List concrete resources — one per known project
     server.setRequestHandler(ListResourcesRequestSchema, async () => {
-      // REVIEWER NOTE: We query Supabase for all projects that have
-      // a handoff entry. This gives Claude Desktop a browsable list
-      // of all projects with saved state. The select fields are
-      // minimal to keep the response lightweight.
-      const handoffs = await supabaseGet("session_handoffs", {
-        select: "project,last_summary,updated_at",
-      });
+      // v2.3.6 FIX: Use storage abstraction instead of direct supabaseGet
+      try {
+        const storage = await getStorage();
+        const projects = await storage.listProjects();
 
-      return {
-        resources: (Array.isArray(handoffs) ? handoffs : []).map((h: any) => ({
-          uri: `memory://${h.project}/handoff`,
-          name: `${h.project} — Session State`,
-          description: h.last_summary
-            ? h.last_summary.substring(0, 200)
-            : "No summary available",
-          mimeType: "application/json",
-        })),
-      };
+        return {
+          resources: projects.map((p: string) => ({
+            uri: `memory://${p}/handoff`,
+            name: `${p} — Session State`,
+            mimeType: "application/json",
+          })),
+        };
+      } catch (error) {
+        console.error(`[resource:list] Error listing resources: ${error}`);
+        return { resources: [] };
+      }
     });
 
     // Read a specific project's handoff as a resource
     server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      // REVIEWER NOTE: Parse the project name from the URI.
-      // URI format: memory://{project}/handoff
       const uri = request.params.uri;
       const match = uri.match(/^memory:\/\/(.+)\/handoff$/);
 
@@ -455,38 +448,38 @@ export function createServer() {
       }
 
       const project = decodeURIComponent(match[1]);
-
       console.error(`[resource:read] Fetching handoff for "${project}"`);
 
-      // Reuse the same RPC as session_load_context — standard level
-      // gives a good balance of info without being too large.
-      // REVIEWER NOTE: The RPC response includes `version` (added in
-      // migration 019), which the LLM needs for OCC when saving later.
-      // v1.5.0: Pass p_user_id for multi-tenant isolation
-      const result = await supabaseRpc("get_session_context", {
-        p_project: project,
-        p_level: "standard",
-        p_user_id: PRISM_USER_ID,
-      });
+      try {
+        // v2.3.6 FIX: Use storage abstraction instead of direct supabaseRpc
+        const storage = await getStorage();
+        const data = await storage.loadContext(project, "standard", PRISM_USER_ID);
 
-      const data = Array.isArray(result) ? result[0] : result;
+        const resourceData = data || { status: "no_session_found", project };
+        if ((data as any)?.version) {
+          (resourceData as any)._occ_instruction =
+            `When saving handoff state, you MUST pass expected_version: ${(data as any).version} ` +
+            `to prevent state collisions with other sessions.`;
+        }
 
-      // REVIEWER NOTE: Inject explicit OCC instructions into the
-      // resource text so the LLM knows to pass version on save.
-      const resourceData = data || { status: "no_session_found", project };
-      if (data?.version) {
-        resourceData._occ_instruction =
-          `When saving handoff state, you MUST pass expected_version: ${data.version} ` +
-          `to prevent state collisions with other sessions.`;
+        return {
+          contents: [{
+            uri: uri,
+            mimeType: "application/json",
+            text: JSON.stringify(resourceData, null, 2),
+          }],
+        };
+      } catch (error) {
+        console.error(`[resource:read] Error reading resource ${uri}: ${error}`);
+        return {
+          isError: true,
+          contents: [{
+            uri: uri,
+            mimeType: "text/plain",
+            text: `Error reading resource: ${error instanceof Error ? error.message : String(error)}`,
+          }],
+        };
       }
-
-      return {
-        contents: [{
-          uri: uri,
-          mimeType: "application/json",
-          text: JSON.stringify(resourceData, null, 2),
-        }],
-      };
     });
 
     // ─── Resource Subscriptions: subscribe/unsubscribe ───
