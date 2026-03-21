@@ -50,6 +50,31 @@
 
 ---
 
+## How Prism Compares
+
+| Feature | **Prism MCP** | [MCP Memory](https://github.com/modelcontextprotocol/servers/tree/main/src/memory) | [Mem0](https://github.com/mem0ai/mem0) | [Mnemory](https://github.com/fpytloun/mnemory) | [Basic Memory](https://github.com/basicmachines-co/basic-memory) |
+|---|---|---|---|---|---|
+| **Storage** | SQLite (local) + Supabase (cloud) | JSON file | Postgres + Qdrant (hosted or self-hosted) | Qdrant + S3/MinIO | Markdown files |
+| **Zero Config** | ✅ `npx -y prism-mcp-server` | ✅ | ❌ Requires Qdrant/Postgres | ✅ `uvx mnemory` | ✅ `pip install basic-memory` |
+| **Semantic Search** | ✅ F32_BLOB vectors + FTS5 | ❌ | ✅ pgvector | ✅ Qdrant vectors | ❌ Text search only |
+| **Knowledge Graph** | ✅ Neural Graph (Vis.js dashboard) | ✅ Entity/Relation model | ❌ | ✅ Relationship graph | ✅ Markdown links |
+| **Time Travel** | ✅ `memory_history` / `memory_checkout` | ❌ | ❌ | ❌ | ❌ |
+| **Fact Merging** | ✅ Async Gemini (fire-and-forget) | ❌ | ✅ Built-in | ✅ Contradiction resolution | ❌ |
+| **Security Scan** | ✅ Prompt injection detection | ❌ | ❌ | ✅ Anti-injection in fsck | ❌ |
+| **Health Check** | ✅ `session_health_check` (fsck) | ❌ | ❌ | ✅ 3-phase fsck | ❌ |
+| **Visual Dashboard** | ✅ Mind Palace (localhost:3000) | ❌ | ✅ Cloud dashboard | ✅ Management UI | ❌ |
+| **Multi-Agent Sync** | ✅ Real-time cross-client | ❌ | ❌ | ❌ Per-user isolation | ❌ |
+| **Visual Memory** | ✅ Screenshot vault + auto-capture | ❌ | ❌ | ✅ Artifact store | ❌ |
+| **Auto-Compaction** | ✅ Gemini rollups | ❌ | ❌ | ❌ | ❌ |
+| **Morning Briefing** | ✅ Gemini synthesis | ❌ | ❌ | ❌ | ❌ |
+| **OCC (Concurrency)** | ✅ Version-based | ❌ | ❌ | ❌ | ❌ |
+| **MCP Native** | ✅ stdio (Claude Desktop, Cursor) | ✅ stdio | ❌ Python SDK / REST | ✅ HTTP + MCP | ✅ stdio |
+| **Language** | TypeScript | TypeScript | Python | Python | Python |
+
+> **When to choose Prism MCP:** You want MCP-native memory with zero infrastructure overhead, progressive context loading, and enterprise features (OCC, compaction, time travel, security scanning) that work directly in Claude Desktop — without running Qdrant, Postgres, or cloud services.
+
+---
+
 ## Quick Start (Zero Config — Local Mode)
 
 Get the MCP server running with Claude Desktop or Cursor in **under 60 seconds**. No API keys required for basic local memory!
@@ -137,25 +162,6 @@ Open **`http://localhost:3000`** in your browser to see exactly what your AI age
 - **Session Ledger** — Full audit trail of every decision your agent has made
 
 The dashboard auto-discovers all your projects and updates in real time.
-
----
-
-## How Prism MCP Compares
-
-| Capability | **Prism MCP** | **Mem0** | **Zep** | **Basic Memory** |
-|---|---|---|---|---|
-| **Architecture** | MCP-native (single npm package) | Standalone service + MCP adapter | Standalone service + API | MCP-native (local files) |
-| **Storage** | SQLite (local) or Supabase (cloud) | Hybrid (vector + graph DBs) | PostgreSQL + Neo4j | Local markdown files |
-| **Local-First** | ✅ Full SQLite mode, zero cloud | ❌ Requires cloud/Docker | ❌ Requires PostgreSQL | ✅ Local files |
-| **Visual Dashboard** | ✅ Mind Palace UI at localhost:3000 | ❌ No UI | ❌ No UI | ❌ No UI |
-| **Time Travel** | ✅ Version history + checkout | ❌ No versioning | ❌ No versioning | ❌ No versioning |
-| **Multi-Agent Sync** | ✅ Telepathy (realtime IPC/CDC) | ❌ Siloed | ❌ Siloed | ❌ Single user |
-| **Auto-Capture** | ✅ HTML snapshots of dev server | ❌ Text only | ❌ Text only | ❌ Text only |
-| **Cold Start Fix** | ✅ MCP Prompts + Resources | ❌ Requires tool call | ❌ Requires tool call | ❌ Requires tool call |
-| **Progressive Loading** | ✅ quick / standard / deep | ❌ All-or-nothing | ❌ Fixed window | ❌ All-or-nothing |
-| **Semantic Search** | ✅ F32_BLOB vectors (local) or pgvector (cloud) | ✅ Qdrant/Chroma | ✅ Built-in | ❌ None |
-| **Concurrency Control** | ✅ OCC with version tracking | ❌ Last write wins | ❌ Last write wins | ❌ Single user |
-| **Setup Complexity** | Zero config (local mode) | Docker + API keys + vector DB | Docker + PostgreSQL + Neo4j | No setup needed |
 
 ---
 
