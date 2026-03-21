@@ -14,10 +14,12 @@
 
 ---
 
-## What's New in v2.3.5 — AI Reasoning Engine 🧠
+## What's New in v2.3.7 — Stability & AI Reasoning Engine 🧠
 
 | Feature | Description |
 |---|---|
+| 🔧 **Storage Abstraction Fix** | Critical fix: Resource/Prompt handlers now route through the storage abstraction layer (`getStorage()`) instead of calling Supabase directly — eliminates EOF crashes when reading `memory://` resources. |
+| 🛡️ **Error Boundaries** | Resource handlers now catch errors gracefully and return proper MCP error responses (`isError: true`) instead of crashing the server process. |
 | 🕸️ **Neural Graph** | Interactive knowledge graph on the Mind Palace Dashboard — visualize how projects connect through shared keywords and categories using Vis.js force-directed layout. |
 | 🛡️ **Prompt Injection Shield** | Gemini-powered security scan in `session_health_check` — detects system override attempts, jailbreaks, and data exfiltration hidden in agent memory. Tuned to avoid false positives on normal dev commands. |
 | 🧬 **Fact Merger** | Async LLM contradiction resolution on every handoff save — if old context says "Postgres" and new says "MySQL", Gemini silently merges the facts in the background. Zero latency impact (fire-and-forget). |
