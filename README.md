@@ -54,6 +54,7 @@
 
 | Feature | **Prism MCP** | [MCP Memory](https://github.com/modelcontextprotocol/servers/tree/main/src/memory) | [Mem0](https://github.com/mem0ai/mem0) | [Mnemory](https://github.com/fpytloun/mnemory) | [Basic Memory](https://github.com/basicmachines-co/basic-memory) |
 |---|---|---|---|---|---|
+| **Pricing** | ✅ Free & open source (MIT) | ✅ Free & open source (MIT) | Freemium (free 10K memories; paid Pro) | ✅ Free & open source | Freemium (OSS core free; paid Pro) |
 | **Storage** | SQLite (local) + Supabase (cloud) | JSON file | Postgres + Qdrant (hosted or self-hosted) | Qdrant + S3/MinIO | Markdown files |
 | **Zero Config** | ✅ `npx -y prism-mcp-server` | ✅ | ❌ Requires Qdrant/Postgres | ✅ `uvx mnemory` | ✅ `pip install basic-memory` |
 | **Semantic Search** | ✅ F32_BLOB vectors + FTS5 | ❌ | ✅ pgvector | ✅ Qdrant vectors | ❌ Text search only |
