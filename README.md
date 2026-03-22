@@ -32,6 +32,7 @@
 - [Observability & Tracing](#observability--tracing)
 - [Supabase Setup](#supabase-setup-cloud-mode)
 - [Project Structure](#project-structure)
+- [🚀 Roadmap](#-roadmap)
 
 ---
 
@@ -905,6 +906,36 @@ See [`vertex-ai/`](vertex-ai/) for setup and benchmarks.
 ├── index.ts                             # Server entry point
 └── package.json
 ```
+
+---
+
+## 🚀 Roadmap
+
+> **[View the full project board →](https://github.com/users/dcostenco/projects/1/views/1)**
+
+### 🚀 Future Ideas
+
+| Feature | Issue | Description |
+|---------|-------|-------------|
+| OpenTelemetry SDK Integration | [#6](https://github.com/dcostenco/prism-mcp/issues/6) | W3C-compliant tracing with Jaeger/Zipkin export |
+| GDPR Right to Portability | [#7](https://github.com/dcostenco/prism-mcp/issues/7) | `session_export_memory` tool for Art. 20 compliance |
+| Multi-agent CRDT Conflict Resolution | [#9](https://github.com/dcostenco/prism-mcp/issues/9) | Conflict-free replicated data types for concurrent agent edits |
+| Memory Analytics Dashboard | [#10](https://github.com/dcostenco/prism-mcp/issues/10) | Usage trends, token costs, and memory health metrics |
+| Pluggable LLM Providers | [#13](https://github.com/dcostenco/prism-mcp/issues/13) | Anthropic, OpenAI, Ollama provider adapters |
+| VLM / OCR for Visual Memory | [#14](https://github.com/dcostenco/prism-mcp/issues/14) | Auto-extract text and insights from stored images |
+| Automated Data Retention (TTL) | [#16](https://github.com/dcostenco/prism-mcp/issues/16) | Time-based memory expiration policies |
+| Obsidian / Logseq Export Bridge | [#17](https://github.com/dcostenco/prism-mcp/issues/17) | Export memory to Markdown knowledge bases |
+| Interactive Knowledge Graph Editor | [#19](https://github.com/dcostenco/prism-mcp/issues/19) | Visual graph editor inside the Mind Palace dashboard |
+
+### 🧰 Infrastructure & Stack
+
+| Feature | Issue | Description |
+|---------|-------|-------------|
+| Supabase RPC Soft-Delete Filtering | [#8](https://github.com/dcostenco/prism-mcp/issues/8) | Server-side RPC filtering for GDPR-deleted records |
+| Pluggable Embedding Providers | [#11](https://github.com/dcostenco/prism-mcp/issues/11) | Swap Gemini for OpenAI, Cohere, or local models |
+| Automated Test Suite | [#12](https://github.com/dcostenco/prism-mcp/issues/12) | Unit, integration, and E2E test coverage with CI/CD |
+| Mind Palace Auth & Secure Access | [#15](https://github.com/dcostenco/prism-mcp/issues/15) | Authentication for the dashboard when exposed remotely |
+| TypeScript LangGraph & Vercel AI SDK Examples | [#18](https://github.com/dcostenco/prism-mcp/issues/18) | Reference implementations for popular frameworks |
 
 ---
 
