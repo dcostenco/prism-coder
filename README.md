@@ -205,6 +205,8 @@ Prism MCP spins up a lightweight, zero-dependency HTTP server alongside the MCP 
 
 Open **`http://localhost:3000`** in your browser to see exactly what your AI agent is thinking:
 
+![Mind Palace Dashboard](docs/mind-palace-dashboard.png)
+
 - **Current State & TODOs** — See the exact context injected into the LLM's prompt
 - **Git Drift Detection** — Alerts you if you've modified code outside the agent's view
 - **Morning Briefing** — AI-synthesized action plan from your last sessions
