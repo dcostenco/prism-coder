@@ -1,6 +1,6 @@
 {
   "name": "prism-mcp-server",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "mcpName": "io.github.dcostenco/prism-mcp",
   "description": "The Mind Palace for AI Agents — local-first MCP server with persistent memory (SQLite/Supabase), visual dashboard, time travel, multi-agent sync, Morning Briefings, reality drift detection, code mode templates, semantic vector search, and Brave Search + Gemini analysis. Zero-config local mode.",
   "module": "index.ts",

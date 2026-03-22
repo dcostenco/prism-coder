@@ -33,7 +33,7 @@
  * ═══════════════════════════════════════════════════════════════════
  */
 
-import { GoogleGenerativeAI, TaskType } from "@google/generative-ai";
+import { GoogleGenerativeAI, TaskType, type EmbedContentRequest } from "@google/generative-ai";
 import { GOOGLE_API_KEY } from "../config.js";
 import { debugLog } from "./logger.js";
 
@@ -101,13 +101,22 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 
   debugLog(`[embedding] Generating 768-dim embedding for ${inputText.length} chars`);
 
-  const result = await model.embedContent({
+  const request: EmbedContentRequest = {
     content: {
       role: "user",
       parts: [{ text: inputText }],
     },
     taskType: TaskType.SEMANTIC_SIMILARITY,
-    outputDimensionality: 768,
-  } as any);
-  return result.embedding.values;
+    // SDK runtime supports this for gemini-embedding-001 even when older
+    // type defs may lag; keep cast localized at request boundary.
+    ...( { outputDimensionality: 768 } as unknown as Record<string, unknown> ),
+  };
+
+  const result = await model.embedContent(request);
+  const values = result.embedding.values;
+  if (!Array.isArray(values) || values.length !== 768) {
+    throw new Error(`Embedding dimension mismatch: expected 768, got ${values?.length ?? 'unknown'}`);
+  }
+
+  return values;
 }

@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 /**
  * Configuration & Environment Variables
  *
@@ -20,11 +24,25 @@
 
 // ─── Server Identity ──────────────────────────────────────────
 
-// REVIEWER NOTE: v1.5.0 includes all v0.4.0 enhancements PLUS
-// multi-tenant Row Level Security (RLS) for production hosting.
+function resolveServerVersion(): string {
+  try {
+    const moduleDir = dirname(fileURLToPath(import.meta.url));
+    const packageJsonPath = resolve(moduleDir, "../package.json");
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+    if (typeof packageJson?.version === "string" && packageJson.version.trim()) {
+      return packageJson.version.trim();
+    }
+  } catch {
+    // Fallback below keeps server booting even if package metadata is unavailable.
+  }
+  return "0.0.0";
+}
+
+// REVIEWER NOTE: derive version from package.json so MCP handshake,
+// dashboard badge, and package metadata stay in sync.
 export const SERVER_CONFIG = {
   name: "prism-mcp",
-  version: "2.3.9",
+  version: resolveServerVersion(),
 };
 
 // ─── Required: Brave Search API Key ───────────────────────────

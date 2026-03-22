@@ -20,7 +20,7 @@
 import * as http from "http";
 import { execSync } from "child_process";
 import { getStorage } from "../storage/index.js";
-import { PRISM_USER_ID } from "../config.js";
+import { PRISM_USER_ID, SERVER_CONFIG } from "../config.js";
 import { renderDashboardHTML } from "./ui.js";
 
 const PORT = parseInt(process.env.PRISM_DASHBOARD_PORT || "3000", 10);
@@ -92,7 +92,7 @@ export async function startDashboardServer(): Promise<void> {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "no-store, no-cache, must-revalidate",
         });
-        return res.end(renderDashboardHTML());
+        return res.end(renderDashboardHTML(SERVER_CONFIG.version));
       }
 
       // ─── API: List all projects ───

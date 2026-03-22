@@ -14,7 +14,7 @@
  * ═══════════════════════════════════════════════════════════════════
  */
 
-export function renderDashboardHTML(): string {
+export function renderDashboardHTML(version: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -280,7 +280,7 @@ export function renderDashboardHTML(): string {
       <div class="logo">
         <span class="logo-icon">🧠</span>
         Prism Mind Palace
-        <span class="version-badge">v2.3.7</span>
+        <span class="version-badge">v${version}</span>
       </div>
       <div class="selector">
         <select id="projectSelect">

@@ -47,6 +47,16 @@
 | 🧩 **LangGraph Research Agent** | Full example in `examples/langgraph-agent/` — a 5-node agentic research loop with MCP bridge, persistent memory, and `EnsembleRetriever` hybrid search. |
 
 <details>
+<summary><strong>What's in v2.5.1 — Version Sync & Embedding Safety</strong></summary>
+
+| Feature | Description |
+|---|---|
+| 🔄 **Dynamic Versioning** | Server version is now derived from `package.json` at startup — MCP handshake, dashboard badge, and npm metadata always stay in sync. Falls back to `0.0.0` if unreadable. |
+| 🛡️ **Embedding Dimension Validation** | `generateEmbedding()` now validates the returned vector is exactly 768 dimensions at runtime, catching model regressions before storing bad vectors. Removed `as any` cast in favor of proper `EmbedContentRequest` typing. |
+
+</details>
+
+<details>
 <summary><strong>What's in v2.3.12 — Stability & Fixes</strong></summary>
 
 | Feature | Description |
