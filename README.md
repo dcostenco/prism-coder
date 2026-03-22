@@ -14,10 +14,10 @@
 
 ## Table of Contents
 
-- [What's New (v2.5.0)](#whats-new-in-v250---enterprise-memory-)
+- [What's New (v2.5.0)](#whats-new-in-v250--enterprise-memory-)
 - [How Prism Compares](#how-prism-compares)
 - [Quick Start](#quick-start-zero-config--local-mode)
-- [Mind Palace Dashboard](#the-mind-palace-dashboard)
+- [Mind Palace Dashboard](#-the-mind-palace-dashboard)
 - [Integration Examples](#integration-examples)
 - [Use Cases](#use-cases)
 - [Architecture](#architecture)
@@ -32,6 +32,7 @@
 - [Observability & Tracing](#observability--tracing)
 - [Supabase Setup](#supabase-setup-cloud-mode)
 - [Project Structure](#project-structure)
+- [Hybrid Search Pipeline](#hybrid-search-pipeline-brave--vertex-ai)
 - [🚀 Roadmap](#-roadmap)
 
 ---
@@ -41,7 +42,7 @@
 | Feature | Description |
 |---|---|
 | 🔍 **Memory Tracing (Phase 1)** | Every search now returns a structured `MemoryTrace` with latency breakdown (`embedding_ms`, `storage_ms`, `total_ms`), search strategy, and scoring metadata — surfaced as a separate `content[1]` block for LangSmith integration. |
-| 🛡️ **GDPR Memory Deletion (Phase 2)** | New `session_forget_memory` tool with soft-delete (tombstoning via `deleted_at`) and hard-delete. Ownership guards prevent cross-user deletion. `deleted_reason` column captures GDPR Article 17 justification. Top-K Hole solved by filtering inside SQL, not post-query. |
+| 🛡️ **GDPR Memory Deletion (Phase 2)** | New `session_forget_memory` tool with soft-delete (tombstoning via `deleted_at`) and hard-delete. Ownership guards prevent cross-user deletion. `deleted_reason` column captures GDPR Article 17 justification. Top-K Hole solved by filtering inside SQL, not post-query (ensures we always return exactly K results, rather than returning fewer because deleted items were filtered out after the vector search). |
 | 🔗 **LangChain Integration (Phase 3)** | `PrismMemoryRetriever` and `PrismKnowledgeRetriever` — async-first `BaseRetriever` subclasses that wrap Prism MCP's traced search endpoints. Trace metadata flows automatically into `Document.metadata["trace"]` for LangSmith visibility. |
 | 🧩 **LangGraph Research Agent** | Full example in `examples/langgraph-agent/` — a 5-node agentic research loop with MCP bridge, persistent memory, and `EnsembleRetriever` hybrid search. |
 
@@ -582,14 +583,14 @@ Add this rule to your `~/.gemini/GEMINI.md` global rules file:
 
 **At the start of every new session**, immediately after displaying
 the startup block, you MUST call `session_load_context` (via the
-`athena-public` MCP server) at the `standard` level for these projects:
+`prism-mcp` MCP server) at the `standard` level for these projects:
 - `my-project`
 - `my-other-project`
 
 This ensures accumulated project memory, pending TODOs, and key context
 from previous sessions are always available. Do NOT skip this step.
 
-**IMPORTANT:** The `athena-public` MCP server is always available.
+**IMPORTANT:** The `prism-mcp` MCP server is always available.
 Do NOT display any warnings or notes about MCP server availability
 — just call the tools directly. Never claim the server is unavailable.
 ```
@@ -720,7 +721,7 @@ Prism supports surgical, per-entry deletion for GDPR Article 17 compliance:
 **How it works:**
 - **Soft delete** sets `deleted_at = NOW()` + `deleted_reason`. The entry stays in the DB for audit but is excluded from ALL search results (vector, FTS5, and context loading).
 - **Hard delete** physically removes the row. FTS5 triggers auto-clean the full-text index.
-- **Top-K Hole Prevention**: `deleted_at IS NULL` filtering happens INSIDE the SQL query, BEFORE the `LIMIT` clause — so `LIMIT 5` always returns 5 live results, never fewer.
+- **Top-K Hole Prevention**: `deleted_at IS NULL` filtering happens INSIDE the SQL query, BEFORE the `LIMIT` clause — so `LIMIT 5` always returns 5 live results, never fewer. *(A "Top-K Hole" occurs when deleted entries are filtered out after the vector search, causing fewer than K results to be returned. Prism avoids this by filtering inside SQL before the LIMIT.)*
 
 ### Article 17 — Right to Erasure ("Right to be Forgotten")
 
@@ -819,11 +820,15 @@ Go to **Settings → API** and copy:
 
 ### 4. Configure
 
+Add these to your MCP client's configuration file (e.g., `claude_desktop_config.json` under `"env"`), or export them if running the server manually:
+
 ```bash
 export SUPABASE_URL="https://your-project.supabase.co"
 export SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 export PRISM_STORAGE="supabase"
 ```
+
+> **Note:** Claude Desktop, Cursor, and other MCP clients spawn isolated processes — terminal `export` commands won't be inherited. Always set env vars in the client's config JSON.
 
 ### Security
 
