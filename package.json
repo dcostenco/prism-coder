@@ -7,7 +7,7 @@
   "type": "module",
   "main": "dist/server.js",
   "bin": {
-    "prism-mcp-server": "./dist/server.js"
+    "prism-mcp-server": "dist/server.js"
   },
   "files": [
     "dist"
@@ -68,7 +68,7 @@
   "homepage": "https://github.com/dcostenco/prism-mcp",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dcostenco/prism-mcp.git"
+    "url": "git+https://github.com/dcostenco/prism-mcp.git"
   },
   "author": "Dmitri Costenco",
   "license": "MIT",
