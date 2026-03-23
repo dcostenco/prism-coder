@@ -24,6 +24,7 @@
 - [Tool Reference](#tool-reference)
 - [LangChain / LangGraph Integration](#langchain--langgraph-integration)
 - [Environment Variables](#environment-variables)
+- [Boot Settings (Restart Required)](#-boot-settings-restart-required)
 - [Progressive Context Loading](#progressive-context-loading)
 - [Time Travel](#time-travel-version-history)
 - [Agent Telepathy](#agent-telepathy-multi-client-sync)
@@ -543,7 +544,8 @@ The retrievers use `_aget_relevant_documents` as the primary path with `asyncio.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `BRAVE_API_KEY` | No | Brave Search Pro API key (enables web/local search tools) |
-| `PRISM_STORAGE` | No | `"local"` (default) or `"supabase"` |
+| `PRISM_STORAGE` | No | `"local"` (default) or `"supabase"` — **requires restart** |
+| `PRISM_ENABLE_HIVEMIND` | No | Set `"true"` to enable multi-agent Hivemind tools — **requires restart** |
 | `GOOGLE_API_KEY` | No | Google AI / Gemini — enables paper analysis, Morning Briefings, compaction |
 | `BRAVE_ANSWERS_API_KEY` | No | Separate Brave Answers key for AI-grounded answers |
 | `SUPABASE_URL` | If cloud mode | Supabase project URL |
@@ -552,6 +554,39 @@ The retrievers use `_aget_relevant_documents` as the primary path with `asyncio.
 | `PRISM_AUTO_CAPTURE` | No | Set `"true"` to auto-capture HTML snapshots of dev servers |
 | `PRISM_CAPTURE_PORTS` | No | Comma-separated ports to scan (default: `3000,3001,5173,8080`) |
 | `PRISM_DEBUG_LOGGING` | No | Set `"true"` to enable verbose debug logs (default: quiet) |
+
+---
+
+## ⚡ Boot Settings (Restart Required)
+
+Some settings affect how Prism **initializes at startup** and cannot be changed at runtime. Prism stores these in a lightweight, dedicated SQLite database (`~/.prism-mcp/prism-config.db`) that is read **before** the main storage backend is selected — solving the chicken-and-egg problem of needing config before the config store is ready.
+
+> **⚠️ You must restart the Prism MCP server after changing any Boot Setting.** The Mind Palace dashboard labels these with a **"Restart Required"** badge.
+
+| Setting | Dashboard Control | Environment Override | Description |
+|---------|------------------|---------------------|-------------|
+| `PRISM_STORAGE` | ⚙️ Storage Backend dropdown | `PRISM_STORAGE=supabase` | Switch between `local` (SQLite) and `supabase` (cloud) |
+| `PRISM_ENABLE_HIVEMIND` | ⚙️ Hivemind Mode toggle | `PRISM_ENABLE_HIVEMIND=true` | Enable/disable multi-agent coordination tools |
+
+### How Boot Settings Work
+
+1. **Dashboard saves the setting** → written to `~/.prism-mcp/prism-config.db` immediately
+2. **You restart the MCP server** → server reads the config DB at startup, selects backend/features
+3. **Environment variables always win** → if `PRISM_STORAGE` is set in your MCP config JSON, it overrides the dashboard value
+
+```
+Priority: env var in MCP config JSON  >  Dashboard (prism-config.db)  >  default (local)
+```
+
+### Runtime Settings (no restart needed)
+
+These settings take effect immediately without a restart:
+
+| Setting | Description |
+|---------|-------------|
+| Dashboard Theme | Visual theme for the Mind Palace (`dark`, `midnight`, `purple`) |
+| Context Depth | Default level for `session_load_context` (`quick`, `standard`, `deep`) |
+| Auto-Capture HTML | Snapshot local dev server HTML on every handoff save |
 
 ---
 
@@ -895,6 +930,7 @@ See [`vertex-ai/`](vertex-ai/) for setup and benchmarks.
 │   │   ├── interface.ts                 # StorageBackend abstraction (+ GDPR delete methods)
 │   │   ├── sqlite.ts                    # SQLite local storage (libSQL + F32_BLOB + deleted_at migration)
 │   │   ├── supabase.ts                  # Supabase cloud storage (+ soft/hard delete)
+│   │   ├── configStorage.ts             # Boot config micro-DB (~/.prism-mcp/prism-config.db)
 │   │   └── index.ts                     # Backend factory (auto-selects based on PRISM_STORAGE)
 │   ├── sync/
 │   │   ├── interface.ts                 # SyncBus abstraction (Telepathy)

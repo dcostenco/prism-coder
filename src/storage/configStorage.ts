@@ -2,10 +2,19 @@ import { createClient } from "@libsql/client";
 import { resolve } from "path";
 import { homedir } from "os";
 
-// We use a small, dedicated DB just for configuration settings
-// so we don't mix it with user payload data, and so we can
-// read it *before* deciding which storage backend to boot.
-const CONFIG_PATH = resolve(homedir(), ".prism", "prism-config.db");
+// We use a small, dedicated DB just for configuration settings.
+// This solves the chicken-and-egg problem: we need to know WHICH
+// storage backend to boot *before* we can use that backend.
+//
+// Stored in ~/.prism-mcp/prism-config.db — the same root directory
+// used by sqlite.ts and autoCapture.ts for all Prism files.
+//
+// ⚡ BOOT SETTINGS NOTE:
+//   Settings in this store that affect server initialization (e.g.
+//   PRISM_STORAGE, PRISM_ENABLE_HIVEMIND) are read only at startup.
+//   Changing them at runtime requires a server restart to take effect.
+//   Runtime-only settings (e.g. dashboard_theme) take effect immediately.
+const CONFIG_PATH = resolve(homedir(), ".prism-mcp", "prism-config.db");
 
 let configClient: ReturnType<typeof createClient> | null = null;
 let initialized = false;
