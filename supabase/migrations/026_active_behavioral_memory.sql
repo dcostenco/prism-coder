@@ -26,6 +26,15 @@ ALTER TABLE session_ledger
 ALTER TABLE session_ledger
   ADD COLUMN IF NOT EXISTS importance INTEGER NOT NULL DEFAULT 0;
 
+-- ─── 1b. Ensure soft-delete columns exist ───────────────────────
+-- These may already exist from the SQLite auto-migration, but
+-- Supabase needs them explicitly for the behavioral warning index.
+ALTER TABLE session_ledger
+  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+
+ALTER TABLE session_ledger
+  ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ DEFAULT NULL;
+
 -- ─── 2. Indexes for behavioral queries ──────────────────────────
 -- Fast lookups by event type (corrections, successes, etc.)
 CREATE INDEX IF NOT EXISTS idx_ledger_event_type
