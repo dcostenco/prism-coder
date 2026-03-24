@@ -28,9 +28,9 @@ export { webSearchHandler, braveWebSearchCodeModeHandler, localSearchHandler, br
 // This file always exports them — server.ts decides whether to include them in the tool list.
 //
 // v0.4.0: Added SESSION_COMPACT_LEDGER_TOOL and SESSION_SEARCH_MEMORY_TOOL
-export { SESSION_SAVE_LEDGER_TOOL, SESSION_SAVE_HANDOFF_TOOL, SESSION_LOAD_CONTEXT_TOOL, KNOWLEDGE_SEARCH_TOOL, KNOWLEDGE_FORGET_TOOL, SESSION_COMPACT_LEDGER_TOOL, SESSION_SEARCH_MEMORY_TOOL, MEMORY_HISTORY_TOOL, MEMORY_CHECKOUT_TOOL, SESSION_SAVE_IMAGE_TOOL, SESSION_VIEW_IMAGE_TOOL, SESSION_HEALTH_CHECK_TOOL, SESSION_FORGET_MEMORY_TOOL, KNOWLEDGE_SET_RETENTION_TOOL } from "./sessionMemoryDefinitions.js";
+export { SESSION_SAVE_LEDGER_TOOL, SESSION_SAVE_HANDOFF_TOOL, SESSION_LOAD_CONTEXT_TOOL, KNOWLEDGE_SEARCH_TOOL, KNOWLEDGE_FORGET_TOOL, SESSION_COMPACT_LEDGER_TOOL, SESSION_SEARCH_MEMORY_TOOL, MEMORY_HISTORY_TOOL, MEMORY_CHECKOUT_TOOL, SESSION_SAVE_IMAGE_TOOL, SESSION_VIEW_IMAGE_TOOL, SESSION_HEALTH_CHECK_TOOL, SESSION_FORGET_MEMORY_TOOL, KNOWLEDGE_SET_RETENTION_TOOL, SESSION_SAVE_EXPERIENCE_TOOL, KNOWLEDGE_UPVOTE_TOOL, KNOWLEDGE_DOWNVOTE_TOOL } from "./sessionMemoryDefinitions.js";
 
-export { sessionSaveLedgerHandler, sessionSaveHandoffHandler, sessionLoadContextHandler, knowledgeSearchHandler, knowledgeForgetHandler, sessionSearchMemoryHandler, backfillEmbeddingsHandler, memoryHistoryHandler, memoryCheckoutHandler, sessionSaveImageHandler, sessionViewImageHandler, sessionHealthCheckHandler, sessionForgetMemoryHandler, knowledgeSetRetentionHandler } from "./sessionMemoryHandlers.js";
+export { sessionSaveLedgerHandler, sessionSaveHandoffHandler, sessionLoadContextHandler, knowledgeSearchHandler, knowledgeForgetHandler, sessionSearchMemoryHandler, backfillEmbeddingsHandler, memoryHistoryHandler, memoryCheckoutHandler, sessionSaveImageHandler, sessionViewImageHandler, sessionHealthCheckHandler, sessionForgetMemoryHandler, knowledgeSetRetentionHandler, sessionSaveExperienceHandler, knowledgeUpvoteHandler, knowledgeDownvoteHandler } from "./sessionMemoryHandlers.js";
 
 
 // ── Compaction Handler (v0.4.0 — Enhancement #2) ──

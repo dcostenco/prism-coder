@@ -68,6 +68,10 @@ export class SupabaseStorage implements StorageBackend {
         title: `Session Rollup (${entry.rollup_count || 0} entries)`,
         agent_name: "prism-compactor",
       }),
+      // v4.0: Active Behavioral Memory fields
+      event_type: entry.event_type || "session",
+      ...(entry.confidence_score !== undefined && { confidence_score: entry.confidence_score }),
+      importance: entry.importance || 0,
     };
 
     return supabasePost("session_ledger", record);
@@ -472,6 +476,34 @@ export class SupabaseStorage implements StorageBackend {
     // Supabase PATCH doesn't return rowsAffected — return 0 (UI doesn't need exact count)
     debugLog(`[SupabaseStorage] TTL sweep completed for "${project}" (cutoff: ${cutoffStr})`);
     return { expired: 0 };
+  }
+
+  // ─── v4.0: Insight Graduation ──────────────────────────────────
+
+  async adjustImportance(
+    id: string,
+    delta: number,
+    userId: string
+  ): Promise<void> {
+    // Supabase PATCH can't do MAX(0, importance + delta) directly.
+    // Fetch current value first, compute new, then patch.
+    try {
+      const data = await supabaseGet("session_ledger", {
+        id: `eq.${id}`,
+        user_id: `eq.${userId}`,
+        select: "importance",
+      });
+      const rows = Array.isArray(data) ? data : [];
+      const current = (rows[0] as any)?.importance ?? 0;
+      const newVal = Math.max(0, current + delta);
+      await supabasePatch("session_ledger", { importance: newVal }, {
+        id: `eq.${id}`,
+        user_id: `eq.${userId}`,
+      });
+      debugLog(`[SupabaseStorage] Adjusted importance for ${id} by ${delta > 0 ? "+" : ""}${delta} (${current} → ${newVal})`);
+    } catch (e) {
+      debugLog("[SupabaseStorage] adjustImportance failed: " + (e instanceof Error ? e.message : String(e)));
+    }
   }
 
 }

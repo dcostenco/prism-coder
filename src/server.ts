@@ -123,6 +123,10 @@ import {
   SESSION_FORGET_MEMORY_TOOL,
   // ─── v3.1: TTL Retention tool ───
   KNOWLEDGE_SET_RETENTION_TOOL,
+  // v4.0: Active Behavioral Memory tools
+  SESSION_SAVE_EXPERIENCE_TOOL,
+  KNOWLEDGE_UPVOTE_TOOL,
+  KNOWLEDGE_DOWNVOTE_TOOL,
 
   sessionSaveLedgerHandler,
   sessionSaveHandoffHandler,
@@ -145,6 +149,10 @@ import {
   sessionForgetMemoryHandler,
   // ─── v3.1: TTL Retention handler ───
   knowledgeSetRetentionHandler,
+  // v4.0: Active Behavioral Memory handlers
+  sessionSaveExperienceHandler,
+  knowledgeUpvoteHandler,
+  knowledgeDownvoteHandler,
   // ─── v3.0: Agent Hivemind tools ───
   AGENT_REGISTRY_TOOLS,
   agentRegisterHandler,
@@ -188,6 +196,10 @@ const SESSION_MEMORY_TOOLS: Tool[] = [
   SESSION_FORGET_MEMORY_TOOL,  // session_forget_memory — GDPR-compliant memory deletion (Phase 2)
   // ─── v3.1: TTL Retention tool ───
   KNOWLEDGE_SET_RETENTION_TOOL, // knowledge_set_retention — set auto-expiry TTL for a project
+  // ─── v4.0: Active Behavioral Memory tools ───
+  SESSION_SAVE_EXPERIENCE_TOOL,  // session_save_experience — record typed experience events
+  KNOWLEDGE_UPVOTE_TOOL,         // knowledge_upvote — increase entry importance
+  KNOWLEDGE_DOWNVOTE_TOOL,       // knowledge_downvote — decrease entry importance
 ];
 
 
@@ -696,6 +708,20 @@ export function createServer() {
         case "knowledge_set_retention":
           if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
           return await knowledgeSetRetentionHandler(args);
+
+        // ─── v4.0: Active Behavioral Memory Tools ───
+
+        case "session_save_experience":
+          if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
+          return await sessionSaveExperienceHandler(args);
+
+        case "knowledge_upvote":
+          if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
+          return await knowledgeUpvoteHandler(args);
+
+        case "knowledge_downvote":
+          if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
+          return await knowledgeDownvoteHandler(args);
 
         // ─── v3.0: Agent Hivemind Tools ───
 

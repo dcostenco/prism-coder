@@ -45,6 +45,9 @@ import {
   isSessionHealthCheckArgs,        // v2.2.0: health check type guard
   isSessionForgetMemoryArgs,       // Phase 2: GDPR-compliant memory deletion type guard
   isKnowledgeSetRetentionArgs,     // v3.1: TTL retention policy type guard
+  // v4.0: Active Behavioral Memory type guards
+  isSessionSaveExperienceArgs,
+  isKnowledgeVoteArgs,
 } from "./sessionMemoryDefinitions.js";
 
 // v3.1: In-memory debounce lock for auto-compaction.
@@ -427,6 +430,7 @@ export async function sessionLoadContextHandler(args: unknown) {
   }
 
   const { project, level = "standard", role } = args;
+  const maxTokens = (args as any).max_tokens as number | undefined;  // v4.0
   const agentName = await getSetting("agent_name", "");
 
   const validLevels = ["quick", "standard", "deep"];
@@ -625,11 +629,30 @@ export async function sessionLoadContextHandler(args: unknown) {
     greetingBlock = `\n\n[👤 AGENT IDENTITY]\n${namePart}${rolePart}${skillPart}`;
   }
 
+  // Build the response object before v4.0 augmentations
+  let responseText = `📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${driftReport}${briefingBlock}${greetingBlock}${visualMemoryBlock}${skillBlock}${versionNote}`;
+
+  // ─── v4.0: Behavioral Warnings Injection ───────────────────
+  // If loadContext returned behavioral_warnings, add them to the
+  // formatted output so the agent sees them prominently.
+  const behavWarnings = (data as any)?.behavioral_warnings as Array<{summary: string; importance: number}> | undefined;
+  if (behavWarnings && behavWarnings.length > 0) {
+    responseText += `\n\n[⚠️ BEHAVIORAL WARNINGS]\n` +
+      behavWarnings.map(w => `- ${w.summary} (importance: ${w.importance})`).join("\n");
+  }
+
+  // ─── v4.0: Token Budget Truncation ─────────────────────────
+  // 1 token ≈ 4 chars heuristic. Truncate if response exceeds budget.
+  if (maxTokens && maxTokens > 0) {
+    const maxChars = maxTokens * 4;
+    if (responseText.length > maxChars) {
+      responseText = responseText.slice(0, maxChars) + "\n\n[… truncated to fit token budget]";
+      debugLog(`[session_load_context] Truncated response to ${maxTokens} tokens (${maxChars} chars)`);
+    }
+  }
+
   return {
-    content: [{
-      type: "text",
-      text: `📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${driftReport}${briefingBlock}${greetingBlock}${visualMemoryBlock}${skillBlock}${versionNote}`,
-    }],
+    content: [{ type: "text", text: responseText }],
     isError: false,
   };
 }
@@ -1800,6 +1823,138 @@ export async function knowledgeSetRetentionHandler(args: unknown) {
         (result.expired > 0
           ? `🗑️ Immediately expired **${result.expired}** entries already past the ${ttl_days}-day threshold.`
           : `✅ No existing entries exceeded the ${ttl_days}-day threshold.`),
+    }],
+    isError: false,
+  };
+}
+
+// ─── v4.0: Experience Save Handler ───────────────────────────
+
+/**
+ * Records a typed experience event for behavioral pattern detection.
+ * Unlike session_save_ledger (flat logs), this captures structured
+ * context → action → outcome data with confidence scoring.
+ *
+ * Corrections start with importance = 1 to jumpstart visibility;
+ * all other event types start at 0.
+ */
+export async function sessionSaveExperienceHandler(args: unknown) {
+  if (!isSessionSaveExperienceArgs(args)) {
+    throw new Error("Invalid arguments for session_save_experience");
+  }
+
+  const { project, event_type, context: ctx, action, outcome, correction, confidence_score, role } = args;
+  const storage = await getStorage();
+
+  debugLog(`[session_save_experience] Recording ${event_type} event for project="${project}"`);
+
+  // Format structured summary from event fields
+  let summary = `[${event_type.toUpperCase()}] ${ctx} → ${action} → ${outcome}`;
+  if (event_type === "correction" && correction) {
+    summary += ` | CORRECTION: ${correction}`;
+  }
+
+  // Auto-extract keywords from the structured summary
+  const keywords = toKeywordArray(summary);
+  debugLog(`[session_save_experience] Extracted ${keywords.length} keywords: ${keywords.slice(0, 5).join(", ")}...`);
+
+  const effectiveRole = role || await getSetting("default_role", "global");
+
+  const result = await storage.saveLedger({
+    project,
+    conversation_id: "experience-event",
+    user_id: PRISM_USER_ID,
+    role: effectiveRole,
+    event_type,
+    summary,
+    decisions: [
+      `Context: ${ctx}`,
+      `Action: ${action}`,
+      `Outcome: ${outcome}`,
+      ...(correction ? [`Correction: ${correction}`] : []),
+    ],
+    keywords,
+    confidence_score: typeof confidence_score === "number" ? confidence_score : undefined,
+    // Corrections start with importance 1 to jumpstart visibility
+    importance: event_type === "correction" ? 1 : 0,
+  });
+
+  // Fire-and-forget embedding generation
+  if (GOOGLE_API_KEY && result) {
+    const embeddingText = summary;
+    const savedEntry = Array.isArray(result) ? result[0] : result;
+    const entryId = (savedEntry as any)?.id;
+
+    if (entryId) {
+      generateEmbedding(embeddingText)
+        .then(async (embedding) => {
+          await storage.patchLedger(entryId, {
+            embedding: JSON.stringify(embedding),
+          });
+          debugLog(`[session_save_experience] Embedding saved for entry ${entryId}`);
+        })
+        .catch((err) => {
+          console.error(`[session_save_experience] Embedding failed (non-fatal): ${err.message}`);
+        });
+    }
+  }
+
+  return {
+    content: [{
+      type: "text",
+      text: `✅ Experience recorded: ${event_type} for project "${project}"\n` +
+        `Summary: ${summary}\n` +
+        (confidence_score !== undefined ? `Confidence: ${confidence_score}%\n` : "") +
+        `Importance: ${event_type === "correction" ? 1 : 0} (upvote to increase)`,
+    }],
+    isError: false,
+  };
+}
+
+// ─── v4.0: Knowledge Upvote Handler ──────────────────────────
+
+/**
+ * Upvotes a ledger entry to increase its importance.
+ * Entries reaching importance >= 7 are considered "graduated"
+ * and will always surface as Behavioral Warnings.
+ */
+export async function knowledgeUpvoteHandler(args: unknown) {
+  if (!isKnowledgeVoteArgs(args)) {
+    throw new Error("Invalid arguments for knowledge_upvote");
+  }
+
+  const storage = await getStorage();
+  await storage.adjustImportance(args.id, 1, PRISM_USER_ID);
+
+  debugLog(`[knowledge_upvote] Upvoted entry ${args.id}`);
+  return {
+    content: [{
+      type: "text",
+      text: `👍 Entry ${args.id} upvoted (+1 importance).`,
+    }],
+    isError: false,
+  };
+}
+
+// ─── v4.0: Knowledge Downvote Handler ────────────────────────
+
+/**
+ * Downvotes a ledger entry to decrease its importance.
+ * Importance is clamped at 0 (never goes negative).
+ */
+export async function knowledgeDownvoteHandler(args: unknown) {
+  if (!isKnowledgeVoteArgs(args)) {
+    throw new Error("Invalid arguments for knowledge_downvote");
+  }
+
+  const storage = await getStorage();
+  await storage.adjustImportance(args.id, -1, PRISM_USER_ID);
+
+  debugLog(`[knowledge_downvote] Downvoted entry ${args.id}`);
+  return {
+    content: [{
+      type: "text",
+      text: `👎 Entry ${args.id} downvoted (-1 importance).`,
     }],
     isError: false,
   };

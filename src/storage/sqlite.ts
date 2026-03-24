@@ -346,6 +346,45 @@ export class SqliteStorage implements StorageBackend {
         updated_at TEXT DEFAULT (datetime('now'))
       )
     `);
+
+    // ─── v4.0 Migration: Active Behavioral Memory ──────────────
+    // Three new columns for typed experience events and insight graduation.
+    // Uses the proven idempotent try/catch pattern for safe ALTER TABLE.
+
+    try {
+      await this.db.execute(
+        `ALTER TABLE session_ledger ADD COLUMN event_type TEXT DEFAULT 'session'`
+      );
+      debugLog("[SqliteStorage] v4.0 migration: added event_type column");
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
+
+    try {
+      await this.db.execute(
+        `ALTER TABLE session_ledger ADD COLUMN confidence_score INTEGER DEFAULT NULL`
+      );
+      debugLog("[SqliteStorage] v4.0 migration: added confidence_score column");
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
+
+    try {
+      await this.db.execute(
+        `ALTER TABLE session_ledger ADD COLUMN importance INTEGER DEFAULT 0`
+      );
+      debugLog("[SqliteStorage] v4.0 migration: added importance column");
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
+
+    // Composite indexes for behavioral queries (idempotent via IF NOT EXISTS)
+    await this.db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_ledger_event_type ON session_ledger(event_type)`
+    );
+    await this.db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_ledger_importance ON session_ledger(importance DESC)`
+    );
   }
 
   // ─── PostgREST Filter Parser ───────────────────────────────
@@ -476,8 +515,10 @@ export class SqliteStorage implements StorageBackend {
     await this.db.execute({
       sql: `INSERT INTO session_ledger
         (id, project, conversation_id, user_id, role, summary, todos, files_changed,
-         decisions, keywords, is_rollup, rollup_count, title, agent_name, created_at, session_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         decisions, keywords, is_rollup, rollup_count, title, agent_name,
+         event_type, confidence_score, importance,
+         created_at, session_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         id,
         entry.project,
@@ -493,6 +534,9 @@ export class SqliteStorage implements StorageBackend {
         entry.rollup_count || 0,
         entry.is_rollup ? `Session Rollup (${entry.rollup_count || 0} entries)` : null,
         entry.is_rollup ? "prism-compactor" : null,
+        entry.event_type || "session",   // v4.0: default to 'session'
+        entry.confidence_score ?? null,   // v4.0: nullable
+        entry.importance || 0,            // v4.0: default to 0
         now,
         now,
       ],
@@ -752,6 +796,29 @@ export class SqliteStorage implements StorageBackend {
     context.active_decisions = this.parseJsonColumn(handoff.active_decisions);
     context.active_branch = handoff.active_branch;
     context.key_context = handoff.key_context;
+
+    // ─── v4.0: Behavioral Warnings (Standard & Deep) ────────────
+    // Hoisted above the branch so both levels get warnings without duplication.
+    // Filters: role-scoped, non-archived, non-deleted, high importance.
+    const warningsResult = await this.db.execute({
+      sql: `SELECT summary, importance
+            FROM session_ledger
+            WHERE project = ? AND user_id = ? AND role = ?
+              AND event_type = 'correction'
+              AND importance >= 3
+              AND deleted_at IS NULL
+              AND archived_at IS NULL
+            ORDER BY importance DESC
+            LIMIT 5`,
+      args: [project, userId, effectiveRole],
+    });
+
+    if (warningsResult.rows.length > 0) {
+      context.behavioral_warnings = warningsResult.rows.map(r => ({
+        summary: r.summary,
+        importance: r.importance,
+      }));
+    }
 
     if (level === "standard") {
       // Add recent ledger entries (role-scoped)
@@ -1496,7 +1563,51 @@ export class SqliteStorage implements StorageBackend {
 
     const expired = result.rowsAffected || 0;
     debugLog(`[SqliteStorage] TTL sweep: expired ${expired} entries for "${project}" (cutoff: ${cutoffStr})`);
+
+    // ─── v4.0: Importance Decay ──────────────────────────────────
+    // Decay importance of experience entries not referenced in 30 days.
+    // This prevents "Insight Bloat" — old corrections that are no longer
+    // relevant gradually lose their weight and stop appearing as warnings.
+    // Only targets typed experience events (event_type != 'session'),
+    // so regular session logs are never affected.
+    const decayResult = await this.db.execute({
+      sql: `UPDATE session_ledger
+            SET importance = MAX(0, importance - 1)
+            WHERE project = ? AND user_id = ?
+              AND importance > 0
+              AND event_type != 'session'
+              AND created_at < datetime('now', '-30 days')
+              AND deleted_at IS NULL`,
+      args: [project, userId],
+    });
+    const decayed = decayResult.rowsAffected || 0;
+    if (decayed > 0) {
+      debugLog(`[SqliteStorage] Importance decay: reduced ${decayed} entries for "${project}"`);
+    }
+
     return { expired };
+  }
+
+  // ─── v4.0: Insight Graduation ──────────────────────────────────
+  //
+  // Adjusts the importance score of a ledger entry.
+  // Used by knowledge_upvote (+1) and knowledge_downvote (-1).
+  // Importance is clamped via MAX(0, ...) — never goes negative.
+  // Entries reaching importance >= 7 are considered "graduated"
+  // and will appear prominently in behavioral warnings.
+
+  async adjustImportance(
+    id: string,
+    delta: number,
+    userId: string
+  ): Promise<void> {
+    await this.db.execute({
+      sql: `UPDATE session_ledger
+            SET importance = MAX(0, importance + ?)
+            WHERE id = ? AND user_id = ?`,
+      args: [delta, id, userId],
+    });
+    debugLog(`[SqliteStorage] Adjusted importance for ${id} by ${delta > 0 ? "+" : ""}${delta}`);
   }
 
 }

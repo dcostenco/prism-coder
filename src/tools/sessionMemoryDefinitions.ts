@@ -132,6 +132,11 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
         type: "string",
         description: "v3.0: Agent role for Hivemind scoping (e.g., 'dev', 'qa', 'pm'). Defaults to 'global'. When set, also injects active_team roster.",
       },
+      // v4.0: Token Budget
+      max_tokens: {
+        type: "integer",
+        description: "Maximum token budget for context response. Uses 1 token ≈ 4 chars heuristic. When set, the response is truncated to fit within the budget. Default: unlimited.",
+      },
     },
     required: ["project"],
   },
@@ -790,3 +795,131 @@ export function isKnowledgeSetRetentionArgs(
   );
 }
 
+// ─── v4.0: Active Behavioral Memory Tools ────────────────────
+
+export const SESSION_SAVE_EXPERIENCE_TOOL: Tool = {
+  name: "session_save_experience",
+  description:
+    "Record a typed experience event. Unlike session_save_ledger (flat logs), " +
+    "this captures structured behavioral data for pattern detection.\n\n" +
+    "Event Types:\n" +
+    "- **correction**: Agent was corrected by user\n" +
+    "- **success**: Task completed successfully\n" +
+    "- **failure**: Task failed\n" +
+    "- **learning**: New knowledge acquired",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project: {
+        type: "string",
+        description: "Project identifier.",
+      },
+      event_type: {
+        type: "string",
+        enum: ["correction", "success", "failure", "learning"],
+        description: "Type of behavioral event.",
+      },
+      context: {
+        type: "string",
+        description: "What the agent was doing when the event occurred.",
+      },
+      action: {
+        type: "string",
+        description: "What action was tried.",
+      },
+      outcome: {
+        type: "string",
+        description: "What happened as a result.",
+      },
+      correction: {
+        type: "string",
+        description: "What should have been done instead (for correction type).",
+      },
+      confidence_score: {
+        type: "integer",
+        minimum: 1,
+        maximum: 100,
+        description: "Agent's confidence in the outcome (1-100).",
+      },
+      role: {
+        type: "string",
+        description: "Agent role for Hivemind scoping. Defaults to 'global'.",
+      },
+    },
+    required: ["project", "event_type", "context", "action", "outcome"],
+  },
+};
+
+export function isSessionSaveExperienceArgs(
+  args: unknown
+): args is {
+  project: string;
+  event_type: string;
+  context: string;
+  action: string;
+  outcome: string;
+  correction?: string;
+  confidence_score?: number;
+  role?: string;
+} {
+  return (
+    typeof args === "object" &&
+    args !== null &&
+    "project" in args &&
+    typeof (args as any).project === "string" &&
+    "event_type" in args &&
+    typeof (args as any).event_type === "string" &&
+    "context" in args &&
+    typeof (args as any).context === "string" &&
+    "action" in args &&
+    typeof (args as any).action === "string" &&
+    "outcome" in args &&
+    typeof (args as any).outcome === "string"
+  );
+}
+
+export const KNOWLEDGE_UPVOTE_TOOL: Tool = {
+  name: "knowledge_upvote",
+  description:
+    "Upvote a memory entry to increase its importance (graduation). " +
+    "Entries with importance >= 7 become 'graduated' insights that always " +
+    "surface in behavioral warnings.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: {
+        type: "string",
+        description: "The UUID of the ledger entry to upvote.",
+      },
+    },
+    required: ["id"],
+  },
+};
+
+export const KNOWLEDGE_DOWNVOTE_TOOL: Tool = {
+  name: "knowledge_downvote",
+  description:
+    "Downvote a memory entry to decrease its importance. " +
+    "Importance cannot go below 0.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: {
+        type: "string",
+        description: "The UUID of the ledger entry to downvote.",
+      },
+    },
+    required: ["id"],
+  },
+};
+
+export function isKnowledgeVoteArgs(
+  args: unknown
+): args is { id: string } {
+  return (
+    typeof args === "object" &&
+    args !== null &&
+    "id" in args &&
+    typeof (args as { id: string }).id === "string"
+  );
+}

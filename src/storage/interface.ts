@@ -53,6 +53,13 @@ export interface LedgerEntry {
   rollup_count?: number;
   archived_at?: string | null;
 
+  // ─── v4.0: Active Behavioral Memory ───────────────────────────
+  // Typed experience events that enable pattern detection and proactive warnings.
+  // Evolves Prism from passive session logging to behavioral learning.
+  event_type?: string;       // 'session' | 'correction' | 'success' | 'failure' | 'learning'
+  confidence_score?: number; // 1-100 — agent's confidence in the outcome
+  importance?: number;       // 0+ — upvote-driven importance scoring (for insight graduation)
+
   // ─── Phase 2: GDPR Soft Delete ───────────────────────────────
   // When deleted_at is set, the entry is "tombstoned" — hidden from
   // all search queries but still physically present for audit trails.
@@ -420,6 +427,20 @@ export interface StorageBackend {
    * Returns count of expired entries.
    */
   expireByTTL(project: string, ttlDays: number, userId: string): Promise<{ expired: number }>;
+
+  // ─── v4.0: Active Behavioral Memory ──────────────────────────
+
+  /**
+   * Adjust the importance score of a ledger entry.
+   * Used by knowledge_upvote (+1) and knowledge_downvote (-1).
+   * Importance is clamped to >= 0 (never goes negative).
+   * Entries at importance >= 7 are considered "graduated" insights.
+   *
+   * @param id - UUID of the ledger entry
+   * @param delta - Amount to adjust by (+1 or -1 typically)
+   * @param userId - Owner verification (MUST match entry's user_id)
+   */
+  adjustImportance(id: string, delta: number, userId: string): Promise<void>;
 }
 
 // ─── v3.1 Types ────────────────────────────────────────────────

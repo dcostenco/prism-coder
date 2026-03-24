@@ -1136,6 +1136,18 @@ See [What's New in v3.0.1](#whats-new-in-v301---agent-identity--brain-clean-up-)
 
 See [What's New in v3.0.0 — Agent Hivemind](#whats-new-in-v300---agent-hivemind-) above.
 
+### 🔜 v4.0 — Active Behavioral Memory (In Development)
+
+Evolves Prism from passive session logging to an **experience learning engine** that shapes agent behavior over time.
+
+| Feature | Description |
+|---------|-------------|
+| **Structured Event Types** | Typed experience events (`correction`, `success`, `failure`, `learning`) with `confidence_score` (1-100) — agents don't just log, they learn |
+| **Token-Budgeted Context Loading** | `max_tokens` param on `session_load_context` — guarantees constant cost regardless of DB size (1 token ≈ 4 chars heuristic) |
+| **`session_save_experience` Tool** | Dedicated tool for behavioral data: context → action → outcome → correction. Auto-extracts keywords, seeds importance |
+| **Insight Graduation System** | `knowledge_upvote` / `knowledge_downvote` tools. Importance ≥ 7 → graduated rule. 30-day decay prevents bloat |
+| **Behavioral Warnings** | High-importance corrections auto-surface as `[⚠️ BEHAVIORAL WARNINGS]` in `session_load_context` — agents proactively avoid past mistakes |
+
 ### 🚀 Future Ideas
 
 | Feature | Issue | Description |
