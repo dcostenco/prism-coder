@@ -625,6 +625,47 @@ The tool and dashboard button both call the same repair logic — the dashboard 
 | `session_search_memory` | Semantic search with `enable_trace` | `query`, `enable_trace` | Results + `MemoryTrace` in `content[1]` |
 | `knowledge_search` | Knowledge search with `enable_trace` | `query`, `enable_trace` | Results + `MemoryTrace` in `content[1]` |
 
+### v4.0 Behavioral Memory Tools
+
+| Tool | Purpose | Key Args |
+|------|---------|----------|
+| `session_save_experience` | Record behavioral events with importance tracking | `project`, `event_type`, `context`, `action`, `outcome` |
+
+**Dynamic Roles (v4.0):** `role` is now *optional* on all tools. Set your **Default Role** once in the dashboard (⚙️ Settings → Agent Identity) and it auto-applies everywhere — no need to pass it per call.
+
+**Token Budget (v4.0):** Pass `max_tokens` to `session_load_context` to cap response size:
+
+```json
+{ "name": "session_load_context", "arguments": {
+    "project": "my-app", "level": "standard", "max_tokens": 2000
+}}
+```
+
+> 💡 **Planned for v4.1:** `max_tokens` will also be configurable as a dashboard setting, so it applies automatically without per-call arguments — like dynamic roles.
+
+**Recording experiences:**
+
+```json
+{ "name": "session_save_experience", "arguments": {
+    "project": "my-app",
+    "event_type": "correction",
+    "context": "User asked to add a database migration",
+    "action": "Ran ALTER TABLE directly in production",
+    "outcome": "Data was corrupted",
+    "correction": "Always create a migration file and test in staging first",
+    "confidence_score": 95
+}}
+```
+
+**Event types:** `correction` (user corrected the agent), `success` (task went well), `failure` (task failed), `learning` (new knowledge acquired).
+
+**How behavioral memory works:**
+1. Agent records experiences via `session_save_experience`
+2. Prism assigns an **importance score** based on event type + confidence
+3. Stale entries **auto-decay** in importance over time
+4. On `session_load_context`, high-importance corrections auto-surface as `[⚠️ BEHAVIORAL WARNINGS]`
+5. Agent sees warnings and avoids repeating past mistakes
+
 ### Code Mode Templates (v2.1)
 
 Instead of writing custom JavaScript, pass a `template` name for instant extraction:
