@@ -14,7 +14,7 @@
 
 ## Table of Contents
 
-- [What's New (v3.1.0)](#whats-new-in-v310---memory-lifecycle-)
+- [What's New (v3.1.0)](#whats-new-in-v310--memory-lifecycle-)
 - [How Prism Compares](#how-prism-compares)
 - [Quick Start](#quick-start-zero-config--local-mode)
 - [Mind Palace Dashboard](#-the-mind-palace-dashboard)
