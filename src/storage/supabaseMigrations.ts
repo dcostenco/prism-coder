@@ -43,13 +43,41 @@ export interface Migration {
  * single transaction. Use IF NOT EXISTS / IF EXISTS guards generously.
  */
 export const MIGRATIONS: Migration[] = [
-  // Future migrations go here. Example:
-  // {
-  //   version: 28,
-  //   name: "add_some_column",
-  //   sql: `ALTER TABLE session_ledger ADD COLUMN IF NOT EXISTS some_col TEXT DEFAULT NULL;`,
-  // },
+  {
+    version: 26,
+    name: "active_behavioral_memory",
+    sql: `
+      -- v4.0: Active Behavioral Memory columns
+      ALTER TABLE session_ledger ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'session';
+      ALTER TABLE session_ledger ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT NULL;
+      ALTER TABLE session_ledger ADD COLUMN IF NOT EXISTS importance INTEGER NOT NULL DEFAULT 0;
+
+      -- Soft-delete / archival columns
+      ALTER TABLE session_ledger ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE session_ledger ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ DEFAULT NULL;
+      ALTER TABLE session_ledger ADD COLUMN IF NOT EXISTS deleted_reason TEXT DEFAULT NULL;
+
+      -- Indexes
+      CREATE INDEX IF NOT EXISTS idx_ledger_event_type ON session_ledger(event_type);
+      CREATE INDEX IF NOT EXISTS idx_ledger_importance ON session_ledger(importance DESC);
+
+      -- Partial index for high-priority warnings
+      CREATE INDEX IF NOT EXISTS idx_ledger_behavioral_warnings
+        ON session_ledger(project, user_id, role, importance DESC)
+        WHERE event_type = 'correction' AND importance >= 3
+          AND deleted_at IS NULL AND archived_at IS NULL;
+    `,
+  },
+  // Future migrations go here (version 28+)
 ];
+
+/**
+ * Current schema version — derived from the MIGRATIONS array.
+ * Automatically updates when new migrations are added.
+ * Used for logging and diagnostics.
+ */
+export const CURRENT_SCHEMA_VERSION =
+  MIGRATIONS.length > 0 ? MIGRATIONS[MIGRATIONS.length - 1].version : 27;
 
 // ─── Runner ──────────────────────────────────────────────────────
 
@@ -65,7 +93,9 @@ export async function runAutoMigrations(): Promise<void> {
     return; // Nothing to apply
   }
 
-  console.error(`[Prism Auto-Migration] Checking ${MIGRATIONS.length} pending migration(s)…`);
+  console.error(
+    `[Prism Auto-Migration] Schema v${CURRENT_SCHEMA_VERSION} — checking ${MIGRATIONS.length} migration(s)…`
+  );
 
   for (const migration of MIGRATIONS) {
     try {

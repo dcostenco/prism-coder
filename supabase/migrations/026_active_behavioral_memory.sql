@@ -35,6 +35,9 @@ ALTER TABLE session_ledger
 ALTER TABLE session_ledger
   ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ DEFAULT NULL;
 
+ALTER TABLE session_ledger
+  ADD COLUMN IF NOT EXISTS deleted_reason TEXT DEFAULT NULL;
+
 -- ─── 2. Indexes for behavioral queries ──────────────────────────
 -- Fast lookups by event type (corrections, successes, etc.)
 CREATE INDEX IF NOT EXISTS idx_ledger_event_type
