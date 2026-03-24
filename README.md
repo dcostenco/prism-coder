@@ -45,22 +45,22 @@
 
 | Feature | Description |
 |---|---|
-| 🧠 **Active Behavioral Memory** | New `session_save_experience` tool — agents log actions, outcomes, corrections, and confidence scores. Prism tracks importance, applies decay over time, and injects behavioral warnings into context loading so agents learn from past mistakes. |
-| 🎯 **Dynamic Role Resolution** | Role parameter is now fully optional across all tools. The server auto-resolves from dashboard settings via `getSetting("default_role")` — set your role once in the Mind Palace Dashboard, and it applies everywhere. No more hardcoding `role: "global"`. |
-| 📏 **Token Budget** | New `max_tokens` parameter on `session_load_context` — set a token budget and the response is intelligently truncated to fit. Uses a 1 token ≈ 4 chars heuristic. |
-| 📉 **Importance Decay** | Stale behavioral experiences automatically decay over time — older corrections fade in importance to keep context fresh and relevant. |
-| 🔧 **Claude Code Hooks** | Refined SessionStart/Stop hook samples that reliably trigger MCP tool calls. Simplified from multi-step workflows to single imperative instructions. |
+| 🧠 **Behavioral Memory** | `session_save_experience` — log actions, outcomes, corrections with confidence scores. Auto-injects warnings into context so agents learn from mistakes. |
+| 🎯 **Dynamic Roles** | Role auto-resolves from dashboard settings. Set once in Mind Palace, applies everywhere. |
+| 📏 **Token Budget** | `max_tokens` on `session_load_context` — intelligently truncates to fit your budget. |
+| 📉 **Importance Decay** | Stale corrections auto-fade over time to keep context fresh. |
+| 🔧 **Claude Code Hooks** | Simplified SessionStart/Stop hooks that reliably trigger MCP tool calls. |
 
 <details>
 <summary><strong>What's in v3.1.0 — Memory Lifecycle 🔄</strong></summary>
 
 | Feature | Description |
 |---|---|
-| 📊 **Memory Analytics** | New **Memory Analytics** card in the dashboard — 14-day sparkline chart, active sessions count, rollup savings, and average context richness. Powered by `getAnalytics()` on both SQLite and Supabase backends. |
-| ⏳ **Automated Data Retention (TTL)** | Set a per-project data retention policy via `knowledge_set_retention` MCP tool or the dashboard **Lifecycle Controls** card. Entries older than the TTL are soft-deleted (GDPR-compliant `archived_at` tombstone) every 12 hours automatically. Rollups are never expired. Minimum 7 days to prevent accidental mass-delete. |
-| 🗜️ **Smart Auto-Compaction** | After every `session_save_ledger`, Prism runs a background health check and triggers compaction automatically if the brain is degraded or unhealthy — gated by `compaction_auto` setting and debounced per-project to prevent concurrent Gemini calls. **Compact Now** button also available in the dashboard. |
-| 📦 **PKM Export (Obsidian / Logseq)** | Export any project's full memory as a ZIP archive of Markdown files — one file per session with YAML-like frontmatter, TODOs, decisions, files-changed, and `#hashtag` keywords. Includes an `_index.md` with `[[wikilink]]` references. Click **Export ZIP** in the dashboard Lifecycle Controls card. |
-| 🧪 **Expanded Test Suite** | 37 new Vitest tests (95 total) — covers analytics queries, TTL soft-delete idempotency, rollup preservation, `activeCompactions` Set memory-leak prevention, type guards, export Markdown structure, and TTL sweep scheduler contracts. |
+| 📊 **Memory Analytics** | Dashboard sparkline chart, session counts, rollup savings, context richness metrics. |
+| ⏳ **Data Retention (TTL)** | Per-project TTL via `knowledge_set_retention` or dashboard. Auto-expires old entries every 12h. |
+| 🗜️ **Auto-Compaction** | Background health check after saves — auto-compacts when brain is degraded. |
+| 📦 **PKM Export** | Export project memory as ZIP of Markdown files for Obsidian/Logseq. |
+| 🧪 **95 Tests** | Analytics, TTL, rollup, compaction, type guards, and export coverage. |
 
 </details>
 
@@ -69,10 +69,10 @@
 
 | Feature | Description |
 |---|---|
-| 🧹 **Brain Health Clean-up** | New **Fix Issues** button in the Mind Palace Dashboard's Brain Health card — detects orphaned handoffs, missing embeddings, and stale rollups, then cleans them up in one click without needing the MCP tool. |
-| 👤 **Agent Identity Settings** | Dashboard Settings → Agent Identity panel lets you set a **Default Role** (`dev`, `qa`, `pm`…) and **Agent Name** (e.g. `Dmitri`). Both values auto-apply as fallbacks in all memory and Hivemind tools — no need to pass them per call. |
-| 📜 **Role-Scoped Skills** | Each agent role can have its own persistent skill/rules document stored in the dashboard (⚙️ Settings → Skills). It is automatically injected into every `session_load_context` response so the agent boots with its rules pre-loaded. |
-| 🔤 **Resource Formatting Fix** | `memory://{project}/handoff` resources now render as formatted plain text (Last Summary, TODOs, Keywords) instead of a raw JSON blob — readable in Claude Desktop's paperclip attach panel. |
+| 🧹 **Brain Health Clean-up** | One-click **Fix Issues** button — detects and cleans orphaned handoffs, missing embeddings, stale rollups. |
+| 👤 **Agent Identity** | Set Default Role and Agent Name in dashboard — auto-applies as fallback in all tools. |
+| 📜 **Role-Scoped Skills** | Per-role persistent rules documents, auto-injected at `session_load_context`. |
+| 🔤 **Resource Formatting** | `memory://` resources render as formatted text instead of raw JSON. |
 
 </details>
 
@@ -81,13 +81,13 @@
 
 | Feature | Description |
 |---|---|
-| 🐝 **Role-Scoped Memory** | Optional `role` parameter on ledger, handoff, and context loading — each agent role (dev, qa, pm, lead, security, ux) gets its own isolated memory lane within a project. Defaults to `'global'` for full backward compatibility. |
-| 👥 **Agent Registry** | New `agent_register`, `agent_heartbeat`, `agent_list_team` tools — agents announce their presence, pulse their status, and discover who else is working on the team. Stale agents are auto-pruned after 30 minutes. |
-| 🎯 **Team Roster Injection** | When loading context with a role, Prism automatically injects a "Team Roster" showing active teammates, their roles, current tasks, and last heartbeat — true multi-agent awareness without extra tool calls. |
-| ⚙️ **Dashboard Settings** | New Settings modal with runtime toggles (auto-capture, theme, context depth) backed by a persistent `system_settings` key-value store. Environment variables override DB settings for safety. |
-| 📡 **Hivemind Radar** | New dashboard widget showing active agents, their roles (with icons), current tasks, and heartbeat timestamps — a real-time team coordination dashboard. |
-| 🔒 **Conditional Tool Registration** | `PRISM_ENABLE_HIVEMIND` env var gates Hivemind tools — users who don't need multi-agent features keep the same lean tool count as v2.x. |
-| ✅ **Test Suite** | 58 tests across 4 suites (storage, tools, dashboard, load) with Vitest — includes concurrent write stress tests, role isolation verification, and 0.2ms/write performance benchmarks. |
+| 🐝 **Role-Scoped Memory** | Optional `role` param — each role gets isolated memory within a project. |
+| 👥 **Agent Registry** | `agent_register`, `agent_heartbeat`, `agent_list_team` — multi-agent discovery. |
+| 🎯 **Team Roster** | Auto-injected teammate awareness during context loading. |
+| ⚙️ **Dashboard Settings** | Runtime toggles backed by persistent key-value store. |
+| 📡 **Hivemind Radar** | Dashboard widget showing active agents, roles, and heartbeats. |
+| 🔒 **Conditional Tools** | `PRISM_ENABLE_HIVEMIND` gates multi-agent tools. |
+| ✅ **58 Tests** | Storage, tools, dashboard, concurrent writes, role isolation. |
 
 </details>
 
@@ -97,10 +97,10 @@
 
 | Feature | Description |
 |---|---|
-| 🔍 **Memory Tracing (Phase 1)** | Every search now returns a structured `MemoryTrace` with latency breakdown (`embedding_ms`, `storage_ms`, `total_ms`), search strategy, and scoring metadata — surfaced as a separate `content[1]` block for LangSmith integration. |
-| 🛡️ **GDPR Memory Deletion (Phase 2)** | New `session_forget_memory` tool with soft-delete (tombstoning via `deleted_at`) and hard-delete. Ownership guards prevent cross-user deletion. `deleted_reason` column captures GDPR Article 17 justification. Top-K Hole solved by filtering inside SQL, not post-query (ensures we always return exactly K results, rather than returning fewer because deleted items were filtered out after the vector search). |
-| 🔗 **LangChain Integration (Phase 3)** | `PrismMemoryRetriever` and `PrismKnowledgeRetriever` — async-first `BaseRetriever` subclasses that wrap Prism MCP's traced search endpoints. Trace metadata flows automatically into `Document.metadata["trace"]` for LangSmith visibility. |
-| 🧩 **LangGraph Research Agent** | Full example in `examples/langgraph-agent/` — a 5-node agentic research loop with MCP bridge, persistent memory, and `EnsembleRetriever` hybrid search. |
+| 🔍 **Memory Tracing** | `MemoryTrace` with latency breakdown and scoring metadata for LangSmith. |
+| 🛡️ **GDPR Deletion** | `session_forget_memory` with soft/hard delete and Article 17 justification. |
+| 🔗 **LangChain Integration** | `PrismMemoryRetriever` / `PrismKnowledgeRetriever` BaseRetriever adapters. |
+| 🧩 **LangGraph Agent** | 5-node research agent example with MCP bridge and hybrid search. |
 
 </details>
 
@@ -109,8 +109,8 @@
 
 | Feature | Description |
 |---|---|
-| 🔄 **Dynamic Versioning** | Server version is now derived from `package.json` at startup — MCP handshake, dashboard badge, and npm metadata always stay in sync. Falls back to `0.0.0` if unreadable. |
-| 🛡️ **Embedding Dimension Validation** | `generateEmbedding()` now validates the returned vector is exactly 768 dimensions at runtime, catching model regressions before storing bad vectors. Removed `as any` cast in favor of proper `EmbedContentRequest` typing. |
+| 🔄 **Dynamic Versioning** | Version derived from `package.json` — MCP handshake, dashboard, and npm stay in sync. |
+| 🛡️ **Embedding Validation** | Validates 768-dimension vectors at runtime to catch model regressions. |
 
 </details>
 
@@ -130,11 +130,11 @@
 
 | Feature | Description |
 |---|---|
-| 🤖 **LangGraph Research Agent** | New `examples/langgraph-agent/` — a 5-node agentic research agent (plan→search→analyze→decide→answer→save) with autonomous looping, MCP integration, and persistent memory. |
-| 🧠 **Agentic Memory** | `save_session` node persists research findings to a ledger — the agent doesn't just answer and forget. Routes to Prism's `session_save_ledger` in MCP-connected mode. |
-| 🔌 **MCP Client Bridge** | Raw JSON-RPC 2.0 client (`mcp_client.py`) for Python 3.9+ — dynamically discovers and wraps Prism MCP tools as LangChain `StructuredTool` objects. |
-| 🔧 **Storage Abstraction Fix** | Resource/Prompt handlers now route through `getStorage()` instead of calling Supabase directly — eliminates EOF crashes when reading `memory://` resources. |
-| 🛡️ **Error Boundaries** | Resource handlers catch errors gracefully and return proper MCP error responses (`isError: true`) instead of crashing the server process. |
+| 🤖 **LangGraph Agent** | 5-node research agent with autonomous looping, MCP integration, persistent memory. |
+| 🧠 **Agentic Memory** | `save_session` node persists findings to ledger — agents don't just answer and forget. |
+| 🔌 **MCP Client Bridge** | JSON-RPC 2.0 client wraps Prism tools as LangChain `StructuredTool` objects. |
+| 🔧 **Storage Fix** | Resource/Prompt handlers route through `getStorage()` — eliminates EOF crashes. |
+| 🛡️ **Error Boundaries** | Graceful error handling with proper MCP error responses. |
 
 </details>
 
@@ -1198,40 +1198,29 @@ See [`vertex-ai/`](vertex-ai/) for setup and benchmarks.
 
 > **[View the full project board →](https://github.com/users/dcostenco/projects/1/views/1)**
 
-### ✅ v3.0.1 — Agent Identity & Brain Clean-up (Shipped!)
+### ✅ v4.0 — Behavioral Memory (Shipped!)
 
-See [What's New in v3.0.1](#whats-new-in-v301---agent-identity--brain-clean-up-) above.
+See [What's New in v4.0.0](#whats-new-in-v400--behavioral-memory-) above.
+
+### ✅ v3.1 — Memory Lifecycle (Shipped!)
+
+See [What's in v3.1.0](#whats-in-v310--memory-lifecycle-) above.
 
 ### ✅ v3.0 — Agent Hivemind (Shipped!)
 
-See [What's New in v3.0.0 — Agent Hivemind](#whats-new-in-v300---agent-hivemind-) above.
-
-### 🔜 v4.0 — Active Behavioral Memory (In Development)
-
-Evolves Prism from passive session logging to an **experience learning engine** that shapes agent behavior over time.
-
-| Feature | Description |
-|---------|-------------|
-| **Structured Event Types** | Typed experience events (`correction`, `success`, `failure`, `learning`) with `confidence_score` (1-100) — agents don't just log, they learn |
-| **Token-Budgeted Context Loading** | `max_tokens` param on `session_load_context` — guarantees constant cost regardless of DB size (1 token ≈ 4 chars heuristic) |
-| **`session_save_experience` Tool** | Dedicated tool for behavioral data: context → action → outcome → correction. Auto-extracts keywords, seeds importance |
-| **Insight Graduation System** | `knowledge_upvote` / `knowledge_downvote` tools. Importance ≥ 7 → graduated rule. 30-day decay prevents bloat |
-| **Behavioral Warnings** | High-importance corrections auto-surface as `[⚠️ BEHAVIORAL WARNINGS]` in `session_load_context` — agents proactively avoid past mistakes |
+See [What's in v3.0.0](#whats-in-v300--agent-hivemind-) above.
 
 ### 🚀 Future Ideas
 
 | Feature | Issue | Description |
 |---------|-------|-------------|
-| **Role-Scoped Skills & Rules** | — | Each agent role (`dev`, `qa`, `pm`, etc.) gets its own persistent skill/rules document. Preloaded automatically at session start via `session_load_context`. Skills editable and uploadable from the Mind Palace Dashboard (⚙️ → Skills tab per role). Stored in `configStorage` per-role key — backend already exists. |
-| OpenTelemetry SDK Integration | [#6](https://github.com/dcostenco/prism-mcp/issues/6) | W3C-compliant tracing with Jaeger/Zipkin export |
-| GDPR Right to Portability | [#7](https://github.com/dcostenco/prism-mcp/issues/7) | `session_export_memory` tool for Art. 20 compliance |
-| Multi-agent CRDT Conflict Resolution | [#9](https://github.com/dcostenco/prism-mcp/issues/9) | Conflict-free replicated data types for concurrent agent edits |
-| Memory Analytics Dashboard | [#10](https://github.com/dcostenco/prism-mcp/issues/10) | Usage trends, token costs, and memory health metrics |
-| Pluggable LLM Providers | [#13](https://github.com/dcostenco/prism-mcp/issues/13) | Anthropic, OpenAI, Ollama provider adapters |
-| VLM / OCR for Visual Memory | [#14](https://github.com/dcostenco/prism-mcp/issues/14) | Auto-extract text and insights from stored images |
-| Automated Data Retention (TTL) | [#16](https://github.com/dcostenco/prism-mcp/issues/16) | Time-based memory expiration policies |
-| Obsidian / Logseq Export Bridge | [#17](https://github.com/dcostenco/prism-mcp/issues/17) | Export memory to Markdown knowledge bases |
-| Interactive Knowledge Graph Editor | [#19](https://github.com/dcostenco/prism-mcp/issues/19) | Visual graph editor inside the Mind Palace dashboard |
+| Insight Graduation | — | `knowledge_upvote` / `knowledge_downvote` — importance ≥ 7 promotes to rule |
+| OpenTelemetry | [#6](https://github.com/dcostenco/prism-mcp/issues/6) | W3C tracing with Jaeger/Zipkin export |
+| GDPR Portability | [#7](https://github.com/dcostenco/prism-mcp/issues/7) | `session_export_memory` for Art. 20 |
+| CRDT Conflict Resolution | [#9](https://github.com/dcostenco/prism-mcp/issues/9) | Conflict-free types for concurrent edits |
+| Pluggable LLM Providers | [#13](https://github.com/dcostenco/prism-mcp/issues/13) | Anthropic, OpenAI, Ollama adapters |
+| VLM / OCR for Images | [#14](https://github.com/dcostenco/prism-mcp/issues/14) | Auto-extract text from stored images |
+| Knowledge Graph Editor | [#19](https://github.com/dcostenco/prism-mcp/issues/19) | Visual graph editor in Mind Palace |
 
 ### 🧰 Infrastructure & Stack
 
