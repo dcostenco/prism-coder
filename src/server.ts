@@ -72,6 +72,7 @@ import { SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID, PRISM_ENABLE_HIVE
 import { getSyncBus } from "./sync/factory.js";
 import type { SyncBus, SyncEvent } from "./sync/index.js";
 import { startDashboardServer } from "./dashboard/server.js";
+import { acquireLock, registerShutdownHandlers } from "./lifecycle.js";
 
 // ─── v2.3.6 FIX: Use Storage Abstraction for Prompts/Resources ───
 // CRITICAL FIX: Previously imported supabaseRpc/supabaseGet directly,
@@ -844,6 +845,10 @@ export function createSandboxServer() {
  * responses to stdout. Log messages go to stderr.
  */
 export async function startServer() {
+  // MUST BE FIRST: Kill any zombie processes and acquire the singleton PID lock
+  // before touching SQLite. This prevents lock contention on prism-config.db.
+  acquireLock();
+
   // Pre-warm the config settings cache BEFORE connecting the MCP transport.
   // This ensures getSettingSync() returns real values (agent_name, default_role)
   // during the Initialize handshake — zero extra latency for resource reads.
@@ -853,6 +858,11 @@ export async function startServer() {
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // Register graceful shutdown handlers (SIGTERM, SIGINT, SIGHUP, stdin close).
+  // The stdin close handler is critical — when MCP clients disconnect, they
+  // often just close the pipe without sending a signal, leaving zombie processes.
+  registerShutdownHandlers();
 
   // Pre-warm storage AFTER connecting — fired async so we never block the
   // stdio handshake. Supabase REST initialization can take 500ms–5s; blocking

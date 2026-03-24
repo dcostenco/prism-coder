@@ -139,3 +139,17 @@ export async function getAllSettings(): Promise<Record<string, string>> {
   }
   return settings;
 }
+
+/**
+ * Closes the config SQLite client to release the file handle on prism-config.db.
+ * Called by the lifecycle module during graceful shutdown.
+ */
+export function closeConfigStorage() {
+  if (configClient) {
+    try {
+      configClient.close();
+    } catch (e) {
+      console.error(`[ConfigStorage] Error closing db:`, e);
+    }
+  }
+}
