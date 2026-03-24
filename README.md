@@ -14,7 +14,7 @@
 
 ## Table of Contents
 
-- [What's New (v3.1.0)](#whats-new-in-v310--memory-lifecycle-)
+- [What's New (v4.0.0)](#whats-new-in-v400--behavioral-memory-)
 - [How Prism Compares](#how-prism-compares)
 - [Quick Start](#quick-start-zero-config--local-mode)
 - [Mind Palace Dashboard](#-the-mind-palace-dashboard)
@@ -41,7 +41,18 @@
 
 ---
 
-## What's New in v3.1.0 — Memory Lifecycle 🔄
+## What's New in v4.0.0 — Behavioral Memory 🧠
+
+| Feature | Description |
+|---|---|
+| 🧠 **Active Behavioral Memory** | New `session_save_experience` tool — agents log actions, outcomes, corrections, and confidence scores. Prism tracks importance, applies decay over time, and injects behavioral warnings into context loading so agents learn from past mistakes. |
+| 🎯 **Dynamic Role Resolution** | Role parameter is now fully optional across all tools. The server auto-resolves from dashboard settings via `getSetting("default_role")` — set your role once in the Mind Palace Dashboard, and it applies everywhere. No more hardcoding `role: "global"`. |
+| 📏 **Token Budget** | New `max_tokens` parameter on `session_load_context` — set a token budget and the response is intelligently truncated to fit. Uses a 1 token ≈ 4 chars heuristic. |
+| 📉 **Importance Decay** | Stale behavioral experiences automatically decay over time — older corrections fade in importance to keep context fresh and relevant. |
+| 🔧 **Claude Code Hooks** | Refined SessionStart/Stop hook samples that reliably trigger MCP tool calls. Simplified from multi-step workflows to single imperative instructions. |
+
+<details>
+<summary><strong>What's in v3.1.0 — Memory Lifecycle 🔄</strong></summary>
 
 | Feature | Description |
 |---|---|
@@ -50,6 +61,8 @@
 | 🗜️ **Smart Auto-Compaction** | After every `session_save_ledger`, Prism runs a background health check and triggers compaction automatically if the brain is degraded or unhealthy — gated by `compaction_auto` setting and debounced per-project to prevent concurrent Gemini calls. **Compact Now** button also available in the dashboard. |
 | 📦 **PKM Export (Obsidian / Logseq)** | Export any project's full memory as a ZIP archive of Markdown files — one file per session with YAML-like frontmatter, TODOs, decisions, files-changed, and `#hashtag` keywords. Includes an `_index.md` with `[[wikilink]]` references. Click **Export ZIP** in the dashboard Lifecycle Controls card. |
 | 🧪 **Expanded Test Suite** | 37 new Vitest tests (95 total) — covers analytics queries, TTL soft-delete idempotency, rollup preservation, `activeCompactions` Set memory-leak prevention, type guards, export Markdown structure, and TTL sweep scheduler contracts. |
+
+</details>
 
 <details>
 <summary><strong>What's in v3.0.1 — Agent Identity & Brain Clean-up 🧹</strong></summary>
