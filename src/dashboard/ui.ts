@@ -697,6 +697,19 @@ export function renderDashboardHTML(version: string): string {
           </select>
         </div>
 
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Token Budget</div>
+            <div class="setting-desc">Max tokens for session_load_context (0 = unlimited)</div>
+          </div>
+          <input type="number" id="input-max-tokens"
+            placeholder="0"
+            min="0" max="100000" step="500"
+            style="padding: 0.2rem 0.5rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); width: 90px; text-align: right;"
+            onchange="saveSetting('max_tokens', this.value)"
+            oninput="clearTimeout(this._t); this._t=setTimeout(()=>saveSetting('max_tokens',this.value),800)" />
+        </div>
+
         <div class="setting-section">Boot Settings <span class="boot-badge">Restart Required</span></div>
 
         <div class="setting-row">
@@ -1305,6 +1318,7 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
         // Agent Identity
         if (s.default_role) document.getElementById('select-default-role').value = s.default_role;
         if (s.agent_name) document.getElementById('input-agent-name').value = s.agent_name;
+        if (s.max_tokens) document.getElementById('input-max-tokens').value = s.max_tokens;
       } catch(e) { console.warn('Settings load failed:', e); }
     }
 

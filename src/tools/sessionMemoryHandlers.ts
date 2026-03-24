@@ -430,7 +430,8 @@ export async function sessionLoadContextHandler(args: unknown) {
   }
 
   const { project, level = "standard", role } = args;
-  const maxTokens = (args as any).max_tokens as number | undefined;  // v4.0
+  const maxTokens = (args as any).max_tokens as number | undefined
+    || parseInt(await getSetting("max_tokens", "0"), 10) || undefined;  // v4.0: arg > dashboard setting > none
   const agentName = await getSetting("agent_name", "");
 
   const validLevels = ["quick", "standard", "deep"];

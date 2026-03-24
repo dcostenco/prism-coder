@@ -633,7 +633,7 @@ The tool and dashboard button both call the same repair logic — the dashboard 
 
 **Dynamic Roles (v4.0):** `role` is now *optional* on all tools. Set your **Default Role** once in the dashboard (⚙️ Settings → Agent Identity) and it auto-applies everywhere — no need to pass it per call.
 
-**Token Budget (v4.0):** Pass `max_tokens` to `session_load_context` to cap response size:
+**Token Budget (v4.0):** Set a default in the dashboard (⚙️ Settings → Token Budget) or pass `max_tokens` per call to override:
 
 ```json
 { "name": "session_load_context", "arguments": {
@@ -641,7 +641,7 @@ The tool and dashboard button both call the same repair logic — the dashboard 
 }}
 ```
 
-> 💡 **Planned for v4.1:** `max_tokens` will also be configurable as a dashboard setting, so it applies automatically without per-call arguments — like dynamic roles.
+> 💡 Set Token Budget to `0` in the dashboard for unlimited (default). Per-call `max_tokens` always takes priority.
 
 **Recording experiences:**
 
