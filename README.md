@@ -14,7 +14,7 @@
 
 ## Table of Contents
 
-- [What's New (v4.0.0)](#whats-new-in-v400--behavioral-memory-)
+- [What's New (v4.2.0)](#whats-new-in-v420--project-repo-registry-)
 - [Multi-Instance Support](#multi-instance-support)
 - [How Prism Compares](#how-prism-compares)
 - [Quick Start](#quick-start-zero-config--local-mode)
@@ -42,7 +42,27 @@
 
 ---
 
-## What's New in v4.0.0 — Behavioral Memory 🧠
+## What's New in v4.2.0 — Project Repo Registry 🗂️
+
+| Feature | Description |
+|---|---|
+| 🗂️ **Project Repo Paths** | Map each project to its repo directory in the dashboard. `session_save_ledger` validates `files_changed` paths and warns on mismatch — prevents cross-project contamination. |
+| 🔄 **Universal Auto-Load** | Auto-load projects via dynamic tool descriptions — works across all MCP clients (Claude, Cursor, Gemini, Antigravity) without lifecycle hooks. Dashboard is the sole source of truth. |
+| 🏠 **Dashboard-First Config** | Removed `PRISM_AUTOLOAD_PROJECTS` env var override. The Mind Palace dashboard is now the single source of truth for auto-load project configuration. |
+
+<details>
+<summary><strong>What's in v4.1.0 — Auto-Migration & Multi-Instance 🔀</strong></summary>
+
+| Feature | Description |
+|---|---|
+| 🔄 **Auto-Migrations (Supabase)** | Zero-config schema upgrades — pending DDL migrations run automatically on server startup via `prism_apply_ddl` RPC. |
+| 🔀 **Multi-Instance Support** | `PRISM_INSTANCE` env var enables instance-aware PID locks — run multiple Prism servers side-by-side without conflicts. |
+| 🛡️ **Server Lifecycle Management** | Singleton PID lock with graceful shutdown and stale PID recovery. |
+
+</details>
+
+<details>
+<summary><strong>What's in v4.0.0 — Behavioral Memory 🧠</strong></summary>
 
 | Feature | Description |
 |---|---|
@@ -51,8 +71,8 @@
 | 📏 **Token Budget** | `max_tokens` on `session_load_context` — intelligently truncates to fit your budget. |
 | 📉 **Importance Decay** | Stale corrections auto-fade over time to keep context fresh. |
 | 🔧 **Claude Code Hooks** | Simplified SessionStart/Stop hooks that reliably trigger MCP tool calls. |
-| 🔄 **Auto-Migrations (Supabase)** | Zero-config schema upgrades — pending DDL migrations run automatically on server startup via `prism_apply_ddl` RPC. |
-| 🔀 **Multi-Instance Support** | `PRISM_INSTANCE` env var enables instance-aware PID locks — run multiple Prism servers side-by-side without conflicts. |
+
+</details>
 
 <details>
 <summary><strong>What's in v3.1.0 — Memory Lifecycle 🔄</strong></summary>
@@ -287,6 +307,7 @@ Open **`http://localhost:3000`** in your browser to see exactly what your AI age
 
 - **Current State & TODOs** — See the exact context injected into the LLM's prompt
 - **Agent Identity Chip** — Header shows your active role + name (e.g. `🛠️ dev · Antigravity`); click to open Settings
+- **Project Repo Paths** — Map each project to its repo directory for save validation
 - **Brain Health 🩺** — Memory integrity status at a glance; **🧹 Fix Issues** button auto-cleans orphaned handoffs in one click
 - **Git Drift Detection** — Alerts you if you've modified code outside the agent's view
 - **Morning Briefing** — AI-synthesized action plan from your last sessions
@@ -854,7 +875,6 @@ The retrievers use `_aget_relevant_documents` as the primary path with `asyncio.
 | `PRISM_USER_ID` | No | Multi-tenant user isolation (default: `"default"`) |
 | `PRISM_AUTO_CAPTURE` | No | Set `"true"` to auto-capture HTML snapshots of dev servers |
 | `PRISM_CAPTURE_PORTS` | No | Comma-separated ports to scan (default: `3000,3001,5173,8080`) |
-| `PRISM_AUTOLOAD_PROJECTS` | No | Comma-separated project names to auto-push context on startup (e.g. `"prism-mcp,my-app"`). Overrides the Dashboard setting. See [Auto-Load on Session Start](#auto-load-on-session-start-recommended). |
 | `PRISM_DEBUG_LOGGING` | No | Set `"true"` to enable verbose debug logs (default: quiet) |
 
 ---
@@ -926,36 +946,14 @@ prism-mcp, my-app
 
 That's it. Restart your AI client and Prism auto-pushes context for each listed project on next boot.
 
-#### Option B: Environment Variable (`PRISM_AUTOLOAD_PROJECTS`)
-
-Set the `PRISM_AUTOLOAD_PROJECTS` environment variable in your MCP client config. This **overrides** the dashboard setting:
-
-```json
-{
-  "mcpServers": {
-    "prism-mcp": {
-      "command": "npx",
-      "args": ["-y", "prism-mcp-server"],
-      "env": {
-        "PRISM_AUTOLOAD_PROJECTS": "prism-mcp,my-app"
-      }
-    }
-  }
-}
-```
-
-Both Options A and B use server-side auto-push — ideal for clients that **lack lifecycle hooks** (e.g. Gemini / Antigravity). The server formats and sends the same context that `session_load_context` returns, including the `[👤 AGENT IDENTITY]` block.
-
-> **Priority chain:** Dashboard setting → `PRISM_AUTOLOAD_PROJECTS` env var → empty (disabled).
-
-#### Option C: Client-Side Hooks / Rules
+#### Option B: Client-Side Hooks / Rules
 
 For clients that support lifecycle hooks or startup rules, instruct the AI to **call `session_load_context` as a tool** at session start:
 
 - **[Claude Code Integration (Hooks)](#claude-code-integration-hooks)** — `SessionStart` and `Stop` hook JSON samples for `~/.claude/settings.json`
 - **[Gemini / Antigravity Integration](#gemini--antigravity-integration)** — global rules for `~/.gemini/GEMINI.md` or user rules
 
-> **You can use multiple approaches together.** The server-side auto-push (A/B) provides a safety net, while client-side hooks (C) give the AI full structured access to the context response (including version numbers for OCC).
+> **You can use both approaches together.** The dashboard auto-load (A) injects project names into the `session_load_context` tool description — works universally across all MCP clients. Client-side hooks (B) give the AI full structured access to the context response (including version numbers for OCC).
 
 > **Key principle:** Never hardcode a `role` in your hooks or rules. Set your role once in the **Mind Palace Dashboard ⚙️ Settings → Agent Identity**, and Prism automatically resolves it for every tool call across all clients. See [Role Resolution](#role-resolution--no-hardcoding-needed).
 
@@ -1350,17 +1348,21 @@ See [`vertex-ai/`](vertex-ai/) for setup and benchmarks.
 
 > **[View the full project board →](https://github.com/users/dcostenco/projects/1/views/1)**
 
-### ✅ v4.1 — Auto-Migration & Multi-Instance (Shipped!)
+### ✅ v4.2 — Project Repo Registry (Shipped!)
 
 | Feature | Description |
 |---|---|
-| 🔄 **Supabase Auto-Migrations** | Zero-config DDL upgrades via `prism_apply_ddl` RPC — schema changes apply automatically on startup. |
-| 🔀 **Multi-Instance PID Locks** | `PRISM_INSTANCE` env var isolates PID files — run multiple Prism servers on the same machine without conflicts. |
-| 🛡️ **Server Lifecycle Management** | Singleton PID lock with graceful shutdown and stale PID recovery. |
+| 🗂️ **Project Repo Paths** | Dashboard UI to map projects to repo directories + `session_save_ledger` path validation. |
+| 🔄 **Universal Auto-Load** | Dynamic tool descriptions replace env var — dashboard is sole source of truth. |
+| 🏠 **Dashboard-First Config** | Removed `PRISM_AUTOLOAD_PROJECTS` env var override. |
+
+### ✅ v4.1 — Auto-Migration & Multi-Instance (Shipped!)
+
+See [What's in v4.1.0](#whats-in-v410--auto-migration--multi-instance-) above.
 
 ### ✅ v4.0 — Behavioral Memory (Shipped!)
 
-See [What's New in v4.0.0](#whats-new-in-v400--behavioral-memory-) above.
+See [What's in v4.0.0](#whats-in-v400--behavioral-memory-) above.
 
 ### ✅ v3.1 — Memory Lifecycle (Shipped!)
 
