@@ -68,7 +68,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import { SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID, PRISM_ENABLE_HIVEMIND } from "./config.js";
+import { SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID, PRISM_ENABLE_HIVEMIND, PRISM_AUTOLOAD_PROJECTS } from "./config.js";
 import { getSyncBus } from "./sync/factory.js";
 import type { SyncBus, SyncEvent } from "./sync/index.js";
 import { startDashboardServer } from "./dashboard/server.js";
@@ -881,6 +881,75 @@ export async function startServer() {
     ]).catch(err => {
       console.error(`[Prism] Storage pre-warm failed (non-fatal): ${err}`);
     });
+
+    // ─── v4.1: Auto-Push Session Context ───────────────────────────
+    // For clients without lifecycle hooks (Antigravity/Gemini), proactively
+    // push session context after storage is warm. This ensures the AI has
+    // context even if it doesn't call session_load_context.
+    //
+    // Priority: env var PRISM_AUTOLOAD_PROJECTS → dashboard setting → empty
+    // The dashboard setting is read here (after initConfigStorage) because
+    // config.ts constants are evaluated at module load time, too early for DB reads.
+    let autoloadProjects = PRISM_AUTOLOAD_PROJECTS;
+    if (autoloadProjects.length === 0) {
+      const dashboardVal = getSettingSync("autoload_projects", "");
+      if (dashboardVal) {
+        autoloadProjects = dashboardVal.split(",").map(p => p.trim()).filter(Boolean);
+      }
+    }
+
+    if (autoloadProjects.length > 0) {
+      storageReady!.then(async () => {
+        if (!storageIsReady) return; // Storage failed to warm — skip
+
+        try {
+          const storage = await getStorage();
+          const agentName = getSettingSync("agent_name", "");
+          const defaultRole = getSettingSync("default_role", "");
+
+          for (const project of autoloadProjects) {
+            try {
+              const data = await storage.loadContext(project, "standard", PRISM_USER_ID) as Record<string, any> | null;
+              if (!data || data.status === "no_previous_session") continue;
+
+              // Format context identically to sessionLoadContextHandler
+              let ctx = `📋 [AUTO-LOADED] Session context for "${project}":\n\n`;
+              if (data.last_summary) ctx += `📝 Last Summary: ${data.last_summary}\n`;
+              if (data.pending_todo?.length) {
+                ctx += `\n✅ Open TODOs:\n` + data.pending_todo.map((t: string) => `  - ${t}`).join("\n") + `\n`;
+              }
+              if (data.keywords?.length) {
+                ctx += `\n🔑 Keywords: ${data.keywords.join(", ")}\n`;
+              }
+
+              // Add identity block
+              if (agentName || (defaultRole && defaultRole !== "global")) {
+                const ROLE_ICONS: Record<string, string> = {
+                  dev: "🛠️", qa: "🔍", pm: "📋", lead: "🏗️",
+                  security: "🔒", ux: "🎨", global: "🌐",
+                };
+                const icon = ROLE_ICONS[defaultRole] || "🤖";
+                ctx += `\n[👤 AGENT IDENTITY] ${icon} ${agentName || "Agent"} · Role: ${defaultRole || "global"}`;
+              }
+
+              // Add version info
+              if (data.version) {
+                ctx += `\n🔑 Session version: ${data.version}`;
+              }
+
+              server.sendLoggingMessage({
+                level: "info",
+                data: ctx,
+              });
+            } catch (err) {
+              console.error(`[AutoLoad] Failed to push context for "${project}" (non-fatal): ${err}`);
+            }
+          }
+        } catch (err) {
+          console.error(`[AutoLoad] Failed to initialize (non-fatal): ${err}`);
+        }
+      });
+    }
   }
 
   // ─── v2.0 Step 6: Initialize SyncBus (Telepathy) ───

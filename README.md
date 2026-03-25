@@ -854,7 +854,7 @@ The retrievers use `_aget_relevant_documents` as the primary path with `asyncio.
 | `PRISM_USER_ID` | No | Multi-tenant user isolation (default: `"default"`) |
 | `PRISM_AUTO_CAPTURE` | No | Set `"true"` to auto-capture HTML snapshots of dev servers |
 | `PRISM_CAPTURE_PORTS` | No | Comma-separated ports to scan (default: `3000,3001,5173,8080`) |
-| `PRISM_AUTOLOAD_PROJECTS` | No | Comma-separated project names to auto-push context on startup (e.g. `"prism-mcp,my-app"`). See [Auto-Load on Session Start](#auto-load-on-session-start-recommended). |
+| `PRISM_AUTOLOAD_PROJECTS` | No | Comma-separated project names to auto-push context on startup (e.g. `"prism-mcp,my-app"`). Overrides the Dashboard setting. See [Auto-Load on Session Start](#auto-load-on-session-start-recommended). |
 | `PRISM_DEBUG_LOGGING` | No | Set `"true"` to enable verbose debug logs (default: quiet) |
 
 ---
@@ -914,11 +914,21 @@ The agent boots up knowing exactly what to do — zero prompting needed.
 
 ### Auto-Load on Session Start (Recommended)
 
-For the best experience, ensure your agent boots with full project memory on every new session. There are two approaches — use whichever fits your client:
+For the best experience, ensure your agent boots with full project memory on every new session. There are three approaches — use whichever fits your workflow:
 
-#### Option A: Server-Side Auto-Push (`PRISM_AUTOLOAD_PROJECTS`)
+#### Option A: Dashboard Setting (Easiest)
 
-Set the `PRISM_AUTOLOAD_PROJECTS` environment variable to a comma-separated list of project names. After storage warms up, Prism **proactively pushes** context to the client via MCP logging notifications — no AI prompting or lifecycle hooks required.
+Open the **Mind Palace Dashboard** (⚙️ Settings) and type your project names into the **Auto-Load Projects** field under Boot Settings:
+
+```
+prism-mcp, my-app
+```
+
+That's it. Restart your AI client and Prism auto-pushes context for each listed project on next boot.
+
+#### Option B: Environment Variable (`PRISM_AUTOLOAD_PROJECTS`)
+
+Set the `PRISM_AUTOLOAD_PROJECTS` environment variable in your MCP client config. This **overrides** the dashboard setting:
 
 ```json
 {
@@ -934,16 +944,18 @@ Set the `PRISM_AUTOLOAD_PROJECTS` environment variable to a comma-separated list
 }
 ```
 
-This is ideal for clients that **lack lifecycle hooks** (e.g. Gemini / Antigravity) or when you want zero-config context hydration. The server formats and sends the same context that `session_load_context` returns, including the `[👤 AGENT IDENTITY]` block.
+Both Options A and B use server-side auto-push — ideal for clients that **lack lifecycle hooks** (e.g. Gemini / Antigravity). The server formats and sends the same context that `session_load_context` returns, including the `[👤 AGENT IDENTITY]` block.
 
-#### Option B: Client-Side Hooks / Rules
+> **Priority chain:** `PRISM_AUTOLOAD_PROJECTS` env var → Dashboard setting → empty (disabled).
+
+#### Option C: Client-Side Hooks / Rules
 
 For clients that support lifecycle hooks or startup rules, instruct the AI to **call `session_load_context` as a tool** at session start:
 
 - **[Claude Code Integration (Hooks)](#claude-code-integration-hooks)** — `SessionStart` and `Stop` hook JSON samples for `~/.claude/settings.json`
 - **[Gemini / Antigravity Integration](#gemini--antigravity-integration)** — global rules for `~/.gemini/GEMINI.md` or user rules
 
-> **You can use both approaches together.** The server-side auto-push provides a safety net, while client-side hooks give the AI full structured access to the context response (including version numbers for OCC).
+> **You can use multiple approaches together.** The server-side auto-push (A/B) provides a safety net, while client-side hooks (C) give the AI full structured access to the context response (including version numbers for OCC).
 
 > **Key principle:** Never hardcode a `role` in your hooks or rules. Set your role once in the **Mind Palace Dashboard ⚙️ Settings → Agent Identity**, and Prism automatically resolves it for every tool call across all clients. See [Role Resolution](#role-resolution--no-hardcoding-needed).
 
