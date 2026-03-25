@@ -68,7 +68,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import { SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID, PRISM_ENABLE_HIVEMIND, PRISM_AUTOLOAD_PROJECTS } from "./config.js";
+import { SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID, PRISM_ENABLE_HIVEMIND } from "./config.js";
 import { getSyncBus } from "./sync/factory.js";
 import type { SyncBus, SyncEvent } from "./sync/index.js";
 import { startDashboardServer } from "./dashboard/server.js";
@@ -271,19 +271,24 @@ export function notifyResourceUpdate(project: string, server: Server) {
  */
 export function createServer() {
   // ─── v4.1 FIX: Auto-Load via Dynamic Tool Descriptions ────────
-  // Read auto-load projects from dashboard config (available after
-  // initConfigStorage() in startServer) or fall back to env var.
+  // Read auto-load projects EXCLUSIVELY from dashboard config
+  // (available after initConfigStorage() in startServer).
   //
   // ARCHITECTURE DECISION: We inject the auto-load instruction into
   // the session_load_context TOOL DESCRIPTION, not into `instructions`
   // or `sendLoggingMessage`. Tool descriptions are the ONLY mechanism
   // guaranteed by ALL MCP clients (Antigravity, Claude Code, Claude CLI).
-  // The `instructions` field is kept as a supplementary signal but is
-  // NOT the primary mechanism.
+  //
+  // The PRISM_AUTOLOAD_PROJECTS env var has been removed — the dashboard
+  // is the single source of truth. This prevents mismatches between
+  // env var and dashboard settings causing duplicate project loads.
   const dashboardAutoload = getSettingSync("autoload_projects", "");
   const autoloadList = dashboardAutoload
-    ? dashboardAutoload.split(",").map(p => p.trim()).filter(Boolean)
-    : PRISM_AUTOLOAD_PROJECTS;
+    .split(",").map(p => p.trim()).filter(Boolean);
+
+  if (autoloadList.length > 0) {
+    console.error(`[Prism] Auto-load projects (dashboard): ${autoloadList.join(', ')}`);
+  }
 
   // Build the dynamic tool list with auto-load instruction injected
   const SESSION_MEMORY_TOOLS = buildSessionMemoryTools(autoloadList);

@@ -138,18 +138,13 @@ export const PRISM_DEBUG_LOGGING = process.env.PRISM_DEBUG_LOGGING === "true";
 export const PRISM_ENABLE_HIVEMIND = process.env.PRISM_ENABLE_HIVEMIND === "true";
 
 // ─── v4.1: Auto-Load Projects ────────────────────────────────
-// Comma-separated list of projects whose session context should be
-// auto-pushed via MCP logging notification after storage is warm.
-// This solves the cold-start problem for clients that don't have
-// lifecycle hooks (e.g. Antigravity/Gemini) — the server proactively
-// injects context without waiting for the AI to call session_load_context.
+// Auto-load is configured exclusively via the Mind Palace dashboard
+// ("Auto-Load Projects" checkboxes in Settings). The setting is stored
+// in prism-config.db and read at startup via getSettingSync().
 //
-// Example: PRISM_AUTOLOAD_PROJECTS=prism-mcp,bcba-private
-export const PRISM_AUTOLOAD_PROJECTS: string[] =
-  (process.env.PRISM_AUTOLOAD_PROJECTS || "")
-    .split(",")
-    .map(p => p.trim())
-    .filter(Boolean);
+// The PRISM_AUTOLOAD_PROJECTS env var has been removed — the dashboard
+// is the single source of truth. This prevents mismatches between
+// env var and dashboard values causing duplicate project loads.
 
 if (PRISM_AUTO_CAPTURE) {
   // Use console.error instead of debugLog here to prevent circular dependency
