@@ -1560,6 +1560,15 @@ See [`vertex-ai/`](vertex-ai/) for setup and benchmarks.
 
 > **[View the full project board →](https://github.com/users/dcostenco/projects/1/views/1)** | **[Full ROADMAP.md →](ROADMAP.md)**
 
+### 🔬 v5.0 — Quantized Agentic Memory (In Progress)
+
+| Feature | Description |
+|---|---|
+| 🧮 **TurboQuant Math Core** | Pure TypeScript port of Google's TurboQuant (ICLR 2026) — Lloyd-Max codebook, QR rotation, QJL error correction. Zero dependencies. [RFC-001](docs/rfcs/001-turboquant-integration.md) |
+| 📦 **~7× Embedding Compression** | 768-dim embeddings shrink from 3,072 bytes to ~400 bytes (4-bit) via variable bit-packing. |
+| 🔍 **Asymmetric Similarity** | Unbiased inner product estimator: query as float32 vs compressed blobs. No decompression needed. |
+| 🗄️ **Two-Tier Search** | FTS5 candidate filter → JS-side asymmetric scoring. Bypasses sqlite-vec float32 limitation. |
+
 ### ✅ v4.6 — OpenTelemetry Observability (Shipped!)
 
 | Feature | Description |
