@@ -1118,13 +1118,92 @@ export class SqliteStorage implements StorageBackend {
           files_changed: this.parseJsonColumn(r.files_changed) as string[],
         }));
     } catch (err) {
-      // Graceful degradation: if vector functions aren't supported,
-      // log the error and return empty (handler already has fallback messaging).
-      console.error(
-        `[SqliteStorage] Vector search failed (libSQL version may not support F32_BLOB): ${err}`
+      // ─── TIER 2 FALLBACK: Asymmetric TurboQuant search in JS ───
+      // When native vector search fails (libSQL <0.4.0 or no F32_BLOB),
+      // fall back to fetching compressed embeddings and ranking in JS
+      // using asymmetricCosineSimilarity().
+      debugLog(
+        `[SqliteStorage] Tier-1 vector search failed, trying Tier-2 TurboQuant fallback: ${err}`
       );
-      console.error("[SqliteStorage] Tip: Ensure you're using libSQL ≥ 0.4.0 for native vector support.");
-      return [];
+
+      try {
+        const { getDefaultCompressor, deserialize } = await import("../utils/turboquant.js");
+        const compressor = getDefaultCompressor();
+
+        // Parse query embedding from JSON string
+        const queryVec: number[] = JSON.parse(params.queryEmbedding);
+
+        // Fetch all entries that have compressed embeddings
+        let fallbackSql: string;
+        const fallbackArgs: InValue[] = [];
+
+        if (params.project) {
+          fallbackSql = `
+            SELECT id, project, summary, decisions, files_changed,
+                   session_date, created_at, embedding_compressed, embedding_turbo_radius
+            FROM session_ledger
+            WHERE embedding_compressed IS NOT NULL
+              AND user_id = ?
+              AND project = ?
+              AND archived_at IS NULL
+              AND deleted_at IS NULL
+          `;
+          fallbackArgs.push(params.userId, params.project);
+        } else {
+          fallbackSql = `
+            SELECT id, project, summary, decisions, files_changed,
+                   session_date, created_at, embedding_compressed, embedding_turbo_radius
+            FROM session_ledger
+            WHERE embedding_compressed IS NOT NULL
+              AND user_id = ?
+              AND archived_at IS NULL
+              AND deleted_at IS NULL
+          `;
+          fallbackArgs.push(params.userId);
+        }
+
+        const fallbackResult = await this.db.execute({ sql: fallbackSql, args: fallbackArgs });
+
+        // Score each entry using asymmetric cosine similarity
+        const scored: SemanticSearchResult[] = [];
+        for (const row of fallbackResult.rows) {
+          try {
+            const compressedBase64 = row.embedding_compressed as string;
+            const buf = Buffer.from(compressedBase64, "base64");
+            const compressed = deserialize(buf);
+            const similarity = compressor.asymmetricCosineSimilarity(queryVec, compressed);
+
+            if (similarity >= params.similarityThreshold) {
+              scored.push({
+                id: row.id as string,
+                project: row.project as string,
+                summary: row.summary as string,
+                similarity,
+                session_date: (row.session_date || row.created_at) as string,
+                decisions: this.parseJsonColumn(row.decisions) as string[],
+                files_changed: this.parseJsonColumn(row.files_changed) as string[],
+              });
+            }
+          } catch {
+            // Skip entries with corrupt compressed data
+          }
+        }
+
+        // Sort by similarity descending and limit
+        scored.sort((a, b) => b.similarity - a.similarity);
+        debugLog(
+          `[SqliteStorage] Tier-2 TurboQuant fallback: scored ${fallbackResult.rows.length} entries, ` +
+          `${scored.length} above threshold`
+        );
+        return scored.slice(0, params.limit);
+      } catch (fallbackErr) {
+        // Both tiers failed — return empty
+        console.error(
+          `[SqliteStorage] Both Tier-1 and Tier-2 search failed: ${fallbackErr}`
+        );
+        console.error("[SqliteStorage] Tip: Ensure you're using libSQL ≥ 0.4.0 for native vector support.");
+        return [];
+      }
     }
   }
 

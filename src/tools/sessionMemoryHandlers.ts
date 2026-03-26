@@ -1207,9 +1207,26 @@ export async function backfillEmbeddingsHandler(args: unknown) {
 
       const embedding = await getLLMProvider().generateEmbedding(textToEmbed);
 
-      await storage.patchLedger(e.id, {
+      // Build atomic patch — float32 + TurboQuant in ONE DB update
+      const patchData: Record<string, unknown> = {
         embedding: JSON.stringify(embedding),
-      });
+      };
+
+      // TurboQuant: compress alongside repair (non-fatal)
+      try {
+        const { getDefaultCompressor, serialize } = await import("../utils/turboquant.js");
+        const compressor = getDefaultCompressor();
+        const compressed = compressor.compress(embedding);
+        const buf = serialize(compressed);
+
+        patchData.embedding_compressed = buf.toString("base64");
+        patchData.embedding_format = `turbo${compressor.bits}`;
+        patchData.embedding_turbo_radius = compressed.radius;
+      } catch (turboErr: any) {
+        debugLog(`[backfill] TurboQuant compression failed for ${e.id} (non-fatal): ${turboErr.message}`);
+      }
+
+      await storage.patchLedger(e.id, patchData);
 
       repaired++;
       debugLog(`[backfill] ✅ Repaired ${e.id} (${e.project})`);

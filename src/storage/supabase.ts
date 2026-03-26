@@ -83,6 +83,10 @@ export class SupabaseStorage implements StorageBackend {
       event_type: entry.event_type || "session",
       ...(entry.confidence_score !== undefined && { confidence_score: entry.confidence_score }),
       importance: entry.importance || 0,
+      // v5.0: TurboQuant Compressed Embedding fields
+      ...(entry.embedding_compressed !== undefined && { embedding_compressed: entry.embedding_compressed }),
+      ...(entry.embedding_format !== undefined && { embedding_format: entry.embedding_format }),
+      ...(entry.embedding_turbo_radius !== undefined && { embedding_turbo_radius: entry.embedding_turbo_radius }),
     };
 
     return supabasePost("session_ledger", record);
