@@ -194,7 +194,25 @@ export const MIGRATIONS: Migration[] = [
       $$;
     `,
   },
-  // Future migrations go here (version 31+)
+  {
+    // ─── v5.2: Cognitive Memory — Last Accessed Tracking ──────────
+    //
+    // REVIEWER NOTE: This column enables the Ebbinghaus Importance Decay
+    // feature (effective = base * 0.95^days_since_accessed) computed at
+    // retrieval time in sessionMemoryHandlers.ts. No background workers
+    // needed — decay is a pure function of time.
+    //
+    // The column is updated fire-and-forget via patchLedger() on every
+    // search hit. NULLs are expected (entries never retrieved yet) and
+    // the decay formula falls back to created_at when last_accessed_at
+    // is NULL.
+    version: 31,
+    name: "cognitive_memory_last_accessed",
+    sql: `
+      ALTER TABLE session_ledger ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ DEFAULT NULL;
+    `,
+  },
+  // Future migrations go here (version 32+)
 ];
 
 /**

@@ -617,10 +617,27 @@ export class SqliteStorage implements StorageBackend {
   }
 
   async patchLedger(id: string, data: Record<string, unknown>): Promise<void> {
+    // ── Column Allowlist (Defense-in-Depth) ────────────────────────
+    // Column names are interpolated directly into SQL (not parameterizable).
+    // This allowlist prevents accidental or malicious injection via the key.
+    // Currently, patchLedger is only called from internal handler code,
+    // but this guard protects against future misuse if the method is
+    // exposed to less-controlled callers.
+    const ALLOWED_COLUMNS = new Set([
+      'embedding', 'embedding_compressed', 'embedding_format', 'embedding_turbo_radius',
+      'archived_at', 'deleted_at', 'deleted_reason', 'is_rollup', 'rollup_count',
+      'importance', 'last_accessed_at', 'keywords', 'todos', 'files_changed', 'decisions',
+      'summary', 'confidence_score', 'event_type', 'role',
+    ]);
+
     const sets: string[] = [];
     const args: InValue[] = [];
 
     for (const [key, value] of Object.entries(data)) {
+      if (!ALLOWED_COLUMNS.has(key)) {
+        debugLog(`[SqliteStorage] patchLedger: rejected unknown column "${key}" — skipping`);
+        continue;
+      }
       if (key === "embedding") {
         // Use libSQL's native vector() function for F32_BLOB columns.
         // The value is a JSON-stringified number[] from the handler.

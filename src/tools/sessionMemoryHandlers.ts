@@ -1025,6 +1025,9 @@ export async function sessionSearchMemoryHandler(args: unknown) {
       // Context load failed — proceed with unmodified query (graceful degradation)
       debugLog("[session_search_memory] Context boost failed (non-fatal) — using original query");
     }
+  } else if (context_boost && !project) {
+    // User enabled context_boost but didn't specify a project — can't boost without context
+    debugLog("[session_search_memory] context_boost ignored — requires a project parameter to load context");
   }
 
   try {
