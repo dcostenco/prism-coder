@@ -14,7 +14,7 @@
 
 ## Table of Contents
 
-- [What's New (v5.1.0)](#whats-new-in-v510--deep-storage--knowledge-graph-)
+- [What's New (v5.1.0)](#whats-new-in-v510--deep-storage--knowledge-graph)
 - [What's New (v5.0.0)](#whats-new-in-v500--quantized-agentic-memory-)
 - [What's New (v4.6.0)](#whats-new-in-v460--opentelemetry-observability-)
 - [Multi-Instance Support](#multi-instance-support)
@@ -44,7 +44,7 @@
 
 ---
 
-## What's New in v5.1.0 — Deep Storage & Knowledge Graph 🗂️
+## What's New in v5.1.0 — Deep Storage & Knowledge Graph
 
 > **🗂️ Reclaim 90% of your vector storage and visually edit your agent's knowledge graph.**
 > [CHANGELOG](CHANGELOG.md)
