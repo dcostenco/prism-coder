@@ -18,6 +18,9 @@
  */
 
 import * as http from "http";
+import * as path from "path";
+import * as os from "os";
+import * as fs from "fs";
 import { exec } from "child_process";
 import { getStorage } from "../storage/index.js";
 import { PRISM_USER_ID, SERVER_CONFIG } from "../config.js";
@@ -84,10 +87,14 @@ async function killPortHolder(port: number): Promise<void> {
 }
 
 export async function startDashboardServer(): Promise<void> {
-  // Fire-and-forget port cleanup — don't block server start.
-  // Previously awaiting this added 300ms+ delay from lsof + setTimeout,
-  // starving the MCP stdio transport during the init handshake.
-  killPortHolder(PORT).catch(() => {});
+  // Await port cleanup before binding. This adds ~300ms from lsof + setTimeout,
+  // but is safe because startDashboardServer() is already deferred to
+  // setTimeout(0) in server.ts — the MCP stdio handshake is long finished.
+  // The old fire-and-forget approach caused a deadly race condition:
+  //   1. listen() fired BEFORE killPortHolder cleared the port → EADDRINUSE
+  //   2. killPortHolder then killed the OTHER instance's entire process
+  //   3. Result: no instance ever held port 3000
+  await killPortHolder(PORT).catch(() => {});
 
   // Lazy storage accessor — returns null if storage isn't ready yet.
   // API routes gracefully degrade with 503 instead of blocking startup.
@@ -788,6 +795,91 @@ return false;}
         }
       }
 
+      // ─── API: Universal History Import (v5.2) ───
+      if (url.pathname === "/api/import" && req.method === "POST") {
+        try {
+          const body = await new Promise<string>(resolve => {
+            let data = ""; req.on("data", c => data += c); req.on("end", () => resolve(data));
+          });
+          const { path: filePath, format, project, dryRun } = JSON.parse(body || "{}");
+          if (!filePath) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "path is required" }));
+          }
+
+          // Verify file exists before starting import
+          if (!fs.existsSync(filePath)) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: `File not found: ${filePath}` }));
+          }
+
+          const { universalImporter } = await import("../utils/universalImporter.js");
+          const result = await universalImporter({
+            path: filePath,
+            format: format || undefined,
+            project: project || undefined,
+            dryRun: !!dryRun,
+            verbose: false,
+          });
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({
+            ok: true,
+            ...result,
+            message: `Imported ${result.conversationCount} conversations (${result.successCount} turns)${result.skipCount > 0 ? `, ${result.skipCount} skipped (dup)` : ""}${result.failCount > 0 ? `, ${result.failCount} failed` : ""}${dryRun ? " [DRY RUN]" : ""}`,
+          }));
+        } catch (err: any) {
+          console.error("[Dashboard] Import error:", err);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: err.message || "Import failed" }));
+        }
+      }
+
+      // ─── API: Universal History Import via File Upload (v5.2) ───
+      if (url.pathname === "/api/import-upload" && req.method === "POST") {
+        try {
+          const body = await new Promise<string>(resolve => {
+            let data = ""; req.on("data", c => data += c); req.on("end", () => resolve(data));
+          });
+          const { filename, content, format, project, dryRun } = JSON.parse(body || "{}");
+          if (!content || !filename) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "filename and content are required" }));
+          }
+
+          // Write uploaded content to a temp file
+          const tmpDir = path.join(os.tmpdir(), "prism-import");
+          fs.mkdirSync(tmpDir, { recursive: true });
+          const tmpFile = path.join(tmpDir, `upload-${Date.now()}-${filename}`);
+          fs.writeFileSync(tmpFile, content, "utf-8");
+
+          try {
+            const { universalImporter } = await import("../utils/universalImporter.js");
+            const result = await universalImporter({
+              path: tmpFile,
+              format: format || undefined,
+              project: project || undefined,
+              dryRun: !!dryRun,
+              verbose: false,
+            });
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({
+              ok: true,
+              ...result,
+              message: `Imported ${result.conversationCount} conversations (${result.successCount} turns)${result.skipCount > 0 ? `, ${result.skipCount} skipped (dup)` : ""}${result.failCount > 0 ? `, ${result.failCount} failed` : ""}${dryRun ? " [DRY RUN]" : ""} from ${filename}`,
+            }));
+          } finally {
+            // Clean up temp file
+            try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+          }
+        } catch (err: any) {
+          console.error("[Dashboard] Import upload error:", err);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: err.message || "Import failed" }));
+        }
+      }
+
       // ─── 404 ───
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not found");
@@ -800,21 +892,66 @@ return false;}
     }
   });
 
-  // Gracefully handle port conflicts (non-fatal — MCP server keeps running)
-  httpServer.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE") {
-      console.error(
-        `[Dashboard] Port ${PORT} is in use — Mind Palace disabled. ` +
-          `Set PRISM_DASHBOARD_PORT to use a different port.`
-      );
-    } else {
-      console.error(`[Dashboard] HTTP server error: ${err.message}`);
-    }
-  });
+  // ─── Resilient port binding with retry ───
+  // Wraps listen() in a Promise to detect EADDRINUSE failures and retry
+  // with a delay (gives OS time to release the port after killPortHolder).
+  // Falls back to PORT+1, PORT+2 if the preferred port is permanently taken.
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 500;
 
-  httpServer.listen(PORT, () => {
-    console.error(`[Prism] 🧠 Mind Palace Dashboard → http://localhost:${PORT}`);
-  });
+  const tryListen = (port: number): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const onError = (err: NodeJS.ErrnoException) => {
+        httpServer.removeListener("error", onError);
+        reject(err);
+      };
+      httpServer.on("error", onError);
+      httpServer.listen(port, () => {
+        httpServer.removeListener("error", onError);
+        // Re-register a permanent error handler for runtime errors
+        httpServer.on("error", (err: NodeJS.ErrnoException) => {
+          console.error(`[Dashboard] HTTP server error: ${err.message}`);
+        });
+        resolve(port);
+      });
+    });
+
+  let boundPort = PORT;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      boundPort = await tryListen(PORT + attempt);
+      break; // Success
+    } catch (err: any) {
+      if (err.code === "EADDRINUSE") {
+        console.error(
+          `[Dashboard] Port ${PORT + attempt} is in use (attempt ${attempt + 1}/${MAX_RETRIES}).`
+        );
+        if (attempt < MAX_RETRIES - 1) {
+          // Wait for OS to release the port, then try next port
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+        } else {
+          console.error(
+            `[Dashboard] All ports ${PORT}–${PORT + MAX_RETRIES - 1} in use — Mind Palace disabled. ` +
+            `Set PRISM_DASHBOARD_PORT to use a different port.`
+          );
+          return; // Give up — MCP server keeps running
+        }
+      } else {
+        console.error(`[Dashboard] HTTP server error: ${err.message}`);
+        return; // Non-retryable error
+      }
+    }
+  }
+
+  // Write the active port to a file for discoverability
+  try {
+    const portFile = path.join(os.homedir(), ".prism-mcp", "dashboard.port");
+    fs.writeFileSync(portFile, String(boundPort), "utf8");
+  } catch {
+    // Non-fatal — just means the user has to know the port
+  }
+
+  console.error(`[Prism] 🧠 Mind Palace Dashboard → http://localhost:${boundPort}`);
 
   // ─── v3.1: TTL Sweep — runs at startup + every 12 hours ───────────
   async function runTtlSweep() {

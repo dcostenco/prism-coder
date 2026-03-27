@@ -88,12 +88,14 @@ Soft/hard delete (Art. 17), full ZIP export (Art. 20), API key redaction, per-pr
 
 ---
 
-## 🆕 What's New in v5.1
+## 🆕 What's New in v5.2
 
-- 🗑️ **Deep Storage Mode** — New `deep_storage_purge` tool reclaims ~90% of vector storage by dropping redundant float32 vectors. Safety guards: 7-day minimum age, dry-run preview, multi-tenant isolation.
-- 🕸️ **Knowledge Graph Editor** — Click nodes to rename or delete keywords. Filter by project, date, or importance. Surgically groom your agent's semantic memory.
-- 🔧 **Auto-Load Reliability** — Hardened hook-based patterns for Claude Code and Gemini/Antigravity to guarantee context loading on the first turn.
-- 🧪 **303 Tests** — Zero regressions across 13 suites.
+- 🧠 **Cognitive Memory** — Ebbinghaus importance decay computes `effective_importance = base × 0.95^days` at retrieval time. Frequently accessed memories stay prominent; neglected ones naturally fade. Tracks `last_accessed_at` per entry.
+- 🎯 **Context-Weighted Retrieval** — New `context_boost` parameter on `session_search_memory` prepends your active project's context to the query before embedding, biasing results toward what matters right now.
+- 🔄 **Universal History Migration** — Import years of Claude Code, Gemini, and ChatGPT sessions on day one. Strategy Pattern adapters with OOM-safe streaming, content-hash dedup, and `--dry-run` support.
+- 🧹 **Smart Consolidation** — Enhanced compaction extracts recurring principles alongside summaries for richer rollups.
+- 🛡️ **SQL Injection Prevention** — 17-column allowlist on `patchLedger()` hardens all dynamic SQL paths.
+- 🧪 **352 Tests** — Zero regressions across 15 suites.
 
 > [Full CHANGELOG →](CHANGELOG.md)
 
@@ -388,7 +390,7 @@ To sync memory across machines or teams:
 }
 ```
 
-See [Supabase Setup](#supabase-setup) for schema migration instructions.
+See the **Supabase Setup** section below for schema migration instructions.
 
 </details>
 
@@ -625,6 +627,8 @@ src/
 └── utils/
     ├── telemetry.ts           # OTel singleton
     ├── turboquant.ts          # TurboQuant math core
+    ├── universalImporter.ts   # Universal migration orchestrator
+    ├── migration/             # Format-specific adapters (Claude/Gemini/OpenAI)
     ├── imageCaptioner.ts      # VLM auto-caption pipeline
     └── llm/adapters/          # Gemini, OpenAI, Anthropic, Ollama
 ```
@@ -663,18 +667,18 @@ Includes a full 5-node LangGraph research agent with MCP bridge and persistent m
 
 ---
 
-## Research Roadmap (v5.2+)
+## Research Roadmap
 
 Prism is evolving from smart session logging toward a **cognitive memory architecture** — grounded in real research, not marketing.
 
-| Phase | Feature | Inspired By |
-|-------|---------|-------------|
-| **v5.2** | Smart Consolidation — extract principles, not just summaries | Neuroscience sleep consolidation |
-| **v5.2** | Dynamic Importance Decay — memories fade unless reinforced | Ebbinghaus forgetting curve |
-| **v5.2** | Context-Weighted Retrieval — current work biases what surfaces | Contextual memory in cognitive science |
-| **v6.x** | Superposed Memory (SDM) — O(1) retrieval via correlation | Kanerva's Sparse Distributed Memory (1988) |
-| **v6.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) |
-| **v7+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations |
+| Phase | Feature | Inspired By | Status |
+|-------|---------|-------------|--------|
+| **v5.2** | Smart Consolidation — extract principles, not just summaries | Neuroscience sleep consolidation | ✅ Shipped |
+| **v5.2** | Ebbinghaus Importance Decay — memories fade unless reinforced | Ebbinghaus forgetting curve | ✅ Shipped |
+| **v5.2** | Context-Weighted Retrieval — current work biases what surfaces | Contextual memory in cognitive science | ✅ Shipped |
+| **v6.x** | Superposed Memory (SDM) — O(1) retrieval via correlation | Kanerva's Sparse Distributed Memory (1988) | 🔬 Research |
+| **v6.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) | 🔬 Research |
+| **v7+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
 
 > Informed by LeCun's "Why AI Systems Don't Learn" (Dupoux, LeCun, Malik — March 2026) and Kanerva's SDM.
 
@@ -685,6 +689,7 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 <details>
 <summary><strong>Previous releases (v3.0 — v5.0)</strong></summary>
 
+- **v5.1** — Knowledge Graph Editor, Deep Storage purge
 - **v5.0** — TurboQuant 10× embedding compression, three-tier search architecture
 - **v4.6** — OpenTelemetry distributed tracing (Jaeger, Grafana)
 - **v4.5** — VLM multimodal memory + GDPR Art. 20 ZIP export
@@ -706,10 +711,11 @@ See [CHANGELOG.md](CHANGELOG.md) for full details.
 
 > **[Full ROADMAP.md →](ROADMAP.md)**
 
-**Next (v5.2):**
+**Next (v5.3):**
 - 🔄 CRDT Handoff Merging — conflict-free concurrent multi-agent edits
 - ⏰ Background Purge Scheduler — automated storage reclamation
 - 📱 Mind Palace Mobile PWA — offline-first responsive dashboard
+- 🌐 Autonomous Web Scholar — agent-driven research pipeline
 
 ---
 

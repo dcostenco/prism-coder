@@ -602,6 +602,53 @@ export function renderDashboardHTML(version: string): string {
           <div style="font-size:0.7rem;color:var(--text-muted);margin-top:0.4rem">0 = disabled. Min 7 days. Rollups are never expired.</div>
         </div>
 
+        <!-- Universal History Import (v5.2) -->
+        <div class="card" id="importCard" style="display:none">
+          <div class="card-title"><span class="dot" style="background:var(--accent-cyan)"></span> Import History 📥</div>
+          <div style="margin-bottom:0.75rem">
+            <label style="font-size:0.78rem;color:var(--text-muted);display:block;margin-bottom:0.3rem">Source File</label>
+            <div style="display:flex;gap:0.4rem;align-items:center">
+              <input type="text" id="importPath" class="ttl-input" style="flex:1;text-align:left;font-size:0.82rem;padding:0.45rem 0.65rem" placeholder="/path/to/conversations.jsonl">
+              <input type="file" id="importFileInput" accept=".jsonl,.json,.ndjson" style="display:none">
+              <button class="lc-btn compact" onclick="document.getElementById('importFileInput').click()" style="flex:none;padding:0.45rem 0.75rem;font-size:0.82rem;white-space:nowrap" title="Choose a file from your computer">
+                📂 Browse
+              </button>
+              <button class="lc-btn" onclick="clearImportFile()" id="importClearBtn" style="flex:none;padding:0.45rem 0.55rem;font-size:0.82rem;display:none;background:rgba(244,63,94,0.15);border-color:rgba(244,63,94,0.3);color:var(--accent-rose)" title="Clear selection">
+                ✕
+              </button>
+            </div>
+            <div id="importFileInfo" style="display:none;margin-top:0.35rem;font-size:0.72rem;color:var(--accent-cyan)"></div>
+          </div>
+          <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;flex-wrap:wrap">
+            <div style="flex:1;min-width:120px">
+              <label style="font-size:0.78rem;color:var(--text-muted);display:block;margin-bottom:0.3rem">Format</label>
+              <select id="importFormat" class="ttl-input" style="width:100%;text-align:left;font-size:0.82rem;padding:0.35rem 0.5rem;cursor:pointer">
+                <option value="">Auto-detect</option>
+                <option value="claude">Claude Code (.jsonl)</option>
+                <option value="gemini">Gemini (.json)</option>
+                <option value="openai">OpenAI (.json)</option>
+              </select>
+            </div>
+            <div style="flex:1;min-width:120px">
+              <label style="font-size:0.78rem;color:var(--text-muted);display:block;margin-bottom:0.3rem">Target Project</label>
+              <input type="text" id="importProject" class="ttl-input" style="width:100%;text-align:left;font-size:0.82rem;padding:0.45rem 0.65rem" placeholder="(auto from file)">
+            </div>
+          </div>
+          <div style="display:flex;gap:0.5rem;align-items:center">
+            <button class="lc-btn compact" id="importBtn" onclick="runImport(false)" style="flex:1">
+              📥 Import
+            </button>
+            <button class="lc-btn export" id="importDryBtn" onclick="runImport(true)" style="flex:1" title="Validate without writing to storage">
+              🧪 Dry Run
+            </button>
+          </div>
+          <div id="importResult" style="display:none;margin-top:0.75rem;padding:0.65rem 0.85rem;border-radius:var(--radius-sm);font-size:0.82rem;line-height:1.5"></div>
+          <div style="font-size:0.68rem;color:var(--text-muted);margin-top:0.5rem">
+            Click <strong>Browse</strong> to pick a file, or type a server-side path.<br>
+            Supports Claude Code (.jsonl), Gemini (.json), and OpenAI (.json).
+          </div>
+        </div>
+
         <div class="card" id="briefingCard" style="display:none">
           <div class="card-title"><span class="dot" style="background:var(--accent-amber)"></span> Morning Briefing 🌅</div>
           <div class="briefing-text" id="briefingText"></div>
@@ -1281,9 +1328,10 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
         document.getElementById('content').className = 'grid grid-main fade-in';
         document.getElementById('content').style.display = 'grid';
 
-        // v3.1: Analytics + Lifecycle Controls
+        // v3.1: Analytics + Lifecycle Controls + Import
         document.getElementById('analyticsCard').style.display = 'block';
         document.getElementById('lifecycleCard').style.display = 'block';
+        document.getElementById('importCard').style.display = 'block';
         loadAnalytics(project);
         loadRetention(project);
 
@@ -1401,6 +1449,122 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
       finally {
         btn.disabled = false;
         btn.textContent = '📦 Export ZIP';
+      }
+    }
+
+    // ─── v5.2: Universal History Import ───────────────────────────────
+
+    // Track the picked file for upload mode
+    var _importPickedFile = null;
+
+    document.getElementById('importFileInput').addEventListener('change', function(e) {
+      var file = e.target.files[0];
+      if (!file) return;
+      _importPickedFile = file;
+      var pathInput = document.getElementById('importPath');
+      pathInput.value = file.name;
+      document.getElementById('importClearBtn').style.display = 'inline-flex';
+      var infoEl = document.getElementById('importFileInfo');
+      var sizeKB = (file.size / 1024).toFixed(1);
+      var sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      infoEl.textContent = '📄 ' + file.name + ' (' + (file.size > 1048576 ? sizeMB + ' MB' : sizeKB + ' KB') + ')';
+      infoEl.style.display = 'block';
+
+      // Auto-detect format from extension
+      var fmt = document.getElementById('importFormat');
+      if (file.name.endsWith('.jsonl') || file.name.endsWith('.ndjson')) {
+        fmt.value = 'claude';
+      } else if (file.name.toLowerCase().includes('gemini')) {
+        fmt.value = 'gemini';
+      } else if (file.name.toLowerCase().includes('openai') || file.name.toLowerCase().includes('chatgpt')) {
+        fmt.value = 'openai';
+      } else {
+        fmt.value = '';
+      }
+    });
+
+    function clearImportFile() {
+      _importPickedFile = null;
+      document.getElementById('importPath').value = '';
+      document.getElementById('importFileInput').value = '';
+      document.getElementById('importClearBtn').style.display = 'none';
+      document.getElementById('importFileInfo').style.display = 'none';
+      document.getElementById('importResult').style.display = 'none';
+      document.getElementById('importFormat').value = '';
+    }
+
+    async function runImport(dryRun) {
+      var filePath = document.getElementById('importPath').value.trim();
+      if (!filePath && !_importPickedFile) { showToast('❌ Pick a file or enter a path', true); return; }
+
+      var format = document.getElementById('importFormat').value || undefined;
+      var project = document.getElementById('importProject').value.trim() || undefined;
+      var importBtn = document.getElementById('importBtn');
+      var dryBtn = document.getElementById('importDryBtn');
+      var resultEl = document.getElementById('importResult');
+
+      importBtn.disabled = true;
+      dryBtn.disabled = true;
+      var activeBtn = dryRun ? dryBtn : importBtn;
+      var origText = activeBtn.innerHTML;
+      activeBtn.innerHTML = dryRun ? '🔄 Validating...' : '🔄 Importing...';
+
+      resultEl.style.display = 'block';
+      resultEl.style.background = 'rgba(139,92,246,0.1)';
+      resultEl.style.border = '1px solid rgba(139,92,246,0.25)';
+      resultEl.style.color = 'var(--accent-purple)';
+      resultEl.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;margin-right:0.4rem;vertical-align:middle"></span> ' +
+        (dryRun ? 'Validating file...' : 'Importing turns...');
+
+      try {
+        var endpoint, body, headers;
+
+        if (_importPickedFile) {
+          // Upload mode: read file and send as base64
+          var content = await _importPickedFile.text();
+          endpoint = '/api/import-upload';
+          headers = {'Content-Type':'application/json'};
+          body = JSON.stringify({
+            filename: _importPickedFile.name,
+            content: content,
+            format: format,
+            project: project,
+            dryRun: dryRun
+          });
+        } else {
+          // Path mode: just send the server-side path
+          endpoint = '/api/import';
+          headers = {'Content-Type':'application/json'};
+          body = JSON.stringify({ path: filePath, format: format, project: project, dryRun: dryRun });
+        }
+
+        var res = await fetch(endpoint, { method: 'POST', headers: headers, body: body });
+        var d = await res.json();
+        if (res.ok && d.ok) {
+          resultEl.style.background = 'rgba(16,185,129,0.1)';
+          resultEl.style.border = '1px solid rgba(16,185,129,0.25)';
+          resultEl.style.color = 'var(--accent-green)';
+          resultEl.innerHTML = '✅ ' + escapeHtml(d.message) +
+            '<div style="margin-top:0.4rem;font-size:0.75rem;color:var(--text-muted)">' +
+            'Conversations: ' + (d.conversationCount || 0) + ' · Turns: ' + (d.successCount || 0) +
+            (d.skipCount ? ' · Skipped: ' + d.skipCount : '') +
+            (d.failCount ? ' · Failed: ' + d.failCount : '') + '</div>';
+          if (!dryRun) { showToast('✓ Import complete'); loadProject(); }
+        } else {
+          resultEl.style.background = 'rgba(244,63,94,0.1)';
+          resultEl.style.border = '1px solid rgba(244,63,94,0.25)';
+          resultEl.style.color = 'var(--accent-rose)';
+          resultEl.innerHTML = '❌ ' + escapeHtml(d.error || 'Import failed');
+        }
+      } catch(e) {
+        resultEl.style.background = 'rgba(244,63,94,0.1)';
+        resultEl.style.border = '1px solid rgba(244,63,94,0.25)';
+        resultEl.style.color = 'var(--accent-rose)';
+        resultEl.innerHTML = '❌ ' + escapeHtml(e.message);
+      } finally {
+        importBtn.disabled = false;
+        dryBtn.disabled = false;
+        activeBtn.innerHTML = origText;
       }
     }
 

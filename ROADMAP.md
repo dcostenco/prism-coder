@@ -8,6 +8,18 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v5.2.0 — Cognitive Memory & Universal Migration
+
+| Feature | Detail |
+|---------|--------|
+| 🧠 **Ebbinghaus Importance Decay** | `effective_importance = base × 0.95^days` at retrieval time. Frequently accessed memories stay prominent; neglected ones fade naturally. |
+| 🎯 **Context-Weighted Retrieval** | `context_boost` parameter on `session_search_memory` prepends project context to query before embedding — biases results toward current work. |
+| 🔄 **Universal History Migration** | Strategy Pattern adapters for Claude Code (JSONL), Gemini (StreamArray), OpenAI (JSON). `p-limit(5)` concurrency, content-hash dedup, `--dry-run`. |
+| 🧹 **Smart Consolidation** | Enhanced compaction prompts extract recurring principles alongside summaries. |
+| 🛡️ **SQL Injection Prevention** | 17-column allowlist on `patchLedger()` blocks column-name injection. |
+
+---
+
 ### ✅ v5.1.0 — Knowledge Graph Editor & Deep Storage
 
 | Feature | Detail |
@@ -111,34 +123,24 @@ v3.0: Role-scoped memory, agent registration/heartbeat, Telepathy (real-time cro
 
 ---
 
-## 📊 The State of Prism (v5.1)
+## 📊 The State of Prism (v5.2)
 
-With v5.1 shipped, Prism sits on a profoundly solid foundation:
+With v5.2 shipped, Prism has crossed from retrieval into **cognition**:
 
+- **Cognitive** — Ebbinghaus decay + context-boosted retrieval = memory that knows what matters *right now*.
+- **Zero Cold-Start** — Universal Migration imports years of Claude/Gemini/ChatGPT history on day one.
 - **Scale** — TurboQuant 10× compression + Deep Storage Purge. Decades of session history on a laptop.
 - **Quality** — Interactive Knowledge Graph Editor + Behavioral Memory that learns from mistakes.
-- **Reliability** — 303 passing tests across 13 suites. Hardened auto-load hooks for Claude Code & Gemini.
+- **Reliability** — 307+ passing tests across 14 suites. Hardened auto-load hooks for Claude Code & Gemini.
 - **Observability** — OpenTelemetry span waterfalls for every tool call, LLM hop, and background worker.
 - **Multimodal** — VLM auto-captioning turns screenshots into semantically searchable memory.
+- **Security** — SQL injection prevention via column allowlists on all dynamic query paths.
 
 ---
 
-## 🗺️ Next on the Horizon — v5.2
+## 🗺️ Next on the Horizon — v5.3
 
-The next major frontier: **Concurrency, Automation & Onboarding**.
-
-### 🔄 Universal History Migration *(in progress)*
-
-**Problem:** New users start with an empty Mind Palace. Months of valuable context from Claude Code, Gemini, and ChatGPT is stranded in proprietary log formats.
-
-**Solution:** A modular migration utility using the Strategy Pattern. Each LLM format gets a dedicated adapter that normalizes source data into `NormalizedTurn` before ingestion into the Prism ledger.
-
-**Key capabilities:**
-- **Claude Code** (.jsonl) — Streaming parser with message.id deduplication for streaming chunks
-- **Gemini** (.json) — OOM-safe `StreamArray` for 100MB+ history arrays
-- **OpenAI/ChatGPT** (.json) — Tool-call normalization and Unix timestamp conversion
-- **CLI flags** — `--format=`, `--project=`, `--dry-run`, `--verbose`
-- **Concurrency control** — `p-limit(5)` prevents database saturation
+The next major frontier: **Concurrency, Automation & Mobile**.
 
 ### 🔄 CRDT Handoff Merging
 
