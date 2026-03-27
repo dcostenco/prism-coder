@@ -968,11 +968,14 @@ export async function sessionSearchMemoryHandler(args: unknown) {
     // Phase 1: enable_trace defaults to false for full backward compatibility.
     // When true, a MemoryTrace JSON block is appended as content[1].
     enable_trace = false,
+    // v5.2: Context-Weighted Retrieval — biases search toward active work context
+    context_boost = false,
   } = args;
 
   debugLog(
     `[session_search_memory] Semantic search: query="${query}", ` +
-    `project=${project || "all"}, limit=${limit}, threshold=${similarity_threshold}`
+    `project=${project || "all"}, limit=${limit}, threshold=${similarity_threshold}` +
+    `${context_boost ? ", context_boost=ON" : ""}`
   );
 
   // Phase 1: Start total latency timer BEFORE any work (embedding + storage)
@@ -995,8 +998,37 @@ export async function sessionSearchMemoryHandler(args: unknown) {
   // Phase 1: Start embedding latency timer — isolates Gemini API call time.
   // This is the most variable component: 50ms on a good day, 2000ms under load.
   const embeddingStart = performance.now();
+
+  // ── v5.2: Context-Weighted Retrieval ───────────────────────────
+  // When context_boost is enabled, prepend active project context to the
+  // search query before embedding generation. This naturally biases the
+  // embedding vector toward memories from the same project/branch/context.
+  // Elegant: no scoring heuristics needed — semantics do the work.
+  let effectiveQuery = query;
+  if (context_boost && project) {
+    try {
+      const storage = await getStorage();
+      const ctx = await storage.loadContext(project, "quick", PRISM_USER_ID);
+      const contextParts: string[] = [];
+      if (ctx && typeof ctx === "object") {
+        const ctxObj = ctx as Record<string, unknown>;
+        if (ctxObj.active_branch) contextParts.push(`branch: ${ctxObj.active_branch}`);
+        if (ctxObj.key_context) contextParts.push(`context: ${String(ctxObj.key_context).substring(0, 200)}`);
+        const keywords = ctxObj.keywords as string[] | undefined;
+        if (keywords?.length) contextParts.push(`keywords: ${keywords.slice(0, 5).join(", ")}`);
+      }
+      if (contextParts.length > 0) {
+        effectiveQuery = `[${contextParts.join("; ")}] ${query}`;
+        debugLog(`[session_search_memory] Context boost applied: "${effectiveQuery.substring(0, 100)}..."`);
+      }
+    } catch {
+      // Context load failed — proceed with unmodified query (graceful degradation)
+      debugLog("[session_search_memory] Context boost failed (non-fatal) — using original query");
+    }
+  }
+
   try {
-    queryEmbedding = await getLLMProvider().generateEmbedding(query);
+    queryEmbedding = await getLLMProvider().generateEmbedding(effectiveQuery);
   } catch (err) {
     return {
       content: [{
@@ -1061,14 +1093,46 @@ export async function sessionSearchMemoryHandler(args: unknown) {
       return { content: contentBlocks, isError: false };
     }
 
-    // Format results with similarity scores
+    // ── v5.2: Dynamic Importance Decay (Ebbinghaus Curve) ──────
+    // Compute effective_importance at retrieval time:
+    //   effective = base_importance * 0.95^days_since_accessed
+    // This avoids background workers — decay is a pure function of time.
+    // Also fire-and-forget update last_accessed_at on all returned results.
+    const now = new Date();
+    const resultIds = results.map((r: any) => r.id).filter(Boolean);
+
+    // Fire-and-forget: update last_accessed_at for all returned results
+    if (resultIds.length > 0) {
+      const storage = await getStorage();
+      const nowISO = now.toISOString();
+      for (const id of resultIds) {
+        storage.patchLedger(id, { last_accessed_at: nowISO }).catch(() => {});
+      }
+    }
+
+    // Format results with similarity scores + effective importance
     const formatted = results.map((r: any, i: number) => {
       const score = typeof r.similarity === "number"
         ? `${(r.similarity * 100).toFixed(1)}%`
         : "N/A";
+
+      // Dynamic importance decay: effective = base * 0.95^days
+      const baseImportance = r.importance ?? 0;
+      let effectiveImportance = baseImportance;
+      if (baseImportance > 0) {
+        const lastAccess = r.last_accessed_at || r.created_at || now.toISOString();
+        const daysSince = Math.max(0, (now.getTime() - new Date(lastAccess).getTime()) / 86400000);
+        effectiveImportance = Math.round(baseImportance * Math.pow(0.95, daysSince) * 100) / 100;
+      }
+
+      const importanceStr = baseImportance > 0
+        ? `  Importance: ${effectiveImportance}${effectiveImportance !== baseImportance ? ` (base: ${baseImportance}, decayed)` : ""}\n`
+        : "";
+
       return `[${i + 1}] ${score} similar — ${r.session_date || "unknown date"}\n` +
         `  Project: ${r.project}\n` +
         `  Summary: ${r.summary}\n` +
+        importanceStr +
         (r.decisions?.length ? `  Decisions: ${r.decisions.join("; ")}\n` : "") +
         (r.files_changed?.length ? `  Files: ${r.files_changed.join(", ")}\n` : "");
     }).join("\n");

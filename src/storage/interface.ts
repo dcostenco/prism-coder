@@ -89,6 +89,7 @@ export interface LedgerEntry {
   // Timestamps
   created_at?: string;
   session_date?: string;
+  last_accessed_at?: string | null;  // v5.2: Cognitive Memory — tracks last retrieval for importance decay
 }
 
 /**

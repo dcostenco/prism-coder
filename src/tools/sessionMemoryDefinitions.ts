@@ -326,6 +326,13 @@ export const SESSION_SEARCH_MEMORY_TOOL: Tool = {
         description: "If true, returns a separate MEMORY TRACE content block with search strategy, " +
           "latency breakdown (embedding vs storage), and scoring metadata. Default: false.",
       },
+      // v5.2: Context-Weighted Retrieval — biases search toward active work context
+      context_boost: {
+        type: "boolean",
+        description: "If true, appends current project and working context to the search query " +
+          "before embedding generation, naturally biasing results toward contextually relevant memories. " +
+          "Useful when searching within a specific project context. Default: false.",
+      },
     },
     required: ["query"],
   },
@@ -453,6 +460,7 @@ export function isSessionSearchMemoryArgs(
   limit?: number;
   similarity_threshold?: number;
   enable_trace?: boolean;  // Phase 1: Explainability flag
+  context_boost?: boolean; // v5.2: Context-Weighted Retrieval
 } {
   return (
     typeof args === "object" &&

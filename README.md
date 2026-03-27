@@ -199,6 +199,34 @@ Add to your Continue `config.json` or Cline MCP settings:
 </details>
 
 <details>
+<summary><strong>Migrating Existing History (Claude, Gemini, OpenAI)</strong></summary>
+
+Prism can ingest months of historical sessions from other tools to give your Mind Palace a massive head start.
+
+### Supported Formats
+* **Claude Code** (`.jsonl` logs) — Automatically handles streaming chunk deduplication and `requestId` normalization.
+* **Gemini** (JSON history arrays) — Supports large-file streaming for 100MB+ exports.
+* **OpenAI** (JSON chat completion history) — Normalizes disparate tool-call structures into the unified Ledger schema.
+
+### How to Run
+Use the `universal-import` command:
+
+```bash
+# Ingest Claude Code history
+npx -y prism-mcp-server universal-import --format claude --path ~/path/to/claude_log.jsonl --project my-project
+
+# Dry run (verify mapping without saving)
+npx -y prism-mcp-server universal-import --format gemini --path ./gemini_history.json --dry-run
+```
+
+### Key Features
+* **OOM-Safe Streaming:** Processes massive log files line-by-line using `stream-json`.
+* **Chronological Integrity:** Uses timestamp fallbacks and `requestId` sorting to ensure your memory timeline is accurate.
+* **Smart Context Mapping:** Extracts `cwd`, `gitBranch`, and tool usage patterns into searchable metadata.
+
+</details>
+
+<details>
 <summary><strong>Claude Code — Lifecycle Hooks (Auto-Load & Auto-Save)</strong></summary>
 
 Claude Code supports `SessionStart` and `Stop` hooks that force the agent to load/save Prism context automatically.
@@ -632,6 +660,23 @@ retriever = EnsembleRetriever(
 Includes a full 5-node LangGraph research agent with MCP bridge and persistent memory.
 
 </details>
+
+---
+
+## Research Roadmap (v5.2+)
+
+Prism is evolving from smart session logging toward a **cognitive memory architecture** — grounded in real research, not marketing.
+
+| Phase | Feature | Inspired By |
+|-------|---------|-------------|
+| **v5.2** | Smart Consolidation — extract principles, not just summaries | Neuroscience sleep consolidation |
+| **v5.2** | Dynamic Importance Decay — memories fade unless reinforced | Ebbinghaus forgetting curve |
+| **v5.2** | Context-Weighted Retrieval — current work biases what surfaces | Contextual memory in cognitive science |
+| **v6.x** | Superposed Memory (SDM) — O(1) retrieval via correlation | Kanerva's Sparse Distributed Memory (1988) |
+| **v6.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) |
+| **v7+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations |
+
+> Informed by LeCun's "Why AI Systems Don't Learn" (Dupoux, LeCun, Malik — March 2026) and Kanerva's SDM.
 
 ---
 

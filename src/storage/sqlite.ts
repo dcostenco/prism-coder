@@ -435,6 +435,22 @@ export class SqliteStorage implements StorageBackend {
     } catch (e: any) {
       if (!e.message?.includes("duplicate column name")) throw e;
     }
+
+    // ─── v5.2 Migration: Cognitive Memory — Last Accessed Tracking ───
+    //
+    // REVIEWER NOTE: last_accessed_at enables dynamic importance decay
+    // computed at retrieval time: effective = base * 0.95^days_since_access.
+    // No background workers needed — decay is a pure function of time.
+    // This column is updated fire-and-forget on each search hit.
+
+    try {
+      await this.db.execute(
+        `ALTER TABLE session_ledger ADD COLUMN last_accessed_at TEXT DEFAULT NULL`
+      );
+      debugLog("[SqliteStorage] v5.2 migration: added last_accessed_at column");
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
   }
 
   // ─── PostgREST Filter Parser ───────────────────────────────

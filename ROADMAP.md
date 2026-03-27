@@ -125,7 +125,20 @@ With v5.1 shipped, Prism sits on a profoundly solid foundation:
 
 ## 🗺️ Next on the Horizon — v5.2
 
-The next major frontier: **Concurrency & Automation**.
+The next major frontier: **Concurrency, Automation & Onboarding**.
+
+### 🔄 Universal History Migration *(in progress)*
+
+**Problem:** New users start with an empty Mind Palace. Months of valuable context from Claude Code, Gemini, and ChatGPT is stranded in proprietary log formats.
+
+**Solution:** A modular migration utility using the Strategy Pattern. Each LLM format gets a dedicated adapter that normalizes source data into `NormalizedTurn` before ingestion into the Prism ledger.
+
+**Key capabilities:**
+- **Claude Code** (.jsonl) — Streaming parser with message.id deduplication for streaming chunks
+- **Gemini** (.json) — OOM-safe `StreamArray` for 100MB+ history arrays
+- **OpenAI/ChatGPT** (.json) — Tool-call normalization and Unix timestamp conversion
+- **CLI flags** — `--format=`, `--project=`, `--dry-run`, `--verbose`
+- **Concurrency control** — `p-limit(5)` prevents database saturation
 
 ### 🔄 CRDT Handoff Merging
 

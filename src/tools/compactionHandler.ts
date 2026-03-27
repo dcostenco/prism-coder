@@ -42,13 +42,23 @@ async function summarizeEntries(entries: any[]): Promise<string> {
   ).join("\n");
 
   const prompt = (
-    `You are compressing a session history log. Summarize these ${entries.length} ` +
-    `work sessions into a single concise paragraph (max 500 words).\n\n` +
-    `PRESERVE: key decisions, important file changes, error resolutions, ` +
-    `architecture changes, and any recurring patterns.\n` +
-    `OMIT: routine operations, intermediate debugging steps, and redundant details.\n\n` +
-    `Sessions to summarize:\n${entriesText}\n\n` +
-    `Provide ONLY the summary paragraph, no headers or formatting.`
+    `You are compressing a session history log for an AI agent's persistent memory.\n\n` +
+    `Analyze these ${entries.length} work sessions and produce THREE sections:\n\n` +
+    `1. SUMMARY (max 300 words): A concise paragraph preserving key decisions, ` +
+    `important file changes, error resolutions, and architecture changes. ` +
+    `Omit routine operations and intermediate debugging steps.\n\n` +
+    `2. PRINCIPLES (1-3 bullet points): Reusable lessons extracted from these sessions. ` +
+    `These should be actionable engineering insights the agent can apply to future work. ` +
+    `Format: "- [principle]"\n\n` +
+    `3. PATTERNS (1-3 bullet points): Recurring behaviors, tools, or workflows observed. ` +
+    `Format: "- [pattern]"\n\n` +
+    `Sessions to analyze:\n${entriesText}\n\n` +
+    `Output format (follow exactly):\n` +
+    `[summary paragraph]\n\n` +
+    `Principles:\n` +
+    `- ...\n\n` +
+    `Patterns:\n` +
+    `- ...`
   ).substring(0, 30000);
 
   return llm.generateText(prompt);
