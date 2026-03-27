@@ -275,37 +275,67 @@ if __name__ == "__main__":
 </details>
 
 <details>
-<summary><strong>Gemini / Antigravity — Auto-Load Rules</strong></summary>
+<summary><strong>Gemini / Antigravity — Auto-Load Rules (Battle-Tested)</strong></summary>
 
-Gemini-based agents need a radically simple approach. Long constraint lists cause the model to hallucinate that the tool doesn't exist.
+Gemini-based agents (including Google's Antigravity IDE) require a fundamentally different approach to auto-load. This guide was refined over **14 iterations** of real-world prompt engineering.
 
-### The 2-Line Rule
+### The Core Problem
 
-Create `~/.gemini/GEMINI.md` (or add to Antigravity **User Rules**):
+When given verbose instructions with many constraints, Gemini models hallucinate that MCP tools "don't exist" or "aren't available" — even when they are. This is adversarial reasoning triggered by long rule lists, not a configuration issue.
+
+### The 2-Line Rule (Proven Fix)
+
+Create `~/.gemini/GEMINI.md`:
 
 ```markdown
 ## First Action
 Call `mcp_prism-mcp_session_load_context(project="my-project", level="deep")` before responding.
 ```
 
-> **Note:** Antigravity uses single underscores (`mcp_prism-mcp_...`) vs Claude's double (`mcp__prism-mcp__...`).
-
-This 2-line approach proved reliable after 13 iterations of prompt engineering. Shorter instructions avoid triggering adversarial reasoning.
-
-### Session End
-
-Tell the agent: *"Wrap up the session."* It will execute:
-1. `session_save_ledger` — immutable work log
-2. `session_save_handoff` — with `expected_version` for concurrency control
+**Why this works:**
+- Gemini uses **single underscores** for MCP tools (`mcp_prism-mcp_...`) vs Claude's **double underscores** (`mcp__prism-mcp__...`)
+- Keeping the instruction to 2 lines avoids triggering the model's adversarial "tool not found" reasoning
+- Framing as a positive "First Action" directive outperforms negative constraint lists
 
 ### Antigravity UI Caveat
 
-Antigravity doesn't visually render MCP tool outputs. Add to your rules:
+Antigravity **does not visually render MCP tool output blocks** in the chat UI. The tool executes successfully, but the user sees nothing. Fix this by adding an echo rule:
 
 ```markdown
 ## Echo Context
-After loading, include in your reply: Agent identity, last summary, open TODOs, version number.
+After loading context, include in your text reply:
+- Agent identity (role + name)
+- Last session summary
+- Open TODOs
+- Session version number
 ```
+
+This ensures the user sees their project context even though the raw MCP output is invisible.
+
+### Session End Workflow
+
+Tell the agent: *"Wrap up the session."* It should execute:
+
+1. `session_save_ledger` — append immutable work log (summary, decisions, files changed)
+2. `session_save_handoff` — upsert project state with `expected_version` for OCC
+
+> **Tip:** Include the session-end instructions in your `GEMINI.md` or ask the agent to save when you're done.
+
+### Key Findings from 14 Iterations
+
+| Iteration | What We Tried | Result |
+|-----------|---------------|--------|
+| 1–6 | Verbose "Banned Behaviors" blocks, negative constraints | ❌ Model hallucinated tools were unavailable |
+| 7–9 | `always_on` trigger rules, multi-file configs | ❌ Redundant configs caused race conditions |
+| 10–11 | Emergency-style `🚨 MANDATORY` headers | ⚠️ Inconsistent — worked sometimes |
+| 12–13 | Positive-only framing, progressively shorter | ⚠️ Better but still intermittent |
+| 14 | **2-line "First Action" directive** | ✅ Reliable across sessions |
+
+### Platform Gotchas
+
+- **`replace_file_content` silently fails** on `~/.gemini/GEMINI.md` in some environments — use `write_to_file` with overwrite instead
+- **Multiple GEMINI.md locations** can conflict: global (`~/.gemini/`), workspace, and User Rules in the Antigravity UI. Keep them synchronized
+- **Camoufox/browser tools** called at startup spawn visible black windows — never call browser tools during greeting handlers
 
 </details>
 
