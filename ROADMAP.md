@@ -111,17 +111,56 @@ v3.0: Role-scoped memory, agent registration/heartbeat, Telepathy (real-time cro
 
 ---
 
-## 🗺️ Next on the Horizon
+## 📊 The State of Prism (v5.1)
 
-### 🥇 Priority 1 — v5.2 Scoping
+With v5.1 shipped, Prism sits on a profoundly solid foundation:
 
-| Feature | Description |
-|---------|-------------|
-| 🔄 **CRDT Handoff Merging** | Conflict-free types for concurrent multi-agent edits on the same handoff state. |
-| ⏰ **Background Purge Scheduler** | Automated cron-style scheduling for `deep_storage_purge` — reclaim storage without manual tool calls. |
-| 📱 **Mind Palace Mobile PWA** | Responsive dashboard UI for tablet/phone with offline-first IndexedDB cache. |
+- **Scale** — TurboQuant 10× compression + Deep Storage Purge. Decades of session history on a laptop.
+- **Quality** — Interactive Knowledge Graph Editor + Behavioral Memory that learns from mistakes.
+- **Reliability** — 303 passing tests across 13 suites. Hardened auto-load hooks for Claude Code & Gemini.
+- **Observability** — OpenTelemetry span waterfalls for every tool call, LLM hop, and background worker.
+- **Multimodal** — VLM auto-captioning turns screenshots into semantically searchable memory.
 
-### 🥉 Priority 3 — Autonomous Web Scholar 🌐
+---
+
+## 🗺️ Next on the Horizon — v5.2
+
+The next major frontier: **Concurrency & Automation**.
+
+### 🔄 CRDT Handoff Merging
+
+**Problem:** Today's OCC (optimistic concurrency control) rejects one agent when two try to save simultaneously. The rejected agent must retry. This is fine for 2 agents but doesn't scale to 5+.
+
+**Solution:** Replace the strict version-bump model with **conflict-free replicated data types** (CRDTs). Each agent can independently mutate `open_todos`, `key_context`, and `last_summary` — merges happen automatically without rejection or retry.
+
+**Architecture candidates:**
+- **Automerge** — mature Rust-backed CRDT library with JS bindings
+- **Yjs** — lighter-weight, excellent for text/array/map types
+- **Custom LWW-Register** — last-writer-wins per-field, simplest to implement
+
+### ⏰ Background Purge Scheduler
+
+**Problem:** `deep_storage_purge` must be invoked manually. Users forget, storage grows.
+
+**Solution:** A cron-style scheduler inside the Prism server process that automatically runs purge on a configurable interval (default: weekly). Completely abstracts storage management away from the user.
+
+**Implementation:**
+- Node.js `setInterval` or `node-cron` with configurable schedule via dashboard
+- Respects all existing safety guards (7-day minimum age, dry-run logging)
+- Dashboard shows last-purge timestamp and bytes reclaimed
+
+### 📱 Mind Palace Mobile PWA
+
+**Problem:** The dashboard is desktop-only. Quick check-ins on mobile require a laptop.
+
+**Solution:** Progressive Web App with responsive glassmorphism layout, offline-first IndexedDB cache, and push notifications for agent activity.
+
+**Phases:**
+1. Responsive CSS breakpoints for the existing dashboard
+2. Service worker + offline cache for read-only access
+3. Push notifications via Web Push API for Telepathy events
+
+### 🥉 Autonomous Web Scholar 🌐
 
 Agent-driven learning pipeline:
 1. Brave Search + Firecrawl scrape for a given topic
