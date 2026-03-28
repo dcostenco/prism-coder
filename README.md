@@ -395,9 +395,31 @@ Then add to your MCP config:
 
 </details>
 
+### ⚠️ Common Installation Pitfalls
+
+> **❌ Don't use `npm install -g`:**
+> Hardcoding the binary path (e.g. `/opt/homebrew/Cellar/node/23.x/bin/prism-mcp-server`) is tied to a specific Node.js version — when Node updates, the path silently breaks.
+>
+> **✅ Always use `npx` instead:**
+> ```json
+> {
+>   "mcpServers": {
+>     "prism-mcp": {
+>       "command": "npx",
+>       "args": ["-y", "prism-mcp-server"]
+>     }
+>   }
+> }
+> ```
+> `npx` resolves the correct binary automatically, always fetches the latest version, and works identically on macOS, Linux, and Windows. Already installed globally? Run `npm uninstall -g prism-mcp-server` first.
+
+> **❓ Seeing warnings about missing API keys on startup?**
+> That's expected and not an error. `BRAVE_API_KEY` / `GOOGLE_API_KEY` warnings are informational only — core session memory works with zero keys. See [Environment Variables](#environment-variables) for what each key unlocks.
+
 ---
 
 ## ✨ What Makes Prism Different
+
 
 ### 🧠 Your Agent Learns From Mistakes
 When you correct your agent, Prism tracks it. Corrections accumulate **importance** over time. High-importance lessons auto-surface as warnings in future sessions — and can even sync to your `.cursorrules` file for permanent enforcement. Your agent literally gets smarter the more you use it.
