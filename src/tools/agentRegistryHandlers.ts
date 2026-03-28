@@ -73,6 +73,7 @@ function isAgentHeartbeatArgs(args: Record<string, unknown>): args is {
   project: string;
   role?: string;
   current_task?: string;
+  expected_duration_minutes?: number;
 } {
   return typeof args.project === "string";
 }
@@ -141,14 +142,16 @@ export async function agentHeartbeatHandler(args: Record<string, unknown>) {
     args.project,
     PRISM_USER_ID,
     effectiveRole,
-    args.current_task as string | undefined
+    args.current_task as string | undefined,
+    args.expected_duration_minutes as number | undefined
   );
 
   return {
     content: [{
       type: "text" as const,
       text: `💓 Heartbeat updated for **${escapeMd(effectiveRole)}** on \`${escapeMd(args.project as string)}\`.` +
-        (args.current_task ? ` Task: ${escapeMd(args.current_task as string)}` : ""),
+        (args.current_task ? ` Task: ${escapeMd(args.current_task as string)}` : "") +
+        (args.expected_duration_minutes ? ` (ETA: ${args.expected_duration_minutes}m)` : ""),
     }],
   };
 }
@@ -173,29 +176,48 @@ export async function agentListTeamHandler(args: Record<string, unknown>) {
     };
   }
 
+  // v5.3: Health-state indicator mapping
+  const statusIndicators: Record<string, string> = {
+    active: "🟢 Active",
+    idle: "💤 Idle",
+    shutdown: "⚫ Offline",
+    stale: "🟡 Stale",
+    frozen: "🔴 Frozen",
+    overdue: "⏰ Overdue",
+    looping: "🔄 Looping",
+  };
+
   const lines = team.map(agent => {
     const icon = getRoleIcon(agent.role);
     const ago = agent.last_heartbeat
       ? getTimeAgo(agent.last_heartbeat)
       : "unknown";
+    const healthIndicator = statusIndicators[agent.status] || `❓ ${agent.status}`;
     // escapeMd() applied to all user-controlled fields to prevent
     // markdown metacharacters in task descriptions from corrupting output
     return (
       `${icon} **${escapeMd(agent.role)}**` +
       (agent.agent_name ? ` (${escapeMd(agent.agent_name)})` : "") +
-      ` — ${escapeMd(agent.status)}` +
+      ` — ${healthIndicator}` +
       (agent.current_task ? ` | Task: ${escapeMd(agent.current_task)}` : "") +
+      (agent.loop_count && agent.loop_count >= 3 ? ` | 🔄 Loop: ${agent.loop_count}x` : "") +
       ` | Last seen: ${ago}`
     );
   });
+
+  // Count agents by health state for summary
+  const healthyCt = team.filter(a => a.status === "active" || a.status === "idle").length;
+  const warnCt = team.filter(a => ["stale", "overdue", "looping", "frozen"].includes(a.status)).length;
 
   return {
     content: [{
       type: "text" as const,
       text:
-        `## 🐝 Active Hivemind Team — \`${escapeMd(args.project as string)}\`\n\n` +
+        `## 🐝 Hivemind Team — \`${escapeMd(args.project as string)}\`\n\n` +
         lines.join("\n") +
-        `\n\n_${team.length} agent(s) active. Stale agents (>30min) auto-pruned._`,
+        `\n\n_${team.length} agent(s) | ${healthyCt} healthy` +
+        (warnCt > 0 ? ` | ⚠️ ${warnCt} need attention` : "") +
+        `_\n_Watchdog monitoring active: health checked every 60s._`,
     }],
   };
 }

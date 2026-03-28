@@ -153,5 +153,22 @@ if (PRISM_AUTO_CAPTURE) {
   }
 }
 
-
+// ─── v5.3: Hivemind Watchdog Thresholds ──────────────────────
+// All values have sane defaults. Override via env vars only for
+// testing or production tuning. Dashboard UI exposure deferred to v5.4.
+export const WATCHDOG_INTERVAL_MS = parseInt(
+  process.env.PRISM_WATCHDOG_INTERVAL_MS || "60000", 10
+);
+export const WATCHDOG_STALE_MIN = parseInt(
+  process.env.PRISM_WATCHDOG_STALE_MIN || "5", 10
+);
+export const WATCHDOG_FROZEN_MIN = parseInt(
+  process.env.PRISM_WATCHDOG_FROZEN_MIN || "15", 10
+);
+export const WATCHDOG_OFFLINE_MIN = parseInt(
+  process.env.PRISM_WATCHDOG_OFFLINE_MIN || "30", 10
+);
+export const WATCHDOG_LOOP_THRESHOLD = parseInt(
+  process.env.PRISM_WATCHDOG_LOOP_THRESHOLD || "5", 10
+);
 

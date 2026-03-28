@@ -377,19 +377,74 @@ export class SupabaseStorage implements StorageBackend {
       agent_name: entry.agent_name ?? null,
       status: entry.status || "active",
       current_task: entry.current_task ?? null,
+      // v5.3: Initialize watchdog fields
+      task_start_time: new Date().toISOString(),
+      expected_duration_minutes: null,
+      task_hash: null,
+      loop_count: 0,
     };
     const result = await supabasePost("agent_registry", record);
     const data = Array.isArray(result) ? result[0] : result;
     return { ...entry, id: data?.id, status: entry.status || "active" };
   }
 
-  async heartbeatAgent(project: string, userId: string, role: string, currentTask?: string): Promise<void> {
+  /**
+   * Simple string hash for loop detection (DJB2).
+   * Mirrors SqliteStorage._simpleHash().
+   */
+  private _simpleHash(str: string): string {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) + hash + str.charCodeAt(i)) & 0xFFFFFFFF;
+    }
+    return hash.toString(16);
+  }
+
+  async heartbeatAgent(
+    project: string, userId: string, role: string,
+    currentTask?: string, expectedDurationMinutes?: number
+  ): Promise<void> {
+    // v5.3: Loop detection — compute task hash and compare with stored value
+    const newTaskHash = currentTask ? this._simpleHash(currentTask) : null;
+
+    // Fetch current agent for loop comparison
+    const current = await supabaseGet("agent_registry", {
+      project: `eq.${project}`,
+      user_id: `eq.${userId}`,
+      role: `eq.${role}`,
+      select: "task_hash,loop_count",
+    });
+    const agentRow = Array.isArray(current) ? current[0] : current;
+    const existingHash = agentRow?.task_hash as string | null;
+    const existingLoopCount = (agentRow?.loop_count as number) || 0;
+
+    const taskChanged = newTaskHash !== null && newTaskHash !== existingHash;
+    const sameTask = newTaskHash !== null && newTaskHash === existingHash;
+
+    const newLoopCount = sameTask
+      ? existingLoopCount + 1
+      : (taskChanged ? 0 : existingLoopCount);
+
+    const newStatus = newLoopCount >= 5 ? "looping" : "active";
+
     const patchData: Record<string, unknown> = {
       last_heartbeat: new Date().toISOString(),
+      loop_count: newLoopCount,
+      status: newStatus,
     };
     if (currentTask !== undefined) {
       patchData.current_task = currentTask;
     }
+    if (newTaskHash !== null) {
+      patchData.task_hash = newTaskHash;
+    }
+    if (taskChanged) {
+      patchData.task_start_time = new Date().toISOString();
+    }
+    if (expectedDurationMinutes !== undefined) {
+      patchData.expected_duration_minutes = expectedDurationMinutes;
+    }
+
     await supabasePatch("agent_registry", patchData, {
       project: `eq.${project}`,
       user_id: `eq.${userId}`,
@@ -408,6 +463,42 @@ export class SupabaseStorage implements StorageBackend {
 
   async deregisterAgent(project: string, userId: string, role: string): Promise<void> {
     await supabaseDelete("agent_registry", {
+      project: `eq.${project}`,
+      user_id: `eq.${userId}`,
+      role: `eq.${role}`,
+    });
+  }
+
+  // ─── v5.3: Hivemind Watchdog Methods ───────────────────────
+
+  async getAllAgents(userId: string): Promise<AgentRegistryEntry[]> {
+    const data = await supabaseGet("agent_registry", {
+      user_id: `eq.${userId}`,
+      order: "project,role",
+    });
+    return (Array.isArray(data) ? data : []) as AgentRegistryEntry[];
+  }
+
+  async updateAgentStatus(
+    project: string, userId: string, role: string,
+    status: AgentRegistryEntry["status"],
+    additionalFields?: Record<string, unknown>
+  ): Promise<void> {
+    const patchData: Record<string, unknown> = { status };
+
+    const ALLOWED_FIELDS = new Set([
+      "loop_count", "task_start_time", "expected_duration_minutes",
+      "task_hash", "current_task",
+    ]);
+    if (additionalFields) {
+      for (const [key, val] of Object.entries(additionalFields)) {
+        if (ALLOWED_FIELDS.has(key)) {
+          patchData[key] = val;
+        }
+      }
+    }
+
+    await supabasePatch("agent_registry", patchData, {
       project: `eq.${project}`,
       user_id: `eq.${userId}`,
       role: `eq.${role}`,

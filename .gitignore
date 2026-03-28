@@ -52,3 +52,4 @@ undefined-wal
 # repomix output
 repomix*.xml
 repomix-output.txt
+repomix-*.txt

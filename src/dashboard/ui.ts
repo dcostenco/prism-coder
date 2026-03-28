@@ -444,7 +444,14 @@ export function renderDashboardHTML(version: string): string {
       width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green);
       flex-shrink: 0; animation: pulseDot 2s ease-in-out infinite;
     }
+    .pulse-dot.looping {
+      animation: spinDot 1s linear infinite;
+      background: #a855f7 !important;
+      border-radius: 2px;
+    }
     @keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes spinDot { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .team-status { font-size: 0.8rem; flex-shrink: 0; }
 
     /* ─── Memory Analytics (v3.1) ─── */
     .sparkline {
@@ -2149,7 +2156,9 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
       setTimeout(function() { toast.classList.remove('show'); }, 2000);
     }
 
-    // ─── Hivemind Radar (v3.0) ───
+    // ─── Hivemind Radar (v5.3 — Health Watchdog) ───
+    var hivemindRefreshTimer = null;
+
     async function loadTeam() {
       var project = document.getElementById('projectSelect').value;
       if (!project) return;
@@ -2161,15 +2170,36 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
         var list = document.getElementById('teamList');
         if (team.length > 0) {
           var roleIcons = {dev:'🛠️',qa:'🔍',pm:'📋',lead:'🏗️',security:'🔒',ux:'🎨',cmo:'📢'};
+          var statusColors = {
+            active: '#10b981', stale: '#f59e0b', frozen: '#ef4444',
+            overdue: '#f97316', looping: '#a855f7', idle: '#64748b', shutdown: '#374151'
+          };
+          var statusLabels = {
+            active: '🟢', stale: '🟡', frozen: '🔴',
+            overdue: '⏰', looping: '🔄', idle: '💤', shutdown: '⚫'
+          };
           list.innerHTML = team.map(function(a) {
             var icon = roleIcons[a.role] || '🤖';
             var ago = a.last_heartbeat ? timeAgo(a.last_heartbeat) : '?';
+            var dotColor = statusColors[a.status] || '#64748b';
+            var statusIcon = statusLabels[a.status] || '❓';
+            var loopBadge = (a.loop_count && a.loop_count >= 3)
+              ? ' <span style="color:#a855f7;font-size:0.75rem">🔄 ' + a.loop_count + 'x</span>'
+              : '';
+            var dotClass = 'pulse-dot' + (a.status === 'looping' ? ' looping' : '');
             return '<li class="team-item">' +
-              '<span class="pulse-dot"></span>' +
+              '<span class="' + dotClass + '" style="background:' + dotColor + '"></span>' +
               '<span class="team-role">' + icon + ' ' + escapeHtml(a.role) + '</span>' +
-              '<span class="team-task">' + escapeHtml(a.current_task || 'idle') + '</span>' +
+              '<span class="team-status" title="' + (a.status || 'active') + '">' + statusIcon + '</span>' +
+              '<span class="team-task">' + escapeHtml(a.current_task || 'idle') + loopBadge + '</span>' +
               '<span class="team-heartbeat">' + ago + '</span></li>';
           }).join('');
+          var healthyCt = team.filter(function(a){ return a.status === 'active' || a.status === 'idle'; }).length;
+          var warnCt = team.length - healthyCt;
+          var summary = team.length + ' agent(s)';
+          if (warnCt > 0) summary += ' | ⚠️ ' + warnCt + ' need attention';
+          summary += ' | 🐝 Watchdog active';
+          list.innerHTML += '<li style="color:var(--text-muted);font-size:0.75rem;text-align:center;padding:0.5rem;border-top:1px solid var(--border)">' + summary + '</li>';
           card.style.display = 'block';
         } else {
           list.innerHTML = '<li style="color:var(--text-muted);font-size:0.85rem;text-align:center;padding:1rem">No active agents on this project.</li>';
@@ -2178,6 +2208,18 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
       } catch(e) {
         console.warn('Team load failed:', e);
       }
+    }
+
+    // v5.3: Auto-refresh Hivemind Radar every 15s
+    function startHivemindRefresh() {
+      stopHivemindRefresh();
+      hivemindRefreshTimer = setInterval(loadTeam, 15000);
+    }
+    function stopHivemindRefresh() {
+      if (hivemindRefreshTimer) { clearInterval(hivemindRefreshTimer); hivemindRefreshTimer = null; }
+    }
+    if (document.getElementById('hivemindCard')) {
+      startHivemindRefresh();
     }
 
     function timeAgo(iso) {

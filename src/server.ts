@@ -68,7 +68,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import { SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID, PRISM_ENABLE_HIVEMIND } from "./config.js";
+import {
+  SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID, PRISM_ENABLE_HIVEMIND,
+  WATCHDOG_INTERVAL_MS, WATCHDOG_STALE_MIN, WATCHDOG_FROZEN_MIN,
+  WATCHDOG_OFFLINE_MIN, WATCHDOG_LOOP_THRESHOLD,
+} from "./config.js";
+import { startWatchdog, drainAlerts } from "./hivemindWatchdog.js";
 import { getSyncBus } from "./sync/factory.js";
 import type { SyncBus, SyncEvent } from "./sync/index.js";
 import { startDashboardServer } from "./dashboard/server.js";
@@ -859,6 +864,39 @@ export function createServer() {
         }
 
         rootSpan.setStatus({ code: SpanStatusCode.OK });
+
+        // ═══ v5.3: Hivemind Watchdog Alert Injection (Telepathy) ═══
+        // CRITICAL: Append alerts DIRECTLY to tool response content
+        // so the LLM actually reads them. sendLoggingMessage goes to
+        // debug logs which the LLM never sees.
+        if (PRISM_ENABLE_HIVEMIND && result && !result.isError) {
+          const project = (args as Record<string, unknown>)?.project;
+          if (typeof project === "string") {
+            const alerts = drainAlerts(project);
+            if (alerts.length > 0) {
+              const alertBlock = alerts.map(a =>
+                `[🐝 SYSTEM ALERT] ⚠️ Teammate "${a.role}"` +
+                (a.agentName ? ` (${a.agentName})` : "") +
+                ` is ${a.status.toUpperCase()}: ${a.message}`
+              ).join("\n");
+
+              // Inject into LLM context (primary mechanism)
+              result.content.push({
+                type: "text" as const,
+                text: `\n\n${alertBlock}`,
+              });
+
+              // Also log to operator/debug channel (secondary)
+              try {
+                server.sendLoggingMessage({
+                  level: "warning",
+                  data: alertBlock,
+                });
+              } catch { /* sendLoggingMessage is best-effort */ }
+            }
+          }
+        }
+
         return result;
 
       } catch (error) {
@@ -1146,6 +1184,24 @@ export async function startServer() {
       console.error(`[Dashboard] Mind Palace startup failed (non-fatal): ${err}`);
     });
   }, 0);
+
+  // ─── v5.3: Hivemind Watchdog ──────────────────────────────
+  // Start the server-side health monitor after storage is warm.
+  // Runs every WATCHDOG_INTERVAL_MS (default 60s) to detect
+  // frozen agents, infinite loops, and task overruns.
+  if (PRISM_ENABLE_HIVEMIND && SESSION_MEMORY_ENABLED) {
+    storageReady?.then(() => {
+      startWatchdog({
+        intervalMs: WATCHDOG_INTERVAL_MS,
+        staleThresholdMin: WATCHDOG_STALE_MIN,
+        frozenThresholdMin: WATCHDOG_FROZEN_MIN,
+        offlineThresholdMin: WATCHDOG_OFFLINE_MIN,
+        loopThreshold: WATCHDOG_LOOP_THRESHOLD,
+      });
+    }).catch(err => {
+      console.error(`[Watchdog] Startup failed (non-fatal): ${err}`);
+    });
+  }
 
   // Keep the process alive — without this, Node.js would exit
   // because there are no active event loop handles after the

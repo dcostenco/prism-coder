@@ -71,7 +71,8 @@ export const AGENT_HEARTBEAT_TOOL: Tool = {
   description:
     "Update your heartbeat and optionally your current task. " +
     "Call this periodically to stay visible to the team. " +
-    "Agents that haven't sent a heartbeat in 30 minutes are auto-pruned.",
+    "The server-side Watchdog monitors health every 60 seconds — agents that miss " +
+    "heartbeats transition through STALE → FROZEN → OFFLINE (auto-pruned).",
   inputSchema: {
     type: "object",
     properties: {
@@ -87,6 +88,13 @@ export const AGENT_HEARTBEAT_TOOL: Tool = {
         type: "string",
         description: "Optional updated description of your current task.",
       },
+      expected_duration_minutes: {
+        type: "number",
+        description:
+          "Optional estimated duration for the current task in minutes. " +
+          "If the task exceeds this duration, the Watchdog flags the agent as OVERDUE " +
+          "and alerts teammates. Typical values: 5 for quick fixes, 15 for features, 30 for refactors.",
+      },
     },
     required: ["project", "role"],
   },
@@ -95,9 +103,9 @@ export const AGENT_HEARTBEAT_TOOL: Tool = {
 export const AGENT_LIST_TEAM_TOOL: Tool = {
   name: "agent_list_team",
   description:
-    "List all active agents on a project. Shows role, status, current task, " +
-    "and last heartbeat time. Automatically prunes agents that haven't " +
-    "reported in 30+ minutes.",
+    "List all agents on a project with health status. Shows role, health state " +
+    "(🟢 ACTIVE / 🟡 STALE / 🔴 FROZEN / ⏰ OVERDUE / 🔄 LOOPING), current task, " +
+    "and last heartbeat time. The server-side Watchdog actively monitors agent health every 60 seconds.",
   inputSchema: {
     type: "object",
     properties: {

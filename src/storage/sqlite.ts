@@ -451,6 +451,46 @@ export class SqliteStorage implements StorageBackend {
     } catch (e: any) {
       if (!e.message?.includes("duplicate column name")) throw e;
     }
+
+    // ── v5.3: Hivemind Watchdog columns on agent_registry ────────
+    // These enable the server-side health monitor to detect frozen agents,
+    // task overruns, and infinite loops. Safe no-op if columns already exist.
+
+    try {
+      await this.db.execute(
+        `ALTER TABLE agent_registry ADD COLUMN task_start_time TEXT DEFAULT NULL`
+      );
+      debugLog("[SqliteStorage] v5.3 migration: added task_start_time column");
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
+
+    try {
+      await this.db.execute(
+        `ALTER TABLE agent_registry ADD COLUMN expected_duration_minutes INTEGER DEFAULT NULL`
+      );
+      debugLog("[SqliteStorage] v5.3 migration: added expected_duration_minutes column");
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
+
+    try {
+      await this.db.execute(
+        `ALTER TABLE agent_registry ADD COLUMN task_hash TEXT DEFAULT NULL`
+      );
+      debugLog("[SqliteStorage] v5.3 migration: added task_hash column");
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
+
+    try {
+      await this.db.execute(
+        `ALTER TABLE agent_registry ADD COLUMN loop_count INTEGER DEFAULT 0`
+      );
+      debugLog("[SqliteStorage] v5.3 migration: added loop_count column");
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
   }
 
   // ─── PostgREST Filter Parser ───────────────────────────────
@@ -1502,8 +1542,9 @@ export class SqliteStorage implements StorageBackend {
       // Try INSERT first
       await this.db.execute({
         sql: `INSERT INTO agent_registry
-          (id, project, user_id, role, agent_name, status, current_task)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          (id, project, user_id, role, agent_name, status, current_task,
+           task_start_time, expected_duration_minutes, task_hash, loop_count)
+          VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), NULL, NULL, 0)`,
         args: [
           id,
           entry.project,
@@ -1518,13 +1559,17 @@ export class SqliteStorage implements StorageBackend {
       debugLog(`[SqliteStorage] Agent registered: ${entry.project}/${role}`);
       return { ...entry, id, status };
     } catch (err) {
-      // UNIQUE constraint → update existing
+      // UNIQUE constraint → update existing — reset watchdog fields on re-registration
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("UNIQUE") || msg.includes("constraint")) {
         await this.db.execute({
           sql: `UPDATE agent_registry
             SET agent_name = ?, status = ?, current_task = ?,
-                last_heartbeat = datetime('now')
+                last_heartbeat = datetime('now'),
+                task_start_time = datetime('now'),
+                expected_duration_minutes = NULL,
+                task_hash = NULL,
+                loop_count = 0
             WHERE project = ? AND user_id = ? AND role = ?`,
           args: [
             entry.agent_name ?? null,
@@ -1547,14 +1592,63 @@ export class SqliteStorage implements StorageBackend {
     project: string,
     userId: string,
     role: string,
-    currentTask?: string
+    currentTask?: string,
+    expectedDurationMinutes?: number
   ): Promise<void> {
-    const setClauses = ["last_heartbeat = datetime('now')"];
-    const args: InValue[] = [];
+    // v5.3: Loop detection — compute task hash and compare with stored value.
+    // If the hash matches, increment loop_count. If different, reset counter.
+    // This runs inline with the heartbeat UPDATE for zero additional queries.
+    const newTaskHash = currentTask
+      ? this._simpleHash(currentTask)
+      : null;
+
+    // Fetch current agent state for loop comparison (single SELECT)
+    const current = await this.db.execute({
+      sql: `SELECT task_hash, loop_count FROM agent_registry
+        WHERE project = ? AND user_id = ? AND role = ?`,
+      args: [project, userId, role],
+    });
+
+    const existingHash = current.rows[0]?.task_hash as string | null;
+    const existingLoopCount = (current.rows[0]?.loop_count as number) || 0;
+
+    // Determine if task changed
+    const taskChanged = newTaskHash !== null && newTaskHash !== existingHash;
+    const sameTask = newTaskHash !== null && newTaskHash === existingHash;
+
+    const newLoopCount = sameTask
+      ? existingLoopCount + 1
+      : (taskChanged ? 0 : existingLoopCount);
+
+    // Auto-detect LOOPING: if same task repeated >= 5 times, flag it
+    const newStatus = newLoopCount >= 5 ? "looping" : "active";
+
+    const setClauses = [
+      "last_heartbeat = datetime('now')",
+      "loop_count = ?",
+      "status = ?",
+    ];
+    const args: InValue[] = [newLoopCount, newStatus];
 
     if (currentTask !== undefined) {
       setClauses.push("current_task = ?");
       args.push(currentTask);
+    }
+
+    if (newTaskHash !== null) {
+      setClauses.push("task_hash = ?");
+      args.push(newTaskHash);
+    }
+
+    // Task changed → reset task_start_time
+    if (taskChanged) {
+      setClauses.push("task_start_time = datetime('now')");
+    }
+
+    // Store expected duration if provided
+    if (expectedDurationMinutes !== undefined) {
+      setClauses.push("expected_duration_minutes = ?");
+      args.push(expectedDurationMinutes);
     }
 
     args.push(project, userId, role);
@@ -1567,12 +1661,24 @@ export class SqliteStorage implements StorageBackend {
     });
   }
 
+  /**
+   * Simple string hash for loop detection.
+   * Uses DJB2 — fast, deterministic, no crypto overhead.
+   */
+  private _simpleHash(str: string): string {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) + hash + str.charCodeAt(i)) & 0xFFFFFFFF;
+    }
+    return hash.toString(16);
+  }
+
   async listTeam(
     project: string,
     userId: string,
     staleMinutes: number = 30
   ): Promise<AgentRegistryEntry[]> {
-    // Auto-prune stale agents first
+    // Auto-prune OFFLINE agents (>30min without heartbeat)
     await this.db.execute({
       sql: `DELETE FROM agent_registry
         WHERE project = ? AND user_id = ?
@@ -1580,10 +1686,11 @@ export class SqliteStorage implements StorageBackend {
       args: [project, userId, staleMinutes],
     });
 
-    // Fetch remaining active agents
+    // Fetch remaining agents (including watchdog columns)
     const result = await this.db.execute({
       sql: `SELECT id, project, user_id, role, agent_name, status,
-                   current_task, last_heartbeat, created_at
+                   current_task, last_heartbeat, created_at,
+                   task_start_time, expected_duration_minutes, task_hash, loop_count
             FROM agent_registry
             WHERE project = ? AND user_id = ?
             ORDER BY last_heartbeat DESC`,
@@ -1596,10 +1703,14 @@ export class SqliteStorage implements StorageBackend {
       user_id: r.user_id as string,
       role: r.role as string,
       agent_name: r.agent_name as string | null,
-      status: (r.status as "active" | "idle" | "shutdown"),
+      status: (r.status as AgentRegistryEntry["status"]),
       current_task: r.current_task as string | null,
       last_heartbeat: r.last_heartbeat as string,
       created_at: r.created_at as string,
+      task_start_time: r.task_start_time as string | null,
+      expected_duration_minutes: r.expected_duration_minutes as number | null,
+      task_hash: r.task_hash as string | null,
+      loop_count: (r.loop_count as number) || 0,
     }));
   }
 
@@ -1613,6 +1724,68 @@ export class SqliteStorage implements StorageBackend {
       args: [project, userId, role],
     });
     debugLog(`[SqliteStorage] Agent deregistered: ${project}/${role}`);
+  }
+
+  // ─── v5.3: Hivemind Watchdog Methods ───────────────────────
+
+  async getAllAgents(userId: string): Promise<AgentRegistryEntry[]> {
+    const result = await this.db.execute({
+      sql: `SELECT id, project, user_id, role, agent_name, status,
+                   current_task, last_heartbeat, created_at,
+                   task_start_time, expected_duration_minutes, task_hash, loop_count
+            FROM agent_registry
+            WHERE user_id = ?
+            ORDER BY project, role`,
+      args: [userId],
+    });
+
+    return result.rows.map(r => ({
+      id: r.id as string,
+      project: r.project as string,
+      user_id: r.user_id as string,
+      role: r.role as string,
+      agent_name: r.agent_name as string | null,
+      status: (r.status as AgentRegistryEntry["status"]),
+      current_task: r.current_task as string | null,
+      last_heartbeat: r.last_heartbeat as string,
+      created_at: r.created_at as string,
+      task_start_time: r.task_start_time as string | null,
+      expected_duration_minutes: r.expected_duration_minutes as number | null,
+      task_hash: r.task_hash as string | null,
+      loop_count: (r.loop_count as number) || 0,
+    }));
+  }
+
+  async updateAgentStatus(
+    project: string, userId: string, role: string,
+    status: AgentRegistryEntry["status"],
+    additionalFields?: Record<string, unknown>
+  ): Promise<void> {
+    const setClauses = ["status = ?"];
+    const args: InValue[] = [status];
+
+    // Allow watchdog to set arbitrary safe fields (e.g., loop_count reset)
+    const ALLOWED_FIELDS = new Set([
+      "loop_count", "task_start_time", "expected_duration_minutes",
+      "task_hash", "current_task",
+    ]);
+    if (additionalFields) {
+      for (const [key, val] of Object.entries(additionalFields)) {
+        if (ALLOWED_FIELDS.has(key)) {
+          setClauses.push(`${key} = ?`);
+          args.push(val as InValue);
+        }
+      }
+    }
+
+    args.push(project, userId, role);
+
+    await this.db.execute({
+      sql: `UPDATE agent_registry
+        SET ${setClauses.join(", ")}
+        WHERE project = ? AND user_id = ? AND role = ?`,
+      args,
+    });
   }
 
   // ─── System Settings (v3.0 Dashboard) — proxy to configStorage ───

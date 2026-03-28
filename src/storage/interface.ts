@@ -158,9 +158,31 @@ export interface SemanticSearchResult {
 // ─── v3.0: Agent Registry Types ──────────────────────────────
 
 /**
+ * Agent health status for the Hivemind Watchdog (v5.3).
+ *
+ * State machine:
+ *   ACTIVE  → STALE    (no heartbeat for staleThresholdMin)
+ *   STALE   → FROZEN   (no heartbeat for frozenThresholdMin)
+ *   FROZEN  → [pruned] (no heartbeat for offlineThresholdMin)
+ *   ACTIVE  → OVERDUE  (task exceeded expected_duration_minutes)
+ *   ACTIVE  → LOOPING  (same task_hash repeated ≥ loopThreshold times)
+ */
+export type AgentHealthStatus =
+  | "active"
+  | "idle"
+  | "shutdown"
+  | "stale"
+  | "frozen"
+  | "overdue"
+  | "looping";
+
+/**
  * Tracks an active agent in the Hivemind coordination registry.
  * Agents register on startup, heartbeat periodically, and are
  * auto-pruned when stale (>30 min without heartbeat).
+ *
+ * v5.3: Added watchdog fields for health monitoring —
+ * task_start_time, expected_duration_minutes, task_hash, loop_count.
  */
 export interface AgentRegistryEntry {
   id?: string;
@@ -168,10 +190,19 @@ export interface AgentRegistryEntry {
   user_id: string;
   role: string;
   agent_name?: string | null;
-  status: "active" | "idle" | "shutdown";
+  status: AgentHealthStatus;
   current_task?: string | null;
   last_heartbeat?: string;
   created_at?: string;
+  // ─── v5.3: Watchdog Health Monitoring Fields ───
+  /** When the current task started (ISO string). Set on task change. */
+  task_start_time?: string | null;
+  /** Expected task duration in minutes. Used by watchdog for OVERDUE detection. */
+  expected_duration_minutes?: number | null;
+  /** Hash of current_task string. Used for loop detection. */
+  task_hash?: string | null;
+  /** Number of consecutive heartbeats with the same task_hash. */
+  loop_count?: number;
 }
 
 /**
@@ -399,8 +430,13 @@ export interface StorageBackend {
 
   /**
    * Update heartbeat timestamp and optionally current_task.
+   * v5.3: Also accepts expected_duration_minutes for OVERDUE detection,
+   * and performs loop detection (incrementing loop_count when task_hash repeats).
    */
-  heartbeatAgent(project: string, userId: string, role: string, currentTask?: string): Promise<void>;
+  heartbeatAgent(
+    project: string, userId: string, role: string,
+    currentTask?: string, expectedDurationMinutes?: number
+  ): Promise<void>;
 
   /**
    * List all agents on a project. Auto-prunes agents with
@@ -412,6 +448,23 @@ export interface StorageBackend {
    * Remove an agent from the registry.
    */
   deregisterAgent(project: string, userId: string, role: string): Promise<void>;
+
+  // ─── v5.3: Hivemind Watchdog Operations ───────────────────────
+
+  /**
+   * Get ALL registered agents across ALL projects for a user.
+   * Used by the watchdog sweep to check health of every agent.
+   */
+  getAllAgents(userId: string): Promise<AgentRegistryEntry[]>;
+
+  /**
+   * Update an agent's status and optional additional fields.
+   * Used by the watchdog sweep for state transitions (ACTIVE→STALE→FROZEN).
+   */
+  updateAgentStatus(
+    project: string, userId: string, role: string,
+    status: AgentHealthStatus, additionalFields?: Record<string, unknown>
+  ): Promise<void>;
 
   // ─── v3.0: Dashboard Settings (configStorage proxy) ──────────
 
