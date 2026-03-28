@@ -18,16 +18,6 @@ npx -y prism-mcp-server
 
 Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gemini · Antigravity** — any MCP client.
 
----
-
-## Why Prism?
-
-Every time you start a new conversation with an AI coding assistant, it starts from scratch. You re-explain your architecture, re-describe your decisions, re-list your TODOs. Hours of context — gone.
-
-**Prism gives your agent a brain that persists.** Save what matters at the end of each session. Load it back instantly on the next one. Your agent remembers what it did, what it learned, and what's left to do.
-
----
-
 ## 📖 Table of Contents
 
 - [Why Prism?](#why-prism)
@@ -47,7 +37,16 @@ Every time you start a new conversation with an AI coding assistant, it starts f
 
 ---
 
+## Why Prism?
+
+Every time you start a new conversation with an AI coding assistant, it starts from scratch. You re-explain your architecture, re-describe your decisions, re-list your TODOs. Hours of context — gone.
+
+**Prism gives your agent a brain that persists.** Save what matters at the end of each session. Load it back instantly on the next one. Your agent remembers what it did, what it learned, and what's left to do.
+
+---
+
 ## 🚀 Quick Start
+
 
 Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`, etc.):
 
