@@ -586,6 +586,33 @@ export interface StorageBackend {
     dryRun: boolean;
     userId: string;
   }): Promise<{ purged: number; eligible: number; reclaimedBytes: number }>;
+
+  // ─── v5.5: SDM Persistence ───────────────────────────────────
+
+  /**
+   * Load the Superposed Distributed Memory (SDM) counter matrix into memory.
+   * Called automatically by the SDMEngine during initialization.
+   * If no state exists for the project, returns null.
+   *
+   * @param project - Project identifier
+   */
+  loadSdmState(project: string): Promise<Float32Array | null>;
+
+  /**
+   * Persist the SDM counter matrix to disk.
+   * Called synchronously during background flushing or SIGINT/SIGTERM.
+   *
+   * @param project - Project identifier
+   * @param state - The 10,000 x 768 element Float32Array
+   */
+  saveSdmState(project: string, state: Float32Array): Promise<void>;
+
+  /**
+   * Fetch all compressed embeddings for a project to enable fast JS-space Hamming scanning.
+   * Returns id, summary, and the base64 encoded embedding_compressed BLOB.
+   * @param project - Project identifier
+   */
+  getAllProjectEmbeddings(project: string): Promise<Array<{ id: string, summary: string, embedding_compressed: string }>>;
 }
 
 // ─── v3.1 Types ────────────────────────────────────────────────

@@ -789,5 +789,19 @@ export class SupabaseStorage implements StorageBackend {
     }
   }
 
+  // ─── SDM Operations ──────────────────────────────────────────
+
+  async loadSdmState(project: string): Promise<Float32Array | null> {
+    throw new Error("loading SDM state is not implemented for Supabase backend yet.");
+  }
+
+  async saveSdmState(project: string, state: Float32Array): Promise<void> {
+    throw new Error("saving SDM state is not implemented for Supabase backend yet.");
+  }
+
+  async getAllProjectEmbeddings(project: string): Promise<Array<{ id: string, summary: string, embedding_compressed: string }>> {
+    throw new Error("getting compressed embeddings for Hamming scan is not implemented for Supabase backend yet.");
+  }
+
 }
 

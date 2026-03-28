@@ -54,12 +54,14 @@ import {
   isKnowledgeSyncRulesArgs,
   // v5.1: Deep Storage Mode type guard
   isDeepStoragePurgeArgs,
+  // v5.5: SDM Intuitive Recall type guard
+  isSessionIntuitiveRecallArgs,
 } from "./sessionMemoryDefinitions.js";
 
 // v4.2: File system access for knowledge_sync_rules
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, dirname, resolve, isAbsolute, sep } from "node:path";
+import { join, dirname, resolve, isAbsolute, sep, relative } from "node:path";
 
 // v3.1: In-memory debounce lock for auto-compaction.
 // Prevents multiple concurrent Gemini compaction tasks for the same project
@@ -783,8 +785,39 @@ export async function sessionLoadContextHandler(args: unknown) {
     greetingBlock = `\n\n[👤 AGENT IDENTITY]\n${namePart}${rolePart}${skillPart}`;
   }
 
+  // ─── SDM Intuitive Recall (v5.5) ───
+  // Generate embedding of current context and fetch latent SDM patterns
+  let sdmRecallBlock = "";
+  if (level !== "quick" && GOOGLE_API_KEY) {
+    try {
+      const activeText = [d.last_summary, d.key_context, ...(d.keywords || [])].filter(Boolean).join(" ");
+      if (activeText.length > 10) {
+        // v2.1 LLM factory handles the API call
+        const queryVector = await getLLMProvider().generateEmbedding(activeText);
+        
+        // Lazy-load to avoid blocking server boot
+        const { getSdmEngine } = await import("../sdm/sdmEngine.js");
+        const { decodeSdmVector } = await import("../sdm/sdmDecoder.js");
+
+        const sdmEngine = getSdmEngine(project);
+        const targetVector = sdmEngine.read(new Float32Array(queryVector));
+        
+        const topMatches = await decodeSdmVector(project, targetVector, 3, 0.55);
+        if (topMatches.length > 0) {
+          sdmRecallBlock = `\n\n[🧠 INTUITIVE RECALL]\nThe deeper Superposed Memory matrix resonated with your current task and surfaced these latent patterns:\n`;
+          for (const match of topMatches) {
+             sdmRecallBlock += `- [Sim: ${(match.similarity * 100).toFixed(1)}%] ${match.summary}\n`;
+          }
+          debugLog(`[session_load_context] SDM Recall surfaced ${topMatches.length} latent patterns`);
+        }
+      }
+    } catch (err) {
+      debugLog(`[session_load_context] SDM Recall failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
   // Build the response object before v4.0 augmentations
-  let responseText = `📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${driftReport}${briefingBlock}${greetingBlock}${visualMemoryBlock}${skillBlock}${versionNote}`;
+  let responseText = `📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${driftReport}${briefingBlock}${sdmRecallBlock}${greetingBlock}${visualMemoryBlock}${skillBlock}${versionNote}`;
 
   // ─── v4.0: Behavioral Warnings Injection ───────────────────
   // If loadContext returned behavioral_warnings, add them to the
@@ -1319,10 +1352,13 @@ export async function backfillEmbeddingsHandler(args: unknown) {
     "embedding": "is.null",
     "archived_at": "is.null",
     user_id: `eq.${PRISM_USER_ID}`,
-    order: "created_at.desc",
+    order: "id.asc",
     limit: String(safeLimit),
     select: "id,summary,decisions,project",
   };
+  if ((args as any)._cursor_id) {
+    params.id = `gt.${(args as any)._cursor_id}`;
+  }
   if (project) {
     params.project = `eq.${project}`;
   }
@@ -1414,7 +1450,8 @@ export async function backfillEmbeddingsHandler(args: unknown) {
           : `All entries now have embeddings for semantic search.`),
     }],
     isError: false,
-  };
+    _stats: { repaired, failed, last_id: (entries[entries.length - 1] as any)?.id },
+  } as any;
 }
 
 // ─── Memory History Handler (v2.0 — Time Travel) ─────────────
@@ -1820,8 +1857,28 @@ export async function sessionHealthCheckHandler(args: unknown) {
           "[Health Check] Auto-fixing " + embeddingIssue.count + " missing embeddings..."
         );
         try {
-          await backfillEmbeddingsHandler({ dry_run: false, limit: 50 });
-          fixedCount += embeddingIssue.count;
+          let hasMore = true;
+          let cursorId: string | undefined = undefined;
+          
+          while (hasMore) {
+            const result: any = await backfillEmbeddingsHandler({ dry_run: false, limit: 50, _cursor_id: cursorId });
+            const stats = result._stats;
+            
+            if (stats) {
+              fixedCount += stats.repaired;
+              if (stats.last_id) {
+                cursorId = stats.last_id;
+              } else {
+                hasMore = false;
+              }
+              // If we repaired + failed less than 50, we're done
+              if ((stats.repaired + stats.failed) < 50) {
+                hasMore = false;
+              }
+            } else {
+              hasMore = false; // Fallback if no stats returned
+            }
+          }
           debugLog("[Health Check] Backfill complete.");
         } catch (err) {
           console.error("[Health Check] Backfill failed: " + err);
@@ -2342,10 +2399,11 @@ export async function knowledgeSyncRulesHandler(args: unknown) {
   // Resolve both paths to their canonical forms, then assert containment
   const resolvedRepo = resolve(normalizedRepoPath);
   const targetPath = resolve(resolvedRepo, target_file);
+  const relativePath = relative(resolvedRepo, targetPath);
 
   // Ensure the resolved target is strictly inside the repo root
   // (handles "../../../etc/hosts" style traversal)
-  if (!targetPath.startsWith(resolvedRepo + sep)) {
+  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
     return {
       content: [{
         type: "text",
@@ -2702,5 +2760,55 @@ export async function deepStoragePurgeHandler(args: unknown) {
     }],
     isError: false,
   };
+}
+
+// ─── v5.5: SDM Intuitive Recall Handler ───────────────────────
+
+export async function sessionIntuitiveRecallHandler(
+  args: unknown
+): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
+  if (!isSessionIntuitiveRecallArgs(args)) {
+    return {
+      content: [{ type: "text", text: "Invalid arguments for session_intuitive_recall" }],
+      isError: true,
+    };
+  }
+
+  try {
+    const { getSdmEngine } = await import("../sdm/sdmEngine.js");
+    const { decodeSdmVector } = await import("../sdm/sdmDecoder.js");
+
+    const queryVector = await getLLMProvider().generateEmbedding(args.query);
+    const sdmEngine = getSdmEngine(args.project);
+    const targetVector = sdmEngine.read(new Float32Array(queryVector));
+
+    const limit = args.limit ?? 3;
+    const threshold = args.threshold ?? 0.55;
+
+    const topMatches = await decodeSdmVector(args.project, targetVector, limit, threshold);
+
+    let recallBlock = `🧠 **SDM Intuitive Recall for "${args.project}"**\n\n`;
+    recallBlock += `Query: "${args.query}"\n`;
+    recallBlock += `Target vector generated. Scanning ${topMatches.length > 0 ? topMatches.length + " latents surfaced." : "No strong patterns surfaced."}\n\n`;
+
+    if (topMatches.length === 0) {
+      recallBlock += `*No stored patterns resonated above the ${(threshold * 100).toFixed(1)}% similarity threshold.*`;
+    } else {
+      for (const match of topMatches) {
+        recallBlock += `- [Similarity: ${(match.similarity * 100).toFixed(1)}%] ${match.summary}\n`;
+      }
+    }
+
+    return {
+      content: [{ type: "text", text: recallBlock }],
+      isError: false,
+    };
+  } catch (err) {
+    debugLog(`[session_intuitive_recall] Failed: ${err}`);
+    return {
+      content: [{ type: "text", text: `Error triggering Intuitive Recall: ${err instanceof Error ? err.message : String(err)}` }],
+      isError: true,
+    };
+  }
 }
 

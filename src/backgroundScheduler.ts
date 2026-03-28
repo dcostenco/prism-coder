@@ -21,6 +21,7 @@ import { getStorage } from "./storage/index.js";
 import { PRISM_USER_ID, PRISM_SCHOLAR_ENABLED, PRISM_SCHOLAR_INTERVAL_MS } from "./config.js";
 import { debugLog } from "./utils/logger.js";
 import { runWebScholar } from "./scholar/webScholar.js";
+import { getAllActiveSdmProjects, getSdmEngine } from "./sdm/sdmEngine.js";
 
 // ─── Configuration ───────────────────────────────────────────
 
@@ -35,6 +36,8 @@ export interface SchedulerConfig {
   enableCompaction: boolean;
   /** Purge float32 embeddings for old entries with compressed blobs (default: true) */
   enableDeepPurge: boolean;
+  /** Auto-flush SDM matrices to disk (default: true) */
+  enableSdmFlush: boolean;
   /** Minimum age in days for deep purge eligibility (default: 30) */
   purgeOlderThanDays: number;
   /** Minimum entries before compaction triggers (default: 50) */
@@ -51,6 +54,7 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
   enableDecay: true,
   enableCompaction: true,
   enableDeepPurge: true,
+  enableSdmFlush: true,
   purgeOlderThanDays: 30,
   compactionThreshold: 50,
   compactionKeepRecent: 10,
@@ -59,7 +63,7 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
 
 // ─── Scheduler State ─────────────────────────────────────────
 
-let schedulerInterval: ReturnType<typeof setInterval> | null = null;
+let schedulerInterval: ReturnType<typeof setTimeout> | null = null;
 
 /** Tracks the last completed sweep for dashboard status */
 let lastSweepResult: SchedulerSweepResult | null = null;
@@ -80,6 +84,7 @@ export interface SchedulerSweepResult {
     importanceDecay: { ran: boolean; projectsDecayed: number; error?: string };
     compaction: { ran: boolean; projectsCompacted: number; error?: string };
     deepPurge: { ran: boolean; purged: number; reclaimedBytes: number; error?: string };
+    sdmFlush: { ran: boolean; projectsFlushed: number; error?: string };
   };
 }
 
@@ -95,29 +100,30 @@ export function startScheduler(config?: Partial<SchedulerConfig>): () => void {
   const cfg: SchedulerConfig = { ...DEFAULT_SCHEDULER_CONFIG, ...config };
 
   if (schedulerInterval) {
-    clearInterval(schedulerInterval);
+    clearTimeout(schedulerInterval);
   }
 
   schedulerStartedAt = new Date().toISOString();
 
-  schedulerInterval = setInterval(() => {
-    runSchedulerSweep(cfg).catch(err => {
-      console.error(`[Scheduler] Sweep error (non-fatal): ${err}`);
-    });
-  }, cfg.intervalMs);
+  const runLoop = () => {
+    runSchedulerSweep(cfg)
+      .catch(err => {
+        console.error(`[Scheduler] Sweep error (non-fatal): ${err}`);
+      })
+      .finally(() => {
+        schedulerInterval = setTimeout(runLoop, cfg.intervalMs);
+      });
+  };
 
   // Run an immediate first sweep (after a short delay to let storage fully warm up)
-  setTimeout(() => {
-    runSchedulerSweep(cfg).catch(err => {
-      console.error(`[Scheduler] Initial sweep error (non-fatal): ${err}`);
-    });
-  }, 5_000);
+  schedulerInterval = setTimeout(runLoop, 5_000);
 
   const enabledTasks = [
     cfg.enableTTLSweep && "TTL",
     cfg.enableDecay && "Decay",
     cfg.enableCompaction && "Compaction",
     cfg.enableDeepPurge && "DeepPurge",
+    cfg.enableSdmFlush && "SdmFlush",
   ].filter(Boolean).join(", ");
 
   console.error(
@@ -126,7 +132,7 @@ export function startScheduler(config?: Partial<SchedulerConfig>): () => void {
 
   return () => {
     if (schedulerInterval) {
-      clearInterval(schedulerInterval);
+      clearTimeout(schedulerInterval);
       schedulerInterval = null;
       console.error("[Scheduler] Stopped");
     }
@@ -155,11 +161,11 @@ export function getSchedulerStatus(): {
 }
 
 // ─── Scholar State ───────────────────────────────────────────
-let scholarInterval: ReturnType<typeof setInterval> | null = null;
+let scholarInterval: ReturnType<typeof setTimeout> | null = null;
 
 export function startScholarScheduler(): () => void {
   if (scholarInterval) {
-    clearInterval(scholarInterval);
+    clearTimeout(scholarInterval);
   }
 
   if (!PRISM_SCHOLAR_ENABLED || PRISM_SCHOLAR_INTERVAL_MS <= 0) {
@@ -167,18 +173,18 @@ export function startScholarScheduler(): () => void {
     return () => {};
   }
 
-  // Initial trigger after 30s to avoid thundering herd on boot
-  setTimeout(() => {
-    runWebScholar().catch(err => {
-        console.error(`[WebScholar] Initial run error: ${err}`);
-    });
-  }, 30_000);
+  const runLoop = () => {
+    runWebScholar()
+      .catch(err => {
+        console.error(`[WebScholar] Sweep error: ${err}`);
+      })
+      .finally(() => {
+        scholarInterval = setTimeout(runLoop, PRISM_SCHOLAR_INTERVAL_MS);
+      });
+  };
 
-  scholarInterval = setInterval(() => {
-    runWebScholar().catch(err => {
-      console.error(`[WebScholar] Sweep error: ${err}`);
-    });
-  }, PRISM_SCHOLAR_INTERVAL_MS);
+  // Initial trigger after 30s to avoid thundering herd on boot
+  scholarInterval = setTimeout(runLoop, 30_000);
 
   console.error(
     `[WebScholar] ⏰ Started (interval=${formatDuration(PRISM_SCHOLAR_INTERVAL_MS)})`
@@ -186,7 +192,7 @@ export function startScholarScheduler(): () => void {
 
   return () => {
     if (scholarInterval) {
-      clearInterval(scholarInterval);
+      clearTimeout(scholarInterval);
       scholarInterval = null;
       console.error("[WebScholar] Stopped");
     }
@@ -220,6 +226,7 @@ export async function runSchedulerSweep(
       importanceDecay: { ran: false, projectsDecayed: 0 },
       compaction: { ran: false, projectsCompacted: 0 },
       deepPurge: { ran: false, purged: 0, reclaimedBytes: 0 },
+      sdmFlush: { ran: false, projectsFlushed: 0 },
     },
   };
 
@@ -343,6 +350,34 @@ export async function runSchedulerSweep(
     }
   }
 
+  // ── Task 5: SDM Flush ──────────────────────────────────────
+  if (cfg.enableSdmFlush) {
+    try {
+      result.tasks.sdmFlush.ran = true;
+      const activeProjects = getAllActiveSdmProjects();
+
+      for (const project of activeProjects) {
+        try {
+          const sdm = getSdmEngine(project);
+          const state = sdm.exportState();
+          await storage.saveSdmState(project, state);
+          result.tasks.sdmFlush.projectsFlushed++;
+        } catch (err) {
+          debugLog(`[Scheduler] SDM flush failed for "${project}": ${err}`);
+        }
+      }
+
+      if (result.tasks.sdmFlush.projectsFlushed > 0) {
+        debugLog(
+          `[Scheduler] SDM flush: saved matrices for ${result.tasks.sdmFlush.projectsFlushed} projects`
+        );
+      }
+    } catch (err) {
+      result.tasks.sdmFlush.error = err instanceof Error ? err.message : String(err);
+      console.error(`[Scheduler] SDM flush error: ${err}`);
+    }
+  }
+
   // ── Finalize ───────────────────────────────────────────────
   result.completedAt = new Date().toISOString();
   result.durationMs = Date.now() - sweepStart;
@@ -361,6 +396,9 @@ export async function runSchedulerSweep(
   }
   if (result.tasks.deepPurge.ran && result.tasks.deepPurge.purged > 0) {
     parts.push(`Purge:${result.tasks.deepPurge.purged} entries (${formatBytes(result.tasks.deepPurge.reclaimedBytes)})`);
+  }
+  if (result.tasks.sdmFlush.ran && result.tasks.sdmFlush.projectsFlushed > 0) {
+    parts.push(`SDM:${result.tasks.sdmFlush.projectsFlushed} projects`);
   }
 
   const summaryLine = parts.length > 0

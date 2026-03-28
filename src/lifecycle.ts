@@ -30,6 +30,40 @@ function log(msg: string) {
 }
 
 /**
+ * Global registry for tracking critical background tasks (like embeddings or SDM writes).
+ * Ensures they complete gracefully during server shutdown.
+ */
+export const BackgroundTaskRegistry = {
+  tasks: new Set<Promise<any>>(),
+
+  register<T>(task: Promise<T>): Promise<T> {
+    this.tasks.add(task);
+    task.finally(() => this.tasks.delete(task)).catch(() => {});
+    return task;
+  },
+
+  async awaitAll(timeoutMs = 5000): Promise<void> {
+    if (this.tasks.size === 0) return;
+    
+    log(`Waiting for ${this.tasks.size} background tasks to complete...`);
+    
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Timeout waiting for tasks")), timeoutMs);
+    });
+    
+    try {
+      await Promise.race([
+        Promise.allSettled(Array.from(this.tasks)),
+        timeout
+      ]);
+      log("Background tasks completed.");
+    } catch (e: any) {
+      log(`Background tasks shutdown warning: ${e.message || e}`);
+    }
+  }
+};
+
+/**
  * Checks if a process is an orphan (adopted by init/launchd, PPID=1).
  * Returns false on Windows (PID logic is different there).
  */
@@ -132,17 +166,43 @@ export function registerShutdownHandlers() {
     log(`Shutting down gracefully (${reason})...`);
 
     try {
-      // 0. Flush OTel span buffer FIRST — before any DBs are closed.
+      // 0. Await pending background tasks FIRST (max 5s timeout)
+      await BackgroundTaskRegistry.awaitAll(5000);
+
+      // 0.5. Flush OTel span buffer FIRST — before any DBs are closed.
       //    BatchSpanProcessor holds spans in memory (up to 5s). If we close
       //    DBs first, spans that reference DB operations lose their context.
       //    shutdownTelemetry() is a no-op when otel_enabled=false.
       await shutdownTelemetry();
 
-      // 1. Close system settings DB
+      const storage = await getStorage();
+
+      // 1. Flush pending SDM matrices to disk
+      try {
+        const { getAllActiveSdmProjects, getSdmEngine } = await import("./sdm/sdmEngine.js");
+        const sdmProjects = getAllActiveSdmProjects();
+        if (sdmProjects.length > 0) {
+          log(`Flushing SDM state for ${sdmProjects.length} active projects...`);
+          for (const project of sdmProjects) {
+            try {
+              const sdm = getSdmEngine(project);
+              // Ensure we aren't saving an empty state unnecessarily if possible, 
+              // but UPSERT handles it cleanly regardless.
+              const state = sdm.exportState();
+              await storage.saveSdmState(project, state);
+            } catch (err) {
+              log(`Failed to flush SDM state for "${project}": ${err}`);
+            }
+          }
+        }
+      } catch (err) {
+        log(`Failed to load SDM engine during shutdown: ${err}`);
+      }
+
+      // 2. Close system settings DB
       closeConfigStorage();
 
-      // 2. Close main ledger DB
-      const storage = await getStorage();
+      // 3. Close main ledger DB
       if (storage && typeof storage.close === "function") {
         await storage.close();
       }

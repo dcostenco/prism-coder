@@ -38,6 +38,7 @@ import type {
 } from "./interface.js";
 
 import { debugLog } from "../utils/logger.js";
+import { getSdmEngine } from "../sdm/sdmEngine.js";
 
 export class SqliteStorage implements StorageBackend {
   private db!: Client;
@@ -266,45 +267,53 @@ export class SqliteStorage implements StorageBackend {
       // Column doesn't exist — do the table rebuild
       debugLog("[SqliteStorage] v3.0 migration: rebuilding session_handoffs with role column");
 
-      // Step 1: Create new table with correct constraint
-      await this.db.execute(`
-        CREATE TABLE session_handoffs_v2 (
-          id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-          project TEXT NOT NULL,
-          user_id TEXT NOT NULL DEFAULT 'default',
-          role TEXT NOT NULL DEFAULT 'global',
-          last_summary TEXT DEFAULT NULL,
-          pending_todo TEXT DEFAULT '[]',
-          active_decisions TEXT DEFAULT '[]',
-          keywords TEXT DEFAULT '[]',
-          key_context TEXT DEFAULT NULL,
-          active_branch TEXT DEFAULT NULL,
-          version INTEGER NOT NULL DEFAULT 1,
-          metadata TEXT DEFAULT '{}',
-          created_at TEXT DEFAULT (datetime('now')),
-          updated_at TEXT DEFAULT (datetime('now')),
-          UNIQUE(project, user_id, role)
-        )
-      `);
+      const tx = await this.db.transaction();
+      try {
+        // Step 1: Create new table with correct constraint
+        await tx.execute(`
+          CREATE TABLE session_handoffs_v2 (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            project TEXT NOT NULL,
+            user_id TEXT NOT NULL DEFAULT 'default',
+            role TEXT NOT NULL DEFAULT 'global',
+            last_summary TEXT DEFAULT NULL,
+            pending_todo TEXT DEFAULT '[]',
+            active_decisions TEXT DEFAULT '[]',
+            keywords TEXT DEFAULT '[]',
+            key_context TEXT DEFAULT NULL,
+            active_branch TEXT DEFAULT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            metadata TEXT DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(project, user_id, role)
+          )
+        `);
 
-      // Step 2: Copy data with explicit column names (Pro-Tip 2)
-      await this.db.execute(`
-        INSERT INTO session_handoffs_v2
-          (id, project, user_id, role, last_summary, pending_todo,
-           active_decisions, keywords, key_context, active_branch,
-           version, metadata, created_at, updated_at)
-        SELECT
-          id, project, user_id, 'global', last_summary, pending_todo,
-          active_decisions, keywords, key_context, active_branch,
-          version, metadata, created_at, updated_at
-        FROM session_handoffs
-      `);
+        // Step 2: Copy data with explicit column names (Pro-Tip 2)
+        await tx.execute(`
+          INSERT INTO session_handoffs_v2
+            (id, project, user_id, role, last_summary, pending_todo,
+             active_decisions, keywords, key_context, active_branch,
+             version, metadata, created_at, updated_at)
+          SELECT
+            id, project, user_id, 'global', last_summary, pending_todo,
+            active_decisions, keywords, key_context, active_branch,
+            version, metadata, created_at, updated_at
+          FROM session_handoffs
+        `);
 
-      // Step 3: Drop old and rename
-      await this.db.execute(`DROP TABLE session_handoffs`);
-      await this.db.execute(`ALTER TABLE session_handoffs_v2 RENAME TO session_handoffs`);
-
-      debugLog("[SqliteStorage] v3.0 migration: session_handoffs rebuilt with UNIQUE(project, user_id, role)");
+        // Step 3: Drop old and rename
+        await tx.execute(`DROP TABLE session_handoffs`);
+        await tx.execute(`ALTER TABLE session_handoffs_v2 RENAME TO session_handoffs`);
+        
+        await tx.commit();
+        debugLog("[SqliteStorage] v3.0 migration: session_handoffs rebuilt with UNIQUE(project, user_id, role)");
+      } catch (txError) {
+        await tx.rollback();
+        console.error("[SqliteStorage] v3.0 migration: session_handoffs rebuild failed, rolled back", txError);
+        throw txError;
+      }
     }
 
     // agent_registry: new table for Hivemind coordination
@@ -491,6 +500,15 @@ export class SqliteStorage implements StorageBackend {
     } catch (e: any) {
       if (!e.message?.includes("duplicate column name")) throw e;
     }
+
+    // ─── v5.5 Migration: Superposed Distributed Memory (SDM) ───
+    await this.db.execute(`
+      CREATE TABLE IF NOT EXISTS sdm_state (
+        project TEXT PRIMARY KEY,
+        counters BLOB NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
   }
 
   // ─── PostgREST Filter Parser ───────────────────────────────
@@ -2203,5 +2221,61 @@ export class SqliteStorage implements StorageBackend {
     return { purged: eligible, eligible, reclaimedBytes };
   }
 
+  // ─── v5.5: SDM Persistence ───────────────────────────────────
+
+  async loadSdmState(project: string): Promise<Float32Array | null> {
+    const result = await this.db.execute({
+      sql: `SELECT counters FROM sdm_state WHERE project = ?`,
+      args: [project],
+    });
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const blob = result.rows[0].counters as any;
+    // libSQL returns blobs as ArrayBuffer.
+    // We instantiate a Float32Array directly over the buffer.
+    if (blob instanceof ArrayBuffer) {
+      return new Float32Array(blob);
+    } else if (blob instanceof Uint8Array) {
+      // In case it's returned as a Uint8Array view
+      return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+    } else {
+      throw new Error(`[SqliteStorage] Unexpected blob type returned for SDM state`);
+    }
+  }
+
+  async saveSdmState(project: string, state: Float32Array): Promise<void> {
+    // The state is a Float32Array. We need its underlying buffer for SQLite.
+    // Wrap in Uint8Array to satisfy @libsql/client InValue typing which rejects SharedArrayBuffer
+    const buffer = new Uint8Array(state.buffer, state.byteOffset, state.byteLength);
+    
+    // We do an UPSERT (INSERT ... ON CONFLICT REPLACE).
+    await this.db.execute({
+      sql: `INSERT INTO sdm_state (project, counters, updated_at) 
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(project) DO UPDATE SET 
+              counters = excluded.counters,
+              updated_at = excluded.updated_at`,
+      args: [project, buffer],
+    });
+    
+    debugLog(`[SqliteStorage] Persisted SDM state to disk for project: ${project}`);
+  }
+
+  async getAllProjectEmbeddings(project: string): Promise<Array<{ id: string, summary: string, embedding_compressed: string }>> {
+    const res = await this.db.execute({
+      sql: `SELECT id, summary, embedding_compressed FROM session_ledger
+            WHERE project = ? AND deleted_at IS NULL AND embedding_compressed IS NOT NULL`,
+      args: [project]
+    });
+
+    return res.rows.map(r => ({
+      id: r.id as string,
+      summary: r.summary as string,
+      embedding_compressed: r.embedding_compressed as string
+    }));
+  }
 }
 

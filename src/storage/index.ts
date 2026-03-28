@@ -46,8 +46,8 @@ export async function getStorage(): Promise<StorageBackend> {
     );
   }
 
-  await storageInstance.initialize();
-  return storageInstance;
+  await storageInstance!.initialize();
+  return storageInstance!;
 }
 
 /**

@@ -1131,7 +1131,54 @@ export function isDeepStoragePurgeArgs(
   const a = args as Record<string, unknown>;
   if (a.project !== undefined && typeof a.project !== "string") return false;
   if (a.older_than_days !== undefined && typeof a.older_than_days !== "number") return false;
-  if (a.dry_run !== undefined && typeof a.dry_run !== "boolean") return false;
   return true;
 }
 
+// ─── v5.5: SDM Intuitive Recall Tool ──────────────────────────
+
+export const SESSION_INTUITIVE_RECALL_TOOL: Tool = {
+  name: "session_intuitive_recall",
+  description:
+    "Manually trigger the Sparse Distributed Memory (SDM) Intuitive Recall to surface latent patterns " +
+    "and related memories for a given query without blowing up the context window. " +
+    "Uses high-speed JS-space Hamming distance scanning on compressed embeddings.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project: {
+        type: "string",
+        description: "Project identifier.",
+      },
+      query: {
+        type: "string",
+        description: "The text query or context to trigger the recall.",
+      },
+      limit: {
+        type: "integer",
+        description: "Maximum number of latent patterns to surface (default: 3).",
+      },
+      threshold: {
+        type: "number",
+        description: "Similarity threshold 0-1 (default: 0.55).",
+      },
+    },
+    required: ["project", "query"],
+  },
+};
+
+export interface SessionIntuitiveRecallArgs {
+  project: string;
+  query: string;
+  limit?: number;
+  threshold?: number;
+}
+
+export function isSessionIntuitiveRecallArgs(
+  args: unknown
+): args is SessionIntuitiveRecallArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  if (typeof a.project !== "string") return false;
+  if (typeof a.query !== "string") return false;
+  return true;
+}
