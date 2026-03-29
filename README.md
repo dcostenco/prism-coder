@@ -677,7 +677,7 @@ Prism is a **stdio-based MCP server** that manages persistent agent memory. Here
 │  ┌────────────────────────────────────────────────────┐  │
 │  │  Background Workers                                │  │
 │  │  • Scheduler (TTL, decay, compaction, purge)       │  │
-│  │  • Web Scholar (Brave → Firecrawl → LLM → Ledger) │  │
+│  │  • Web Scholar (Brave → Firecrawl → LLM → Ledger)  │  │
 │  │  • Hivemind heartbeats & Telepathy broadcasts      │  │
 │  │  • OpenTelemetry span export                       │  │
 │  └────────────────────────────────────────────────────┘  │
