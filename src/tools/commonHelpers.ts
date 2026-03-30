@@ -3,7 +3,9 @@
 export const SENTINEL_START = "<!-- PRISM:AUTO-RULES:START -->";
 export const SENTINEL_END = "<!-- PRISM:AUTO-RULES:END -->";
 
-export const REDACT_PATTERNS = [/_api_key$/i, /_secret$/i, /^password$/i];
+export const REDACT_PATTERNS = [
+  /api_key/i, /apikey/i, /secret/i, /password/i, /token/i, /jwt/i, /auth/i, /credential/i
+];
 
 /**
  * Formats graduated insights into a markdown rules block.
@@ -59,7 +61,7 @@ export function applySentinelBlock(existingContent: string, rulesBlock: string):
 
 export function redactSettings(settings: Record<string, string>): Record<string, string> {
   const redacted: Record<string, string> = {};
-  for (const [k, v] of Object.entries(settings)) {
+  for (const [k, v] of Object.entries(settings || {})) {
     redacted[k] = REDACT_PATTERNS.some(p => p.test(k)) ? "**REDACTED**" : v;
   }
   return redacted;
@@ -67,7 +69,7 @@ export function redactSettings(settings: Record<string, string>): Record<string,
 
 export function toMarkdown(exportData: object): string {
   const data = exportData as {
-    prism_export: {
+    prism_export?: {
       version: string;
       exported_at: string;
       project: string;
@@ -85,12 +87,17 @@ export function toMarkdown(exportData: object): string {
       visual_memory: unknown[];
     };
   };
-  const d = data.prism_export;
+  const d = data?.prism_export;
+  
+  if (!d) {
+    return "> **Error:** Invalid or missing Prism memory export data.";
+  }
+
   const lines: string[] = [];
 
-  lines.push(`# Prism Memory Export: \`${d.project}\``);
+  lines.push(`# Prism Memory Export: \`${d.project || "Unknown Project"}\``);
   lines.push(``);
-  lines.push(`> Exported: ${d.exported_at}  |  Version: ${d.version}`);
+  lines.push(`> Exported: ${d.exported_at || "Unknown Date"}  |  Version: ${d.version || "Unknown"}`);
   lines.push(``);
 
   // ── Settings
@@ -98,7 +105,7 @@ export function toMarkdown(exportData: object): string {
   lines.push(``);
   lines.push(`| Key | Value |`);
   lines.push(`|-----|-------|`);
-  for (const [k, v] of Object.entries(d.settings)) {
+  for (const [k, v] of Object.entries(d.settings || {})) {
     lines.push(`| \`${k}\` | ${v} |`);
   }
   lines.push(``);
@@ -107,7 +114,7 @@ export function toMarkdown(exportData: object): string {
   lines.push(`## 🎯 Live Project State (Handoff)`);
   lines.push(``);
   lines.push(`\`\`\`json`);
-  lines.push(JSON.stringify(d.handoff, null, 2));
+  lines.push(JSON.stringify(d.handoff || {}, null, 2));
   lines.push(`\`\`\``);
   lines.push(``);
 
@@ -116,9 +123,10 @@ export function toMarkdown(exportData: object): string {
     lines.push(`## 🖼️ Visual Memory Index`);
     lines.push(``);
     for (const vm of d.visual_memory) {
-      const v = vm as { id: string; description: string; created_at: string; original_filename: string };
-      lines.push(`- **[\`${v.id.substring(0, 8)}\`]** ${v.description}`);
-      lines.push(`  <small>File: \`${v.original_filename}\` | Date: ${v.created_at}</small>`);
+      if (!vm) continue;
+      const v = vm as { id?: string; description?: string; created_at?: string; original_filename?: string };
+      lines.push(`- **[\`${(v.id || "").substring(0, 8)}\`]** ${v.description || "No description"}`);
+      lines.push(`  <small>File: \`${v.original_filename || "Unknown"}\` | Date: ${v.created_at || "Unknown"}</small>`);
     }
     lines.push(``);
   }
@@ -126,21 +134,22 @@ export function toMarkdown(exportData: object): string {
   // ── Ledger
   lines.push(`## 📝 Memory Ledger`);
   lines.push(``);
-  if (!d.ledger || d.ledger.length === 0) {
+  if (!Array.isArray(d.ledger) || d.ledger.length === 0) {
     lines.push(`*No ledger entries found.*`);
   } else {
     for (const entry of d.ledger) {
-      lines.push(`### \`${entry.created_at?.split("T")[0]}\` (Type: ${entry.event_type || "unknown"})`);
-      lines.push(`**Summary:** ${entry.summary}`);
-      if (entry.todos && entry.todos.length > 0) {
+      if (!entry) continue;
+      lines.push(`### \`${entry.created_at?.split("T")[0] || "Unknown Date"}\` (Type: ${entry.event_type || "unknown"})`);
+      lines.push(`**Summary:** ${entry.summary || "No summary"}`);
+      if (Array.isArray(entry.todos) && entry.todos.length > 0) {
         lines.push(`\n**Outstanding TODOs:**`);
         entry.todos.forEach((t: string) => lines.push(`- [ ] ${t}`));
       }
-      if (entry.decisions && entry.decisions.length > 0) {
+      if (Array.isArray(entry.decisions) && entry.decisions.length > 0) {
         lines.push(`\n**Decisions:**`);
         entry.decisions.forEach((dec: string) => lines.push(`- ${dec}`));
       }
-      if (entry.files_changed && entry.files_changed.length > 0) {
+      if (Array.isArray(entry.files_changed) && entry.files_changed.length > 0) {
         lines.push(`\n**Files Changed:**`);
         entry.files_changed.forEach((f: string) => lines.push(`- \`${f}\``));
       }
