@@ -32,14 +32,16 @@ export function formatRulesBlock(
  * Content outside the sentinels is never modified.
  */
 export function applySentinelBlock(existingContent: string, rulesBlock: string): string {
-  const startIdx = existingContent.indexOf(SENTINEL_START);
-  const endIdx = existingContent.indexOf(SENTINEL_END);
+  const blockRegex = /(<!-- PRISM:AUTO-RULES:START -->)[\s\S]*?(<!-- PRISM:AUTO-RULES:END -->)/;
 
-  if (startIdx !== -1 && endIdx !== -1) {
-    // Replace existing block
-    const before = existingContent.substring(0, startIdx);
-    const after = existingContent.substring(endIdx + SENTINEL_END.length);
-    return `${before}${rulesBlock}${after}`;
+  if (blockRegex.test(existingContent)) {
+    // Replace existing full block (non-global regex replaces the first occurrence safely)
+    return existingContent.replace(blockRegex, rulesBlock);
+  }
+
+  // Fallback check: Does a partial marker exist without proper closing?
+  if (existingContent.includes(SENTINEL_START) || existingContent.includes(SENTINEL_END)) {
+    console.warn('[Prism] Malformed PRISM auto-rules block detected. Appending a fresh block to prevent data loss.');
   }
 
   // Append with separator
