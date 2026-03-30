@@ -125,7 +125,7 @@ export function toMarkdown(exportData: object): string {
     for (const vm of d.visual_memory) {
       if (!vm) continue;
       const v = vm as { id?: string | number; description?: string; created_at?: string; original_filename?: string };
-      const safeId = String(v.id || "").substring(0, 8);
+      const safeId = String(v.id ?? "").substring(0, 8);
       lines.push(`- **[\`${safeId}\`]** ${v.description || "No description"}`);
       lines.push(`  <small>File: \`${v.original_filename || "Unknown"}\` | Date: ${v.created_at || "Unknown"}</small>`);
     }
