@@ -77,7 +77,7 @@ Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`,
 | Semantic vector search | ❌ | ✅ `GOOGLE_API_KEY` |
 | Morning Briefings | ❌ | ✅ `GOOGLE_API_KEY` |
 | Auto-compaction | ❌ | ✅ `GOOGLE_API_KEY` |
-| Web Scholar research | ❌ | ✅ `BRAVE_API_KEY` + `FIRECRAWL_API_KEY` |
+| Web Scholar research | ❌ | ✅ `BRAVE_API_KEY` + `FIRECRAWL_API_KEY` (or `TAVILY_API_KEY`) |
 | VLM image captioning | ❌ | ✅ Provider key |
 
 > 🔑 The core Mind Palace works **100% offline** with zero API keys. Cloud keys unlock intelligence features. See [Environment Variables](#environment-variables).
@@ -568,7 +568,8 @@ Requires `PRISM_ENABLE_HIVEMIND=true`.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `BRAVE_API_KEY` | No | Brave Search Pro API key |
-| `FIRECRAWL_API_KEY` | No | Firecrawl API key — required for Web Scholar |
+| `FIRECRAWL_API_KEY` | No | Firecrawl API key — required for Web Scholar (unless using Tavily) |
+| `TAVILY_API_KEY` | No | Tavily Search API key — alternative to Brave+Firecrawl for Web Scholar |
 | `PRISM_STORAGE` | No | `"local"` (default) or `"supabase"` — restart required |
 | `PRISM_ENABLE_HIVEMIND` | No | `"true"` to enable multi-agent tools — restart required |
 | `PRISM_INSTANCE` | No | Instance name for multi-server PID isolation |
