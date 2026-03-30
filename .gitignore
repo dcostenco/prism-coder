@@ -53,3 +53,9 @@ undefined-wal
 repomix*.xml
 repomix-output.txt
 repomix-*.txt
+
+# Local Build / DB
+*.tgz
+*.db
+*.db-shm
+*.db-wal
