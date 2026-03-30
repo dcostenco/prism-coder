@@ -1393,8 +1393,12 @@ export async function sessionExportMemoryHandler(args: unknown) {
         [key: string]: unknown;
       } | null;
 
-      // Fetch full ledger (all non-deleted entries)
-      const ledger = await storage.getLedgerEntries({ project }) as Array<{
+      // Fetch full ledger (all non-deleted entries, capped at 10k as OOM guard)
+      const ledger = await storage.getLedgerEntries({
+        project: `eq.${project}`,
+        order: "created_at.asc",
+        limit: "10000",
+      }) as Array<{
         id?: string;
         created_at?: string;
         event_type?: string;
@@ -1406,8 +1410,10 @@ export async function sessionExportMemoryHandler(args: unknown) {
         [key: string]: unknown;
       }>;
 
-      // Strip raw embedding vectors from the export (large binary data)
-      const cleanLedger = ledger.map(({ embedding: _emb, ...rest }) => rest);
+      // Strip raw embedding vectors from the export (large binary / not human-useful)
+      // embedding: raw float32 JSON array (~12KB/entry)
+      // embedding_compressed: TurboQuant binary blob (~400B/entry, base64 in JSON)
+      const cleanLedger = ledger.map(({ embedding: _emb, embedding_compressed: _ec, ...rest }) => rest);
 
       const visualMemory = (ctx?.metadata?.visual_memory as unknown[] | undefined) ?? [];
 

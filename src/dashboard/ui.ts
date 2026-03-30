@@ -333,6 +333,45 @@ export function renderDashboardHTML(version: string): string {
     }
     .cleanup-btn:hover { background: rgba(244,63,94,0.25); border-color: var(--accent-rose); }
     .cleanup-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    /* ─── Health repair progress bar ─── */
+    .health-progress-wrap {
+      display: none; margin-top: 0.75rem;
+      background: rgba(15,23,42,0.7); border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      border: 1px solid rgba(139,92,246,0.25);
+    }
+    .health-progress-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 0.45rem;
+    }
+    .health-progress-stage {
+      font-size: 0.72rem; color: #a78bfa; font-weight: 500;
+      transition: color 0.3s;
+    }
+    .health-progress-pct {
+      font-size: 0.72rem; color: var(--text-muted); font-weight: 600; font-variant-numeric: tabular-nums;
+    }
+    .health-progress-track {
+      height: 6px; border-radius: 3px;
+      background: rgba(139,92,246,0.15);
+      overflow: hidden;
+    }
+    .health-progress-bar {
+      height: 100%; width: 0%; border-radius: 3px;
+      background: linear-gradient(90deg, #7c3aed, #a78bfa, #7c3aed);
+      background-size: 200% 100%;
+      animation: healthBarShimmer 1.8s linear infinite;
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    @keyframes healthBarShimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .health-progress-bar.done {
+      animation: none;
+      background: var(--accent-green);
+      transition: width 0.25s ease-out, background 0.3s;
+    }
     .toast-fixed {
       position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 200;
       padding: 0.65rem 1.2rem; border-radius: 10px; font-size: 0.85rem; font-weight: 500;
@@ -516,6 +555,8 @@ export function renderDashboardHTML(version: string): string {
     .lc-btn.compact:hover { background: rgba(139,92,246,0.3); }
     .lc-btn.export { background: rgba(16,185,129,0.12); color: var(--accent-green); border: 1px solid rgba(16,185,129,0.3); }
     .lc-btn.export:hover { background: rgba(16,185,129,0.25); }
+    .lc-btn.export-vault { background: rgba(139,92,246,0.12); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); }
+    .lc-btn.export-vault:hover { background: rgba(139,92,246,0.25); }
     .lc-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .ttl-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
     .ttl-input {
@@ -606,6 +647,16 @@ export function renderDashboardHTML(version: string): string {
             </div>
           </div>
           <div class="health-issues" id="healthIssues"></div>
+          <!-- Repair progress bar (v6.1.4) -->
+          <div class="health-progress-wrap" id="healthProgressWrap">
+            <div class="health-progress-header">
+              <span class="health-progress-stage" id="healthProgressStage">Initializing…</span>
+              <span class="health-progress-pct" id="healthProgressPct">0%</span>
+            </div>
+            <div class="health-progress-track">
+              <div class="health-progress-bar" id="healthProgressBar"></div>
+            </div>
+          </div>
         </div>
 
         <!-- Memory Analytics (v3.1) -->
@@ -634,6 +685,19 @@ export function renderDashboardHTML(version: string): string {
             <button class="lc-btn export" id="exportBtn" onclick="exportPKM()">
               📦 Export ZIP
             </button>
+            <button class="lc-btn export-vault" id="exportVaultBtn" onclick="exportVault()" title="Export as Obsidian/Logseq-compatible vault with Wikilinks and keyword index">
+              🏛️ Export Vault
+            </button>
+          </div>
+          <!-- Export progress bar (v6.1.4) -->
+          <div class="health-progress-wrap" id="exportProgressWrap">
+            <div class="health-progress-header">
+              <span class="health-progress-stage" id="exportProgressStage">Building archive…</span>
+              <span class="health-progress-pct" id="exportProgressPct">0%</span>
+            </div>
+            <div class="health-progress-track">
+              <div class="health-progress-bar" id="exportProgressBar"></div>
+            </div>
           </div>
           <div class="ttl-row">
             <span class="ttl-label">Auto-expire after</span>
@@ -685,6 +749,16 @@ export function renderDashboardHTML(version: string): string {
             </button>
           </div>
           <div id="importResult" style="display:none;margin-top:0.75rem;padding:0.65rem 0.85rem;border-radius:var(--radius-sm);font-size:0.82rem;line-height:1.5"></div>
+          <!-- Import progress bar (v6.1.4) -->
+          <div class="health-progress-wrap" id="importProgressWrap">
+            <div class="health-progress-header">
+              <span class="health-progress-stage" id="importProgressStage">Reading file…</span>
+              <span class="health-progress-pct" id="importProgressPct">0%</span>
+            </div>
+            <div class="health-progress-track">
+              <div class="health-progress-bar" id="importProgressBar"></div>
+            </div>
+          </div>
           <div style="font-size:0.68rem;color:var(--text-muted);margin-top:0.5rem">
             Click <strong>Browse</strong> to pick a file, or type a server-side path.<br>
             Supports Claude Code (.jsonl), Gemini (.json), and OpenAI (.json).
@@ -1616,24 +1690,116 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
     }
 
     // ─── v3.1: PKM Export (Obsidian / Logseq ZIP) ───────────────────────
+    // ── Shared export progress helpers ─────────────────────────────────
+    // Export uses fetch+blob so we can show a building bar during ZIP generation.
+    // Estimated time ~5-15s for most projects (fflate in-memory); staged accordingly.
+    function startExportProgress(isVault) {
+      var wrap  = document.getElementById('exportProgressWrap');
+      var bar   = document.getElementById('exportProgressBar');
+      var pct   = document.getElementById('exportProgressPct');
+      var stage = document.getElementById('exportProgressStage');
+      if (wrap) wrap.style.display = 'block';
+      var stages = isVault
+        ? [
+            { pct: 10, label: 'Fetching ledger entries…',   ms: 500  },
+            { pct: 30, label: 'Rendering Markdown files…',  ms: 2000 },
+            { pct: 55, label: 'Building Wikilink index…',   ms: 4000 },
+            { pct: 75, label: 'Compressing vault ZIP…',     ms: 7000 },
+            { pct: 88, label: 'Finalizing archive…',        ms: 11000 },
+          ]
+        : [
+            { pct: 15, label: 'Fetching project data…',    ms: 500  },
+            { pct: 50, label: 'Building archive…',         ms: 2000 },
+            { pct: 80, label: 'Compressing ZIP…',          ms: 5000 },
+            { pct: 92, label: 'Finalizing…',               ms: 9000 },
+          ];
+      var timers = stages.map(function(s) {
+        return setTimeout(function() {
+          if (bar) bar.style.width = s.pct + '%';
+          if (pct) pct.textContent = s.pct + '%';
+          if (stage) stage.textContent = s.label;
+        }, s.ms);
+      });
+      return timers;
+    }
+
+    function finishExportProgress(timers, ok) {
+      timers.forEach(function(t) { clearTimeout(t); });
+      var bar   = document.getElementById('exportProgressBar');
+      var pct   = document.getElementById('exportProgressPct');
+      var stage = document.getElementById('exportProgressStage');
+      var wrap  = document.getElementById('exportProgressWrap');
+      if (bar) bar.classList.add('done');
+      if (bar) bar.style.width = '100%';
+      if (pct) pct.textContent = '100%';
+      if (stage) stage.textContent = ok ? '✅ Ready — downloading…' : '❌ Export failed';
+      setTimeout(function() {
+        if (wrap) wrap.style.display = 'none';
+        if (bar) { bar.classList.remove('done'); bar.style.width = '0%'; }
+        if (pct) pct.textContent = '0%';
+        if (stage) stage.textContent = 'Building archive…';
+      }, 2200);
+    }
+
+    // ── v3.1: PKM Export (ZIP) ────────────────────────────────────────
     async function exportPKM() {
       var project = document.getElementById('projectSelect').value;
       if (!project) return;
       var btn = document.getElementById('exportBtn');
       btn.disabled = true;
-      btn.textContent = '📦 Exporting...';
+      btn.textContent = '📦 Building…';
+      var timers = startExportProgress(false);
       try {
+        var res = await fetch('/api/export?project=' + encodeURIComponent(project));
+        if (!res.ok) throw new Error('Server error ' + res.status);
+        var blob = await res.blob();
+        finishExportProgress(timers, true);
+        var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
-        a.href = '/api/export?project=' + encodeURIComponent(project);
-        a.download = 'prism-export-' + project + '.zip';
+        a.href = url;
+        a.download = 'prism-vault-' + project + '.zip';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 10000);
         showToast('↓ Download started');
-      } catch(e) { showToast('❌ Export failed', true); }
-      finally {
+      } catch(e) {
+        finishExportProgress(timers, false);
+        showToast('❌ Export failed', true);
+      } finally {
         btn.disabled = false;
         btn.textContent = '📦 Export ZIP';
+      }
+    }
+
+    // ── v6.1: Vault Export (Prism-Port) ────────────────────────────
+    async function exportVault() {
+      var project = document.getElementById('projectSelect').value;
+      if (!project) return;
+      var btn = document.getElementById('exportVaultBtn');
+      btn.disabled = true;
+      btn.textContent = '🏛️ Building…';
+      var timers = startExportProgress(true);
+      try {
+        var res = await fetch('/api/export/vault?project=' + encodeURIComponent(project));
+        if (!res.ok) throw new Error('Server error ' + res.status);
+        var blob = await res.blob();
+        finishExportProgress(timers, true);
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'prism-vault-' + project + '.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 10000);
+        showToast('↓ Vault download started — open in Obsidian or Logseq');
+      } catch(e) {
+        finishExportProgress(timers, false);
+        showToast('❌ Vault export failed', true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🏛️ Export Vault';
       }
     }
 
@@ -1682,73 +1848,123 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
       var filePath = document.getElementById('importPath').value.trim();
       if (!filePath && !_importPickedFile) { showToast('❌ Pick a file or enter a path', true); return; }
 
-      var format = document.getElementById('importFormat').value || undefined;
-      var project = document.getElementById('importProject').value.trim() || undefined;
+      var format    = document.getElementById('importFormat').value || undefined;
+      var project   = document.getElementById('importProject').value.trim() || undefined;
       var importBtn = document.getElementById('importBtn');
-      var dryBtn = document.getElementById('importDryBtn');
-      var resultEl = document.getElementById('importResult');
+      var dryBtn    = document.getElementById('importDryBtn');
+      var resultEl  = document.getElementById('importResult');
+      var progWrap  = document.getElementById('importProgressWrap');
+      var progBar   = document.getElementById('importProgressBar');
+      var progPct   = document.getElementById('importProgressPct');
+      var progStage = document.getElementById('importProgressStage');
 
       importBtn.disabled = true;
       dryBtn.disabled = true;
       var activeBtn = dryRun ? dryBtn : importBtn;
-      var origText = activeBtn.innerHTML;
-      activeBtn.innerHTML = dryRun ? '🔄 Validating...' : '🔄 Importing...';
+      var origText  = activeBtn.innerHTML;
+      activeBtn.innerHTML = dryRun ? '🔄 Validating…' : '🔄 Importing…';
 
-      resultEl.style.display = 'block';
-      resultEl.style.background = 'rgba(139,92,246,0.1)';
-      resultEl.style.border = '1px solid rgba(139,92,246,0.25)';
-      resultEl.style.color = 'var(--accent-purple)';
-      resultEl.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;margin-right:0.4rem;vertical-align:middle"></span> ' +
-        (dryRun ? 'Validating file...' : 'Importing turns...');
+      // Hide old result, show progress bar
+      resultEl.style.display = 'none';
+      if (progWrap) progWrap.style.display = 'block';
+
+      // Estimate duration by file size: <500KB~10s, <5MB~30s, else~90s
+      var fileSize = _importPickedFile ? _importPickedFile.size : 0;
+      var estMs = fileSize > 5 * 1024 * 1024 ? 90000
+                : fileSize > 500 * 1024      ? 30000
+                : 10000;
+
+      var importStages = dryRun
+        ? [
+            { pct: 20, label: 'Parsing file structure…', ms: Math.round(estMs * 0.1) },
+            { pct: 55, label: 'Validating conversation turns…', ms: Math.round(estMs * 0.35) },
+            { pct: 80, label: 'Checking for duplicates…', ms: Math.round(estMs * 0.65) },
+            { pct: 92, label: 'Generating preview…', ms: Math.round(estMs * 0.85) },
+          ]
+        : [
+            { pct: 10, label: 'Reading file…', ms: Math.round(estMs * 0.05) },
+            { pct: 25, label: 'Parsing conversation turns…', ms: Math.round(estMs * 0.15) },
+            { pct: 45, label: 'Deduplicating entries…', ms: Math.round(estMs * 0.35) },
+            { pct: 65, label: 'Writing to ledger…', ms: Math.round(estMs * 0.55) },
+            { pct: 82, label: 'Indexing keywords (FTS5)…', ms: Math.round(estMs * 0.72) },
+            { pct: 91, label: 'Generating embeddings…', ms: Math.round(estMs * 0.85) },
+          ];
+
+      function setImportProgress(pct, label) {
+        if (progBar)   progBar.style.width  = pct + '%';
+        if (progPct)   progPct.textContent  = pct + '%';
+        if (progStage) progStage.textContent = label;
+      }
+
+      var timers = importStages.map(function(s) {
+        return setTimeout(function() { setImportProgress(s.pct, s.label); }, s.ms);
+      });
+
+      function finishImportProgress(ok, label) {
+        timers.forEach(function(t) { clearTimeout(t); });
+        if (progBar) progBar.classList.add('done');
+        setImportProgress(100, ok ? '✅ ' + (label || 'Done') : '❌ ' + (label || 'Failed'));
+        setTimeout(function() {
+          if (progWrap) progWrap.style.display = 'none';
+          if (progBar)  { progBar.classList.remove('done'); progBar.style.width = '0%'; }
+          if (progPct)  progPct.textContent = '0%';
+          if (progStage) progStage.textContent = 'Reading file…';
+        }, 2500);
+      }
 
       try {
         var endpoint, body, headers;
 
         if (_importPickedFile) {
-          // Upload mode: read file and send as base64
           var content = await _importPickedFile.text();
           endpoint = '/api/import-upload';
-          headers = {'Content-Type':'application/json'};
-          body = JSON.stringify({
+          headers  = {'Content-Type':'application/json'};
+          body     = JSON.stringify({
             filename: _importPickedFile.name,
-            content: content,
-            format: format,
-            project: project,
-            dryRun: dryRun
+            content:  content,
+            format:   format,
+            project:  project,
+            dryRun:   dryRun
           });
         } else {
-          // Path mode: just send the server-side path
           endpoint = '/api/import';
-          headers = {'Content-Type':'application/json'};
-          body = JSON.stringify({ path: filePath, format: format, project: project, dryRun: dryRun });
+          headers  = {'Content-Type':'application/json'};
+          body     = JSON.stringify({ path: filePath, format: format, project: project, dryRun: dryRun });
         }
 
         var res = await fetch(endpoint, { method: 'POST', headers: headers, body: body });
-        var d = await res.json();
+        var d   = await res.json();
+
         if (res.ok && d.ok) {
+          finishImportProgress(true, dryRun ? 'Validation complete' : 'Import complete');
+          resultEl.style.display    = 'block';
           resultEl.style.background = 'rgba(16,185,129,0.1)';
-          resultEl.style.border = '1px solid rgba(16,185,129,0.25)';
-          resultEl.style.color = 'var(--accent-green)';
+          resultEl.style.border     = '1px solid rgba(16,185,129,0.25)';
+          resultEl.style.color      = 'var(--accent-green)';
           resultEl.innerHTML = '✅ ' + escapeHtml(d.message) +
             '<div style="margin-top:0.4rem;font-size:0.75rem;color:var(--text-muted)">' +
             'Conversations: ' + (d.conversationCount || 0) + ' · Turns: ' + (d.successCount || 0) +
-            (d.skipCount ? ' · Skipped: ' + d.skipCount : '') +
-            (d.failCount ? ' · Failed: ' + d.failCount : '') + '</div>';
+            (d.skipCount  ? ' · Skipped: '  + d.skipCount  : '') +
+            (d.failCount  ? ' · Failed: '   + d.failCount  : '') + '</div>';
           if (!dryRun) { showToast('✓ Import complete'); loadProject(); }
         } else {
+          finishImportProgress(false, d.error || 'Import failed');
+          resultEl.style.display    = 'block';
           resultEl.style.background = 'rgba(244,63,94,0.1)';
-          resultEl.style.border = '1px solid rgba(244,63,94,0.25)';
-          resultEl.style.color = 'var(--accent-rose)';
+          resultEl.style.border     = '1px solid rgba(244,63,94,0.25)';
+          resultEl.style.color      = 'var(--accent-rose)';
           resultEl.innerHTML = '❌ ' + escapeHtml(d.error || 'Import failed');
         }
       } catch(e) {
+        finishImportProgress(false, e.message);
+        resultEl.style.display    = 'block';
         resultEl.style.background = 'rgba(244,63,94,0.1)';
-        resultEl.style.border = '1px solid rgba(244,63,94,0.25)';
-        resultEl.style.color = 'var(--accent-rose)';
+        resultEl.style.border     = '1px solid rgba(244,63,94,0.25)';
+        resultEl.style.color      = 'var(--accent-rose)';
         resultEl.innerHTML = '❌ ' + escapeHtml(e.message);
       } finally {
         importBtn.disabled = false;
-        dryBtn.disabled = false;
+        dryBtn.disabled    = false;
         activeBtn.innerHTML = origText;
       }
     }
@@ -2516,24 +2732,76 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
       return Math.floor(mins/60) + 'h ago';
     }
 
-    // ─── Brain Health Cleanup (v3.1) ───
+    // ─── Brain Health Cleanup (v6.1.4) — with simulated progress bar ───
     async function cleanupIssues() {
-      var btn = document.getElementById('cleanupBtn');
-      if (btn) { btn.disabled = true; btn.textContent = 'Cleaning...'; }
+      var btn       = document.getElementById('cleanupBtn');
+      var wrap      = document.getElementById('healthProgressWrap');
+      var bar       = document.getElementById('healthProgressBar');
+      var pctEl     = document.getElementById('healthProgressPct');
+      var stageEl   = document.getElementById('healthProgressStage');
+
+      if (btn) { btn.disabled = true; btn.textContent = 'Cleaning…'; }
+
+      // ── show progress bar ──
+      if (wrap) wrap.style.display = 'block';
+
+      // Stages mapped to approximate % milestones over ~120s.
+      // Easing: fast early (embedding detection is quick), slow in the
+      // middle (100-iteration embedding backfill loop), normal at the end.
+      var stages = [
+        { pct: 5,  label: 'Running health scan…',          ms: 1500  },
+        { pct: 12, label: 'Identifying missing embeddings…', ms: 4000  },
+        { pct: 22, label: 'Backfilling embeddings (batch 1)…', ms: 10000 },
+        { pct: 35, label: 'Backfilling embeddings (batch 2)…', ms: 20000 },
+        { pct: 48, label: 'Backfilling embeddings (batch 3)…', ms: 30000 },
+        { pct: 60, label: 'Backfilling embeddings (batch 4)…', ms: 40000 },
+        { pct: 70, label: 'Backfilling embeddings (batch 5)…', ms: 55000 },
+        { pct: 78, label: 'Backfilling embeddings (batch 6)…', ms: 70000 },
+        { pct: 85, label: 'Cleaning orphaned handoffs…',    ms: 85000 },
+        { pct: 90, label: 'Verifying repairs…',             ms: 100000 },
+        { pct: 95, label: 'Finalizing…',                   ms: 115000 },
+      ];
+
+      function setProgress(pct, label) {
+        if (bar)    { bar.style.width = pct + '%'; }
+        if (pctEl)  { pctEl.textContent = pct + '%'; }
+        if (stageEl && label) { stageEl.textContent = label; }
+      }
+
+      // Kick off all stage timers
+      var timers = stages.map(function(s) {
+        return setTimeout(function() { setProgress(s.pct, s.label); }, s.ms);
+      });
+
+      function clearTimers() { timers.forEach(function(t) { clearTimeout(t); }); }
+
+      function finishProgress(ok, label) {
+        clearTimers();
+        if (bar) bar.classList.add('done');
+        setProgress(100, ok ? '✅ Repair complete' : '❌ ' + (label || 'Repair failed'));
+        // hide bar after a short celebration
+        setTimeout(function() {
+          if (wrap) wrap.style.display = 'none';
+          if (bar) { bar.classList.remove('done'); bar.style.width = '0%'; }
+          if (pctEl) pctEl.textContent = '0%';
+        }, 2500);
+      }
+
       try {
-        var res = await fetch('/api/health/cleanup', { method: 'POST' });
+        var res  = await fetch('/api/health/cleanup', { method: 'POST' });
         var data = await res.json();
+        finishProgress(data.ok, data.message);
         showFixedToast(data.message || (data.ok ? 'Cleanup complete.' : 'Cleanup failed.'), data.ok);
         // Re-run health check to refresh the card
         setTimeout(async function() {
           try {
-            var healthRes = await fetch('/api/health');
+            var healthRes  = await fetch('/api/health');
             var healthData = await healthRes.json();
-            var healthDot = document.getElementById('healthDot');
-            var healthLabel = document.getElementById('healthLabel');
+            var healthDot    = document.getElementById('healthDot');
+            var healthLabel  = document.getElementById('healthLabel');
             var healthSummary = document.getElementById('healthSummary');
             var healthIssues = document.getElementById('healthIssues');
-            var cleanupBtn = document.getElementById('cleanupBtn');
+            var cleanupBtn   = document.getElementById('cleanupBtn');
             var statusMap = { healthy: '✅ Healthy', degraded: '⚠️ Degraded', unhealthy: '🔴 Unhealthy' };
             healthDot.className = 'health-dot ' + (healthData.status || 'unknown');
             healthLabel.textContent = statusMap[healthData.status] || '❓ Unknown';
@@ -2553,6 +2821,7 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
           } catch(e) {}
         }, 400);
       } catch(e) {
+        finishProgress(false, 'Request failed');
         showFixedToast('Cleanup request failed.', false);
         if (btn) { btn.disabled = false; btn.textContent = '🧹 Fix Issues'; }
       }

@@ -28,6 +28,8 @@ import { renderDashboardHTML } from "./ui.js";
 import { getAllSettings, setSetting, getSetting } from "../storage/configStorage.js";
 import { compactLedgerHandler } from "../tools/compactionHandler.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
+import { buildVaultDirectory } from "../utils/vaultExporter.js";
+import { redactSettings } from "../tools/commonHelpers.js";
 
 
 const PORT = parseInt(process.env.PRISM_DASHBOARD_PORT || "3000", 10);
@@ -775,86 +777,77 @@ return false;}
       }
 
       // ─── API: PKM Export — Obsidian/Logseq ZIP (v3.1) ──────
-      if (url.pathname === "/api/export" && req.method === "GET") {
+      // ─── API: PKM Export (v6.1 — Prism-Port Vault) ──────────────
+      // /api/export?project=<name>         — legacy URL (keeps old links working)
+      // /api/export/vault?project=<name>  — canonical vault URL
+      //
+      // Both routes produce the same Prism-Port vault ZIP:
+      //   - YAML frontmatter + Wikilinks (Obsidian/Logseq compatible)
+      //   - Keyword backlink index (Keywords/<slug>.md)
+      //   - Visual memory index (Visual_Memory/Index.md)
+      //   - Settings/handoff metadata (Settings.md)
+      //   - One file per ledger entry (Ledger/<date>_<slug>.md)
+      if (
+        (url.pathname === "/api/export" || url.pathname === "/api/export/vault") &&
+        req.method === "GET"
+      ) {
         const projectName = url.searchParams.get("project");
         if (!projectName) {
           res.writeHead(400, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ error: "Missing ?project= parameter" }));
         }
         try {
-          // Lazy-import fflate to keep startup fast
-          const { strToU8, zipSync } = await import("fflate");
-
-          // Fetch all active ledger entries for this project
           const s = await getStorageSafe();
-          if (!s) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: "Storage initializing..." })); }
-          const entries = await s.getLedgerEntries({
+          if (!s) {
+            res.writeHead(503, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "Storage initializing..." }));
+          }
+
+          // Gather data (mirrors sessionExportMemoryHandler)
+          const ctx = await s.loadContext(projectName, "deep", PRISM_USER_ID) as Record<string, unknown> | null;
+          const rawLedger = await s.getLedgerEntries({
             project: `eq.${projectName}`,
             order: "created_at.asc",
             limit: "1000",
           }) as Array<Record<string, unknown>>;
 
-          const files: Record<string, Uint8Array> = {};
+          // Strip binary embedding fields
+          const cleanLedger = rawLedger.map(({ embedding: _e, embedding_compressed: _ec, ...rest }) => rest);
 
-          // One MD file per session
-          for (const entry of entries) {
-            const date = (entry.created_at as string | undefined)?.slice(0, 10) ?? "unknown";
-            const id = (entry.id as string | undefined)?.slice(0, 8) ?? "xxxxxxxx";
-            const filename = `${projectName}/${date}-${id}.md`;
+          const rawSettings = await getAllSettings();
+          const safeSettings = redactSettings(rawSettings);
+          const visualMemory = (ctx?.metadata as Record<string, unknown> | undefined)?.visual_memory as unknown[] ?? [];
 
-            const todos = Array.isArray(entry.todos) ? (entry.todos as string[]) : [];
-            const decisions = Array.isArray(entry.decisions) ? (entry.decisions as string[]) : [];
-            const files_changed = Array.isArray(entry.files_changed) ? (entry.files_changed as string[]) : [];
-            const tags = ((Array.isArray(entry.keywords) ? entry.keywords : []) as string[]).slice(0, 10);
+          const exportPayload = {
+            prism_export: {
+              version: "6.1",
+              exported_at: new Date().toISOString(),
+              project: projectName,
+              settings: safeSettings,
+              handoff: ctx ?? null,
+              visual_memory: visualMemory,
+              ledger: cleanLedger,
+            },
+          };
 
-            const content = [
-              `# Session: ${date}`,
-              ``,
-              `**Project:** ${projectName}`,
-              `**Date:** ${date}`,
-              `**Role:** ${(entry.role as string) || "global"}`,
-              tags.length ? `**Tags:** ${tags.map(t => `#${t.replace(/\s+/g, "_")}`).join(" ")}` : "",
-              ``,
-              `## Summary`,
-              ``,
-              entry.summary as string,
-              ``,
-              todos.length ? `## TODOs\n\n${todos.map(t => `- [ ] ${t}`).join("\n")}` : "",
-              decisions.length ? `## Decisions\n\n${decisions.map(d => `- ${d}`).join("\n")}` : "",
-              files_changed.length ? `## Files Changed\n\n${files_changed.map(f => `- \`${f}\``).join("\n")}` : "",
-            ].filter(Boolean).join("\n");
-
-            files[filename] = strToU8(content);
-          }
-
-          // Index file linking all sessions
-          const indexLines = [
-            `# ${projectName} — Session Index`,
-            ``,
-            `> Exported from Prism MCP on ${new Date().toISOString().slice(0, 10)}`,
-            ``,
-            ...entries.map(e => {
-              const d = (e.created_at as string | undefined)?.slice(0, 10) ?? "unknown";
-              const i = (e.id as string | undefined)?.slice(0, 8) ?? "xxxxxxxx";
-              return `- [[${projectName}/${d}-${i}]]`;
-            }),
-          ];
-          files[`${projectName}/_index.md`] = strToU8(indexLines.join("\n"));
-
-          const zipped = zipSync(files, { level: 6 });
+          // Build vault directory and ZIP
+          const { zipSync } = await import("fflate");
+          const vaultFiles = buildVaultDirectory(exportPayload);
+          const zipped = zipSync(vaultFiles, { level: 6 });
 
           res.writeHead(200, {
             "Content-Type": "application/zip",
-            "Content-Disposition": `attachment; filename="prism-export-${projectName}-${Date.now()}.zip"`,
+            "Content-Disposition": `attachment; filename="prism-vault-${projectName}-${new Date().toISOString().slice(0, 10)}.zip"`,
             "Content-Length": String(zipped.byteLength),
           });
           return res.end(Buffer.from(zipped));
         } catch (err) {
-          console.error("[Dashboard] PKM export error:", err);
+          console.error("[Dashboard] Vault export error:", err);
           res.writeHead(500, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ error: "Export failed" }));
         }
       }
+
 
       // ─── API: Universal History Import (v5.2) ───
       if (url.pathname === "/api/import" && req.method === "POST") {

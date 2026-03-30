@@ -757,9 +757,13 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
      * - listProjects() — not called when a specific project is given
      */
 
-    it("getLedgerEntries called with { project } object", async () => {
+    it("getLedgerEntries called with PostgREST-style filter, order, and limit", async () => {
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
-      expect(storage.getLedgerEntries).toHaveBeenCalledWith({ project: "test-project" });
+      expect(storage.getLedgerEntries).toHaveBeenCalledWith({
+        project: "eq.test-project",
+        order: "created_at.asc",
+        limit: "10000",
+      });
     });
 
     it("loadContext called with positional (project, 'deep', PRISM_USER_ID)", async () => {
@@ -1104,15 +1108,18 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
     it("5 concurrent exports to different projects all succeed without throwing", async () => {
       const projects = ["concurrent-a", "concurrent-b", "concurrent-c", "concurrent-d", "concurrent-e"];
 
-      // Wire each getLedgerEntries call to return project-specific data
-      storage.getLedgerEntries.mockImplementation((args: { project: string }) =>
-        Promise.resolve([{
-          id: `entry-for-${args.project}`,
-          summary: `Session for ${args.project}`,
+      // Wire each getLedgerEntries call to return project-specific data.
+      // The handler now passes project as "eq.<project>" (PostgREST filter format),
+      // so we strip the "eq." prefix to reconstruct the raw project name for assertions.
+      storage.getLedgerEntries.mockImplementation((args: { project: string }) => {
+        const rawProject = args.project.startsWith("eq.") ? args.project.slice(3) : args.project;
+        return Promise.resolve([{
+          id: `entry-for-${rawProject}`,
+          summary: `Session for ${rawProject}`,
           importance: 3,
           // no embedding — tests clean path
-        }])
-      );
+        }]);
+      });
       storage.loadContext.mockResolvedValue(null);
 
       // Fire all 5 exports in parallel
@@ -1153,6 +1160,39 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
         expect(prism_export.ledger).toHaveLength(1);
         expect(prism_export.ledger[0].summary).toBe(`Session for ${p}`);
       }
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GROUP 14: VAULT EXPORT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe("Vault export file generation", () => {
+    it("exports a .zip file when format is set to 'vault'", async () => {
+      storage.getLedgerEntries.mockResolvedValue([{
+        id: "entry-1",
+        summary: "Vault test session",
+        importance: 1,
+        created_at: "2026-03-30T10:00:00.000Z",
+      }]);
+      storage.loadContext.mockResolvedValue(null);
+
+      const result = await sessionExportMemoryHandler({
+        project: "test-project",
+        format: "vault",
+        output_dir: tempDir,
+      });
+
+      expect(result.isError).toBe(false);
+
+      const today = new Date().toISOString().split("T")[0];
+      const filePath = join(tempDir, `prism-export-test-project-${today}.zip`);
+      expect(existsSync(filePath)).toBe(true);
+
+      const buf = await readFile(filePath);
+      // Valid ZIP files start with PK (0x50 0x4B)
+      expect(buf[0]).toBe(0x50);
+      expect(buf[1]).toBe(0x4b);
     });
   });
 });

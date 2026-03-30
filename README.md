@@ -30,7 +30,7 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [How Prism Compares](#-how-prism-compares)
 - [Tool Reference](#-tool-reference)
 - [Environment Variables](#environment-variables)
-- [Architecture](#architecture-1)
+- [Architecture](#architecture)
 - [Scientific Foundation](#-scientific-foundation)
 - [Product Roadmap](#-product-roadmap)
 - [Limitations](#limitations)
@@ -63,8 +63,7 @@ Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`,
 
 > **Note on Windows/Restricted Shells:** If your MCP client complains that `npx` is not found, use the absolute path to your node binary (e.g. `C:\Program Files\nodejs\npx.cmd`) or install globally with caution.
 
-**That's it.** Restart your client. All tools are available. Dashboard at `http://localhost:3000`.
-*(Note: The MCP server automatically starts this UI on port 3000 when connected. If you have a Next.js/React app running, port 3000 might already be in use.)*
+**That's it.** Restart your client. All tools are available. Dashboard at `http://localhost:3000`. *(Note: The MCP server automatically starts this UI on port 3000 when connected. If you have a Next.js/React app running, port 3000 might already be in use.)*
 
 ### Capability Matrix
 
@@ -78,7 +77,7 @@ Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`,
 | Semantic vector search | ❌ | ✅ `GOOGLE_API_KEY` |
 | Morning Briefings | ❌ | ✅ `GOOGLE_API_KEY` |
 | Auto-compaction | ❌ | ✅ `GOOGLE_API_KEY` |
-| Web Scholar research | ❌ | ✅ `BRAVE_API_KEY` |
+| Web Scholar research | ❌ | ✅ `BRAVE_API_KEY` + `FIRECRAWL_API_KEY` |
 | VLM image captioning | ❌ | ✅ Provider key |
 
 > 🔑 The core Mind Palace works **100% offline** with zero API keys. Cloud keys unlock intelligence features. See [Environment Variables](#environment-variables).
@@ -184,19 +183,19 @@ Add to your Continue `config.json` or Cline MCP settings:
 
 </details>
 
-#### Migration
+### Migration
 
 <details>
 <summary><strong>Migrating Existing History (Claude, Gemini, OpenAI)</strong></summary>
 
 Prism can ingest months of historical sessions from other tools to give your Mind Palace a massive head start. Import via the **CLI** or directly from the [Mind Palace Dashboard](#-mind-palace-dashboard) Import tab (file picker + manual path + dry-run toggle).
 
-### Supported Formats
+#### Supported Formats
 * **Claude Code** (`.jsonl` logs) — Automatically handles streaming chunk deduplication and `requestId` normalization.
 * **Gemini** (JSON history arrays) — Supports large-file streaming for 100MB+ exports.
 * **OpenAI** (JSON chat completion history) — Normalizes disparate tool-call structures into the unified Ledger schema.
 
-### How to Run
+#### How to Run
 
 **Option 1 — CLI:**
 
@@ -210,7 +209,7 @@ npx -y prism-mcp-server universal-import --format gemini --path ./gemini_history
 
 **Option 2 — Dashboard:** Open `localhost:3000`, navigate to the **Import** tab, select the format and file, and click Import. Supports dry-run preview. See the [dashboard screenshot](#-mind-palace-dashboard) above.
 
-### Key Features
+#### Key Features
 * **OOM-Safe Streaming:** Processes massive log files line-by-line using `stream-json`.
 * **Idempotent Dedup:** Content-hash prevents duplicate imports on re-run (`skipCount` reported).
 * **Chronological Integrity:** Uses timestamp fallbacks and `requestId` sorting to ensure your memory timeline is accurate.
@@ -253,7 +252,7 @@ To sync memory across machines or teams:
       "env": {
         "PRISM_STORAGE": "supabase",
         "SUPABASE_URL": "https://your-project.supabase.co",
-        "SUPABASE_KEY": "your-supabase-anon-key"
+        "SUPABASE_KEY": "your-supabase-anon-or-service-key"
       }
     }
   }
@@ -261,6 +260,8 @@ To sync memory across machines or teams:
 ```
 
 See the **Supabase Setup** section below for schema migration instructions.
+
+> **Anon key vs. service role key:** The anon key works for personal use (Supabase RLS policies apply). Use the service role key for team deployments where multiple users share the same Supabase project — it bypasses RLS and allows Prism to manage all rows regardless of auth context. Never expose the service role key client-side.
 
 </details>
 
@@ -327,8 +328,8 @@ Every save creates a versioned snapshot. Made a mistake? `memory_checkout` rever
 A gorgeous glassmorphism UI at `localhost:3000` that lets you see exactly what your agent is thinking:
 
 - **Current State & TODOs** — the exact context injected into the LLM's prompt
-- **Interactive Knowledge Graph** — force-directed neural graph with click-to-filter, node renaming, and surgical keyword deletion *(v5.1)*
-- **Deep Storage Manager** — preview and execute vector purge operations with dry-run safety *(v5.1)*
+- **Interactive Knowledge Graph** — force-directed neural graph with click-to-filter, node renaming, and surgical keyword deletion
+- **Deep Storage Manager** — preview and execute vector purge operations with dry-run safety
 - **Session Ledger** — full audit trail of every decision your agent has made
 - **Time Travel Timeline** — browse and revert any historical handoff version
 - **Visual Memory Vault** — browse VLM-captioned screenshots and auto-captured HTML states
@@ -339,7 +340,7 @@ A gorgeous glassmorphism UI at `localhost:3000` that lets you see exactly what y
 ![Mind Palace Dashboard](docs/mind-palace-dashboard.png)
 
 ### 🧬 10× Memory Compression
-Powered by a pure TypeScript port of Google's TurboQuant (Inspired by ICLR), Prism compresses 768-dim embeddings from **3,072 bytes → ~400 bytes** — enabling decades of session history on a standard laptop. No native modules. No vector database required.
+Powered by a pure TypeScript port of Google's TurboQuant (Inspired by Google's ICLR research), Prism compresses 768-dim embeddings from **3,072 bytes → ~400 bytes** — enabling decades of session history on a standard laptop. No native modules. No vector database required.
 
 ### 🐝 Multi-Agent Hivemind
 Multiple agents (dev, QA, PM) can work on the same project with **role-isolated memory**. Agents discover each other automatically, share context in real-time via Telepathy sync, and see a team roster during context loading.
@@ -384,28 +385,36 @@ Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.z
 > **Current stable release.** Data sovereignty meets active memory intelligence.
 
 - 📦 **Prism-Port Vault Export** — New `vault` format for `session_export_memory`. Generates a `.zip` of interlinked Markdown files with YAML frontmatter, `[[Wikilinks]]`, and auto-generated `Keywords/` backlink indices. Drop into Obsidian or Logseq for instant knowledge graph.
+- 🏛️ **Dashboard Export Vault Button** — "🏛️ Export Vault" button in the Mind Palace UI exports the full Prism-Port vault ZIP directly from the browser. Both `/api/export` and `/api/export/vault` now use the unified `buildVaultDirectory` path — same rich format as the MCP tool.
 - 🏥 **Dashboard Health Cleanup** — The "Fix Issues" button now repairs missing embeddings directly from the Mind Palace UI.
 - 🧠 **Smart Memory Merge UI** — Dynamically merge duplicate knowledge nodes right from the Graph Editor. "Knowledge Gardening" made effortless.
 - ✨ **Semantic Search Highlighting** — Native RegEx mapping that visually wraps the exact reason a vector result was retrieved during a search.
 - 📊 **Deep Purge Visualization** — A zero-overhead "Memory Density" analytic providing instant signal-to-noise ratio visibility (Graduated ideas vs raw concepts).
 - 🛡️ **Context-Boosted Search** — Biases semantic queries by intelligently interleaving your current project workspace.
 
+#### v6.1.4 — Production Hardening
+- 🔒 **Embedding Binary Strip** — Both `embedding` (raw float32) and `embedding_compressed` (TurboQuant binary blob) are now stripped from all export formats, preventing ~400 bytes of raw binary per entry from appearing in vault/JSON exports.
+- 🔗 **Vault Wikilink Fix** — Keyword backlink paths now use vault-relative `Ledger/filename.md` instead of `../Ledger/filename.md` — ensuring correct internal link resolution in Obsidian and Logseq.
+- 🖼️ **Visual Memory Key Fix** — Export correctly reads `filename` and `timestamp` (the keys written by `session_save_image`), resolving a mismatch that produced `"Unknown"` values in the vault visual memory index.
+- 🛡️ **OOM Guard on Large Exports** — `getLedgerEntries` in the export handler now has a 10,000-entry ceiling with explicit `ORDER BY created_at ASC`, preventing unbounded heap allocation on high-volume projects.
+- ⚡ **O(1) Filename Dedup** — Vault filename collision resolution upgraded from O(n²) loop to O(1) `Map<string, number>` counter. Important for projects with many same-day sessions.
+- 🔧 **TurboQuant Guard** — `bits` parameter now validated to `[2, 6]` range at construction time, preventing accidental multi-second Lloyd-Max initialization at higher bit depths.
+
 ![Prism v6 Features](docs/v6_cognitive_load_dashboard.png)
 
 <details>
 <summary><strong>Earlier releases (v5.x and below)</strong></summary>
 
-### v5.5 — Architectural Hardening
+#### v5.5 — Architectural Hardening
 - 🛡️ **Transactional Migrations** — SQLite DDL rebuilds are wrapped in explicit `BEGIN/COMMIT` blocks.
 - 🛑 **Graceful Shutdown Registry** — `BackgroundTaskRegistry` uses a 5-second `Promise.race()` to await flushes.
 - 🕰️ **Thundering Herd Prevention** — Maintenance scheduler migrated from `setInterval` to state-aware `setTimeout`.
 - 🚀 **Zero-Thrashing SDM Scans** — `Int32Array` scratchpad allocations hoisted outside the hot decode loop.
 
-### v5.4 — Convergent Intelligence
+#### v5.4 — Convergent Intelligence
 - 🔄 **CRDT Handoff Merging** — Multi-agent saves no longer reject on version conflict. Custom OR-Map engine auto-merges concurrent edits.
 - ⏰ **Background Purge Scheduler** — Fully automated storage maintenance TTL sweep, Ebbinghaus decay, auto-compaction.
 - 🌐 **Autonomous Web Scholar** — Agent-driven research pipeline. Brave Search → Firecrawl scrape → LLM synthesis.
-
 - **v5.3** — Hivemind Health Watchdog (state machine, loop detection, Telepathy alert injection)
 - **v5.2** — Cognitive Memory (Ebbinghaus decay, context-weighted retrieval), Universal History Migration, Smart Consolidation
 - **v5.1** — Knowledge Graph Editor, Deep Storage purge
@@ -641,8 +650,8 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 | **v5.4** | Autonomous Web Scholar — background research pipeline with LLM synthesis | Autonomous research agents | ✅ Shipped |
 | **v5.5** | SDM Decoder Foundation — pre-allocated typed-array hot loop, zero GC thrash | Kanerva's Sparse Distributed Memory (1988) | ✅ Shipped |
 | **v5.5** | Architectural Hardening — transactional migrations, graceful shutdown, thundering herd prevention | Production reliability engineering | ✅ Shipped |
-| **v5.6** | Full Superposed Memory (SDM) — O(1) key-value retrieval via Hamming correlation | Kanerva's SDM | 🔬 In Progress |
-| **v5.6** | Intuitive Recall — proactive surface of relevant past decisions without explicit search | Predictive memory (cognitive science) | 🔬 In Progress |
+| **v6.2+** | Full Superposed Memory (SDM) — O(1) key-value retrieval via Hamming correlation | Kanerva's SDM | 🔬 In Progress |
+| **v6.2+** | Intuitive Recall — proactive surface of relevant past decisions without explicit search | Predictive memory (cognitive science) | 🔬 In Progress |
 | **v6.1** | Prism-Port Vault Export — Obsidian/Logseq `.zip` with YAML frontmatter & `[[Wikilinks]]` | Data sovereignty, PKM interop | ✅ Shipped |
 | **v6.1** | Cognitive Load & Semantic Search — dynamic graph thinning, search highlights | Contextual working memory | ✅ Shipped |
 | **v6.2** | Synthesize & Prune — automated edge synthesis and visual decay | Implicit associative memory | 🔬 In Progress |
@@ -675,7 +684,8 @@ The v6.1 update shipped Prism-Port (Obsidian vault export) and enhanced Knowledg
 - **Embedding quality varies by provider.** Gemini `text-embedding-004` and OpenAI `text-embedding-3-small` produce high-quality 768-dim vectors. Ollama embeddings (e.g., `nomic-embed-text`) are usable but may reduce retrieval accuracy.
 - **Dashboard is HTTP-only.** The Mind Palace dashboard at `localhost:3000` does not support HTTPS. For remote access, use a reverse proxy (nginx/Caddy) or SSH tunnel. Basic auth is available via `PRISM_DASHBOARD_USER` / `PRISM_DASHBOARD_PASS`.
 - **Long-lived clients can accumulate zombie processes.** MCP clients that run for extended periods (e.g., Claude CLI) may leave orphaned Prism server processes. The lifecycle manager detects true orphans (PPID=1) but allows coexistence for active parent processes. Use `PRISM_INSTANCE` to isolate instances across clients.
-- **Migration is one-way.** Universal History Migration imports sessions *into* Prism but does not export back to Claude/Gemini/OpenAI formats. Use `session_export_memory` for portable JSON/Markdown export, or the new `vault` format for Obsidian/Logseq-compatible `.zip` archives.
+- **Migration is one-way.** Universal History Migration imports sessions *into* Prism but does not export back to Claude/Gemini/OpenAI formats. Use `session_export_memory` for portable JSON/Markdown export, or the `vault` format for Obsidian/Logseq-compatible `.zip` archives.
+- **Export ceiling at 10,000 ledger entries.** The `session_export_memory` tool and the dashboard export button cap vault/JSON exports at 10,000 entries per project as an OOM guard. Projects exceeding this limit should use per-project exports and time-based filtering to stay within the ceiling. This limit does not affect search or context loading.
 - **No Windows CI testing.** Prism is developed and tested on macOS/Linux. It should work on Windows via Node.js, but edge cases (file paths, PID locks) may surface.
 
 ---

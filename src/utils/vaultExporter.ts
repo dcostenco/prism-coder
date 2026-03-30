@@ -79,13 +79,16 @@ export function buildVaultDirectory(exportData: any): Record<string, Buffer> {
       if (!vm) continue;
       const safeId = String(vm.id ?? "").substring(0, 8);
       visualMd += `- **[\`${safeId}\`]** ${vm.description || "No description"}\n`;
-      visualMd += `  <small>File: \`${vm.original_filename || "Unknown"}\` | Date: ${vm.created_at || "Unknown"}</small>\n`;
+      visualMd += `  <small>File: \`${vm.filename || "Unknown"}\` | Date: ${vm.timestamp || "Unknown"}</small>\n`;
     }
     addFile("Visual_Memory/Index.md", visualMd);
   }
 
   // 4. Ledger/ and Keywords/ processing
   const keywordMentions: Record<string, { sessionName: string, path: string }[]> = {};
+
+  // O(1) filename collision counter: key = "YYYY-MM-DD_slug", value = next suffix number
+  const filenameCounters = new Map<string, number>();
 
   if (Array.isArray(d.ledger)) {
     for (const entry of d.ledger) {
@@ -96,13 +99,11 @@ export function buildVaultDirectory(exportData: any): Record<string, Buffer> {
         : "Unknown_Date";
       
       const sessionSlug = slugify(entry.summary ? entry.summary.substring(0, 40) : "Session");
-      let filename = `${dateStr}_${sessionSlug}.md`;
-      // Deduplicate filenames to prevent silent overwrites
-      let counter = 1;
-      while (vaultFiles[`Ledger/${filename}`]) {
-        filename = `${dateStr}_${sessionSlug}-${counter}.md`;
-        counter++;
-      }
+      const baseKey = `${dateStr}_${sessionSlug}`;
+      const count = filenameCounters.get(baseKey) ?? 0;
+      filenameCounters.set(baseKey, count + 1);
+      // First entry gets no suffix; subsequent collisions get -1, -2, …
+      const filename = count === 0 ? `${baseKey}.md` : `${baseKey}-${count}.md`;
       const fullPath = `Ledger/${filename}`;
 
       // Extract raw keywords from entry
@@ -159,11 +160,13 @@ export function buildVaultDirectory(exportData: any): Record<string, Buffer> {
           }
           keywordMentions[kwSlug].push({
             sessionName: entry.summary || filename,
-            path: `../Ledger/${filename}`
+            // Vault-relative path (no "../" prefix) — Obsidian [[Wikilinks]] resolve
+            // from vault root, not from the current file's directory.
+            path: `Ledger/${filename}`
           });
 
           // Embed wikilink in the ledger file
-          // Using typical Obsidian shortest-path but providing full path just in case
+          // Using vault-relative path for Obsidian/Logseq compatibility
           content += `- [[Keywords/${kwSlug}|${kw}]]\n`;
         });
       }

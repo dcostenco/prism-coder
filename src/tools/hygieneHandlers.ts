@@ -464,6 +464,25 @@ export async function deepStoragePurgeHandler(args: unknown) {
   const olderThanDays = args.older_than_days ?? 30;
   const dryRun = args.dry_run ?? false;
 
+  // ── TTL = 0 guard ──────────────────────────────────────────────────────────
+  // older_than_days = 0 is a valid sentinel meaning "no purge policy" — the
+  // same semantics as knowledge_set_retention with ttl_days = 0. The storage
+  // layer enforces a minimum of 7, so we must short-circuit here rather than
+  // letting a storage error bubble up as a confusing MCP error response.
+  if (olderThanDays === 0) {
+    return {
+      content: [{
+        type: "text",
+        text:
+          `ℹ️ **Deep Storage Purge — Skipped**\n\n` +
+          `\`older_than_days: 0\` means no retention policy is active.\n` +
+          `0 entries eligible. Nothing was purged.\n\n` +
+          `To start a purge, set \`older_than_days\` to 7 or more.`,
+      }],
+      isError: false,
+    };
+  }
+
   debugLog(
     `[deep_storage_purge] ${dryRun ? "DRY RUN" : "EXECUTING"}: ` +
     `olderThanDays=${olderThanDays}, project=${args.project || "all"}`
@@ -477,6 +496,7 @@ export async function deepStoragePurgeHandler(args: unknown) {
     dryRun,
     userId: PRISM_USER_ID,
   });
+
 
   // Format bytes as human-readable MB with 2 decimal places
   const mbs = (result.reclaimedBytes / (1024 * 1024)).toFixed(2);

@@ -560,10 +560,14 @@ function unpackSigns(packed: Uint8Array, count: number): Float64Array {
 // on construction, then reuses it for all compress/search calls.
 //
 // MEMORY FOOTPRINT (for d=768):
-//   Rotation matrix Pi: 768 × 768 × 8 bytes = ~4.7 MB
-//   QJL matrix S:       768 × 768 × 8 bytes = ~4.7 MB
-//   Codebook:           < 1 KB
-//   TOTAL:              ~9.4 MB (acceptable for a server-side singleton)
+//   During init — QR decomp allocates G + Q + R simultaneously:
+//     G:  768 × 768 × 8 bytes = 4.72 MB (freed after generateRotationMatrix returns)
+//     Q:  768 × 768 × 8 bytes = 4.72 MB (stored as this.Pi)
+//     R:  768 × 768 × 8 bytes = 4.72 MB (freed after generateRotationMatrix returns)
+//     Peak transient:          ~14.1 MB during init
+//   Steady-state (after init):
+//     this.Pi: 4.72 MB · this.S: 4.72 MB · codebook: < 1 KB
+//     Total retained:          ~9.44 MB (acceptable for a server-side singleton)
 //
 // THREAD SAFETY: compress() and asymmetricInnerProduct() are pure
 // functions with no shared mutable state. Safe for concurrent calls.
@@ -582,6 +586,10 @@ export class TurboQuantCompressor {
   readonly S: Float64Array;    // d×d QJL projection matrix
 
   constructor(config: TurboQuantConfig) {
+    // Guard against exponential Lloyd-Max cost: bits=7 → 128 levels → ~2s init
+    if (config.bits < 2 || config.bits > 6) {
+      throw new Error(`TurboQuantConfig.bits must be in [2, 6]; got ${config.bits}`);
+    }
     this.d = config.d;
     this.bits = config.bits;
     this.mseBits = Math.max(config.bits - 1, 1);
