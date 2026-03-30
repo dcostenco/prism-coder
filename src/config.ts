@@ -184,13 +184,15 @@ export const PRISM_SCHEDULER_INTERVAL_MS = parseInt(
 
 // ─── v5.4: Autonomous Web Scholar ─────────────────────────────
 // Background LLM research pipeline powered by Brave Search + Firecrawl.
+// Tavily can be used as an alternative when TAVILY_API_KEY is set.
 // Defaults are conservative to prevent runaway API costs.
 
 export const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
+export const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 export const PRISM_SCHOLAR_ENABLED = process.env.PRISM_SCHOLAR_ENABLED === "true"; // Opt-in
 
-if (PRISM_SCHOLAR_ENABLED && !FIRECRAWL_API_KEY) {
-  console.error("Warning: FIRECRAWL_API_KEY environment variable is missing. Web Scholar will be unavailable.");
+if (PRISM_SCHOLAR_ENABLED && !FIRECRAWL_API_KEY && !TAVILY_API_KEY) {
+  console.error("Warning: Neither FIRECRAWL_API_KEY nor TAVILY_API_KEY is set. Web Scholar will fall back to free search.");
 }
 export const PRISM_SCHOLAR_INTERVAL_MS = parseInt(
   process.env.PRISM_SCHOLAR_INTERVAL_MS || "0", 10  // Default manual-only

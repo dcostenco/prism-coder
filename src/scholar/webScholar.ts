@@ -1,16 +1,18 @@
-import { 
-  BRAVE_API_KEY, 
-  FIRECRAWL_API_KEY, 
-  PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN, 
-  PRISM_USER_ID, 
+import {
+  BRAVE_API_KEY,
+  FIRECRAWL_API_KEY,
+  TAVILY_API_KEY,
+  PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN,
+  PRISM_USER_ID,
   PRISM_SCHOLAR_TOPICS,
-  PRISM_ENABLE_HIVEMIND 
+  PRISM_ENABLE_HIVEMIND
 } from "../config.js";
 import { getStorage } from "../storage/index.js";
 import { debugLog } from "../utils/logger.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
 import { randomUUID } from "node:crypto";
 import { performWebSearchRaw } from "../utils/braveApi.js";
+import { performTavilySearch, performTavilyExtract } from "../utils/tavilyApi.js";
 import { getTracer } from "../utils/telemetry.js";
 import { searchYahooFree, scrapeArticleLocal } from "./freeSearch.js";
 
@@ -155,7 +157,13 @@ export async function runWebScholar(): Promise<void> {
   const span = tracer.startSpan("background.web_scholar");
   
   try {
-    const useFreeFallback = !BRAVE_API_KEY || !FIRECRAWL_API_KEY;
+    // Pipeline priority:
+    //   1. Brave + Firecrawl (when both keys present)
+    //   2. Tavily Search + Extract (when TAVILY_API_KEY set but Brave/Firecrawl missing)
+    //   3. Yahoo + Readability free fallback (no paid keys)
+    const useBraveFirecrawl = !!(BRAVE_API_KEY && FIRECRAWL_API_KEY);
+    const useTavily = !useBraveFirecrawl && !!TAVILY_API_KEY;
+    const useFreeFallback = !useBraveFirecrawl && !useTavily;
 
     if (!PRISM_SCHOLAR_TOPICS || PRISM_SCHOLAR_TOPICS.length === 0) {
       debugLog("[WebScholar] Skipped: No topics configured in PRISM_SCHOLAR_TOPICS");
@@ -179,14 +187,18 @@ export async function runWebScholar(): Promise<void> {
     await hivemindHeartbeat(`Searching for: ${topic}`);
     let urls: string[] = [];
 
-    if (useFreeFallback) {
-      debugLog("[WebScholar] API keys missing, falling back to Local Free Search (Yahoo + Readability)");
-      const ddgResults = await searchYahooFree(topic, PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN);
-      urls = ddgResults.map(r => r.url).filter(Boolean);
-    } else {
+    if (useBraveFirecrawl) {
       const braveResponse = await performWebSearchRaw(topic, PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN);
       const braveData = JSON.parse(braveResponse);
       urls = (braveData.web?.results || []).map((r: any) => r.url).filter(Boolean);
+    } else if (useTavily) {
+      debugLog("[WebScholar] Using Tavily Search for URL discovery");
+      const tavilyResults = await performTavilySearch(TAVILY_API_KEY!, topic, PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN);
+      urls = tavilyResults.map(r => r.url).filter(Boolean);
+    } else {
+      debugLog("[WebScholar] API keys missing, falling back to Local Free Search (Yahoo + Readability)");
+      const ddgResults = await searchYahooFree(topic, PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN);
+      urls = ddgResults.map(r => r.url).filter(Boolean);
     }
 
     if (urls.length === 0) {
@@ -201,43 +213,60 @@ export async function runWebScholar(): Promise<void> {
     // 4. Scrape each URL
     await hivemindHeartbeat(`Scraping ${urls.length} articles on: ${topic}`);
     const scrapedTexts: string[] = [];
-    for (const url of urls) {
-      if (useFreeFallback) {
-        try {
-          debugLog(`[WebScholar] Scraping local fallback: ${url}`);
-          const article = await scrapeArticleLocal(url);
-          const trimmed = article.content.slice(0, 15_000);
-          scrapedTexts.push(`Source: ${url}\nTitle: ${article.title}\n\n${trimmed}\n\n---\n`);
-        } catch (err) {
-          console.error(`[WebScholar] Failed to locally scrape ${url}:`, err);
+
+    if (useTavily) {
+      // Tavily Extract: batch all URLs at once (up to 20)
+      try {
+        debugLog(`[WebScholar] Extracting ${urls.length} URLs via Tavily Extract`);
+        const extracted = await performTavilyExtract(TAVILY_API_KEY!, urls);
+        for (const item of extracted) {
+          if (item.rawContent) {
+            const trimmed = item.rawContent.slice(0, 15_000);
+            scrapedTexts.push(`Source: ${item.url}\n\n${trimmed}\n\n---\n`);
+          }
         }
-      } else {
-        try {
-          debugLog(`[WebScholar] Scraping Firecrawl: ${url}`);
-          const scrapeRes = await fetch("https://api.firecrawl.dev/v1/scrape", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${FIRECRAWL_API_KEY}`
-            },
-            body: JSON.stringify({
-              url,
-              formats: ["markdown"],
-            })
-          });
-
-          if (!scrapeRes.ok) {
-            console.error(`[WebScholar] Firecrawl failed for ${url}: ${scrapeRes.status}`);
-            continue;
+      } catch (err) {
+        console.error("[WebScholar] Tavily Extract failed:", err);
+      }
+    } else {
+      for (const url of urls) {
+        if (useFreeFallback) {
+          try {
+            debugLog(`[WebScholar] Scraping local fallback: ${url}`);
+            const article = await scrapeArticleLocal(url);
+            const trimmed = article.content.slice(0, 15_000);
+            scrapedTexts.push(`Source: ${url}\nTitle: ${article.title}\n\n${trimmed}\n\n---\n`);
+          } catch (err) {
+            console.error(`[WebScholar] Failed to locally scrape ${url}:`, err);
           }
+        } else {
+          try {
+            debugLog(`[WebScholar] Scraping Firecrawl: ${url}`);
+            const scrapeRes = await fetch("https://api.firecrawl.dev/v1/scrape", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${FIRECRAWL_API_KEY}`
+              },
+              body: JSON.stringify({
+                url,
+                formats: ["markdown"],
+              })
+            });
 
-          const result = (await scrapeRes.json()) as FirecrawlScrapeResponse;
-          if (result.success && result.data?.markdown) {
-            const trimmed = result.data.markdown.slice(0, 15_000);
-            scrapedTexts.push(`Source: ${url}\n\n${trimmed}\n\n---\n`);
+            if (!scrapeRes.ok) {
+              console.error(`[WebScholar] Firecrawl failed for ${url}: ${scrapeRes.status}`);
+              continue;
+            }
+
+            const result = (await scrapeRes.json()) as FirecrawlScrapeResponse;
+            if (result.success && result.data?.markdown) {
+              const trimmed = result.data.markdown.slice(0, 15_000);
+              scrapedTexts.push(`Source: ${url}\n\n${trimmed}\n\n---\n`);
+            }
+          } catch (err) {
+            console.error(`[WebScholar] Failed to scrape ${url}:`, err);
           }
-        } catch (err) {
-          console.error(`[WebScholar] Failed to scrape ${url}:`, err);
         }
       }
     }
