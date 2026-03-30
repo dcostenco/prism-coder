@@ -70,15 +70,30 @@ export async function performTavilyExtract(
   // Tavily extract accepts up to 20 URLs at once
   for (let i = 0; i < urls.length; i += 20) {
     const batch = urls.slice(i, i + 20);
-    const response = await client.extract(batch, {
-      extractDepth: "basic",
-    });
+    
+    try {
+      const response = await client.extract(batch, {
+        extractDepth: "basic",
+      });
 
-    const mapped = (response.results || []).map((r: any) => ({
-      url: r.url || "",
-      rawContent: r.rawContent || "",
-    }));
-    allResults.push(...mapped);
+      // Optionally log failed URLs from this batch
+      if (response.failedResults && response.failedResults.length > 0) {
+        console.warn(
+          `[Tavily Extract] Failed to extract ${response.failedResults.length} URLs in this batch.`, 
+          response.failedResults
+        );
+      }
+
+      const mapped = (response.results || []).map((r: any) => ({
+        url: r.url || "",
+        rawContent: r.rawContent || "",
+      }));
+      
+      allResults.push(...mapped);
+    } catch (error) {
+      // Log the error but continue to the next batch to prevent total data loss
+      console.error(`[Tavily Extract] Error extracting batch ${i} to ${i + 20}:`, error);
+    }
   }
 
   return allResults;
