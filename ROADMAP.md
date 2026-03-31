@@ -212,6 +212,23 @@ With v6.1.8 shipped, Prism is a **production-hardened, type-safe, cognitively-gr
 
 ## 🗺️ Next on the Horizon — v6.2
 
+### 🧠 Autonomous Cognitive Loop Hardening (Immediate Priority)
+
+**Problem:** The graph intelligence stack is feature-complete but still partially operator-driven. Without hardened autonomous execution, scheduler drift and noisy links can degrade retrieval quality over time.
+
+**Solution:** Prioritize reliability of the synthesis/pruning loop before adding higher-complexity cognitive features.
+
+**Execution track (v6.2.x):**
+1. **Step 5 closure:** Fix scheduler telemetry semantics (`projects_processed`) and add route-level `/api/graph/metrics` integration coverage.
+2. **Resilient scheduled synthesis:** Add cooldown, runtime budget, bounded retry/backoff, and explicit failure accounting.
+3. **Proactive graph pruning:** Scheduler-driven weak-link pruning (`strength < threshold`) with safety caps and structured observability.
+4. **Graph-loop SLOs:** Track synthesis success rate, net-new links/sweep, prune ratio, and sweep latency in dashboard health views.
+
+**Exit gates:**
+- 7-day stable scheduler operation with no runaway link growth
+- Deterministic prune behavior under configured link-budget caps
+- Healthy synthesis failure rate and bounded sweep duration
+
 ### 📱 Mind Palace Mobile PWA
 
 **Problem:** The dashboard is desktop-only. Quick check-ins on mobile require a laptop.

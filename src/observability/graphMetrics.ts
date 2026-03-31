@@ -90,9 +90,15 @@ interface TestMeMetrics {
 
 interface SchedulerSynthesisMetrics {
   projects_processed_last: number;
+  projects_succeeded_last: number;
+  projects_failed_last: number;
+  retries_last: number;
   links_created_last: number;
   duration_ms_last: number;
   skipped_backpressure_last: number;
+  skipped_cooldown_last: number;
+  skipped_budget_last: number;
+  skipped_backoff_last: number;
   last_sweep_at: string | null;
 }
 
@@ -140,9 +146,15 @@ function createFreshTestMeMetrics(): TestMeMetrics {
 function createFreshSchedulerMetrics(): SchedulerSynthesisMetrics {
   return {
     projects_processed_last: 0,
+    projects_succeeded_last: 0,
+    projects_failed_last: 0,
+    retries_last: 0,
     links_created_last: 0,
     duration_ms_last: 0,
     skipped_backpressure_last: 0,
+    skipped_cooldown_last: 0,
+    skipped_budget_last: 0,
+    skipped_backoff_last: 0,
     last_sweep_at: null,
   };
 }
@@ -243,25 +255,43 @@ export function recordTestMeRequest(data: TestMeRequestData): void {
 
 export interface SchedulerSynthesisData {
   projects_processed: number;
+  projects_succeeded: number;
+  projects_failed: number;
+  retries: number;
   links_created: number;
   duration_ms: number;
   skipped_backpressure: number;
+  skipped_cooldown: number;
+  skipped_budget: number;
+  skipped_backoff: number;
 }
 
 export function recordSchedulerSynthesis(data: SchedulerSynthesisData): void {
   const now = new Date().toISOString();
   schedulerSynthesis.projects_processed_last = data.projects_processed;
+  schedulerSynthesis.projects_succeeded_last = data.projects_succeeded;
+  schedulerSynthesis.projects_failed_last = data.projects_failed;
+  schedulerSynthesis.retries_last = data.retries;
   schedulerSynthesis.links_created_last = data.links_created;
   schedulerSynthesis.duration_ms_last = data.duration_ms;
   schedulerSynthesis.skipped_backpressure_last = data.skipped_backpressure;
+  schedulerSynthesis.skipped_cooldown_last = data.skipped_cooldown;
+  schedulerSynthesis.skipped_budget_last = data.skipped_budget;
+  schedulerSynthesis.skipped_backoff_last = data.skipped_backoff;
   schedulerSynthesis.last_sweep_at = now;
 
   emitGraphEvent({
     event: "graph_scheduler_synthesis",
     projects_processed: data.projects_processed,
+    projects_succeeded: data.projects_succeeded,
+    projects_failed: data.projects_failed,
+    retries: data.retries,
     links_created: data.links_created,
     duration_ms: data.duration_ms,
     skipped_backpressure: data.skipped_backpressure,
+    skipped_cooldown: data.skipped_cooldown,
+    skipped_budget: data.skipped_budget,
+    skipped_backoff: data.skipped_backoff,
   });
 }
 
@@ -317,9 +347,15 @@ export interface GraphMetricsSnapshot {
   };
   scheduler: {
     projects_processed_last: number;
+    projects_succeeded_last: number;
+    projects_failed_last: number;
+    retries_last: number;
     links_created_last: number;
     duration_ms_last: number;
     skipped_backpressure_last: number;
+    skipped_cooldown_last: number;
+    skipped_budget_last: number;
+    skipped_backoff_last: number;
     last_sweep_at: string | null;
   };
   warnings: WarningFlags;
@@ -352,9 +388,15 @@ export function getGraphMetricsSnapshot(): GraphMetricsSnapshot {
     },
     scheduler: {
       projects_processed_last: schedulerSynthesis.projects_processed_last,
+      projects_succeeded_last: schedulerSynthesis.projects_succeeded_last,
+      projects_failed_last: schedulerSynthesis.projects_failed_last,
+      retries_last: schedulerSynthesis.retries_last,
       links_created_last: schedulerSynthesis.links_created_last,
       duration_ms_last: schedulerSynthesis.duration_ms_last,
       skipped_backpressure_last: schedulerSynthesis.skipped_backpressure_last,
+      skipped_cooldown_last: schedulerSynthesis.skipped_cooldown_last,
+      skipped_budget_last: schedulerSynthesis.skipped_budget_last,
+      skipped_backoff_last: schedulerSynthesis.skipped_backoff_last,
       last_sweep_at: schedulerSynthesis.last_sweep_at,
     },
     warnings: computeWarningFlags(),

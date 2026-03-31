@@ -102,16 +102,28 @@ describe("Counter increments", () => {
   it("records scheduler synthesis data", () => {
     recordSchedulerSynthesis({
       projects_processed: 3,
+      projects_succeeded: 2,
+      projects_failed: 1,
+      retries: 1,
       links_created: 12,
       duration_ms: 450,
       skipped_backpressure: 1,
+      skipped_cooldown: 2,
+      skipped_budget: 3,
+      skipped_backoff: 4,
     });
 
     const snap = getGraphMetricsSnapshot();
     expect(snap.scheduler.projects_processed_last).toBe(3);
+    expect(snap.scheduler.projects_succeeded_last).toBe(2);
+    expect(snap.scheduler.projects_failed_last).toBe(1);
+    expect(snap.scheduler.retries_last).toBe(1);
     expect(snap.scheduler.links_created_last).toBe(12);
     expect(snap.scheduler.duration_ms_last).toBe(450);
     expect(snap.scheduler.skipped_backpressure_last).toBe(1);
+    expect(snap.scheduler.skipped_cooldown_last).toBe(2);
+    expect(snap.scheduler.skipped_budget_last).toBe(3);
+    expect(snap.scheduler.skipped_backoff_last).toBe(4);
     expect(snap.scheduler.last_sweep_at).not.toBeNull();
   });
 });
@@ -328,9 +340,15 @@ describe("Snapshot shape contract", () => {
     const snap = getGraphMetricsSnapshot();
     const sc = snap.scheduler;
     expect(typeof sc.projects_processed_last).toBe("number");
+    expect(typeof sc.projects_succeeded_last).toBe("number");
+    expect(typeof sc.projects_failed_last).toBe("number");
+    expect(typeof sc.retries_last).toBe("number");
     expect(typeof sc.links_created_last).toBe("number");
     expect(typeof sc.duration_ms_last).toBe("number");
     expect(typeof sc.skipped_backpressure_last).toBe("number");
+    expect(typeof sc.skipped_cooldown_last).toBe("number");
+    expect(typeof sc.skipped_budget_last).toBe("number");
+    expect(typeof sc.skipped_backoff_last).toBe("number");
   });
 
   it("warnings has all required flags", () => {

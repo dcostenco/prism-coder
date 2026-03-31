@@ -22,7 +22,7 @@ import { PRISM_USER_ID, PRISM_SCHOLAR_ENABLED, PRISM_SCHOLAR_INTERVAL_MS } from 
 import { debugLog } from "./utils/logger.js";
 import { runWebScholar } from "./scholar/webScholar.js";
 import { getAllActiveSdmProjects, getSdmEngine } from "./sdm/sdmEngine.js";
-import { supabasePost, supabasePatch, supabaseDelete, supabaseRpc } from "./utils/supabaseApi.js";
+import { supabasePatch, supabaseDelete, supabaseRpc } from "./utils/supabaseApi.js";
 
 // ─── Distributed Lock Helpers (v6.2) ─────────────────────────────────────────
 //
@@ -116,6 +116,14 @@ export interface SchedulerConfig {
   compactionKeepRecent: number;
   /** Days before importance decay applies to behavioral entries (default: 30) */
   decayDays: number;
+  /** Per-project synthesis cooldown in milliseconds (default: 10 minutes) */
+  edgeSynthesisCooldownMs: number;
+  /** Max wall-clock budget for synthesis task per sweep (default: 60 seconds) */
+  edgeSynthesisBudgetMs: number;
+  /** Max retries after first synthesis failure (default: 1) */
+  edgeSynthesisMaxRetries: number;
+  /** Backoff duration after terminal synthesis failure (default: 30 minutes) */
+  edgeSynthesisBackoffMs: number;
 }
 
 export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
@@ -130,6 +138,10 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
   compactionThreshold: 50,
   compactionKeepRecent: 10,
   decayDays: 30,
+  edgeSynthesisCooldownMs: 10 * 60_000,
+  edgeSynthesisBudgetMs: 60_000,
+  edgeSynthesisMaxRetries: 1,
+  edgeSynthesisBackoffMs: 30 * 60_000,
 };
 
 // ─── Scheduler State ─────────────────────────────────────────
@@ -144,6 +156,12 @@ let schedulerStartedAt: string | null = null;
 
 /** Backpressure: tracks projects currently undergoing edge synthesis */
 const runningSynthesis = new Set<string>();
+
+/** Per-project last successful synthesis timestamp (ms since epoch) */
+const lastSynthesisAt = new Map<string, number>();
+
+/** Per-project synthesis backoff-until timestamp (ms since epoch) */
+const synthesisBackoffUntil = new Map<string, number>();
 
 export interface SchedulerSweepResult {
   /** ISO timestamp of sweep start */
@@ -160,7 +178,19 @@ export interface SchedulerSweepResult {
     deepPurge: { ran: boolean; purged: number; reclaimedBytes: number; error?: string };
     sdmFlush: { ran: boolean; projectsFlushed: number; error?: string };
     linkDecay: { ran: boolean; linksDecayed: number; error?: string };
-    edgeSynthesis: { ran: boolean; projectsSynthesized: number; newLinks: number; error?: string };
+    edgeSynthesis: {
+      ran: boolean;
+      projectsAttempted: number;
+      projectsSynthesized: number;
+      projectsFailed: number;
+      retries: number;
+      skippedBackpressure: number;
+      skippedCooldown: number;
+      skippedBudget: number;
+      skippedBackoff: number;
+      newLinks: number;
+      error?: string;
+    };
   };
 }
 
@@ -305,7 +335,18 @@ export async function runSchedulerSweep(
       deepPurge: { ran: false, purged: 0, reclaimedBytes: 0 },
       sdmFlush: { ran: false, projectsFlushed: 0 },
       linkDecay: { ran: false, linksDecayed: 0 },
-      edgeSynthesis: { ran: false, projectsSynthesized: 0, newLinks: 0 },
+      edgeSynthesis: {
+        ran: false,
+        projectsAttempted: 0,
+        projectsSynthesized: 0,
+        projectsFailed: 0,
+        retries: 0,
+        skippedBackpressure: 0,
+        skippedCooldown: 0,
+        skippedBudget: 0,
+        skippedBackoff: 0,
+        newLinks: 0,
+      },
     },
   };
 
@@ -528,45 +569,83 @@ export async function runSchedulerSweep(
   // ── Task 7: Edge Synthesis ──────────────────────────────────
   if (cfg.enableEdgeSynthesis) {
     const synthTaskStart = Date.now();
-    let synthSkippedBackpressure = 0;
-    let synthProjectsAttempted = 0;
     try {
       result.tasks.edgeSynthesis.ran = true;
       const projects = await storage.listProjects();
-      
+
       // Dynamic import to avoid circular dependencies
       const { synthesizeEdgesCore } = await import("./tools/graphHandlers.js");
 
       for (const project of projects) {
+        const now = Date.now();
+
         if (runningSynthesis.has(project)) {
           debugLog(`[Scheduler] Skipping edge synthesis for "${project}" — already running`);
-          synthSkippedBackpressure++;
+          result.tasks.edgeSynthesis.skippedBackpressure++;
           continue;
         }
 
-        synthProjectsAttempted++;
+        const backoffUntil = synthesisBackoffUntil.get(project);
+        if (typeof backoffUntil === "number" && now < backoffUntil) {
+          result.tasks.edgeSynthesis.skippedBackoff++;
+          continue;
+        }
+
+        const lastRun = lastSynthesisAt.get(project);
+        if (typeof lastRun === "number" && now - lastRun < cfg.edgeSynthesisCooldownMs) {
+          result.tasks.edgeSynthesis.skippedCooldown++;
+          continue;
+        }
+
+        if (now - synthTaskStart >= cfg.edgeSynthesisBudgetMs) {
+          result.tasks.edgeSynthesis.skippedBudget++;
+          continue;
+        }
+
+        result.tasks.edgeSynthesis.projectsAttempted++;
 
         try {
           runningSynthesis.add(project);
-          
-          debugLog(`[Scheduler] Synthesizing edges for "${project}"...`);
-          const synthRes = await synthesizeEdgesCore({
-            project,
-            similarity_threshold: 0.7,
-            max_entries: 50,
-            max_neighbors_per_entry: 3,
-            randomize_selection: true, // Use random sampling for wide coverage in background
-          });
-          
-          if (synthRes && synthRes.success) {
-            result.tasks.edgeSynthesis.projectsSynthesized++;
-            result.tasks.edgeSynthesis.newLinks += synthRes.newLinks;
-            if (synthRes.newLinks > 0) {
-              debugLog(`[Scheduler] Edge Synthesis: created ${synthRes.newLinks} links for "${project}"`);
+
+          for (let attempt = 0; attempt <= cfg.edgeSynthesisMaxRetries; attempt++) {
+            try {
+              if (attempt > 0) {
+                result.tasks.edgeSynthesis.retries++;
+                debugLog(`[Scheduler] Retrying edge synthesis for "${project}" (attempt ${attempt + 1})`);
+              } else {
+                debugLog(`[Scheduler] Synthesizing edges for "${project}"...`);
+              }
+
+              const synthRes = await synthesizeEdgesCore({
+                project,
+                similarity_threshold: 0.7,
+                max_entries: 50,
+                max_neighbors_per_entry: 3,
+                randomize_selection: true,
+              });
+
+              if (synthRes && synthRes.success) {
+                result.tasks.edgeSynthesis.projectsSynthesized++;
+                result.tasks.edgeSynthesis.newLinks += synthRes.newLinks;
+                lastSynthesisAt.set(project, Date.now());
+                synthesisBackoffUntil.delete(project);
+                if (synthRes.newLinks > 0) {
+                  debugLog(`[Scheduler] Edge Synthesis: created ${synthRes.newLinks} links for "${project}"`);
+                }
+                break;
+              }
+
+              throw new Error("Synthesis returned unsuccessful result");
+            } catch (err) {
+              const isLast = attempt >= cfg.edgeSynthesisMaxRetries;
+              if (isLast) {
+                result.tasks.edgeSynthesis.projectsFailed++;
+                synthesisBackoffUntil.set(project, Date.now() + cfg.edgeSynthesisBackoffMs);
+                debugLog(`[Scheduler] Edge Synthesis failed for "${project}": ${err instanceof Error ? err.message : String(err)}`);
+              }
             }
           }
-        } catch (err) {
-          debugLog(`[Scheduler] Edge Synthesis failed for "${project}": ${err instanceof Error ? err.message : String(err)}`);
+
         } finally {
           runningSynthesis.delete(project);
         }
@@ -577,20 +656,25 @@ export async function runSchedulerSweep(
     }
 
     // Emit scheduler-level synthesis telemetry
-    // Note: projects_processed = all attempted projects (not just successes)
-    // to accurately reflect the scope of work attempted during the sweep.
     try {
       const { recordSchedulerSynthesis } = await import("./observability/graphMetrics.js");
       recordSchedulerSynthesis({
-        projects_processed: synthProjectsAttempted,
+        projects_processed: result.tasks.edgeSynthesis.projectsAttempted,
+        projects_succeeded: result.tasks.edgeSynthesis.projectsSynthesized,
+        projects_failed: result.tasks.edgeSynthesis.projectsFailed,
+        retries: result.tasks.edgeSynthesis.retries,
         links_created: result.tasks.edgeSynthesis.newLinks,
         duration_ms: Date.now() - synthTaskStart,
-        skipped_backpressure: synthSkippedBackpressure,
+        skipped_backpressure: result.tasks.edgeSynthesis.skippedBackpressure,
+        skipped_cooldown: result.tasks.edgeSynthesis.skippedCooldown,
+        skipped_budget: result.tasks.edgeSynthesis.skippedBudget,
+        skipped_backoff: result.tasks.edgeSynthesis.skippedBackoff,
       });
     } catch {
       // Non-critical — don't let metrics failure break the scheduler
     }
   }
+
 
   } finally {
     clearInterval(heartbeatInterval!);
