@@ -205,3 +205,84 @@ describe("Team API (Storage Layer)", () => {
     expect(otherTeam.length).toBe(1);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// 3. GRAPH STEP 3B/4 — Core Contract Checks (Storage/Handler Layer)
+// ═══════════════════════════════════════════════════════════════════
+
+describe("Graph Step 3B/4 Contracts", () => {
+  /**
+   * Tests that synthesizeEdgesCore returns the expected metrics shape
+   * when run against real SQLite storage with seeded entries.
+   *
+   * This is an integration-level check: real storage, real code path,
+   * but with a low similarity_threshold (0.0) to guarantee link creation.
+   */
+  it("synthesizeEdgesCore returns metrics shape", async () => {
+    const { synthesizeEdgesCore } = await import("../../src/tools/graphHandlers.js");
+
+    // Seed minimal deterministic entries with embeddings
+    await storage.saveLedger({
+      project: TEST_PROJECT,
+      conversation_id: "conv-synth-a",
+      summary: "graph seed entry A for synthesis test",
+      user_id: TEST_USER_ID,
+      embedding: JSON.stringify([0.1, 0.2, 0.3]),
+    });
+    await storage.saveLedger({
+      project: TEST_PROJECT,
+      conversation_id: "conv-synth-b",
+      summary: "graph seed entry B for synthesis test",
+      user_id: TEST_USER_ID,
+      embedding: JSON.stringify([0.1, 0.21, 0.31]),
+    });
+
+    const out = await synthesizeEdgesCore({
+      project: TEST_PROJECT,
+      similarity_threshold: 0.0,
+      max_entries: 10,
+      max_neighbors_per_entry: 2,
+      randomize_selection: false,
+    });
+
+    expect(out.success).toBe(true);
+    expect(typeof out.entriesScanned).toBe("number");
+    expect(typeof out.totalCandidates).toBe("number");
+    expect(typeof out.totalBelow).toBe("number");
+    expect(typeof out.skippedLinks).toBe("number");
+    expect(typeof out.newLinks).toBe("number");
+  });
+
+  /**
+   * Tests the test-me helper stack (assembleTestMeContext + generateTestMeQuestions)
+   * against real storage. Since no LLM key may be configured in CI, we accept
+   * both success (3-item array) and known failure reasons (no_api_key, generation_failed).
+   */
+  it("test-me helpers return no_api_key/generation_failed OR strict 3-item shape", async () => {
+    const { assembleTestMeContext, generateTestMeQuestions } = await import("../../src/tools/graphHandlers.js");
+
+    // Context assembly should be safe even with sparse graph data
+    const ctx = await assembleTestMeContext("cat:debugging", TEST_PROJECT, storage);
+    expect(Array.isArray(ctx.contextItems)).toBe(true);
+    expect(ctx.nodeId).toBe("cat:debugging");
+    expect(ctx.project).toBe(TEST_PROJECT);
+
+    const result = await generateTestMeQuestions(ctx, "cat:debugging");
+
+    if (result.reason) {
+      // In CI without LLM key, this is the expected path
+      expect(["no_api_key", "generation_failed"]).toContain(result.reason);
+      expect(result.questions).toEqual([]);
+    } else {
+      // With a configured LLM, we should get exactly 3 Q/A pairs
+      expect(Array.isArray(result.questions)).toBe(true);
+      expect(result.questions).toHaveLength(3);
+      for (const qa of result.questions) {
+        expect(typeof qa.q).toBe("string");
+        expect(qa.q.length).toBeGreaterThan(0);
+        expect(typeof qa.a).toBe("string");
+        expect(qa.a.length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
