@@ -789,7 +789,7 @@ export function renderDashboardHTML(version: string): string {
           </div>
 
           <!-- v5.1 Graph Filters -->
-          <div style="display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap;">
+          <div style="display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; align-items:center;">
             <select id="graphProjectFilter" class="input-modern" style="min-width:120px; font-size:0.75rem; padding:0.3rem 0.5rem" onchange="loadGraph()">
               <option value="">All Projects</option>
             </select>
@@ -804,6 +804,9 @@ export function renderDashboardHTML(version: string): string {
               <option value="5">Importance &gt;= 5</option>
               <option value="7">Graduated (&gt;= 7)</option>
             </select>
+            <button id="decayToggle" class="input-modern" style="font-size:0.75rem; padding:0.3rem 0.65rem; cursor:pointer; border:1px solid rgba(139,92,246,0.3); background:transparent; color:var(--text-secondary); border-radius:6px; transition:all 0.2s; white-space:nowrap" onclick="toggleDecayView()" title="Color nodes by temporal freshness (Ebbinghaus decay)">
+              🗓️ Decay View
+            </button>
           </div>
 
           <div id="network-container">Loading nodes...</div>
@@ -1997,8 +2000,54 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
     // Allow Enter key in select to trigger load
     document.getElementById('projectSelect').addEventListener('change', loadProject);
 
-    // ─── Neural Graph (v2.3.0 / v5.1) ───
-    // Renders a force-directed graph of projects ↔ keywords ↔ categories
+    // ─── v6.2: Decay View State ───
+    var _decayViewActive = false;
+    function toggleDecayView() {
+      _decayViewActive = !_decayViewActive;
+      var btn = document.getElementById('decayToggle');
+      if (btn) {
+        btn.style.background = _decayViewActive ? 'rgba(139,92,246,0.25)' : 'transparent';
+        btn.style.color = _decayViewActive ? 'var(--accent-purple)' : 'var(--text-secondary)';
+        btn.style.borderColor = _decayViewActive ? 'var(--accent-purple)' : 'rgba(139,92,246,0.3)';
+      }
+      loadGraph();
+    }
+
+    /**
+     * Compute decay color for a node.
+     * Fresh (0 days) → bright green (#10b981)
+     * Stale (30+ days) → dim gray (#334155)
+     * Graduated nodes (importance >= 7) stay vibrant purple regardless of age.
+     */
+    function getDecayColor(daysSince, decayedImportance, group, baseImportance) {
+      // Graduated nodes: always vibrant (check BASE importance, not decayed)
+      if (baseImportance !== null && baseImportance !== undefined && baseImportance >= 7) {
+        return { bg: '#8b5cf6', border: '#7c3aed', fontColor: '#f1f5f9' };
+      }
+      // Clamp days to 0-60 range for interpolation
+      var d = Math.min(60, Math.max(0, daysSince || 0));
+      var t = d / 60; // 0 = fresh, 1 = stale
+      // Interpolate: green → amber → gray
+      var r, g, b;
+      if (t < 0.5) {
+        // green (#10b981) → amber (#f59e0b)
+        var tt = t * 2;
+        r = Math.round(16 + (245 - 16) * tt);
+        g = Math.round(185 + (158 - 185) * tt);
+        b = Math.round(129 + (11 - 129) * tt);
+      } else {
+        // amber (#f59e0b) → gray (#334155)
+        var tt = (t - 0.5) * 2;
+        r = Math.round(245 + (51 - 245) * tt);
+        g = Math.round(158 + (65 - 158) * tt);
+        b = Math.round(11 + (85 - 11) * tt);
+      }
+      var hex = '#' + [r, g, b].map(function(c) { return c.toString(16).padStart(2, '0'); }).join('');
+      var fontBrightness = (t < 0.7) ? '#0f172a' : '#94a3b8';
+      return { bg: hex, border: hex, fontColor: fontBrightness };
+    }
+
+    // ─── Neural Graph (v2.3.0 / v5.1 / v6.2 Decay Heatmap) ───
     async function loadGraph() {
       var container = document.getElementById('network-container');
       if (!container) return;
@@ -2035,15 +2084,30 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
         }
 
         // Safety cap: Vis.js Barnes-Hut physics blows the call stack at ~400+ nodes.
-        // Truncate to 200 nodes max, keeping project and category nodes first.
         var MAX_NODES = 200;
         if (data.nodes.length > MAX_NODES) {
-          // Priority: project > category > keyword
           var priority = { project: 0, category: 1, keyword: 2 };
           data.nodes.sort(function(a, b) { return (priority[a.group] || 9) - (priority[b.group] || 9); });
           var kept = new Set(data.nodes.slice(0, MAX_NODES).map(function(n) { return n.id; }));
           data.nodes = data.nodes.slice(0, MAX_NODES);
           data.edges = data.edges.filter(function(e) { return kept.has(e.from) && kept.has(e.to); });
+        }
+
+        // ── v6.2: Apply decay heatmap coloring when toggle is active ──
+        if (_decayViewActive) {
+          data.nodes.forEach(function(n) {
+            var dc = getDecayColor(n.days_since_access, n.decayed_importance, n.group, n.base_importance);
+            n.color = { background: dc.bg, border: dc.border };
+            n.font = { color: dc.fontColor, face: 'Inter', size: n.group === 'project' ? 14 : (n.group === 'category' ? 12 : 10) };
+            // Add decay tooltip
+            var daysText = (n.days_since_access !== null && n.days_since_access !== undefined)
+              ? n.days_since_access + 'd ago'
+              : 'unknown';
+            var decayText = (n.decayed_importance !== null && n.decayed_importance !== undefined)
+              ? ' · importance: ' + n.decayed_importance
+              : '';
+            n.title = n.label + ' (' + daysText + decayText + ')';
+          });
         }
 
         // Vis.js dark-theme config matching the glassmorphism palette
