@@ -46,13 +46,18 @@ export function updateLastAccessed(ids: string[]): void {
     
     // Fire and forget, don't block execution
     getStorage().then(storage => {
-        // Fast parallel patch: map over ids and patch simultaneously
-        // Catch all errors so it never throws up to the caller
-        Promise.allSettled(
-            ids.map(id => storage.patchLedger(id, { last_accessed_at: now }))
-        ).then(() => {
-            debugLog(`[CognitiveMemory] Updated last_accessed_at for ${ids.length} memories.`);
-        });
+        if (typeof storage.updateLastAccessed === 'function') {
+            storage.updateLastAccessed(ids).catch(error => {
+                debugLog(`[CognitiveMemory] Failed to update last_accessed_at: ${error instanceof Error ? error.message : String(error)}`);
+            });
+        } else {
+            // Fallback for older interface implementation
+            Promise.allSettled(
+                ids.map(id => storage.patchLedger(id, { last_accessed_at: now }))
+            ).then(() => {
+                debugLog(`[CognitiveMemory] Updated last_accessed_at for ${ids.length} memories.`);
+            });
+        }
     }).catch(error => {
         debugLog(`[CognitiveMemory] Failed to get storage backend for last_accessed_at update: ${error instanceof Error ? error.message : String(error)}`);
     });
