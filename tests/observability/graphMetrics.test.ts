@@ -17,6 +17,7 @@ import {
   recordTestMeRequest,
   recordSchedulerSynthesis,
   recordPruningRun,
+  recordSweepDuration,
   getGraphMetricsSnapshot,
   resetGraphMetricsForTests,
 } from "../../src/observability/graphMetrics.js";
@@ -319,6 +320,7 @@ describe("Snapshot shape contract", () => {
     expect(snap).toHaveProperty("testMe");
     expect(snap).toHaveProperty("scheduler");
     expect(snap).toHaveProperty("pruning");
+    expect(snap).toHaveProperty("slo");
     expect(snap).toHaveProperty("warnings");
   });
 
@@ -390,5 +392,132 @@ describe("Snapshot shape contract", () => {
     expect(typeof p.skipped_cooldown_last).toBe("number");
     expect(typeof p.skipped_budget_last).toBe("number");
     expect(["string", "object"]).toContain(typeof p.last_run_at);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 6. SLO Derivations (WS4)
+// ═══════════════════════════════════════════════════════════════════
+
+describe("SLO derivations", () => {
+  it("synthesis_success_rate is null when no runs", () => {
+    const snap = getGraphMetricsSnapshot();
+    expect(snap.slo.synthesis_success_rate).toBeNull();
+  });
+
+  it("synthesis_success_rate computes correctly", () => {
+    // 4 ok + 1 error = 80%
+    for (let i = 0; i < 4; i++) {
+      recordSynthesisRun({ project: "p", status: "ok", duration_ms: 100 });
+    }
+    recordSynthesisRun({ project: "p", status: "error", duration_ms: 50 });
+
+    const snap = getGraphMetricsSnapshot();
+    expect(snap.slo.synthesis_success_rate).toBe(0.8);
+  });
+
+  it("synthesis_success_rate is 1.0 with all successes", () => {
+    recordSynthesisRun({ project: "p", status: "ok", duration_ms: 100 });
+    recordSynthesisRun({ project: "p", status: "ok", duration_ms: 100 });
+
+    const snap = getGraphMetricsSnapshot();
+    expect(snap.slo.synthesis_success_rate).toBe(1.0);
+  });
+
+  it("net_new_links_last_sweep is positive when synthesis > prune", () => {
+    recordSynthesisRun({
+      project: "p",
+      status: "ok",
+      duration_ms: 100,
+      new_links: 10,
+    });
+    recordPruningRun({
+      projects_considered: 1,
+      projects_pruned: 1,
+      links_scanned: 20,
+      links_soft_pruned: 3,
+      min_strength: 0.15,
+      duration_ms: 50,
+      skipped_backpressure: 0,
+      skipped_cooldown: 0,
+      skipped_budget: 0,
+    });
+
+    const snap = getGraphMetricsSnapshot();
+    expect(snap.slo.net_new_links_last_sweep).toBe(7); // 10 - 3
+  });
+
+  it("net_new_links_last_sweep is negative when prune > synthesis", () => {
+    recordSynthesisRun({
+      project: "p",
+      status: "ok",
+      duration_ms: 100,
+      new_links: 2,
+    });
+    recordPruningRun({
+      projects_considered: 1,
+      projects_pruned: 1,
+      links_scanned: 20,
+      links_soft_pruned: 8,
+      min_strength: 0.15,
+      duration_ms: 50,
+      skipped_backpressure: 0,
+      skipped_cooldown: 0,
+      skipped_budget: 0,
+    });
+
+    const snap = getGraphMetricsSnapshot();
+    expect(snap.slo.net_new_links_last_sweep).toBe(-6); // 2 - 8
+  });
+
+  it("prune_ratio_last_sweep is 0 when no scans", () => {
+    const snap = getGraphMetricsSnapshot();
+    expect(snap.slo.prune_ratio_last_sweep).toBe(0);
+  });
+
+  it("prune_ratio_last_sweep computes correctly", () => {
+    recordPruningRun({
+      projects_considered: 1,
+      projects_pruned: 1,
+      links_scanned: 100,
+      links_soft_pruned: 25,
+      min_strength: 0.15,
+      duration_ms: 50,
+      skipped_backpressure: 0,
+      skipped_cooldown: 0,
+      skipped_budget: 0,
+    });
+
+    const snap = getGraphMetricsSnapshot();
+    expect(snap.slo.prune_ratio_last_sweep).toBe(0.25);
+  });
+
+  it("scheduler_sweep_duration_ms_last defaults to 0", () => {
+    const snap = getGraphMetricsSnapshot();
+    expect(snap.slo.scheduler_sweep_duration_ms_last).toBe(0);
+  });
+
+  it("scheduler_sweep_duration_ms_last records via recordSweepDuration", () => {
+    recordSweepDuration(1234);
+
+    const snap = getGraphMetricsSnapshot();
+    expect(snap.slo.scheduler_sweep_duration_ms_last).toBe(1234);
+  });
+
+  it("slo snapshot has all required fields", () => {
+    const snap = getGraphMetricsSnapshot();
+    const slo = snap.slo;
+    expect(["number", "object"]).toContain(typeof slo.synthesis_success_rate); // number or null
+    expect(typeof slo.net_new_links_last_sweep).toBe("number");
+    expect(typeof slo.prune_ratio_last_sweep).toBe("number");
+    expect(typeof slo.scheduler_sweep_duration_ms_last).toBe("number");
+  });
+
+  it("reset clears sweep duration state", () => {
+    recordSweepDuration(5000);
+    resetGraphMetricsForTests();
+
+    const snap = getGraphMetricsSnapshot();
+    expect(snap.slo.scheduler_sweep_duration_ms_last).toBe(0);
   });
 });

@@ -316,6 +316,7 @@ describe("Graph Metrics API shape", () => {
     expect(snap).toHaveProperty("testMe");
     expect(snap).toHaveProperty("scheduler");
     expect(snap).toHaveProperty("warnings");
+    expect(snap).toHaveProperty("slo");
 
     // Synthesis counters
     expect(snap.synthesis.runs_total).toBe(1);
@@ -404,6 +405,7 @@ describe("GET /api/graph/metrics (Router Integration)", () => {
     expect(parsed).toHaveProperty("testMe");
     expect(parsed).toHaveProperty("scheduler");
     expect(parsed).toHaveProperty("pruning");
+    expect(parsed).toHaveProperty("slo");
     expect(parsed).toHaveProperty("warnings");
 
     // Verify the seeded data flows through
@@ -438,6 +440,12 @@ describe("GET /api/graph/metrics (Router Integration)", () => {
     expect(typeof parsed.warnings.synthesis_quality_warning).toBe("boolean");
     expect(typeof parsed.warnings.testme_provider_warning).toBe("boolean");
     expect(typeof parsed.warnings.synthesis_failure_warning).toBe("boolean");
+
+    // SLO fields (WS4) are present with correct types
+    expect(["number", "object"]).toContain(typeof parsed.slo.synthesis_success_rate); // number or null
+    expect(typeof parsed.slo.net_new_links_last_sweep).toBe("number");
+    expect(typeof parsed.slo.prune_ratio_last_sweep).toBe("number");
+    expect(typeof parsed.slo.scheduler_sweep_duration_ms_last).toBe("number");
 
     resetGraphMetricsForTests();
   });

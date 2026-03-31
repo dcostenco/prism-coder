@@ -822,6 +822,14 @@ export async function runSchedulerSweep(
   result.durationMs = Date.now() - sweepStart;
   lastSweepResult = result;
 
+  // WS4: Record total sweep duration into graph metrics for SLO exposure
+  try {
+    const { recordSweepDuration } = await import("./observability/graphMetrics.js");
+    recordSweepDuration(result.durationMs);
+  } catch {
+    // Non-critical — don't let metrics recording break the scheduler
+  }
+
   // Build summary line
   const parts: string[] = [];
   if (result.tasks.ttlSweep.ran && result.tasks.ttlSweep.totalExpired > 0) {

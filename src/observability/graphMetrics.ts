@@ -17,6 +17,7 @@
  *   A) Synthesis: runs, failures, links created, candidates, below-threshold, duration
  *   B) Test-Me: requests, success, no_api_key, generation_failed, bad_request, duration
  *   C) Warning flags: quality drift, provider issues, failure rate
+ *   D) SLO derivations: success rate, net new links, prune ratio, sweep duration (WS4)
  * ═══════════════════════════════════════════════════════════════════
  */
 
@@ -121,6 +122,11 @@ interface WarningFlags {
   synthesis_failure_warning: boolean;
 }
 
+
+// ─── Sweep Duration State (WS4) ─────────────────────────────────
+
+let sweepDurationMsLast: number = 0;
+let sweepLastAt: string | null = null;
 
 // ─── Singleton State ─────────────────────────────────────────────
 
@@ -363,6 +369,18 @@ export function recordPruningRun(data: PruningRunData): void {
   });
 }
 
+// ─── Sweep Duration Recording (WS4) ─────────────────────────────
+
+export function recordSweepDuration(duration_ms: number): void {
+  sweepDurationMsLast = duration_ms;
+  sweepLastAt = new Date().toISOString();
+
+  emitGraphEvent({
+    event: "graph_sweep_duration",
+    duration_ms,
+  });
+}
+
 // ─── Warning Flag Computation ────────────────────────────────────
 
 function computeWarningFlags(): WarningFlags {
@@ -387,7 +405,42 @@ function computeWarningFlags(): WarningFlags {
   };
 }
 
+// ─── SLO Derivation (WS4) ────────────────────────────────────────
+
+function computeSloMetrics(): SloMetrics {
+  // synthesis_success_rate: null when no runs, otherwise (total - failed) / total
+  const synthesis_success_rate =
+    synthesis.runs_total > 0
+      ? parseFloat(((synthesis.runs_total - synthesis.runs_failed) / synthesis.runs_total).toFixed(4))
+      : null;
+
+  // net_new_links_last_sweep: synthesis links created minus pruned links in last sweep
+  const net_new_links_last_sweep =
+    synthesis.last_links_created - pruning.links_soft_pruned_last;
+
+  // prune_ratio_last_sweep: soft-pruned / scanned (0 when no scans)
+  const prune_ratio_last_sweep =
+    pruning.links_scanned_last > 0
+      ? parseFloat((pruning.links_soft_pruned_last / pruning.links_scanned_last).toFixed(4))
+      : 0;
+
+  // scheduler_sweep_duration_ms_last: recorded by backgroundScheduler
+  return {
+    synthesis_success_rate,
+    net_new_links_last_sweep,
+    prune_ratio_last_sweep,
+    scheduler_sweep_duration_ms_last: sweepDurationMsLast,
+  };
+}
+
 // ─── Snapshot ────────────────────────────────────────────────────
+
+interface SloMetrics {
+  synthesis_success_rate: number | null;
+  net_new_links_last_sweep: number;
+  prune_ratio_last_sweep: number;
+  scheduler_sweep_duration_ms_last: number;
+}
 
 export interface GraphMetricsSnapshot {
   synthesis: {
@@ -438,6 +491,7 @@ export interface GraphMetricsSnapshot {
     skipped_budget_last: number;
     last_run_at: string | null;
   };
+  slo: SloMetrics;
   warnings: WarningFlags;
 }
 
@@ -491,6 +545,7 @@ export function getGraphMetricsSnapshot(): GraphMetricsSnapshot {
       skipped_budget_last: pruning.skipped_budget_last,
       last_run_at: pruning.last_run_at,
     },
+    slo: computeSloMetrics(),
     warnings: computeWarningFlags(),
   };
 }
@@ -502,4 +557,6 @@ export function resetGraphMetricsForTests(): void {
   testMe = createFreshTestMeMetrics();
   schedulerSynthesis = createFreshSchedulerMetrics();
   pruning = createFreshPruningMetrics();
+  sweepDurationMsLast = 0;
+  sweepLastAt = null;
 }

@@ -3007,6 +3007,39 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
           parts.push('</div>');
         }
 
+        // SLO derivations row (WS4)
+        if (m.slo) {
+          parts.push('<div style="border-top:1px solid var(--border-glass);padding-top:0.4rem;margin-top:0.2rem;font-size:0.75rem">');
+          parts.push('<strong>SLO</strong>');
+
+          // Synthesis success rate — color-coded
+          if (m.slo.synthesis_success_rate !== null) {
+            var rate = m.slo.synthesis_success_rate;
+            var ratePct = Math.round(rate * 100);
+            var rateColor = rate >= 0.95 ? 'var(--accent-green)' : rate >= 0.80 ? 'var(--accent-amber)' : 'var(--accent-rose)';
+            parts.push('<br>Success rate: <span style="color:' + rateColor + ';font-weight:600">' + ratePct + '%</span>');
+          } else {
+            parts.push('<br>Success rate: <span style="color:var(--text-muted)">—</span>');
+          }
+
+          // Net new links
+          var netNew = m.slo.net_new_links_last_sweep;
+          var netColor = netNew > 0 ? 'var(--accent-green)' : netNew < 0 ? 'var(--accent-rose)' : 'var(--text-muted)';
+          var netSign = netNew > 0 ? '+' : '';
+          parts.push(' · Net links: <span style="color:' + netColor + '">' + netSign + netNew + '</span>');
+
+          // Prune ratio
+          var pruneRatioPct = Math.round(m.slo.prune_ratio_last_sweep * 100);
+          parts.push(' · Prune: ' + pruneRatioPct + '%');
+
+          // Sweep duration
+          if (m.slo.scheduler_sweep_duration_ms_last > 0) {
+            parts.push(' · Sweep: ' + m.slo.scheduler_sweep_duration_ms_last + 'ms');
+          }
+
+          parts.push('</div>');
+        }
+
 
         el.innerHTML = parts.join('');
 
