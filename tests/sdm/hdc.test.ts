@@ -34,17 +34,17 @@ describe('Hyperdimensional Computing (HDC) Engine', () => {
     expect(bundled[0]).toBe(0b1111 >>> 0);
   });
 
-  it('should deterministically handle BUNDLE tie-breakers for even arrays (defaults to 0)', () => {
+  it('should deterministically handle BUNDLE tie-breakers for even arrays (inherits from vectors[0])', () => {
     const vecA = new Uint32Array([0b1010]);
     const vecB = new Uint32Array([0b1100]);
     
     // Pos 0: 0, 0 => 0
-    // Pos 1: 1, 0 => tie (0)
-    // Pos 2: 0, 1 => tie (0)
+    // Pos 1: 1, 0 => tie → vectors[0] bit 1 = 1, so 1
+    // Pos 2: 0, 1 => tie → vectors[0] bit 2 = 0, so 0
     // Pos 3: 1, 1 => 1
-    // Expected result: 0b1000
+    // Expected result: 0b1010
     const bundled = HDCEngine.bundle([vecA, vecB]);
-    expect(bundled[0]).toBe(0b1000 >>> 0);
+    expect(bundled[0]).toBe(0b1010 >>> 0);
   });
 
   it('should correctly PERMUTE (circular left shift) bit sequences across Uint32 indices', () => {

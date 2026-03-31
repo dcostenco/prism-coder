@@ -1,5 +1,5 @@
 import { HDCEngine } from './hdc.js';
-import { SparseDistributedMemory, D_ADDR_UINT32 } from './sdmEngine.js';
+import { SparseDistributedMemory, D_ADDR_UINT32, hammingDistance } from './sdmEngine.js';
 
 export class HdcStateMachine {
   private currentState: Uint32Array;
@@ -30,8 +30,12 @@ export class HdcStateMachine {
     const permutedState = HDCEngine.permute(this.currentState);
     const boundAction = HDCEngine.bind(roleVector, actionVector);
 
-    // BUNDLE([PERMUTE(S_t), BIND(Role_t, Action_t)])
-    this.currentState = HDCEngine.bundle([permutedState, boundAction]);
+    // High-capacity binding transition: BIND(PERMUTE(S_t), BIND(Role_t, Action_t))
+    // This is an XOR chain (not a bundle/majority vote), which:
+    //   1. Preserves ~50% bit density across unlimited transitions
+    //   2. Produces pseudo-orthogonal state trajectories (feed-forward binding chain)
+    // Using bundle(2) here would act as AND (tie-breaker=0), collapsing density by half each step.
+    this.currentState = HDCEngine.bind(permutedState, boundAction);
 
     return new Uint32Array(this.currentState);
   }
@@ -70,19 +74,9 @@ export class HdcStateMachine {
     let convergedBase = this.sdm.readHdc(currentStateCopy);
     let steps = 1;
 
-    // Fast Hamming inline to avoid importing since it's simple or we could import it.
-    const hDist = (a: Uint32Array, b: Uint32Array) => {
-      let d = 0;
-      for (let i = 0; i < a.length; i++) {
-        let x = a[i] ^ b[i];
-        while (x) { d++; x &= x - 1; }
-      }
-      return d;
-    };
-
     for (; steps < maxIterations; steps++) {
       const nextState = this.sdm.readHdc(convergedBase);
-      if (hDist(convergedBase, nextState) === 0) {
+      if (hammingDistance(convergedBase, nextState) === 0) {
         break;
       }
       convergedBase = nextState;

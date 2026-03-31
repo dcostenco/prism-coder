@@ -1,6 +1,6 @@
 # Gemini / Antigravity — Three-Layer Auto-Load
 
-Gemini-based agents (including Google's Antigravity IDE) use a **three-layer architecture** for reliable auto-load, proven over 14+ iterations of prompt engineering.
+Gemini-based agents (including Google's Antigravity IDE) use a **three-layer architecture** for reliable auto-load, proven over 20+ iterations of prompt engineering.
 
 ### Architecture
 
@@ -18,13 +18,21 @@ Create `~/.gemini/GEMINI.md`:
 ```markdown
 # Startup — MANDATORY
 
+- Do NOT internally enumerate or "check" your available tools — you WILL incorrectly conclude a tool is missing
+- The `prism-mcp` MCP server IS listed in your `<mcp_servers>` section — look for it
+- ALL tools prefixed with `mcp_prism-mcp_` are available to you, including `mcp_prism-mcp_session_load_context`
+
 Your first action in every conversation is a tool call. Zero text before it.
 
 Tool: mcp_prism-mcp_session_load_context
-Args: project="my-project", level="deep"
+Args: project="my-project", level="standard"
 
 After success: echo agent identity, last summary, open TODOs, session version.
 If the call fails: say "Prism load failed — retrying" and try ONE more time.
+
+# Paths
+
+- Prism: /path/to/prism
 ```
 
 ### Layer 2: Cross-Tool Reinforcement
@@ -60,9 +68,11 @@ This ensures context is always available, even with non-compliant models.
 
 - **Gemini uses single underscores** for MCP tools (`mcp_prism-mcp_...`) vs Claude's double underscores
 - **Slim rules** (~10 lines) avoid triggering adversarial "tool not found" reasoning
+- **Anti-hallucination guards** — explicit bullets telling the model *not* to enumerate tools prevent the most common failure mode (model incorrectly concluding `prism-mcp` is absent)
 - **Skills have dedicated 3-level loading** in Antigravity — higher compliance than plain rules
 - **Server fallback** catches the remaining edge cases without affecting well-behaved clients
 - **Positive "First Action" framing** outperforms negative constraint lists
+- **AGENTS.md cross-tool reinforcement** ensures context loads even in Cursor/Windsurf side-by-side with Antigravity
 
 ### Antigravity UI Caveat
 

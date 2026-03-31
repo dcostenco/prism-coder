@@ -365,7 +365,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     const baseState = dbToHandoffSchema(baseDbState);
 
     // Step 2: Fetch current DB state (what beat us to the save)
-    const currentDbState = await storage.loadContext(project, "standard", PRISM_USER_ID);
+    const currentDbState = await storage.loadContext(project, "standard", PRISM_USER_ID, effectiveRole);
     const currentState = dbToHandoffSchema(currentDbState);
 
     if (!currentState || !currentDbState) {

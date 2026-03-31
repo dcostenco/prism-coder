@@ -5,23 +5,30 @@ const SDM_M = 10000;
 // D_addr = 768 bits (binary QJL string length), represented as 24 Uint32s
 export const D_ADDR_UINT32 = PRISM_DEFAULT_CONFIG.d / 32; 
 
+// Bump this whenever the PRNG algorithm changes, to invalidate stale persisted state.
+export const SDM_ADDRESS_VERSION = 2;
 
 // The hard threshold boundary applied to counters during HDC writes
 // to retain memory plasticity over long periods.
 const COUNTER_CLIP = 20;
 
-// We use PRNG seeded deterministically to generate the initial hard location addresses
-// This ensures that restarts produce the exact same Kanerva address space
+// Deterministic PRNG with Weyl sequence for full 2^32 period.
+// The golden ratio increment (0x6D2B79F5) guarantees the seed visits every
+// 32-bit value exactly once before repeating, preventing Birthday Paradox
+// cycle collisions that would duplicate hard-location addresses.
 class PRNG {
   private seed: number;
   constructor(seed: number) {
     this.seed = seed;
   }
   nextUInt32(): number {
-    this.seed = Math.imul(this.seed ^ (this.seed >>> 15), 1 | this.seed);
-    this.seed ^= this.seed + Math.imul(this.seed ^ (this.seed >>> 7), 61 | this.seed);
-    const v = ((this.seed ^ (this.seed >>> 14)) >>> 0);
-    return v;
+    // Weyl sequence: monotonic increment through full 2^32 space
+    // The `| 0` forces 32-bit signed integer wrapping, preventing
+    // JS float precision loss past Number.MAX_SAFE_INTEGER.
+    let t = (this.seed = (this.seed + 0x6D2B79F5) | 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0);
   }
 }
 
@@ -184,16 +191,63 @@ export class SparseDistributedMemory {
     if (k <= 0 || k > SDM_M) {
       throw new Error(`[SDM] Invalid K radius boundary: expected 1 <= k <= ${SDM_M}, got ${k}`);
     }
-    // Array of (dist, index)
-    const dists: {d: number, i: number}[] = new Array(SDM_M);
+
+    // Bounded max-heap of size K: avoids allocating 10,000 objects and O(M log M) sort.
+    // Instead uses O(M log K) with a pre-allocated parallel Int32Array pair.
+    // heap[i] = distance, heapIdx[i] = address index. Max-heap so we can eject the farthest.
+    const heap = new Int32Array(k);
+    const heapIdx = new Int32Array(k);
+    let heapSize = 0;
+
+    const swap = (a: number, b: number) => {
+      let t = heap[a]; heap[a] = heap[b]; heap[b] = t;
+      t = heapIdx[a]; heapIdx[a] = heapIdx[b]; heapIdx[b] = t;
+    };
+
+    const siftUp = (i: number) => {
+      while (i > 0) {
+        const parent = (i - 1) >> 1;
+        if (heap[i] > heap[parent]) { swap(i, parent); i = parent; }
+        else break;
+      }
+    };
+
+    const siftDown = (i: number) => {
+      while (true) {
+        let largest = i;
+        const l = 2 * i + 1, r = 2 * i + 2;
+        if (l < heapSize && heap[l] > heap[largest]) largest = l;
+        if (r < heapSize && heap[r] > heap[largest]) largest = r;
+        if (largest !== i) { swap(i, largest); i = largest; }
+        else break;
+      }
+    };
+
     for (let i = 0; i < SDM_M; i++) {
-      dists[i] = { d: hammingDistance(address, this.addresses[i]), i };
+      const d = hammingDistance(address, this.addresses[i]);
+      if (heapSize < k) {
+        heap[heapSize] = d;
+        heapIdx[heapSize] = i;
+        heapSize++;
+        siftUp(heapSize - 1);
+      } else if (d < heap[0]) {
+        // Replace root (farthest) with this closer address
+        heap[0] = d;
+        heapIdx[0] = i;
+        siftDown(0);
+      }
     }
-    // Partial sort to find top K
-    dists.sort((a, b) => a.d - b.d);
-    const result = new Array(k);
-    for (let i = 0; i < k; i++) {
-        result[i] = dists[i].i;
+
+    // Extract sorted result (closest first) for deterministic ordering
+    const result = new Array(heapSize);
+    const sortBuf: {d: number, i: number}[] = new Array(heapSize);
+    for (let j = 0; j < heapSize; j++) {
+      sortBuf[j] = { d: heap[j], i: heapIdx[j] };
+    }
+    // O(K log K) sort on the tiny K-sized slice — deterministic tie-break on index
+    sortBuf.sort((a, b) => a.d - b.d || a.i - b.i);
+    for (let j = 0; j < heapSize; j++) {
+      result[j] = sortBuf[j].i;
     }
     return result;
   }
@@ -246,14 +300,30 @@ export class SparseDistributedMemory {
   }
 }
 
-// Global Singleton per Project in memory
+// Global Singleton per Project in memory — with LRU eviction
 const _sdmInstances = new Map<string, SparseDistributedMemory>();
+const MAX_SDM_INSTANCES = 50;
 
 export function getSdmEngine(projectId: string): SparseDistributedMemory {
-  if (!_sdmInstances.has(projectId)) {
-    _sdmInstances.set(projectId, new SparseDistributedMemory());
+  // Touch: move to end of insertion order (LRU refresh)
+  const existing = _sdmInstances.get(projectId);
+  if (existing) {
+    _sdmInstances.delete(projectId);
+    _sdmInstances.set(projectId, existing);
+    return existing;
   }
-  return _sdmInstances.get(projectId)!;
+
+  // Evict oldest if at capacity
+  if (_sdmInstances.size >= MAX_SDM_INSTANCES) {
+    const oldestKey = _sdmInstances.keys().next().value;
+    if (oldestKey !== undefined) {
+      _sdmInstances.delete(oldestKey);
+    }
+  }
+
+  const instance = new SparseDistributedMemory();
+  _sdmInstances.set(projectId, instance);
+  return instance;
 }
 
 export function getAllActiveSdmProjects(): string[] {

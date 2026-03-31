@@ -12,6 +12,10 @@ export interface SdmRecallMatch {
 /**
  * Perform a fast JS-space Hamming distance scan across TurboQuant compressed embeddings.
  * Used exclusively for decoding SDM superposed target vectors back into ledger entries.
+ *
+ * PLATFORM CONSTRAINT: Both sdmEngine.ts (DataView LE) and this decoder (TypedArray views)
+ * assume Little-Endian host byte order. This is universal on Node.js/V8 (x86, ARM, WASM)
+ * but would produce incorrect results on hypothetical Big-Endian V8 targets.
  */
 export async function decodeSdmVector(
   project: string,
@@ -31,8 +35,9 @@ export async function decodeSdmVector(
 
   // 2. Compress the target Float32Array into a 96-byte Uint8Array using TurboQuant
   const compressor = getDefaultCompressor();
-  // compressor.compress takes number[]
-  const queryArray = Array.from(targetVector); // V8 optimized array conversion
+  // compressor.compress takes number[] — copy via for-loop to avoid Array.from GC pressure
+  const queryArray: number[] = new Array(targetVector.length);
+  for (let i = 0; i < targetVector.length; i++) queryArray[i] = targetVector[i];
   const compressedTarget = compressor.compress(queryArray);
   const targetQjl = compressedTarget.qjlSigns;
 
@@ -70,7 +75,7 @@ export async function decodeSdmVector(
         // but simple bitwise popcount is fast enough in V8:
         xor = xor - ((xor >>> 1) & 0x55555555);
         xor = (xor & 0x33333333) + ((xor >>> 2) & 0x33333333);
-        hammingDistance += (((xor + (xor >>> 4)) & 0x0F0F0F0F) * 0x01010101) >>> 24;
+        hammingDistance += Math.imul((xor + (xor >>> 4)) & 0x0F0F0F0F, 0x01010101) >>> 24;
       }
 
       // Convert distance to standard similarity score (1.0 = exact match)

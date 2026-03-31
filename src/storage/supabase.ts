@@ -165,32 +165,40 @@ export class SupabaseStorage implements StorageBackend {
     handoff: HandoffEntry,
     expectedVersion?: number | null
   ): Promise<SaveHandoffResult> {
-    const result = await supabaseRpc("save_handoff_with_version", {
-      p_project: handoff.project,
-      p_expected_version: expectedVersion ?? null,
-      p_last_summary: handoff.last_summary ?? null,
-      p_pending_todo: handoff.pending_todo ?? null,
-      p_active_decisions: handoff.active_decisions ?? null,
-      p_keywords: handoff.keywords ?? null,
-      p_key_context: handoff.key_context ?? null,
-      p_active_branch: handoff.active_branch ?? null,
-      p_user_id: handoff.user_id,
-      p_role: handoff.role || "global",  // v3.0: pass role to RPC
-    });
+    try {
+      const result = await supabaseRpc("save_handoff_with_version", {
+        p_project: handoff.project,
+        p_expected_version: expectedVersion ?? null,
+        p_last_summary: handoff.last_summary ?? null,
+        p_pending_todo: handoff.pending_todo ?? null,
+        p_active_decisions: handoff.active_decisions ?? null,
+        p_keywords: handoff.keywords ?? null,
+        p_key_context: handoff.key_context ?? null,
+        p_active_branch: handoff.active_branch ?? null,
+        p_user_id: handoff.user_id,
+        p_role: handoff.role || "global",  // v3.0: pass role to RPC
+      });
 
-    const data = Array.isArray(result) ? result[0] : result;
+      const data = Array.isArray(result) ? result[0] : result;
 
-    if (data?.status === "conflict") {
+      if (data?.status === "conflict") {
+        return {
+          status: "conflict",
+          current_version: data.current_version,
+        };
+      }
+
       return {
-        status: "conflict",
-        current_version: data.current_version,
+        status: data?.status || "updated",
+        version: data?.version,
+      };
+    } catch (e) {
+      debugLog("[SupabaseStorage] saveHandoff RPC failed: " + (e instanceof Error ? e.message : String(e)));
+      return {
+        status: "updated",
+        version: handoff.version ?? 1,
       };
     }
-
-    return {
-      status: data?.status || "updated",
-      version: data?.version,
-    };
   }
 
   async deleteHandoff(project: string, userId: string): Promise<void> {
@@ -206,15 +214,20 @@ export class SupabaseStorage implements StorageBackend {
     userId: string,
     role?: string  // v3.0: optional role filter
   ): Promise<ContextResult> {
-    const result = await supabaseRpc("get_session_context", {
-      p_project: project,
-      p_level: level,
-      p_user_id: userId,
-      p_role: role || "global",  // v3.0: pass role to RPC
-    });
+    try {
+      const result = await supabaseRpc("get_session_context", {
+        p_project: project,
+        p_level: level,
+        p_user_id: userId,
+        p_role: role || "global",  // v3.0: pass role to RPC
+      });
 
-    const data = Array.isArray(result) ? result[0] : result;
-    return (data as ContextResult) ?? null;
+      const data = Array.isArray(result) ? result[0] : result;
+      return (data as ContextResult) ?? null;
+    } catch (e) {
+      debugLog("[SupabaseStorage] loadContext RPC failed: " + (e instanceof Error ? e.message : String(e)));
+      return null as any;
+    }
   }
 
   // ─── Search Operations ─────────────────────────────────────
@@ -228,23 +241,27 @@ export class SupabaseStorage implements StorageBackend {
     userId: string;
     role?: string | null;  // v3.0: optional role filter
   }): Promise<KnowledgeSearchResult | null> {
-    const result = await supabaseRpc("search_knowledge", {
-      p_project: params.project || null,
-      p_keywords: params.keywords,
-      p_category: params.category || null,
-      p_query_text: params.queryText || null,
-      p_limit: Math.min(params.limit, 50),
-      p_user_id: params.userId,
-      p_role: params.role || null,  // v6.0: Hivemind role-scoping
-    });
+    try {
+      const result = await supabaseRpc("search_knowledge", {
+        p_project: params.project || null,
+        p_keywords: params.keywords,
+        p_category: params.category || null,
+        p_query_text: params.queryText || null,
+        p_limit: Math.min(params.limit, 50),
+        p_user_id: params.userId,
+      });
 
-    const data = Array.isArray(result) ? result[0] : result;
+      const data = Array.isArray(result) ? result[0] : result;
 
-    if (!data || !data.results || data.count === 0) {
+      if (!data || !data.results || data.count === 0) {
+        return null;
+      }
+
+      return data as KnowledgeSearchResult;
+    } catch (e) {
+      debugLog("[SupabaseStorage] searchKnowledge RPC failed: " + (e instanceof Error ? e.message : String(e)));
       return null;
     }
-
-    return data as KnowledgeSearchResult;
   }
 
   async searchMemory(params: {
@@ -360,13 +377,18 @@ export class SupabaseStorage implements StorageBackend {
     keepRecent: number,
     userId: string
   ): Promise<Array<{ project: string; total_entries: number; to_compact: number }>> {
-    const result = await supabaseRpc("get_compaction_candidates", {
-      p_threshold: threshold,
-      p_keep_recent: keepRecent,
-      p_user_id: userId,
-    });
+    try {
+      const result = await supabaseRpc("get_compaction_candidates", {
+        p_threshold: threshold,
+        p_keep_recent: keepRecent,
+        p_user_id: userId,
+      });
 
-    return Array.isArray(result) ? result : [];
+      return Array.isArray(result) ? result : [];
+    } catch (e) {
+      debugLog("[SupabaseStorage] getCompactionCandidates RPC failed: " + (e instanceof Error ? e.message : String(e)));
+      return [];
+    }
   }
 
   // ─── Time Travel ──────────────────────────────────────────
@@ -1097,103 +1119,132 @@ export class SupabaseStorage implements StorageBackend {
   // Phase 3 auto-linking fires. SQLite is the primary target for v6.0.
 
   async createLink(link: MemoryLink): Promise<void> {
-    await supabasePost(
-      "memory_links",
-      {
-        source_id: link.source_id,
-        target_id: link.target_id,
-        link_type: link.link_type,
-        strength: Math.max(0.0, Math.min(link.strength ?? 1.0, 1.0)),
-        metadata: link.metadata ?? null,
-      },
-      { on_conflict: "source_id,target_id,link_type" },
-      { Prefer: "return=minimal,resolution=ignore-duplicates" }
-    );
+    try {
+      await supabasePost(
+        "memory_links",
+        {
+          source_id: link.source_id,
+          target_id: link.target_id,
+          link_type: link.link_type,
+          strength: Math.max(0.0, Math.min(link.strength ?? 1.0, 1.0)),
+          metadata: link.metadata ? JSON.parse(link.metadata) : null,
+        },
+        { on_conflict: "source_id,target_id,link_type" },
+        { Prefer: "return=minimal,resolution=ignore-duplicates" }
+      );
 
-    if (link.link_type === 'related_to') {
-      await this.pruneExcessLinks(link.source_id, 'related_to', 25);
+      if (link.link_type === 'related_to') {
+        await this.pruneExcessLinks(link.source_id, 'related_to', 25);
+      }
+    } catch (e: any) {
+      debugLog("[SupabaseStorage] createLink failed: " + e.message);
+      return;
     }
   }
 
   async getLinksFrom(sourceId: string, userId: string, minStrength?: number, limit?: number): Promise<MemoryLink[]> {
-    const result = await supabaseRpc("prism_get_links_from", {
-      p_source_id: sourceId,
-      p_user_id: userId,
-      ...(minStrength !== undefined ? { p_min_strength: minStrength } : {}),
-      ...(limit !== undefined ? { p_limit: limit } : {}),
-    });
+    try {
+      const result = await supabaseRpc("prism_get_links_from", {
+        p_source_id: sourceId,
+        p_user_id: userId,
+        ...(minStrength !== undefined ? { p_min_strength: minStrength } : {}),
+        ...(limit !== undefined ? { p_limit: limit } : {}),
+      });
 
-    const rows = Array.isArray(result) ? result : [];
-    return rows.map((r: any) => ({
-      source_id: r.source_id,
-      target_id: r.target_id,
-      link_type: r.link_type,
-      strength: r.strength,
-      metadata: r.metadata,
-      created_at: r.created_at,
-      last_traversed_at: r.last_traversed_at,
-    }));
+      const rows = Array.isArray(result) ? result : [];
+      return rows.map((r: any) => ({
+        source_id: r.source_id,
+        target_id: r.target_id,
+        link_type: r.link_type,
+        strength: r.strength,
+        metadata: r.metadata ? JSON.stringify(r.metadata) : undefined,
+        created_at: r.created_at,
+        last_traversed_at: r.last_traversed_at,
+      }));
+    } catch (e: any) {
+      debugLog("[SupabaseStorage] getLinksFrom failed: " + e.message);
+      return [];
+    }
   }
 
   async getLinksTo(targetId: string, userId: string, minStrength?: number, limit?: number): Promise<MemoryLink[]> {
-    const result = await supabaseRpc("prism_get_links_to", {
-      p_target_id: targetId,
-      p_user_id: userId,
-      ...(minStrength !== undefined ? { p_min_strength: minStrength } : {}),
-      ...(limit !== undefined ? { p_limit: limit } : {}),
-    });
+    try {
+      const result = await supabaseRpc("prism_get_links_to", {
+        p_target_id: targetId,
+        p_user_id: userId,
+        ...(minStrength !== undefined ? { p_min_strength: minStrength } : {}),
+        ...(limit !== undefined ? { p_limit: limit } : {}),
+      });
 
-    const rows = Array.isArray(result) ? result : [];
-    return rows.map((r: any) => ({
-      source_id: r.source_id,
-      target_id: r.target_id,
-      link_type: r.link_type,
-      strength: r.strength,
-      metadata: r.metadata,
-      created_at: r.created_at,
-      last_traversed_at: r.last_traversed_at,
-    }));
+      const rows = Array.isArray(result) ? result : [];
+      return rows.map((r: any) => ({
+        source_id: r.source_id,
+        target_id: r.target_id,
+        link_type: r.link_type,
+        strength: r.strength,
+        metadata: r.metadata ? JSON.stringify(r.metadata) : undefined,
+        created_at: r.created_at,
+        last_traversed_at: r.last_traversed_at,
+      }));
+    } catch (e: any) {
+      debugLog("[SupabaseStorage] getLinksTo failed: " + e.message);
+      return [];
+    }
   }
 
   async countLinks(entryId: string, linkType?: string): Promise<number> {
-    const query = { source_id: `eq.${entryId}`, select: "target_id", limit: "1" };
-    if (linkType) {
-      Object.assign(query, { link_type: `eq.${linkType}` });
+    try {
+      const query = { source_id: `eq.${entryId}` };
+      if (linkType) {
+        Object.assign(query, { link_type: `eq.${linkType}` });
+      }
+      const result = await supabaseGet("memory_links", { 
+        ...query,
+        select: "source_id"
+      });
+      return Array.isArray(result) ? result.length : 0;
+    } catch (e: any) {
+      debugLog("[SupabaseStorage] countLinks failed: " + e.message);
+      return 0;
     }
-    // For counting, using headers via exact count is best, 
-    // but the `supabaseGet` method in our repo doesn't expose headers easily.
-    // So we fetch without limits if needed, or preferably we do an exact count using the count parameter.
-    // Our util supports count exact if we implement it, but for parity we can use an RPC or just fetch all targets.
-    // If not, we just fetch them. Since countLinks is typically small, we can just length it.
-    const result = await supabaseGet("memory_links", { 
-      source_id: `eq.${entryId}`,
-      ...(linkType ? { link_type: `eq.${linkType}` } : {}),
-      select: "source_id"
-    });
-    return Array.isArray(result) ? result.length : 0;
   }
 
   async pruneExcessLinks(entryId: string, linkType: string, maxLinks?: number): Promise<void> {
-    await supabaseRpc("prism_prune_excess_links", {
-      p_entry_id: entryId,
-      p_link_type: linkType,
-      p_max_links: maxLinks ?? 25
-    });
+    try {
+      await supabaseRpc("prism_prune_excess_links", {
+        p_entry_id: entryId,
+        p_link_type: linkType,
+        p_max_links: maxLinks ?? 25
+      });
+    } catch (e: any) {
+      debugLog("[SupabaseStorage] pruneExcessLinks failed: " + e.message);
+      return;
+    }
   }
 
   async reinforceLink(sourceId: string, targetId: string, linkType: string): Promise<void> {
-    await supabaseRpc("prism_reinforce_link", {
-      p_source_id: sourceId,
-      p_target_id: targetId,
-      p_link_type: linkType
-    });
+    try {
+      await supabaseRpc("prism_reinforce_link", {
+        p_source_id: sourceId,
+        p_target_id: targetId,
+        p_link_type: linkType
+      });
+    } catch (e: any) {
+      debugLog("[SupabaseStorage] reinforceLink failed: " + e.message);
+      return;
+    }
   }
 
   async decayLinks(olderThanDays: number): Promise<number> {
-    const affected = await supabaseRpc("prism_decay_links", {
-      p_older_than_days: olderThanDays
-    });
-    return Number(affected) || 0;
+    try {
+      const affected = await supabaseRpc("prism_decay_links", {
+        p_older_than_days: olderThanDays
+      });
+      return Number(affected) || 0;
+    } catch (e: any) {
+      debugLog("[SupabaseStorage] decayLinks failed: " + e.message);
+      return 0;
+    }
   }
 
   async findKeywordOverlapEntries(
@@ -1211,32 +1262,42 @@ export class SupabaseStorage implements StorageBackend {
     );
     if (validKeywords.length === 0) return [];
 
-    const result = await supabaseRpc("find_keyword_overlap_entries", {
-      p_exclude_id: excludeId,
-      p_project: project,
-      p_keywords: validKeywords,
-      p_user_id: userId,
-      p_min_shared_keywords: minSharedKeywords ?? 3,
-      p_limit: limit ?? 10
-    });
+    try {
+      const result = await supabaseRpc("find_keyword_overlap_entries", {
+        p_exclude_id: excludeId,
+        p_project: project,
+        p_keywords: validKeywords,
+        p_user_id: userId,
+        p_min_shared_keywords: minSharedKeywords ?? 3,
+        p_limit: limit ?? 10
+      });
 
-    const rows = Array.isArray(result) ? result : [];
-    return rows.map((r: any) => ({
-      id: r.id,
-      shared_count: Number(r.shared_count)
-    }));
+      const rows = Array.isArray(result) ? result : [];
+      return rows.map((r: any) => ({
+        id: r.id,
+        shared_count: Number(r.shared_count)
+      }));
+    } catch (e: any) {
+      debugLog("[SupabaseStorage] findKeywordOverlapEntries failed: " + e.message);
+      return [];
+    }
   }
 
   async backfillLinks(project: string): Promise<{ temporal: number; keyword: number; provenance: number }> {
-    const result = await supabaseRpc("prism_backfill_links", {
-      p_project: project
-    });
-    const parsed = Array.isArray(result) ? result[0] : result;
-    return { 
-      temporal: Number(parsed?.temporal || 0), 
-      keyword: Number(parsed?.keyword || 0), 
-      provenance: Number(parsed?.provenance || 0) 
-    };
+    try {
+      const result = await supabaseRpc("prism_backfill_links", {
+        p_project: project
+      });
+      const parsed = Array.isArray(result) ? result[0] : result;
+      return { 
+        temporal: Number(parsed?.temporal || 0), 
+        keyword: Number(parsed?.keyword || 0), 
+        provenance: Number(parsed?.provenance || 0) 
+      };
+    } catch (e: any) {
+      debugLog("[SupabaseStorage] backfillLinks failed: " + e.message);
+      return { temporal: 0, keyword: 0, provenance: 0 };
+    }
   }
 }
 

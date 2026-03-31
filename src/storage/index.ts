@@ -31,7 +31,10 @@ export let activeStorageBackend: string = "local";
 export async function getStorage(): Promise<StorageBackend> {
   if (storageInstance) return storageInstance;
 
-  activeStorageBackend = await getSetting("PRISM_STORAGE", ENV_PRISM_STORAGE) as "supabase" | "local";
+  // Use environment variable if explicitly set, otherwise fall back to db config
+  const envStorage = process.env.PRISM_STORAGE as "supabase" | "local" | undefined;
+  activeStorageBackend = envStorage || await getSetting("PRISM_STORAGE", ENV_PRISM_STORAGE) as "supabase" | "local";
+  
   debugLog(`[Prism Storage] Initializing backend: ${activeStorageBackend}`);
 
   if (activeStorageBackend === "local") {

@@ -259,7 +259,21 @@ To sync memory across machines or teams:
 }
 ```
 
-See the **Supabase Setup** section below for schema migration instructions.
+#### Schema Migrations
+
+Prism auto-applies its schema on first connect — no manual step required. If you need to apply or re-apply migrations manually (e.g. for a fresh project or after a version bump), run the SQL files in `supabase/migrations/` in numbered order via the **Supabase SQL Editor** or the CLI:
+
+```bash
+# Via CLI (requires supabase CLI + project linked)
+supabase db push
+
+# Or apply a single migration via the Supabase dashboard SQL Editor
+# Paste the contents of supabase/migrations/0NN_*.sql and click Run
+```
+
+> **Key migrations:**
+> - `020_*` — Core schema (ledger, handoff, FTS, TTL, CRDT)
+> - `033_memory_links.sql` — Associative Memory Graph (MemoryLinks) — required for `session_backfill_links`
 
 > **Anon key vs. service role key:** The anon key works for personal use (Supabase RLS policies apply). Use the service role key for team deployments where multiple users share the same Supabase project — it bypasses RLS and allows Prism to manage all rows regardless of auth context. Never expose the service role key client-side.
 

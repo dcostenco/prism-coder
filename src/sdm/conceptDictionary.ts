@@ -5,9 +5,12 @@ export class DeterministicPRNG {
   private seed: number;
   constructor(seed: number) { this.seed = seed; }
   nextUInt32(): number {
-    this.seed = Math.imul(this.seed ^ (this.seed >>> 15), 1 | this.seed);
-    this.seed ^= this.seed + Math.imul(this.seed ^ (this.seed >>> 7), 61 | this.seed);
-    return ((this.seed ^ (this.seed >>> 14)) >>> 0);
+    // Weyl sequence: golden ratio increment guarantees full 2^32 period.
+    // `| 0` forces 32-bit signed wrapping to prevent JS float precision loss.
+    let t = (this.seed = (this.seed + 0x6D2B79F5) | 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0);
   }
 }
 

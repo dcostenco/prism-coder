@@ -21,7 +21,7 @@ import * as http from "http";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
-import { exec } from "child_process";
+
 import { getStorage } from "../storage/index.js";
 import { PRISM_USER_ID, SERVER_CONFIG } from "../config.js";
 import { renderDashboardHTML } from "./ui.js";
@@ -44,82 +44,9 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
-/**
- * Kill any existing process holding the dashboard port.
- * This prevents zombie dashboard processes from surviving IDE restarts
- * and serving stale versions of the UI.
- *
- * CRITICAL: Uses async exec() instead of execSync() to avoid blocking
- * the Node.js event loop. Blocking during startup prevents the MCP
- * stdio transport from responding to the initialize handshake in time,
- * causing Antigravity to report MCP_SERVER_INIT_ERROR.
- */
-async function killPortHolder(port: number): Promise<void> {
-  const isWin = process.platform === "win32";
-
-  return new Promise((resolve) => {
-    if (isWin) {
-      // Windows: use netstat + taskkill (lsof is not available)
-      exec(`netstat -ano | findstr :${port} | findstr LISTENING`, { encoding: "utf-8" }, (err, stdout) => {
-        if (err || !stdout.trim()) return resolve();
-
-        // Extract PIDs from the last column of netstat output
-        const pids = [...new Set(
-          stdout.trim().split("\n")
-            .map(line => line.trim().split(/\s+/).pop())
-            .filter((p): p is string => !!p && p !== "0" && p !== String(process.pid))
-        )];
-
-        if (pids.length > 0) {
-          console.error(`[Dashboard] Killing stale process(es) on port ${port}: ${pids.join(", ")}`);
-          exec(`taskkill /F ${pids.map(p => `/PID ${p}`).join(" ")}`, () => {
-            setTimeout(resolve, 300);
-          });
-        } else {
-          resolve();
-        }
-      });
-    } else {
-      // Unix/macOS: use lsof
-      exec(`lsof -ti tcp:${port}`, { encoding: "utf-8" }, (err, stdout) => {
-        if (err) {
-          const isNoMatch = err.code === 1;
-          if (!isNoMatch) {
-            console.error(
-              `[Dashboard] killPortHolder: could not check port ${port} (lsof may not be installed) — skipping.`
-            );
-          }
-          return resolve();
-        }
-
-        const pids = stdout.trim().split("\n").filter(Boolean);
-        if (pids.length === 0) return resolve();
-
-        const myPid = String(process.pid);
-        const stalePids = pids.filter(p => p !== myPid);
-
-        if (stalePids.length > 0) {
-          console.error(`[Dashboard] Killing stale process(es) on port ${port}: ${stalePids.join(", ")}`);
-          exec(`kill ${stalePids.join(" ")}`, () => {
-            setTimeout(resolve, 300);
-          });
-        } else {
-          resolve();
-        }
-      });
-    }
-  });
-}
-
 export async function startDashboardServer(): Promise<void> {
-  // Await port cleanup before binding. This adds ~300ms from lsof + setTimeout,
-  // but is safe because startDashboardServer() is already deferred to
-  // setTimeout(0) in server.ts — the MCP stdio handshake is long finished.
-  // The old fire-and-forget approach caused a deadly race condition:
-  //   1. listen() fired BEFORE killPortHolder cleared the port → EADDRINUSE
-  //   2. killPortHolder then killed the OTHER instance's entire process
-  //   3. Result: no instance ever held port 3000
-  await killPortHolder(PORT).catch(() => {});
+  // Port 3000 conflicts are gracefully handled by server.ts catching EADDRINUSE
+  // which will just disable the dashboard on secondary instances, keeping MCP alive.
 
   // Lazy storage accessor — returns null if storage isn't ready yet.
   // API routes gracefully degrade with 503 instead of blocking startup.
@@ -1258,7 +1185,7 @@ self.addEventListener('message', (e) => {
 
   // ─── Resilient port binding with retry ───
   // Wraps listen() in a Promise to detect EADDRINUSE failures and retry
-  // with a delay (gives OS time to release the port after killPortHolder).
+  // with a delay (gives OS time to release the port).
   // Falls back to PORT+1, PORT+2 if the preferred port is permanently taken.
   const MAX_RETRIES = 3;
   const RETRY_DELAY_MS = 500;

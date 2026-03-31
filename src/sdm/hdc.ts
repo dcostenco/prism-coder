@@ -25,7 +25,8 @@ export class HDCEngine {
   /**
    * BUNDLE (Addition): Combines a set of vectors using Majority Vote.
    * Ideal for grouping short lists (3-7 concepts). Uses a deterministic
-   * tie-breaker (defaults to 0) if an even number of vectors results in a tie.
+   * tie-breaker (inherits from vectors[0]) if an even number of vectors
+   * results in a tie, preserving ~50% bit density.
    */
   static bundle(vectors: Uint32Array[]): Uint32Array {
     if (!vectors.length) throw new Error("Must provide at least one vector to bundle.");
@@ -46,7 +47,10 @@ export class HDCEngine {
         if (count > numVecs / 2) {
           resultWord |= mask;
         } else if (count === numVecs / 2) {
-          // Tie-breaker: deterministic 0. Since resultWord is initially 0, we do nothing.
+          // Tie-breaker: use bit from the first vector to prevent density collapse
+          if ((vectors[0][wordIdx] & mask) !== 0) {
+            resultWord |= mask;
+          }
         }
       }
       result[wordIdx] = resultWord >>> 0; // ensure unsigned

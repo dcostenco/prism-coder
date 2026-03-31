@@ -515,6 +515,13 @@ export class SqliteStorage implements StorageBackend {
       )
     `);
 
+    // v6.5 Migration: Add address_version column if missing
+    try {
+      await this.db.execute(`ALTER TABLE sdm_state ADD COLUMN address_version INTEGER DEFAULT 1`);
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
+
     // ─── v6.0 Migration: Associative Memory Graph ──────────────
     //
     // REVIEWER NOTE: memory_links implements a typed, weighted edge table
@@ -573,6 +580,13 @@ export class SqliteStorage implements StorageBackend {
         vector BLOB NOT NULL
       )
     `);
+
+    // v6.5 Migration: Add prng_version column if missing
+    try {
+      await this.db.execute(`ALTER TABLE hdc_dictionary ADD COLUMN prng_version INTEGER DEFAULT 1`);
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
 
     // ─── v6.1 Migration: Integrity Check ──────────────────────
     //
@@ -2399,11 +2413,22 @@ export class SqliteStorage implements StorageBackend {
 
   async loadSdmState(project: string): Promise<Float32Array | null> {
     const result = await this.db.execute({
-      sql: `SELECT counters FROM sdm_state WHERE project = ?`,
+      sql: `SELECT counters, address_version FROM sdm_state WHERE project = ?`,
       args: [project],
     });
 
     if (result.rows.length === 0) {
+      return null;
+    }
+
+    // Check address_version: if persisted state was generated with a different
+    // PRNG algorithm, the hard-location addresses will mismatch. Reject stale state.
+    const storedVersion = (result.rows[0].address_version as number) ?? 1;
+    const { SDM_ADDRESS_VERSION } = await import('../sdm/sdmEngine.js');
+    if (storedVersion !== SDM_ADDRESS_VERSION) {
+      debugLog(`[SqliteStorage] SDM state version mismatch for ${project}: stored v${storedVersion}, current v${SDM_ADDRESS_VERSION}. Rebuilding.`);
+      // Delete the stale row so it gets regenerated cleanly
+      await this.db.execute({ sql: `DELETE FROM sdm_state WHERE project = ?`, args: [project] });
       return null;
     }
 
@@ -2424,18 +2449,20 @@ export class SqliteStorage implements StorageBackend {
     // The state is a Float32Array. We need its underlying buffer for SQLite.
     // Wrap in Uint8Array to satisfy @libsql/client InValue typing which rejects SharedArrayBuffer
     const buffer = new Uint8Array(state.buffer, state.byteOffset, state.byteLength);
+    const { SDM_ADDRESS_VERSION } = await import('../sdm/sdmEngine.js');
     
     // We do an UPSERT (INSERT ... ON CONFLICT REPLACE).
     await this.db.execute({
-      sql: `INSERT INTO sdm_state (project, counters, updated_at) 
-            VALUES (?, ?, datetime('now'))
+      sql: `INSERT INTO sdm_state (project, counters, address_version, updated_at) 
+            VALUES (?, ?, ?, datetime('now'))
             ON CONFLICT(project) DO UPDATE SET 
               counters = excluded.counters,
+              address_version = excluded.address_version,
               updated_at = excluded.updated_at`,
-      args: [project, buffer],
+      args: [project, buffer, SDM_ADDRESS_VERSION],
     });
     
-    debugLog(`[SqliteStorage] Persisted SDM state to disk for project: ${project}`);
+    debugLog(`[SqliteStorage] Persisted SDM state v${SDM_ADDRESS_VERSION} to disk for project: ${project}`);
   }
 
   // ─── v6.5: HDC State Machines & Cognitive Logic ───────────────────────
@@ -2482,16 +2509,18 @@ export class SqliteStorage implements StorageBackend {
     // The vector is a Uint32Array. We need its underlying buffer for SQLite.
     // Wrap in Uint8Array to satisfy @libsql/client InValue typing which rejects SharedArrayBuffer
     const buffer = new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength);
+    const { SDM_ADDRESS_VERSION } = await import('../sdm/sdmEngine.js');
     
     await this.db.execute({
-      sql: `INSERT INTO hdc_dictionary (concept_name, vector) 
-            VALUES (?, ?)
+      sql: `INSERT INTO hdc_dictionary (concept_name, vector, prng_version) 
+            VALUES (?, ?, ?)
             ON CONFLICT(concept_name) DO UPDATE SET 
-              vector = excluded.vector`,
-      args: [concept, buffer],
+              vector = excluded.vector,
+              prng_version = excluded.prng_version`,
+      args: [concept, buffer, SDM_ADDRESS_VERSION],
     });
     
-    debugLog(`[SqliteStorage] Persisted HDC orthogonal concept to dictionary: ${concept}`);
+    debugLog(`[SqliteStorage] Persisted HDC orthogonal concept v${SDM_ADDRESS_VERSION} to dictionary: ${concept}`);
   }
 
   // ─── v6.1: Storage Hygiene ────────────────────────────────────────────

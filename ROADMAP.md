@@ -244,3 +244,5 @@ Foundation shipped in v5.5 (typed-array decoder, GC-free hot loop); HDC algebra 
 | Supabase RPC Soft-Delete Filtering | Server-side GDPR filtering at the RPC layer |
 | Prism CLI | Standalone CLI for backup, export, and health check without MCP |
 | Plugin System | Third-party tool registration via MCP tool composition |
+| **Supabase MemoryLinks** | Implement `MemoryLinks` (graph-based traversal) in Supabase to achieve full structural parity with SQLite backend |
+| **SDM Counter Soft Decay** | Evaluate implementing chronological "Soft Decay" for SDM counters if plasticity loss (catastrophic saturation) is observed in long-running agents |

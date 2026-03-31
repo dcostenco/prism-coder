@@ -70,20 +70,6 @@ if (!BRAVE_ANSWERS_API_KEY) {
   console.error("Warning: BRAVE_ANSWERS_API_KEY environment variable is missing. Brave Answers tool will be unavailable.");
 }
 
-// ─── Optional: Supabase (Session Memory Module) ───────────────
-// When both SUPABASE_URL and SUPABASE_KEY are set, session memory tools
-// are registered. These tools allow AI agents to persist and recover
-// context between sessions.
-
-export const SUPABASE_URL = process.env.SUPABASE_URL;
-export const SUPABASE_KEY = process.env.SUPABASE_KEY;
-export const SESSION_MEMORY_ENABLED = !!(SUPABASE_URL && SUPABASE_KEY);
-// Note: debug() is defined at the bottom of this file; these lines
-// execute at import time after the full module is loaded by Node.
-if (!SESSION_MEMORY_ENABLED) {
-  console.error("Info: Session memory disabled (set SUPABASE_URL + SUPABASE_KEY to enable)");
-}
-
 // ─── v2.0: Storage Backend Selection ─────────────────────────
 // REVIEWER NOTE: Step 1 of v2.0 introduces a storage abstraction.
 // Currently only "supabase" is implemented. "local" (SQLite) is
@@ -95,6 +81,21 @@ if (!SESSION_MEMORY_ENABLED) {
 export const PRISM_STORAGE: "local" | "supabase" =
   (process.env.PRISM_STORAGE as "local" | "supabase") || "supabase";
 // Logged at debug level — see debug() at bottom of file
+
+// ─── Optional: Supabase (Session Memory Module) ───────────────
+// When both SUPABASE_URL and SUPABASE_KEY are set, session memory tools
+// are registered. These tools allow AI agents to persist and recover
+// context between sessions.
+
+export const SUPABASE_URL = process.env.SUPABASE_URL;
+export const SUPABASE_KEY = process.env.SUPABASE_KEY;
+
+export const SESSION_MEMORY_ENABLED = true;
+// Note: debug() is defined at the bottom of this file; these lines
+// execute at import time after the full module is loaded by Node.
+if (!SESSION_MEMORY_ENABLED) {
+  console.error("Info: Session memory disabled (set PRISM_STORAGE=local or configure Supabase)");
+}
 
 // ─── Optional: Multi-Tenant User ID ──────────────────────────
 // REVIEWER NOTE: When multiple users share the same Supabase instance,
