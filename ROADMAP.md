@@ -223,11 +223,17 @@ With v6.1.8 shipped, Prism is a **production-hardened, type-safe, cognitively-gr
 2. Service worker + offline cache for read-only access
 3. Push notifications via Web Push API for Telepathy events
 
-### 🧠 Full Superposed Memory (SDM)
+## 🧠 Cognitive Architecture — v6.5
 
-**Problem:** Semantic search requires embedding every query and scanning all vectors — O(n) at scale.
+### Full Superposed Memory (SDM) & Hyperdimensional Computing (HDC/VSA)
 
-**Solution:** Sparse Distributed Memory (Kanerva, 1988) — store patterns in a superposed address space for O(1) retrieval via correlation. No index, no ANN, just ask the vector. Foundation shipped in v5.5 (typed-array decoder, GC-free hot loop); full Hamming-space address mapping coming in v5.6.
+**Problem:** Semantic search requires embedding every query and scanning all vectors — O(n) at scale. Standard SDM provides memory storage, but lacks a reasoning language to construct cognitive logic (e.g. associating an Action + User Role + Topic algebraically) locally without hitting LLM embedding limits.
+
+**Solution:** The intersection of Neuro-Symbolic AI: combining SDM (associative storage) with HDC/BSC (algebraic logic).
+1. **HDC (Hyperdimensional Computing):** Binds, bundles, and permutes bits locally (in microseconds via bitwise XOR and majority-rule ops) to form logical compositional agent states in continuous time.
+2. **SDM (Sparse Distributed Memory):** The hardware tissue. Stores the composed HDC states for noisy retrieval and cleanup via Kanerva's Hamming-space addressing.
+
+Foundation shipped in v5.5 (typed-array decoder, GC-free hot loop); HDC algebra integration and full Hamming-space address mapping targeting v6.5.
 
 ---
 

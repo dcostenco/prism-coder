@@ -3,11 +3,12 @@ import { TurboQuantCompressor, CompressedEmbedding, PRISM_DEFAULT_CONFIG, getDef
 // M = 10,000 hard locations per project
 const SDM_M = 10000;
 // D_addr = 768 bits (binary QJL string length), represented as 24 Uint32s
-const D_ADDR_UINT32 = PRISM_DEFAULT_CONFIG.d / 32; 
+export const D_ADDR_UINT32 = PRISM_DEFAULT_CONFIG.d / 32; 
 
-// The L1 radius threshold for "activation" (how many bits can differ)
-// For 768 bits, picking a threshold like 300 gives us sparse activation
-const ACTIVATION_RADIUS = 300; 
+
+// The hard threshold boundary applied to counters during HDC writes
+// to retain memory plasticity over long periods.
+const COUNTER_CLIP = 20;
 
 // We use PRNG seeded deterministically to generate the initial hard location addresses
 // This ensures that restarts produce the exact same Kanerva address space
@@ -41,6 +42,9 @@ export function hammingDistance(a: Uint32Array, b: Uint32Array): number {
 }
 
 export class SparseDistributedMemory {
+  // Guard flag to prevent cross-talk between standard embedding logic and pure HDC logic
+  private _mode: 'uninitialized' | 'semantic' | 'hdc' = 'uninitialized';
+
   // Hard Locations: Addresses (M x 24 uint32)
   public readonly addresses: Uint32Array[];
   // Hard Locations: Counters (M x 768 float32)
@@ -77,6 +81,7 @@ export class SparseDistributedMemory {
    * Write a dense vector into the memory by routing it to activated counters
    */
   public write(vector: Float32Array, k: number = 20) {
+    this.assertMode('semantic');
     const compressor = getDefaultCompressor();
     const blob = compressor.compress(Array.from(vector));
     const address = this.blobToAddress(blob);
@@ -91,6 +96,7 @@ export class SparseDistributedMemory {
   }
 
   public read(queryVector: Float32Array, k: number = 20): Float32Array {
+    this.assertMode('semantic');
     const compressor = getDefaultCompressor();
     const blob = compressor.compress(Array.from(queryVector));
     const address = this.blobToAddress(blob);
@@ -108,7 +114,76 @@ export class SparseDistributedMemory {
     return this.l2Normalize(result);
   }
 
+  /**
+   * Write an HDC binary vector directly into memory (skips TurboQuant logic).
+   * Maps 1 bits to +1 and 0 bits to -1, summing them into the addressed counters.
+   * Applies hard clipping per counter entry ensuring bounded dynamics.
+   */
+  public writeHdc(hdcVector: Uint32Array, k: number = 20) {
+    this.assertMode('hdc');
+    if (hdcVector.length !== D_ADDR_UINT32) {
+      throw new Error(`[HDC] Invalid vector length: expected ${D_ADDR_UINT32}, got ${hdcVector.length}`);
+    }
+    const activated = this.getTopK(hdcVector, k);
+    
+    for (const idx of activated) {
+      const c = this.counters[idx];
+      let floatIdx = 0;
+      for (let w = 0; w < D_ADDR_UINT32; w++) {
+        const word = hdcVector[w];
+        for (let bitIdx = 0; bitIdx < 32; bitIdx++) {
+          const bitVal = (word & (1 << bitIdx)) !== 0 ? 1 : -1;
+          const newVal = c[floatIdx] + bitVal;
+          // Apply strict bounds clipping to retain plasticity
+          c[floatIdx] = Math.max(-COUNTER_CLIP, Math.min(COUNTER_CLIP, newVal));
+          floatIdx++;
+        }
+      }
+    }
+  }
+
+  /**
+   * Retrieve an HDC binary vector associatively via noise cleanup thresholding.
+   * Sums the raw counters natively within the activation radius and thresholds 
+   * the values directly to 0 or 1, skipping expensive L2 normalization entirely.
+   */
+  public readHdc(queryVector: Uint32Array, k: number = 20): Uint32Array {
+    this.assertMode('hdc');
+    if (queryVector.length !== D_ADDR_UINT32) {
+      throw new Error(`[HDC] Invalid query vector length: expected ${D_ADDR_UINT32}, got ${queryVector.length}`);
+    }
+    const activated = this.getTopK(queryVector, k);
+    
+    const accum = new Float32Array(PRISM_DEFAULT_CONFIG.d);
+    for (const idx of activated) {
+      const c = this.counters[idx];
+      for (let j = 0; j < PRISM_DEFAULT_CONFIG.d; j++) {
+        accum[j] += c[j];
+      }
+    }
+    
+    const result = new Uint32Array(D_ADDR_UINT32);
+    let floatIdx = 0;
+    for (let w = 0; w < D_ADDR_UINT32; w++) {
+      let word = 0;
+      for (let bitIdx = 0; bitIdx < 32; bitIdx++) {
+        if (accum[floatIdx] > 0) {
+          word |= (1 << bitIdx);
+        } else if (accum[floatIdx] === 0) {
+          // Deterministic tie-breaker for read summation:
+          // Defaulting to 0 on exact zero sums aligns mathematically with HDC implementation ties
+        }
+        floatIdx++;
+      }
+      result[w] = word >>> 0;
+    }
+    return result;
+  }
+
   private getTopK(address: Uint32Array, k: number): number[] {
+    if (k <= 0 || k > SDM_M) {
+      throw new Error(`[SDM] Invalid K radius boundary: expected 1 <= k <= ${SDM_M}, got ${k}`);
+    }
     // Array of (dist, index)
     const dists: {d: number, i: number}[] = new Array(SDM_M);
     for (let i = 0; i < SDM_M; i++) {
@@ -134,6 +209,14 @@ export class SparseDistributedMemory {
       vec[i] /= mag;
     }
     return vec;
+  }
+
+  private assertMode(req: 'semantic' | 'hdc') {
+    if (this._mode === 'uninitialized') {
+      this._mode = req;
+    } else if (this._mode !== req) {
+      throw new Error(`[SDM] Engine mode cross-talk violation. Instance locked to ${this._mode} memory, but received ${req} operation.`);
+    }
   }
 
   /**

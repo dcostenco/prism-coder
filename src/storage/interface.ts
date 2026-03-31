@@ -720,6 +720,29 @@ export interface StorageBackend {
     sizeAfter: number;
     message: string;
   }>;
+
+  // ─── v6.5: HDC State Machines & Cognitive Logic ────────────────
+
+  /**
+   * Retrieve a generated HDC orthogonal vector for a semantic concept.
+   * If the concept doesn't exist, returns null.
+   *
+   * @param concept - The string identifier of the concept (e.g. 'Action:Read')
+   */
+  getHdcConcept(concept: string): Promise<Uint32Array | null>;
+
+  /**
+   * Retrieves all globally stored HDC concepts from the dictionary.
+   */
+  getAllHdcConcepts(): Promise<Array<{ concept: string; vector: Uint32Array }>>;
+
+  /**
+   * Persist a generated HDC orthogonal vector to the dictionary.
+   *
+   * @param concept - The string identifier of the concept.
+   * @param vector - The 768-word Uint32Array representing the concept.
+   */
+  saveHdcConcept(concept: string, vector: Uint32Array): Promise<void>;
 }
 
 // ─── v6.0: Memory Link Type ───────────────────────────────────

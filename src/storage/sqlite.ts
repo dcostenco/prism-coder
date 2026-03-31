@@ -567,6 +567,13 @@ export class SqliteStorage implements StorageBackend {
       `CREATE INDEX IF NOT EXISTS idx_session_ledger_last_accessed ON session_ledger(last_accessed_at)`
     );
 
+    await this.db.execute(`
+      CREATE TABLE IF NOT EXISTS hdc_dictionary (
+        concept_name TEXT PRIMARY KEY,
+        vector BLOB NOT NULL
+      )
+    `);
+
     // ─── v6.1 Migration: Integrity Check ──────────────────────
     //
     // REVIEWER NOTE: PRAGMA integrity_check scans the B-tree structure of
@@ -2429,6 +2436,62 @@ export class SqliteStorage implements StorageBackend {
     });
     
     debugLog(`[SqliteStorage] Persisted SDM state to disk for project: ${project}`);
+  }
+
+  // ─── v6.5: HDC State Machines & Cognitive Logic ───────────────────────
+
+  async getHdcConcept(concept: string): Promise<Uint32Array | null> {
+    const result = await this.db.execute({
+      sql: `SELECT vector FROM hdc_dictionary WHERE concept_name = ?`,
+      args: [concept]
+    });
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const blob = result.rows[0].vector as any;
+    // libSQL returns blobs as ArrayBuffer.
+    // We instantiate a Uint32Array directly over the buffer.
+    if (blob instanceof ArrayBuffer) {
+      return new Uint32Array(blob);
+    } else if (blob instanceof Uint8Array) {
+      return new Uint32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+    } else {
+      throw new Error(`[SqliteStorage] Unexpected blob type returned for HDC vector`);
+    }
+  }
+
+  async getAllHdcConcepts(): Promise<Array<{ concept: string; vector: Uint32Array }>> {
+    const result = await this.db.execute(`SELECT concept_name, vector FROM hdc_dictionary`);
+    return result.rows.map(row => {
+      const blob = row.vector as any;
+      let vec: Uint32Array;
+      if (blob instanceof ArrayBuffer) {
+        vec = new Uint32Array(blob);
+      } else if (blob instanceof Uint8Array) {
+        vec = new Uint32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+      } else {
+        throw new Error(`[SqliteStorage] Unexpected blob type returned for HDC vector`);
+      }
+      return { concept: row.concept_name as string, vector: vec };
+    });
+  }
+
+  async saveHdcConcept(concept: string, vector: Uint32Array): Promise<void> {
+    // The vector is a Uint32Array. We need its underlying buffer for SQLite.
+    // Wrap in Uint8Array to satisfy @libsql/client InValue typing which rejects SharedArrayBuffer
+    const buffer = new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength);
+    
+    await this.db.execute({
+      sql: `INSERT INTO hdc_dictionary (concept_name, vector) 
+            VALUES (?, ?)
+            ON CONFLICT(concept_name) DO UPDATE SET 
+              vector = excluded.vector`,
+      args: [concept, buffer],
+    });
+    
+    debugLog(`[SqliteStorage] Persisted HDC orthogonal concept to dictionary: ${concept}`);
   }
 
   // ─── v6.1: Storage Hygiene ────────────────────────────────────────────
