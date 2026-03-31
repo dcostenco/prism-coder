@@ -410,6 +410,18 @@ describe("GET /api/graph/metrics (Router Integration)", () => {
     expect(parsed.synthesis.links_created_total).toBe(5);
     expect(parsed.synthesis.last_status).toBe("ok");
 
+    // Scheduler fields (legacy + WS2 additions) are present and numeric
+    expect(typeof parsed.scheduler.projects_processed_last).toBe("number");
+    expect(typeof parsed.scheduler.projects_succeeded_last).toBe("number");
+    expect(typeof parsed.scheduler.projects_failed_last).toBe("number");
+    expect(typeof parsed.scheduler.retries_last).toBe("number");
+    expect(typeof parsed.scheduler.links_created_last).toBe("number");
+    expect(typeof parsed.scheduler.duration_ms_last).toBe("number");
+    expect(typeof parsed.scheduler.skipped_backpressure_last).toBe("number");
+    expect(typeof parsed.scheduler.skipped_cooldown_last).toBe("number");
+    expect(typeof parsed.scheduler.skipped_budget_last).toBe("number");
+    expect(typeof parsed.scheduler.skipped_backoff_last).toBe("number");
+
     // Warning flags are present and boolean
     expect(typeof parsed.warnings.synthesis_quality_warning).toBe("boolean");
     expect(typeof parsed.warnings.testme_provider_warning).toBe("boolean");
