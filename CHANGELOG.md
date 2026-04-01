@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [6.5.1] - 2026-04-01
+
+### Fixed
+- **Dashboard Project Selector Bootstrap Failure** — Resolved a startup failure where `/api/projects` returned errors and the selector remained stuck on "Loading projects..." when `SUPABASE_URL`/`SUPABASE_KEY` were unresolved template placeholders (e.g. `${SUPABASE_URL}`).
+- **Storage Backend Fallback Safety** — Added runtime guardrails to automatically fall back to local SQLite storage when Supabase is requested but env configuration is invalid/unresolved, preventing dashboard hard-failure in mixed/local setups.
+
+### Changed
+- **Config Sanitization** — Added Supabase env sanitization and URL validation to ignore unresolved placeholder strings and invalid non-http(s) values.
+
+### Validation
+- Dashboard project loading retested on clean server process.
+- Build and targeted dashboard route tests passing.
+
+---
+
 ## [6.5.0] - 2026-04-01
 
 ### Added

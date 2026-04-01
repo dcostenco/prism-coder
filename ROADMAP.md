@@ -8,6 +8,15 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v6.5.1 — Dashboard Project-Load Hotfix
+
+| Fix | Detail |
+|-----|--------|
+| 🩹 **Project Selector Bootstrap** | Fixed a startup failure where unresolved Supabase env placeholders (`${SUPABASE_URL}` / `${SUPABASE_KEY}`) could break `/api/projects` and leave the selector stuck on "Loading projects...". |
+| 🔄 **Backend Fallback Safety** | Added guardrails to auto-fallback to local SQLite when Supabase backend is requested but env config is invalid/unresolved. |
+
+---
+
 ### ✅ v6.5.0 — HDC Cognitive Routing
 
 | Feature | Detail |
@@ -222,7 +231,7 @@ v3.0: Role-scoped memory, agent registration/heartbeat, Telepathy (real-time cro
 
 ---
 
-## 📊 The State of Prism (v6.5.0)
+## 📊 The State of Prism (v6.5.1)
 
 With v6.5.0 shipped, Prism is a **production-hardened, self-organizing, cognitively-routed AI Operating System**:
 
