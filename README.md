@@ -395,6 +395,10 @@ Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.z
 
 ## 🆕 What's New
 
+### v6.5.1 — Dashboard Project-Load Hotfix ✅
+- 🩹 **Project Selector Recovery** — Fixed a startup path where the dashboard selector could stay stuck on "Loading projects..." when Supabase env vars were unresolved placeholders.
+- 🔄 **Safe Backend Fallback** — If Supabase is requested but env is invalid/unresolved, Prism now auto-falls back to local SQLite so `/api/projects` and dashboard boot remain operational.
+
 ### v6.5 — HDC Cognitive Routing ✅
 > **Current stable release.** The Mind Palace gains a brain-inspired routing engine.
 
