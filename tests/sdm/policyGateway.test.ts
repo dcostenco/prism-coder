@@ -103,3 +103,194 @@ describe('Intent Arbitration & Action Policy Gateway', () => {
     expect(result.route).toBe(ActionRoute.ACTION_FALLBACK);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// EDGE CASES: Constructor guards & threshold boundary routing
+// ═══════════════════════════════════════════════════════════════════
+
+describe('PolicyGateway — Constructor Threshold Validation', () => {
+  let dbParams: any;
+
+  beforeEach(async () => {
+    dbParams = await fixtures.createTestDb('policy-guard-test');
+  });
+
+  afterEach(async () => {
+    await dbParams.storage.close();
+    dbParams.cleanup();
+  });
+
+  it('throws when fallbackThreshold is negative', () => {
+    /**
+     * WHY: policyGateway.ts line 39 enforces fallbackThreshold >= 0.
+     * A negative fallback would mean literally everything auto-routes,
+     * defeating the safety net entirely.
+     */
+    const dict = new ConceptDictionary(dbParams.storage);
+    expect(() => new PolicyGateway(dict, { fallbackThreshold: -0.1, clarifyThreshold: 0.95 }))
+      .toThrow(/Invalid threshold/i);
+  });
+
+  it('throws when fallbackThreshold >= clarifyThreshold', () => {
+    /**
+     * WHY: policyGateway.ts line 40 enforces fallback < clarify.
+     * If fallback >= clarify, the CLARIFY zone has zero width and
+     * no intent can ever land there — rendering the tier useless.
+     */
+    const dict = new ConceptDictionary(dbParams.storage);
+    expect(() => new PolicyGateway(dict, { fallbackThreshold: 0.95, clarifyThreshold: 0.95 }))
+      .toThrow(/Invalid threshold/i);
+  });
+
+  it('throws when fallbackThreshold > clarifyThreshold (inverted)', () => {
+    const dict = new ConceptDictionary(dbParams.storage);
+    expect(() => new PolicyGateway(dict, { fallbackThreshold: 0.99, clarifyThreshold: 0.50 }))
+      .toThrow(/Invalid threshold/i);
+  });
+
+  it('throws when clarifyThreshold > 1', () => {
+    /**
+     * WHY: policyGateway.ts line 41 enforces clarifyThreshold <= 1.
+     * Confidence is capped at 1.0 (0 hamming distance = 100% match).
+     * A threshold > 1 would make AUTO_ROUTE unreachable.
+     */
+    const dict = new ConceptDictionary(dbParams.storage);
+    expect(() => new PolicyGateway(dict, { fallbackThreshold: 0.50, clarifyThreshold: 1.01 }))
+      .toThrow(/Invalid threshold/i);
+  });
+
+  it('accepts valid thresholds: fallback=0, clarify=1 (extreme range)', () => {
+    /**
+     * WHY: fallback=0 and clarify=1 are boundary-valid.
+     * fallback=0 means only null concepts fall back.
+     * clarify=1 means only perfect matches auto-route.
+     */
+    const dict = new ConceptDictionary(dbParams.storage);
+    expect(() => new PolicyGateway(dict, { fallbackThreshold: 0, clarifyThreshold: 1 }))
+      .not.toThrow();
+  });
+
+  it('accepts defaults (no config) without throwing', () => {
+    const dict = new ConceptDictionary(dbParams.storage);
+    expect(() => new PolicyGateway(dict)).not.toThrow();
+  });
+});
+
+describe('PolicyGateway — Exact Threshold Boundary Routing', () => {
+  let dbParams: any;
+  let dict: ConceptDictionary;
+
+  beforeEach(async () => {
+    dbParams = await fixtures.createTestDb('policy-boundary-test');
+    dict = new ConceptDictionary(dbParams.storage);
+  });
+
+  afterEach(async () => {
+    await dbParams.storage.close();
+    dbParams.cleanup();
+  });
+
+  it('confidence exactly AT fallbackThreshold (0.85) → CLARIFY, not FALLBACK', async () => {
+    /**
+     * WHY: policyGateway.ts line 60 uses `confidence < fallbackThreshold`.
+     * The strict-less-than means 0.85 is NOT below threshold, so it
+     * falls through to the CLARIFY check. This is the critical off-by-one
+     * boundary that could silently misroute if changed to <=.
+     */
+    const gateway = new PolicyGateway(dict); // default 0.85 / 0.95
+    const machineMock = Object.create(HdcStateMachine.prototype);
+    machineMock.recallToConcept = vi.fn().mockResolvedValue({
+      concept: 'Intent.Boundary', distance: 115, confidence: 0.85,
+      ambiguous: false, steps: 1
+    });
+
+    const result = await gateway.evaluateIntent(machineMock);
+    expect(result.route).toBe(ActionRoute.ACTION_CLARIFY);
+  });
+
+  it('confidence exactly AT clarifyThreshold (0.95) → AUTO_ROUTE, not CLARIFY', async () => {
+    /**
+     * WHY: policyGateway.ts line 62 uses `confidence < clarifyThreshold`.
+     * confidence=0.95 is NOT below 0.95, so it falls through to AUTO_ROUTE.
+     */
+    const gateway = new PolicyGateway(dict);
+    const machineMock = Object.create(HdcStateMachine.prototype);
+    machineMock.recallToConcept = vi.fn().mockResolvedValue({
+      concept: 'Intent.Precise', distance: 38, confidence: 0.95,
+      ambiguous: false, steps: 1
+    });
+
+    const result = await gateway.evaluateIntent(machineMock);
+    expect(result.route).toBe(ActionRoute.ACTION_AUTO_ROUTE);
+  });
+
+  it('confidence just below fallbackThreshold (0.8499) → FALLBACK', async () => {
+    const gateway = new PolicyGateway(dict);
+    const machineMock = Object.create(HdcStateMachine.prototype);
+    machineMock.recallToConcept = vi.fn().mockResolvedValue({
+      concept: 'Intent.AlmostThere', distance: 116, confidence: 0.8499,
+      ambiguous: false, steps: 2
+    });
+
+    const result = await gateway.evaluateIntent(machineMock);
+    expect(result.route).toBe(ActionRoute.ACTION_FALLBACK);
+  });
+
+  it('confidence just below clarifyThreshold (0.9499) → CLARIFY', async () => {
+    const gateway = new PolicyGateway(dict);
+    const machineMock = Object.create(HdcStateMachine.prototype);
+    machineMock.recallToConcept = vi.fn().mockResolvedValue({
+      concept: 'Intent.Close', distance: 39, confidence: 0.9499,
+      ambiguous: false, steps: 1
+    });
+
+    const result = await gateway.evaluateIntent(machineMock);
+    expect(result.route).toBe(ActionRoute.ACTION_CLARIFY);
+  });
+
+  it('null concept overrides high confidence → always FALLBACK', async () => {
+    /**
+     * WHY: policyGateway.ts line 60 checks `concept === null` first.
+     * Even if confidence were 1.0, a null concept means the dictionary
+     * had zero entries. This must ALWAYS route to FALLBACK.
+     */
+    const gateway = new PolicyGateway(dict);
+    const machineMock = Object.create(HdcStateMachine.prototype);
+    machineMock.recallToConcept = vi.fn().mockResolvedValue({
+      concept: null, distance: 0, confidence: 1.0,
+      ambiguous: false, steps: 1
+    });
+
+    const result = await gateway.evaluateIntent(machineMock);
+    expect(result.route).toBe(ActionRoute.ACTION_FALLBACK);
+  });
+
+  it('custom thresholds pass through correctly', async () => {
+    /**
+     * WHY: Verifies that non-default threshold values are actually
+     * used in routing, not silently overridden by defaults.
+     */
+    const gateway = new PolicyGateway(dict, {
+      fallbackThreshold: 0.50,
+      clarifyThreshold: 0.80
+    });
+    const machineMock = Object.create(HdcStateMachine.prototype);
+    // confidence=0.75: above 0.50 (not fallback), below 0.80 (clarify)
+    machineMock.recallToConcept = vi.fn().mockResolvedValue({
+      concept: 'Intent.Custom', distance: 192, confidence: 0.75,
+      ambiguous: false, steps: 1
+    });
+
+    const result = await gateway.evaluateIntent(machineMock);
+    expect(result.route).toBe(ActionRoute.ACTION_CLARIFY);
+
+    // confidence=0.80: exactly at clarify threshold → AUTO_ROUTE
+    machineMock.recallToConcept = vi.fn().mockResolvedValue({
+      concept: 'Intent.Custom', distance: 154, confidence: 0.80,
+      ambiguous: false, steps: 1
+    });
+
+    const result2 = await gateway.evaluateIntent(machineMock);
+    expect(result2.route).toBe(ActionRoute.ACTION_AUTO_ROUTE);
+  });
+});

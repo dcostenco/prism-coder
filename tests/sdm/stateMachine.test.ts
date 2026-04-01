@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { HdcStateMachine } from '../../src/sdm/stateMachine.js';
 import { ConceptDictionary, DeterministicPRNG } from '../../src/sdm/conceptDictionary.js';
-import { SparseDistributedMemory, hammingDistance } from '../../src/sdm/sdmEngine.js';
+import { SparseDistributedMemory, hammingDistance, D_ADDR_UINT32 } from '../../src/sdm/sdmEngine.js';
 import { SqliteStorage } from '../../src/storage/sqlite.js';
 import { createTestDb } from '../helpers/fixtures.js';
 
@@ -184,3 +184,119 @@ describe('HDC State Machine & Cognitive Logic', () => {
     expect(result.ambiguous).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// EDGE CASES: Constructor guards, dimension checks, defensive copies
+// ═══════════════════════════════════════════════════════════════════
+
+describe('HdcStateMachine — Edge Cases & Error Guards', () => {
+  let storage: any;
+  let sdm: SparseDistributedMemory;
+  let cleanup: () => void;
+
+  beforeEach(async () => {
+    const db = await createTestDb("machine-edge-test");
+    storage = db.storage;
+    cleanup = db.cleanup;
+    sdm = new SparseDistributedMemory(42);
+  });
+
+  afterEach(async () => {
+    await storage.close();
+    cleanup();
+  });
+
+  it('constructor throws on wrong-sized initialState', () => {
+    /**
+     * WHY: stateMachine.ts line 9-11 guards initialState.length !== D_ADDR_UINT32.
+     * A wrong-sized vector would corrupt every subsequent transition
+     * because XOR alignment would be mismatched.
+     */
+    const wrongSize = new Uint32Array(10); // D_ADDR_UINT32 = 24
+    expect(() => new HdcStateMachine(wrongSize, sdm))
+      .toThrow(/must be exactly/i);
+  });
+
+  it('constructor throws on empty vector', () => {
+    const empty = new Uint32Array(0);
+    expect(() => new HdcStateMachine(empty, sdm))
+      .toThrow(/must be exactly/i);
+  });
+
+  it('transition() throws on wrong-sized role vector', () => {
+    /**
+     * WHY: stateMachine.ts line 26-28 guards vector dimensions.
+     * Mismatched dimensions between state and role/action would
+     * produce XOR over out-of-bounds memory (silent corruption).
+     */
+    const validState = new Uint32Array(D_ADDR_UINT32);
+    const machine = new HdcStateMachine(validState, sdm);
+
+    const wrongRole = new Uint32Array(12); // wrong dimension
+    const validAction = new Uint32Array(D_ADDR_UINT32);
+
+    expect(() => machine.transition(wrongRole, validAction))
+      .toThrow(/must be exactly/i);
+  });
+
+  it('transition() throws on wrong-sized action vector', () => {
+    const validState = new Uint32Array(D_ADDR_UINT32);
+    const machine = new HdcStateMachine(validState, sdm);
+
+    const validRole = new Uint32Array(D_ADDR_UINT32);
+    const wrongAction = new Uint32Array(1);
+
+    expect(() => machine.transition(validRole, wrongAction))
+      .toThrow(/must be exactly/i);
+  });
+
+  it('getCurrentState() returns a defensive clone (not the internal reference)', () => {
+    /**
+     * WHY: stateMachine.ts line 108 returns `new Uint32Array(this.currentState)`.
+     * If it returned the live internal array, external mutation would
+     * corrupt the machine's state without going through transition().
+     */
+    const validState = new Uint32Array(D_ADDR_UINT32);
+    validState[0] = 0xDEADBEEF;
+    const machine = new HdcStateMachine(validState, sdm);
+
+    const state1 = machine.getCurrentState();
+    const state2 = machine.getCurrentState();
+
+    // Same content
+    expect(state1).toEqual(state2);
+    // Different references — mutation of one must not affect the machine
+    expect(state1).not.toBe(state2);
+    state1[0] = 0;
+    expect(machine.getCurrentState()[0]).toBe(0xDEADBEEF >>> 0);
+  });
+
+  it('injectStateForTesting() throws on wrong-dimension vector', () => {
+    /**
+     * WHY: stateMachine.ts line 112 guards dimension.
+     * This testing-only API must not bypass safety checks.
+     */
+    const validState = new Uint32Array(D_ADDR_UINT32);
+    const machine = new HdcStateMachine(validState, sdm);
+    expect(() => machine.injectStateForTesting(new Uint32Array(5)))
+      .toThrow(/Invalid testing state dimension/i);
+  });
+
+  it('constructor clones initial state (does not hold external reference)', () => {
+    /**
+     * WHY: stateMachine.ts line 13 clones via `new Uint32Array(initialState)`.
+     * If the constructor held the external reference, mutation of the
+     * original array after construction would corrupt the machine.
+     */
+    const initial = new Uint32Array(D_ADDR_UINT32);
+    initial[0] = 0x12345678;
+    const machine = new HdcStateMachine(initial, sdm);
+
+    // Mutate the original AFTER construction
+    initial[0] = 0;
+
+    // Machine must retain the original value
+    expect(machine.getCurrentState()[0]).toBe(0x12345678 >>> 0);
+  });
+});
+

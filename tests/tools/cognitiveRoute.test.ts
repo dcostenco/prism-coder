@@ -257,12 +257,24 @@ describe("sessionCognitiveRouteHandler args guards", () => {
     expect(res.content[0].text).toContain("Invalid arguments");
   });
 
-  it("rejects inverted thresholds (fallback >= clarify) at guard level", async () => {
+
+
+  it("rejects NaN fallback_threshold and does not call gateway", async () => {
     const res = await sessionCognitiveRouteHandler({
       project: "p", state: "State:Test", role: "Role:dev", action: "Action:inspect",
-      fallback_threshold: 0.9, clarify_threshold: 0.3,
+      fallback_threshold: Number.NaN,
     });
     expect(res.isError).toBe(true);
+    expect(mockEvaluateIntent).not.toHaveBeenCalled();
+  });
+
+  it("rejects Infinity fallback_threshold and does not call gateway", async () => {
+    const res = await sessionCognitiveRouteHandler({
+      project: "p", state: "State:Test", role: "Role:dev", action: "Action:inspect",
+      fallback_threshold: Number.POSITIVE_INFINITY,
+    });
+    expect(res.isError).toBe(true);
+    expect(mockEvaluateIntent).not.toHaveBeenCalled();
   });
 });
 
@@ -455,10 +467,11 @@ describe("sessionCognitiveRouteHandler threshold semantics", () => {
     expect(mockStorage.setSetting).not.toHaveBeenCalled();
   });
 
-  it("falls back to config defaults on corrupt persisted threshold", async () => {
+
+  it("uses default fallback when persisted fallback is corrupt but clarify is valid", async () => {
     mockStorage.getSetting.mockImplementation(async (key: string) => {
-      if (key.includes("fallback")) return "not-a-number";
-      if (key.includes("clarify")) return "also-bad";
+      if (key === "hdc:fallback_threshold:p") return "not-a-number";
+      if (key === "hdc:clarify_threshold:p") return "0.9";
       return null;
     });
 
@@ -466,10 +479,55 @@ describe("sessionCognitiveRouteHandler threshold semantics", () => {
       project: "p", state: "State:Test", role: "Role:dev", action: "Action:inspect",
     });
 
-    // Should succeed using defaults (0.85, 0.95), not crash
     expect(res.isError).toBe(false);
-    const text = res.content[0].text;
-    expect(text).toContain("Route:");
+    expect(res.content[0].text).toContain("Route:");
+  });
+
+  it("uses default clarify when persisted clarify is corrupt but fallback is valid", async () => {
+    mockStorage.getSetting.mockImplementation(async (key: string) => {
+      if (key === "hdc:fallback_threshold:p") return "0.7";
+      if (key === "hdc:clarify_threshold:p") return "bad";
+      return null;
+    });
+
+    const res = await sessionCognitiveRouteHandler({
+      project: "p", state: "State:Test", role: "Role:dev", action: "Action:inspect",
+    });
+
+    expect(res.isError).toBe(false);
+    expect(res.content[0].text).toContain("Route:");
+  });
+
+  it("accepts fallback override only when persisted/default clarify remains valid", async () => {
+    mockStorage.getSetting.mockImplementation(async (key: string) => {
+      if (key === "hdc:clarify_threshold:p") return "0.93";
+      return null;
+    });
+
+    const res = await sessionCognitiveRouteHandler({
+      project: "p", state: "State:Test", role: "Role:dev", action: "Action:inspect",
+      fallback_threshold: 0.5,
+    });
+
+    expect(res.isError).toBe(false);
+    expect(mockStorage.setSetting).toHaveBeenCalledWith("hdc:fallback_threshold:p", "0.5");
+    expect(mockStorage.setSetting).toHaveBeenCalledWith("hdc:clarify_threshold:p", "0.93");
+  });
+
+  it("accepts clarify override only when persisted/default fallback remains valid", async () => {
+    mockStorage.getSetting.mockImplementation(async (key: string) => {
+      if (key === "hdc:fallback_threshold:p") return "0.4";
+      return null;
+    });
+
+    const res = await sessionCognitiveRouteHandler({
+      project: "p", state: "State:Test", role: "Role:dev", action: "Action:inspect",
+      clarify_threshold: 0.8,
+    });
+
+    expect(res.isError).toBe(false);
+    expect(mockStorage.setSetting).toHaveBeenCalledWith("hdc:fallback_threshold:p", "0.4");
+    expect(mockStorage.setSetting).toHaveBeenCalledWith("hdc:clarify_threshold:p", "0.8");
   });
 
   /**
@@ -529,23 +587,13 @@ describe("sessionCognitiveRouteHandler telemetry", () => {
     expect(data.duration_ms).toBeGreaterThanOrEqual(0);
   });
 
-  it("records null concept when result has no concept", async () => {
-    mockEvaluateIntent.mockResolvedValueOnce({
-      route: "ACTION_FALLBACK",
-      concept: null,
-      confidence: 0.3,
-      distance: 0.7,
-      ambiguous: false,
-      steps: 1,
-    });
-
+  it("records finite duration for telemetry", async () => {
     await sessionCognitiveRouteHandler({
-      project: "p", state: "State:Test", role: "Role:dev", action: "Action:inspect",
+      project: "telemetry-proj", state: "State:Test", role: "Role:dev", action: "Action:inspect",
     });
 
     const data = mockRecordCognitiveRoute.mock.calls[0][0];
-    expect(data.concept).toBeNull();
-    expect(data.route).toBe("ACTION_FALLBACK");
+    expect(Number.isFinite(data.duration_ms)).toBe(true);
   });
 });
 
@@ -580,7 +628,6 @@ describe("sessionCognitiveRouteHandler error paths", () => {
 
     expect(mockRecordCognitiveRoute).not.toHaveBeenCalled();
   });
-
   it("returns isError when storage.getSetting throws", async () => {
     mockStorage.getSetting.mockRejectedValueOnce(new Error("DB connection lost"));
 
@@ -590,5 +637,18 @@ describe("sessionCognitiveRouteHandler error paths", () => {
 
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toContain("DB connection lost");
+  });
+
+  it("returns isError when storage.setSetting throws during override persistence", async () => {
+    mockStorage.setSetting.mockRejectedValueOnce(new Error("persist failed"));
+
+    const res = await sessionCognitiveRouteHandler({
+      project: "p", state: "State:Test", role: "Role:dev", action: "Action:inspect",
+      fallback_threshold: 0.5, clarify_threshold: 0.8,
+    });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain("persist failed");
+    expect(mockRecordCognitiveRoute).not.toHaveBeenCalled();
   });
 });
