@@ -8,6 +8,23 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v6.2.0 — Autonomous Cognitive Loop ("Synthesize & Prune")
+
+| Feature | Detail |
+|---------|--------|
+| 🧬 **Edge Synthesis ("The Dream Procedure")** | Automated background linker (`session_synthesize_edges`) discovers semantically similar but disconnected memory nodes via cosine similarity (threshold ≥ 0.7). Batch-limited to 50 sources × 3 neighbors per sweep to prevent runaway graph growth. |
+| ✂️ **Graph Pruning (Soft-Prune)** | Configurable strength-based pruning (`PRISM_GRAPH_PRUNING_ENABLED`) soft-deletes weak links below a configurable minimum strength. Per-project cooldown, backpressure guards, and sweep budget controls. |
+| 📊 **SLO Observability Layer** | `graphMetrics.ts` tracks synthesis success rate, net new links, prune ratio, and sweep duration. Exposes `slo` and `warnings` fields for proactive health monitoring. |
+| 🖥️ **Dashboard Metrics Integration** | SLO cards, warning badges, and pruning skip breakdown (backpressure / cooldown / budget) in the Mind Palace dashboard at `/api/graph/metrics`. |
+| 🌡️ **Temporal Decay Heatmaps** | UI overlay toggle where un-accessed nodes desaturate while Graduated nodes stay vibrant. Graph router extraction + decay view toggle. |
+| 🧪 **Active Recall Prompt Generation** | "Test Me" utility in the node editor panel generates synthetic quizzes from semantic neighbors for knowledge activation. |
+| ⚡ **Supabase Weak-Link RPC (WS4.1)** | `prism_summarize_weak_links` Postgres function (migration 036) aggregates pruning server-side in one RPC call, eliminating N+1 network roundtrips. TypeScript fast-path with automatic fallback. |
+| 🔐 **Migration 035** | Tenant-safe graph writes + soft-delete hardening for MemoryLinks. |
+| 🔧 **Scheduler Telemetry Fix** | `projects_processed` now tracks all attempted projects, not just successes, for accurate SLO derivation. |
+| 🧪 **510 Tests** | 28 suites, TypeScript strict mode, zero errors. |
+
+---
+
 ### ✅ v6.1.0 — Prism-Port, Security Hardening & Dashboard Healing
 
 | Feature | Detail |
@@ -191,45 +208,30 @@ v3.0: Role-scoped memory, agent registration/heartbeat, Telepathy (real-time cro
 
 ---
 
-## 📊 The State of Prism (v6.1.8)
+## 📊 The State of Prism (v6.2.0)
 
-With v6.1.8 shipped, Prism is a **production-hardened, type-safe, cognitively-grounded AI Operating System**:
+With v6.2.0 shipped, Prism is a **production-hardened, self-organizing, cognitively-grounded AI Operating System**:
 
-- **Cognitive** — Ebbinghaus decay + context-boosted retrieval + Intuitive Recall = memory that knows what matters *right now*.
+- **Self-Organizing** — Edge Synthesis + Graph Pruning form an autonomous cognitive loop: the graph grows connective tissue overnight and prunes dead weight on schedule.
+- **Cognitive** — Ebbinghaus decay + context-boosted retrieval + Intuitive Recall + Active Recall quizzes = memory that knows what matters *right now*.
+- **Observable** — SLO dashboard tracks synthesis success rate, net link growth, prune ratio, and sweep latency. Warning badges fire proactively.
 - **Zero Cold-Start** — Universal Migration imports years of Claude/Gemini/ChatGPT history on day one.
 - **Scale** — TurboQuant 10× compression + Deep Storage Purge + SQLite VACUUM. Decades of session history on a laptop.
 - **Safe** — Full type-guard matrix across all 30+ MCP tools. LLM-hallucinated payloads are rejected at the boundary.
 - **Convergent** — CRDT OR-Map handoff merging. Multiple agents, zero conflicts.
 - **Autonomous** — Web Scholar researches while you sleep. Task-aware, Hivemind-integrated.
-- **Hardened** — Transactional migrations, graceful shutdown, thundering herd prevention, prototype pollution guards.
+- **Hardened** — Transactional migrations, graceful shutdown, thundering herd prevention, prototype pollution guards, tenant-safe graph writes.
 - **Quality** — Interactive Knowledge Graph Editor + Behavioral Memory that learns from mistakes.
-- **Reliability** — 425 passing tests across 20 suites.
-- **Observability** — OpenTelemetry span waterfalls for every tool call, LLM hop, and background worker.
+- **Reliability** — 510 passing tests across 28 suites.
+- **Observability** — OpenTelemetry span waterfalls + SLO metrics for every tool call, LLM hop, background worker, and graph sweep.
 - **Multimodal** — VLM auto-captioning turns screenshots into semantically searchable memory.
 - **Security** — SQL injection prevention, path traversal guard, GDPR Art. 17+20 compliance.
 
 ---
 
-## 🗺️ Next on the Horizon — v6.2
+## 🗺️ Next on the Horizon
 
-### 🧠 Autonomous Cognitive Loop Hardening (Immediate Priority)
-
-**Problem:** The graph intelligence stack is feature-complete but still partially operator-driven. Without hardened autonomous execution, scheduler drift and noisy links can degrade retrieval quality over time.
-
-**Solution:** Prioritize reliability of the synthesis/pruning loop before adding higher-complexity cognitive features.
-
-**Execution track (v6.2.x):**
-1. **Step 5 closure:** Fix scheduler telemetry semantics (`projects_processed`) and add route-level `/api/graph/metrics` integration coverage.
-2. **Resilient scheduled synthesis:** Add cooldown, runtime budget, bounded retry/backoff, and explicit failure accounting.
-3. **Proactive graph pruning:** Scheduler-driven weak-link pruning (`strength < threshold`) with safety caps and structured observability.
-4. **Graph-loop SLOs:** Track synthesis success rate, net-new links/sweep, prune ratio, and sweep latency in dashboard health views.
-
-**Exit gates:**
-- 7-day stable scheduler operation with no runaway link growth
-- Deterministic prune behavior under configured link-budget caps
-- Healthy synthesis failure rate and bounded sweep duration
-
-### 📱 Mind Palace Mobile PWA
+### 📱 Mind Palace Mobile PWA — v6.3
 
 **Problem:** The dashboard is desktop-only. Quick check-ins on mobile require a laptop.
 
@@ -240,7 +242,7 @@ With v6.1.8 shipped, Prism is a **production-hardened, type-safe, cognitively-gr
 2. Service worker + offline cache for read-only access
 3. Push notifications via Web Push API for Telepathy events
 
-## 🧠 Cognitive Architecture — v6.5
+### 🧠 Cognitive Architecture — v6.5
 
 ### Full Superposed Memory (SDM) & Hyperdimensional Computing (HDC/VSA)
 
@@ -258,6 +260,7 @@ Foundation shipped in v5.5 (typed-array decoder, GC-free hot loop); HDC algebra 
 
 | Feature | Notes |
 |---------|-------|
+| **Supabase `summarizeWeakLinks` N+1 Removal** | Migration 036 ships the RPC; remove the sequential REST fallback once 036 is confirmed deployed across all tenants |
 | Supabase RPC Soft-Delete Filtering | Server-side GDPR filtering at the RPC layer |
 | Prism CLI | Standalone CLI for backup, export, and health check without MCP |
 | Plugin System | Third-party tool registration via MCP tool composition |
