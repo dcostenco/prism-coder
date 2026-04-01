@@ -2,7 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
-## [6.1.9] - 2026-03-30
+## [6.2.0] - 2026-03-31
+
+### Added
+- **Edge Synthesis ("The Dream Procedure")** — Automated background linker (`session_synthesize_edges`) discovers semantically similar but disconnected memory nodes via cosine similarity (threshold ≥ 0.7). Batch-limited to 50 sources × 3 neighbors per sweep to prevent runaway graph growth.
+- **Graph Pruning (Soft-Prune)** — Configurable strength-based pruning (`PRISM_GRAPH_PRUNING_ENABLED`) soft-deletes weak links below a configurable minimum strength. Includes per-project cooldown, backpressure guards, and sweep budget controls.
+- **SLO Observability Layer** — `graphMetrics.ts` module tracks synthesis success rate, net new links, prune ratio, and sweep duration. Exposes `slo` and `warnings` fields for proactive health monitoring.
+- **Dashboard Metrics Integration** — New SLO cards, warning badges, and pruning skip breakdown (backpressure / cooldown / budget) in the Mind Palace dashboard at `/api/graph/metrics`.
+- **Temporal Decay Heatmaps** — UI overlay toggle where un-accessed nodes desaturate while Graduated nodes stay vibrant. Graph router extraction + decay view toggle.
+- **Active Recall Prompt Generation** — "Test Me" utility in the node editor panel generates synthetic quizzes from semantic neighbors for knowledge activation.
+- **Supabase Weak-Link RPC (WS4.1)** — New `prism_summarize_weak_links` Postgres function (migration 036) aggregates pruning server-side in one RPC call, eliminating N+1 network roundtrips. TypeScript fast-path with automatic fallback.
+- **Migration 035** — Tenant-safe graph writes + soft-delete hardening for MemoryLinks.
+
+### Fixed
+- **Scheduler `projects_processed` Semantics** — Now tracks all attempted projects, not just successes, for accurate SLO derivation.
+- **Router Integration Test** — Added `GET /api/graph/metrics` integration test to validate the full metrics pipeline.
+- **Export Test Mock Staleness** — Added missing `PRISM_GRAPH_PRUNE*` config exports to `sessionExportMemory.test.ts` mock (transitive import fix).
+- **Dashboard `const` in Switch** — Fixed `const` declaration in switch-case scope (`pruneSkipParts`) that caused strict-mode errors in some browsers.
+
+### Architecture
+- New module: `src/observability/graphMetrics.ts` — in-memory metrics with SLO derivation and warning heuristics.
+- New migration: `supabase/migrations/036_prune_summary_rpc.sql` — server-side aggregate RPC.
+- Extended: `src/backgroundScheduler.ts` — synthesis telemetry, pruning telemetry, sweep duration recording.
+- Extended: `src/dashboard/graphRouter.ts` — `GET /api/graph/metrics` endpoint.
+- Extended: `src/dashboard/ui.ts` — SLO cards, warning badges, pruning breakdown.
+
+### Engineering
+- 510 tests across 28 suites (all passing)
+- TypeScript strict mode: zero errors
+
+---
+
 
 ### Added
 - **Tavily Support** — Added `@tavily/core` integration as a robust alternative to Brave + Firecrawl for the Web Scholar pipeline. Supports `performTavilySearch` and `performTavilyExtract`.

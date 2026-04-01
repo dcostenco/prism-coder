@@ -395,51 +395,30 @@ Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.z
 
 ## 🆕 What's New
 
-### v6.1 — Prism-Port, Cognitive Load & Semantic Search ✅
-> **Current stable release (v6.1.9).** Data sovereignty meets active memory intelligence.
+### v6.2 — The "Synthesize & Prune" Phase ✅
+> **Current stable release (v6.2.0).** The Mind Palace becomes self-organizing.
 
-- 📦 **Prism-Port Vault Export** — New `vault` format for `session_export_memory`. Generates a `.zip` of interlinked Markdown files with YAML frontmatter, `[[Wikilinks]]`, and auto-generated `Keywords/` backlink indices. Drop into Obsidian or Logseq for instant knowledge graph.
-- 🏛️ **Dashboard Export Vault Button** — "🏛️ Export Vault" button in the Mind Palace UI exports the full Prism-Port vault ZIP directly from the browser. Both `/api/export` and `/api/export/vault` now use the unified `buildVaultDirectory` path — same rich format as the MCP tool.
-- 🏥 **Dashboard Health Cleanup** — The "Fix Issues" button now repairs missing embeddings directly from the Mind Palace UI.
-- 🧠 **Smart Memory Merge UI** — Dynamically merge duplicate knowledge nodes right from the Graph Editor. "Knowledge Gardening" made effortless.
-- ✨ **Semantic Search Highlighting** — Native RegEx mapping that visually wraps the exact reason a vector result was retrieved during a search.
-- 📊 **Deep Purge Visualization** — A zero-overhead "Memory Density" analytic providing instant signal-to-noise ratio visibility (Graduated ideas vs raw concepts).
-- 🛡️ **Context-Boosted Search** — Biases semantic queries by intelligently interleaving your current project workspace.
+- 🕸️ **Edge Synthesis ("The Dream Procedure")** — Automated background linker discovers semantically similar but disconnected memory nodes via cosine similarity (≥ 0.7 threshold). Batch-limited to 50 sources × 3 neighbors. New `session_synthesize_edges` tool for on-demand graph enrichment.
+- ✂️ **Graph Pruning (Soft-Prune)** — Configurable strength-based pruning soft-deletes weak links. Includes per-project cooldown, backpressure guards, and sweep budget controls. Enable with `PRISM_GRAPH_PRUNING_ENABLED=true`.
+- 📊 **SLO Observability** — New `graphMetrics.ts` module tracks synthesis success rate, net new links, prune ratio, and sweep duration. Exposes `slo` and `warnings` fields at `GET /api/graph/metrics` for proactive health monitoring.
+- 🗓️ **Temporal Decay Heatmaps** — UI overlay toggle where un-accessed nodes desaturate while Graduated nodes stay vibrant. Makes the Ebbinghaus curve visceral.
+- 📝 **Active Recall ("Test Me")** — Node editor panel generates synthetic quizzes from semantic neighbors for knowledge activation.
+- ⚡ **Supabase Weak-Link RPC (WS4.1)** — New `prism_summarize_weak_links` Postgres function (migration 036) aggregates pruning server-side, eliminating N+1 network roundtrips.
+- 🔒 **Migration 035** — Tenant-safe graph writes + soft-delete hardening for MemoryLinks.
 
-#### v6.1.9 — Web Scholar Tavily Integration
-- 🌐 **Tavily Core** — The Web Scholar now supports `@tavily/core` as an all-in-one search and extraction alternative to Brave+Firecrawl.
-- 📦 **API Chunking Limits** — Advanced looping logic transparently works around `tavily.extract` 20-URL boundaries.
-- 🛡️ **Network Resilience** — Handled promise rejections prevent data loss out-of-bounds due to chunk extraction or upstream network timeouts.
+<details>
+<summary><strong>v6.1 — Prism-Port, Cognitive Load & Semantic Search</strong></summary>
 
-#### v6.1.8 — Type Guard Hardening (Production Safety)
-- 🛡️ **Missing Guard Added** — `isSessionCompactLedgerArgs` was absent; an LLM passing `{threshold: "many"}` would reach the handler as a string. Added full validation for all four optional fields.
-- ✅ **Array Field Validation** — `isSessionSaveLedgerArgs` now guards `todos`, `files_changed`, and `decisions` with `Array.isArray` checks — prevents a hallucinated `{todos: "string"}` from bypassing the type system.
-- 🔖 **Enum Literal Guard** — `isSessionExportMemoryArgs` now rejects any `format` value outside `'json' | 'markdown' | 'vault'` at the boundary instead of propagating to the handler.
-- 🔢 **Numeric Field Guards** — `isSessionIntuitiveRecallArgs` now validates `limit` and `threshold` as numbers, blocking string coercion (`{limit: "many"}`).
-- 🧹 **Legacy Guard Migration** — `isMemoryHistoryArgs`, `isMemoryCheckoutArgs`, and `isSessionSaveImageArgs` migrated to the consistent `Record<string, unknown>` pattern; `isMemoryHistoryArgs` also gains a previously missing `limit` number check.
+- 📦 **Prism-Port Vault Export** — `.zip` of interlinked Markdown files with YAML frontmatter, `[[Wikilinks]]`, and `Keywords/` backlink indices for Obsidian/Logseq.
+- 🧠 **Smart Memory Merge UI** — Merge duplicate knowledge nodes from the Graph Editor.
+- ✨ **Semantic Search Highlighting** — RegEx-powered match engine wraps exact keyword matches in `<mark>` tags.
+- 📊 **Deep Purge Visualization** — "Memory Density" analytic for signal-to-noise ratio.
+- 🛡️ **Context-Boosted Search** — Biases semantic queries by current project workspace.
+- 🌐 **Tavily Web Scholar** — `@tavily/core` as alternative to Brave+Firecrawl.
+- 🛡️ **Type Guard Hardening** — Full audit of all 11+ MCP tool argument guards.
+- 🔄 **Dashboard Toggle Persistence** — Optimistic rollback on save failure.
 
-#### v6.1.7 — Dashboard Toggle Persistence
-- 🔄 **Rollback on Save Failure** — `saveSetting()` now returns `Promise<boolean>`; UI toggles (Hivemind, Auto-Capture) roll back their optimistic state if the server request fails.
-- 🚫 **Cache-Busting** — `loadSettings()` appends `?t=<timestamp>` to bypass stale browser/service-worker caches.
-- 🔔 **HTTP Error Detection** — Explicit 4xx/5xx catching in `saveSetting()` surfaces failed saves as user-visible toast notifications.
-
-#### v6.1.6 — Type Guard Audit (Round 1)
-- 🛡️ **11 Type Guards Hardened** — Audited and refactored all MCP tool argument guards to include explicit `typeof` validation for optional fields, preventing LLM-hallucinated payloads from causing runtime type coercion errors.
-
-#### v6.1.5 — SQLite Deep Storage TTL
-- 🧪 **Comprehensive Edge-Case Test Suite** — 425 tests across 20 files covering CRDT merges, TurboQuant mathematical invariants, prototype pollution guards, and SQLite retention TTL boundary conditions.
-- 🔒 **Prototype Pollution Guards** — CRDT merge pipeline hardened against `__proto__` / `constructor` injection via `Object.create(null)` scratchpads.
-- 🗜️ **`maintenance_vacuum` Tool** — New tool to reclaim SQLite disk space after large purge operations.
-
-#### v6.1.4 — Production Hardening
-- 🔒 **Embedding Binary Strip** — Both `embedding` (raw float32) and `embedding_compressed` (TurboQuant binary blob) are now stripped from all export formats, preventing ~400 bytes of raw binary per entry from appearing in vault/JSON exports.
-- 🔗 **Vault Wikilink Fix** — Keyword backlink paths now use vault-relative `Ledger/filename.md` instead of `../Ledger/filename.md` — ensuring correct internal link resolution in Obsidian and Logseq.
-- 🖼️ **Visual Memory Key Fix** — Export correctly reads `filename` and `timestamp` (the keys written by `session_save_image`), resolving a mismatch that produced `"Unknown"` values in the vault visual memory index.
-- 🛡️ **OOM Guard on Large Exports** — `getLedgerEntries` in the export handler now has a 10,000-entry ceiling with explicit `ORDER BY created_at ASC`, preventing unbounded heap allocation on high-volume projects.
-- ⚡ **O(1) Filename Dedup** — Vault filename collision resolution upgraded from O(n²) loop to O(1) `Map<string, number>` counter. Important for projects with many same-day sessions.
-- 🔧 **TurboQuant Guard** — `bits` parameter now validated to `[2, 6]` range at construction time, preventing accidental multi-second Lloyd-Max initialization at higher bit depths.
-
-![Prism v6 Features](docs/v6_cognitive_load_dashboard.png)
+</details>
 
 <details>
 <summary><strong>Earlier releases (v5.x and below)</strong></summary>
@@ -466,29 +445,43 @@ Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.z
 
 ---
 
-## 🆚 How Prism Compares
+## ⚔️ How Prism Compares
 
-| Capability | **Prism MCP** | [MCP Memory](https://github.com/modelcontextprotocol/servers/tree/main/src/memory) | [Mem0](https://github.com/mem0ai/mem0) | [Mnemory](https://github.com/fpytloun/mnemory) | [Basic Memory](https://github.com/basicmachines-co/basic-memory) |
-|:-----------|:---:|:---:|:---:|:---:|:---:|
-| Zero-config (`npx` one-liner) | ✅ | ✅ | ❌ Docker | ✅ | ✅ |
-| Time travel (version revert) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Behavioral memory (mistake learning) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Visual dashboard | ✅ | ❌ | ✅ Web | ❌ | ❌ |
-| Multi-agent Hivemind | ✅ | ❌ | ❌ | ❌ | ❌ |
-| CRDT conflict-free merging | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Autonomous research (Web Scholar) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Visual memory (VLM screenshots) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| 10× vector compression | ✅ | ❌ | ❌ (Qdrant) | ❌ | ❌ |
-| Obsidian/Logseq vault export | ✅ | ❌ | ❌ | ❌ | ✅ |
-| Token budgeting | ✅ | ❌ | ❌ | ❌ | ❌ |
-| GDPR compliance (Art. 17 + 20) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| OpenTelemetry tracing | ✅ | ❌ | ❌ | ❌ | ❌ |
-| IDE rules sync (`.cursorrules`) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Air-gapped mode (Ollama) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Morning Briefings | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Auto-compaction | ✅ | ❌ | ❌ | ❌ | ❌ |
+While standard Memory MCPs act as passive filing cabinets, Prism is an **active cognitive architecture** that manages its own health, compresses its own data, and learns autonomously in the background.
 
-> **TL;DR:** Prism is the only MCP memory server with time travel, behavioral learning, autonomous research, CRDT multi-agent sync, and 10× compression — all from a single `npx` command.
+| Feature | 🧠 **Prism MCP** | Official Anthropic Memory | Cloud APIs (Mem0 / Zep) | Simple SQLite/File MCPs |
+|:---|:---:|:---:|:---:|:---:|
+| **Paradigm** | **Active & Autonomous** | Passive Entity Graph | Passive Vector Store | Passive Log |
+| **Context Assembly** | **Progressive (Quick/Std/Deep)** | Manual JSON retrieval | Similarity Search only | Dump all / exact match |
+| **Graph Generation** | **Auto-Synthesized (Edges)** | Manual (LLM must write JSON) | Often none / black box | None |
+| **Context Window Mgmt** | **Auto-Compaction & Decay** | Endless unbounded growth | Requires paid API logic | Manual deletion required |
+| **Storage Engine** | **Local SQLite OR Supabase** | Local File | Cloud Only (Vendor lock-in) | Local SQLite |
+| **Vector Search** | **Three-Tier (Native / TQ / FTS5)** | ❌ None | ✅ Yes (Remote) | ❌ None |
+| **Vector Compression** | **TurboQuant (10× smaller)** | ❌ N/A | ❌ Expensive/Opaque | ❌ N/A |
+| **Multi-Agent Sync** | **CRDTs + Hivemind Watchdog** | ❌ Single-agent only | ✅ Paid feature | ❌ Data collisions |
+| **Observability** | **OTel Traces + Web Dashboard** | ❌ None | ✅ Web Dashboard | ❌ None |
+| **Data Portability** | **Prism-Port (Obsidian Vault ZIP)** | ❌ Raw JSON | ❌ API Export | ❌ Raw DB file |
+| **Cost Model** | **Free + BYOM (Ollama)** | Free (limited) | Per-API-call pricing | Free (limited) |
+
+### 🏆 Why Prism Wins: The "Big Three" Differentiators
+
+**1. Zero Cold-Starts with Progressive Loading & OCC**
+Other systems require the LLM to waste tokens and reasoning steps asking "What was I doing?" and calling tools to fetch memory. Prism uses MCP Resources to instantly inject the live project state into the context window *before* the LLM generates its first token. CRDT-backed Optimistic Concurrency Control ensures multiple agents (e.g., Claude + Cursor) can work on the same project simultaneously without data collisions.
+
+**2. Self-Cleaning & Self-Optimizing**
+If you use a standard memory tool long enough, it clogs the LLM's context window with thousands of obsolete tokens. Prism runs an autonomous Background Scheduler that:
+- **Ebbinghaus Decays** older, unreferenced memories — importance fades unless reinforced.
+- **Auto-Compacts** large session histories into dense, LLM-generated summaries.
+- **Deep Purges** high-precision vectors, replacing them with 400-byte TurboQuant compressed blobs, saving ~90% of disk space.
+
+> 💰 **Token Economics:** Progressive Context Loading (Quick ~50 tokens / Standard ~200 / Deep ~1000+) plus auto-compaction means you never blow your Claude/OpenAI token budget fetching 50 pages of raw chat history.
+
+**3. The Associative Memory Graph**
+Prism doesn't just store logs; it connects them. When a session is saved, Prism automatically creates temporal chains (what happened next) and keyword overlap edges. In the background, Edge Synthesis actively scans for latent relationships and *synthesizes* new graph edges between conceptually similar but disconnected memories — turning passive storage into an active, self-organizing knowledge graph.
+
+> 🔌 **BYOM (Bring Your Own Model):** While tools like Mem0 charge per API call, Prism's pluggable architecture lets you run `nomic-embed-text` locally via Ollama for **free vectors**, while using Claude or GPT for high-level reasoning. Zero vendor lock-in.
+>
+> 🏛️ **Prism-Port for PKM:** Prism turns your AI's brain into a readable [Obsidian](https://obsidian.md) / [Logseq](https://logseq.com) vault. Export with `session_export_memory(format='vault')` — complete with YAML frontmatter, `[[Wikilinks]]`, and keyword backlink indices. No more black-box AI memory.
 
 ---
 
@@ -694,7 +687,7 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 | **v6.2+** | Full Superposed Memory (SDM) — O(1) key-value retrieval via Hamming correlation | Kanerva's SDM | 🔬 In Progress |
 | **v6.1** | Prism-Port Vault Export — Obsidian/Logseq `.zip` with YAML frontmatter & `[[Wikilinks]]` | Data sovereignty, PKM interop | ✅ Shipped |
 | **v6.1** | Cognitive Load & Semantic Search — dynamic graph thinning, search highlights | Contextual working memory | ✅ Shipped |
-| **v6.2** | Synthesize & Prune — automated edge synthesis and visual decay | Implicit associative memory | 🔬 In Progress |
+| **v6.2** | Synthesize & Prune — automated edge synthesis, graph pruning, SLO observability | Implicit associative memory | ✅ Shipped |
 | **v7.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) | 🔭 Horizon |
 | **v8+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
 
@@ -706,12 +699,11 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 
 > **[Full ROADMAP.md →](ROADMAP.md)**
 
-### v6.2: The "Synthesize & Prune" Phase
-The v6.1 series (through v6.1.8) shipped Prism-Port vault export, Intuitive Recall, full type guard hardening, and dashboard toggle persistence. The v6.2 phase aims to turn collected data into proactive intelligence, moving the dashboard from a passive storage viewer into an active, self-organizing Mind Palace.
+### v6.2: The "Synthesize & Prune" Phase ✅
+Shipped in v6.2.0. Edge synthesis, graph pruning with SLO observability, temporal decay heatmaps, active recall prompt generation, and full dashboard metrics integration.
 
-1. 🕸️ **Automated Edge Synthesis (The "Dream" Procedure):** A background routine that runs on the graph payload to find semantically similar but disconnected nodes via Cosine Similarity. It highlights potential ghostly edges in the UI, empowering the system to autonomously suggest new mental models instead of waiting for the user to connect the dots manually.
-2. 🗓️ **Temporal Decay Heatmaps (Visualizing the Ebbinghaus Curve):** A UI overlay toggle where un-accessed nodes dynamically desaturate or physically "fade" while Graduated nodes (Score >= 7) stay vibrant longer. This makes the "Deep Purge" decision-making visceral: if the graph looks gray, trigger a learning session or a cleanup.
-3. 📝 **Active Recall Prompt Generation (Knowledge Activation):** A "Test Me" utility in the `nodeEditorPanel`. Using a node's semantic neighbors, the dashboard generates synthetic quizzes to ensure context retention, pushing the product away from pure "storage" into genuine "active learning" capabilities.
+### v7.x: Affect-Tagged Memory
+Sentiment and emotional valence shape what gets recalled — bringing affect-modulated retrieval from neuroscience into agentic memory.
 
 ---
 

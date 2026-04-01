@@ -2995,7 +2995,7 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
           parts.push(' (' + pruneRatio + '%)');
           parts.push('<br>Threshold: ' + m.pruning.min_strength_last + ' | ' + m.pruning.duration_ms_last + 'ms');
 
-          const pruneSkipParts = [];
+          var pruneSkipParts = [];
           if (m.pruning.skipped_backpressure_last > 0) pruneSkipParts.push('⏳ ' + m.pruning.skipped_backpressure_last + ' backpressure');
           if (m.pruning.skipped_cooldown_last > 0) pruneSkipParts.push('🕒 ' + m.pruning.skipped_cooldown_last + ' cooldown');
           if (m.pruning.skipped_budget_last > 0) pruneSkipParts.push('⛽ ' + m.pruning.skipped_budget_last + ' budget');

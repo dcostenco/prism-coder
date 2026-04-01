@@ -102,6 +102,12 @@ vi.mock("../../src/config.js", () => ({
   PRISM_CAPTURE_PORTS:    [],
   GOOGLE_API_KEY:         "",
   SERVER_CONFIG:          { name: "prism-test", version: "4.5.1" },
+  // Step 5 pruning config — required by backgroundScheduler.ts transitive import
+  PRISM_GRAPH_PRUNING_ENABLED:            false,
+  PRISM_GRAPH_PRUNE_MIN_STRENGTH:         0.15,
+  PRISM_GRAPH_PRUNE_PROJECT_COOLDOWN_MS:  600_000,
+  PRISM_GRAPH_PRUNE_SWEEP_BUDGET_MS:      30_000,
+  PRISM_GRAPH_PRUNE_MAX_PROJECTS_PER_SWEEP: 25,
 }));
 
 vi.mock("../../src/utils/logger.js", () => ({

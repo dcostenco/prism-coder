@@ -1270,6 +1270,29 @@ export class SupabaseStorage implements StorageBackend {
     maxSourceEntries: number = 25,
     maxLinksPerSource: number = 25,
   ): Promise<{ sources_considered: number; links_scanned: number; links_soft_pruned: number }> {
+    // WS4.1 fast-path: aggregate server-side in one RPC call.
+    try {
+      const rpcResult = await supabaseRpc("prism_summarize_weak_links", {
+        p_project: project,
+        p_user_id: userId,
+        p_min_strength: minStrength,
+        p_max_source_entries: maxSourceEntries,
+        p_max_links_per_source: maxLinksPerSource,
+      });
+
+      const row = Array.isArray(rpcResult) ? rpcResult[0] : rpcResult;
+      if (row && typeof row === "object") {
+        return {
+          sources_considered: Number((row as any).sources_considered) || 0,
+          links_scanned: Number((row as any).links_scanned) || 0,
+          links_soft_pruned: Number((row as any).links_soft_pruned) || 0,
+        };
+      }
+    } catch (e: any) {
+      debugLog("[SupabaseStorage] summarizeWeakLinks RPC path failed, falling back: " + e.message);
+    }
+
+    // Compatibility fallback: iterative N+1 path (kept for migration lag/fault tolerance)
     try {
       const rows = await this.getLedgerEntries({
         project: `eq.${project}`,
@@ -1297,7 +1320,7 @@ export class SupabaseStorage implements StorageBackend {
         links_soft_pruned: linksSoftPruned,
       };
     } catch (e: any) {
-      debugLog("[SupabaseStorage] summarizeWeakLinks failed: " + e.message);
+      debugLog("[SupabaseStorage] summarizeWeakLinks fallback failed: " + e.message);
       return {
         sources_considered: 0,
         links_scanned: 0,
@@ -1305,6 +1328,7 @@ export class SupabaseStorage implements StorageBackend {
       };
     }
   }
+
 
   async findKeywordOverlapEntries(
     excludeId: string,
