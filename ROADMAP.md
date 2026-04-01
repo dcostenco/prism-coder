@@ -1,6 +1,6 @@
 # Prism MCP — Roadmap
 
-> Full project board: https://github.com/users/dcostenco/projects/1/views/1
+> Full project board: GitHub Projects (internal tracking)
 
 ---
 
