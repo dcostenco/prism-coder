@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.0.0] - 2026-04-01
+
+### Added
+- **ACT-R Activation Memory** — Scientifically-grounded memory retrieval based on Anderson's ACT-R cognitive architecture. Base-level activation `B_i = ln(Σ t_j^{-d})` replaces flat similarity search with recency × frequency scoring that mirrors human cognitive decay. Memories accessed recently and frequently surface first; stale context fades naturally.
+- **Candidate-Scoped Spreading Activation** — Activation spreads only within the current search result set, preventing "God node" centrality bias where highly-connected nodes dominate every query regardless of relevance.
+- **Composite Scoring** — `0.7 × similarity + 0.3 × σ(activation)` blends semantic relevance with cognitive activation. Sigmoid normalization keeps activation in `[0,1]` regardless of access pattern. Weights configurable via `PRISM_ACTR_WEIGHT_SIMILARITY` / `PRISM_ACTR_WEIGHT_ACTIVATION`.
+- **AccessLogBuffer** — In-memory batch-write buffer with 5-second flush window resolves `SQLITE_BUSY` contention during parallel multi-agent tool calls. Registered with `BackgroundTaskRegistry` for graceful shutdown — no orphaned writes on `SIGTERM`.
+- **Zero Cold-Start** — Memory creation now seeds an initial access log entry. New memories are immediately rankable without a warm-up period.
+- **Supabase Migration 037** — `actr_access_log` table + RPC functions for access log writes and activation computation. Full feature parity with SQLite backend.
+- **5 New Environment Variables** — `PRISM_ACTR_ENABLED` (default: `true`), `PRISM_ACTR_DECAY` (default: `0.5`), `PRISM_ACTR_WEIGHT_SIMILARITY` (default: `0.7`), `PRISM_ACTR_WEIGHT_ACTIVATION` (default: `0.3`), `PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS` (default: `90`).
+
+### Changed
+- **Cognitive Memory Pipeline** — `cognitiveMemory.ts` refactored to integrate ACT-R activation scoring into the retrieval pipeline. When `PRISM_ACTR_ENABLED=true`, search results are re-ranked with composite scores; when disabled, falls back to pure similarity.
+- **Tracing Integration** — OpenTelemetry spans added for ACT-R activation computation, access log writes, and buffer flushes.
+
+### Documentation
+- **README Overhaul** — Added "Mind Palace" terminology definition, promoted Universal Import to top-level section, added Quick Start port-conflict collapsible, added "Recommended Minimal Setup" TL;DR for environment variables, updated dashboard screenshot to v7.0.0, added dashboard-runs-in-background reassurance.
+- **ROADMAP** — v7.0.0 entry with full ACT-R feature table. "State of Prism" updated to v7.0.0. Future tracks bumped to v8.x/v9+.
+
+### Architecture
+- New file: `src/utils/actrActivation.ts` — 250 lines. ACT-R base-level activation, sigmoid normalization, composite scoring.
+- New file: `src/utils/accessLogBuffer.ts` — 199 lines. In-memory batch-write buffer with 5s flush, `BackgroundTaskRegistry` integration.
+- New migration: `supabase/migrations/037_actr_access_log_parity.sql` — 121 lines. Access log table, RPC functions, retention cleanup.
+- Extended: `src/storage/sqlite.ts` — Access log table creation, write/query methods, retention sweep.
+- Extended: `src/storage/supabase.ts` — Access log RPC calls, activation computation.
+- Extended: `src/tools/graphHandlers.ts` — ACT-R activation integration in search handler.
+- Extended: `src/utils/cognitiveMemory.ts` — Composite scoring pipeline with ACT-R re-ranking.
+- Extended: `src/utils/tracing.ts` — ACT-R span instrumentation.
+
+### Engineering
+- 705 tests across 32 suites (49 new ACT-R tests), all passing, zero regressions
+- New file: `tests/utils/actr-activation.test.ts` — 695 lines covering activation math, buffer flush, cold-start seeding, SQLite/Supabase parity, decay parameter edge cases
+- TypeScript strict mode: zero errors
+
+---
+
 ## [6.5.3] - 2026-04-01
 
 ### Added

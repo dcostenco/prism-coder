@@ -167,6 +167,31 @@ export interface MemoryTrace {
 
   /** Project scope (null = searched across all projects) */
   project: string | null;
+
+  // ─── v7.0: ACT-R Activation Observability ────────────────────
+
+  /** Mean base-level activation B_i across all returned results (undefined if ACT-R disabled) */
+  actr_base_level_mean?: number;
+  /** @alias actr_base_level_mean — plan-documented name for per-result tracing */
+  actr_base_level_activation?: number;
+
+  /** Mean spreading activation S_i across all returned results (undefined if ACT-R disabled) */
+  actr_spreading_mean?: number;
+  /** @alias actr_spreading_mean — plan-documented name for per-result tracing */
+  actr_spreading_activation?: number;
+
+  /** Mean sigmoid output σ(B_i + S_i) across all returned results (undefined if ACT-R disabled) */
+  actr_sigmoid_mean?: number;
+  /** @alias actr_sigmoid_mean — plan-documented name for per-result tracing */
+  actr_sigmoid_activation?: number;
+
+  /** Mean composite score across all returned results (undefined if ACT-R disabled) */
+  actr_composite_mean?: number;
+  /** @alias actr_composite_mean — plan-documented name for per-result tracing */
+  actr_composite_score?: number;
+
+  /** Whether ACT-R re-ranking was applied */
+  actr_enabled?: boolean;
 }
 
 // ─── Factory ──────────────────────────────────────────────────
@@ -202,8 +227,14 @@ export function createMemoryTrace(params: {
   storageMs: number;
   totalMs: number;
   project: string | null;
+  // v7.0: Optional ACT-R metrics
+  actrBaseLevelMean?: number;
+  actrSpreadingMean?: number;
+  actrSigmoidMean?: number;
+  actrCompositeMean?: number;
+  actrEnabled?: boolean;
 }): MemoryTrace {
-  return {
+  const trace: MemoryTrace = {
     strategy: params.strategy,
     query: params.query,
     result_count: params.resultCount,
@@ -217,6 +248,33 @@ export function createMemoryTrace(params: {
     timestamp: new Date().toISOString(),
     project: params.project,
   };
+
+  // v7.0: Attach ACT-R metrics only when present (keeps trace clean when disabled)
+  if (params.actrEnabled !== undefined) {
+    trace.actr_enabled = params.actrEnabled;
+    if (params.actrBaseLevelMean !== undefined) {
+      const v = Math.round(params.actrBaseLevelMean * 1000) / 1000;
+      trace.actr_base_level_mean = v;
+      trace.actr_base_level_activation = v; // plan-documented alias
+    }
+    if (params.actrSpreadingMean !== undefined) {
+      const v = Math.round(params.actrSpreadingMean * 1000) / 1000;
+      trace.actr_spreading_mean = v;
+      trace.actr_spreading_activation = v; // plan-documented alias
+    }
+    if (params.actrSigmoidMean !== undefined) {
+      const v = Math.round(params.actrSigmoidMean * 1000) / 1000;
+      trace.actr_sigmoid_mean = v;
+      trace.actr_sigmoid_activation = v; // plan-documented alias
+    }
+    if (params.actrCompositeMean !== undefined) {
+      const v = Math.round(params.actrCompositeMean * 1000) / 1000;
+      trace.actr_composite_mean = v;
+      trace.actr_composite_score = v; // plan-documented alias
+    }
+  }
+
+  return trace;
 }
 
 /**

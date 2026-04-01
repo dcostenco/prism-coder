@@ -87,7 +87,21 @@ import { notifyResourceUpdate } from "../server.js";
  *
  * After saving, generates an embedding vector for the entry via fire-and-forget.
  */
-import { computeEffectiveImportance, updateLastAccessed } from "../utils/cognitiveMemory.js";
+import { computeEffectiveImportance, recordMemoryAccess } from "../utils/cognitiveMemory.js";
+import {
+  baseLevelActivation,
+  candidateScopedSpreadingActivation,
+  compositeRetrievalScore,
+} from "../utils/actrActivation.js";
+import {
+  PRISM_ACTR_ENABLED,
+  PRISM_ACTR_DECAY,
+  PRISM_ACTR_WEIGHT_SIMILARITY,
+  PRISM_ACTR_WEIGHT_ACTIVATION,
+  PRISM_ACTR_SIGMOID_MIDPOINT,
+  PRISM_ACTR_SIGMOID_STEEPNESS,
+  PRISM_ACTR_MAX_ACCESSES_PER_ENTRY,
+} from "../config.js";
 import { HdcStateMachine } from "../sdm/stateMachine.js";
 import { ConceptDictionary } from "../sdm/conceptDictionary.js";
 import { PolicyGateway } from "../sdm/policyGateway.js";
@@ -164,7 +178,7 @@ export async function knowledgeSearchHandler(args: unknown) {
   if (data.results && Array.isArray(data.results)) {
     const resultIds = data.results.map((r: any) => r.id).filter(Boolean);
     if (resultIds.length > 0) {
-      updateLastAccessed(resultIds);
+      recordMemoryAccess(resultIds);
     }
     
     // Mutate results to surface effective importance
@@ -445,10 +459,17 @@ export async function sessionSearchMemoryHandler(args: unknown) {
     // For Supabase: this measures the pgvector cosine distance RPC call.
     // For SQLite: this measures the local sqlite-vec similarity search.
     const storageStart = performance.now();
+    // v7.0: Over-fetch candidates to give ACT-R re-ranker a meaningful pool.
+    // If we only fetch `limit` rows, the re-ranker can only shuffle those exact
+    // results — a memory at rank #(limit+1) by similarity but accessed 500 times
+    // would never surface. Fetch 4× or minimum 20, then slice after re-ranking.
+    const candidateLimit = PRISM_ACTR_ENABLED
+      ? Math.min(Math.max(limit * 4, 20), 50)
+      : Math.min(limit, 20);
     const results = await storage.searchMemory({
       queryEmbedding: JSON.stringify(queryEmbedding),
       project: project || null,
-      limit: Math.min(limit, 20),
+      limit: candidateLimit,
       similarityThreshold: similarity_threshold,
       userId: PRISM_USER_ID,
     });
@@ -489,22 +510,111 @@ export async function sessionSearchMemoryHandler(args: unknown) {
       return { content: contentBlocks, isError: false };
     }
 
-    // ── v5.2: Dynamic Importance Decay (Ebbinghaus Curve) ──────
-    // Compute effective_importance at retrieval time
+    // ── v7.0: ACT-R Re-Ranking Pipeline ──────────────────────────
     const resultIds = results.map((r: any) => r.id).filter(Boolean);
+    const now = new Date();
 
-    // Fire-and-forget: update last_accessed_at for all returned results
-    if (resultIds.length > 0) {
-      updateLastAccessed(resultIds);
+    // Accumulate ACT-R metrics for trace output
+    let actrMetrics: {
+      baseLevels: number[];
+      spreadings: number[];
+      sigmoids: number[];
+      composites: number[];
+    } | null = null;
+
+    if (PRISM_ACTR_ENABLED && resultIds.length > 0) {
+      try {
+        // Step A: Bulk-fetch access logs for all candidate IDs
+        const accessLogMap = await storage.getAccessLog(resultIds, PRISM_ACTR_MAX_ACCESSES_PER_ENTRY);
+
+        // Step B: Fetch outbound links for spreading activation
+        const candidateIdSet = new Set(resultIds);
+        const linksMap = new Map<string, Array<{ target_id: string; strength: number }>>();
+        for (const id of resultIds) {
+          try {
+            const links = await storage.getLinksFrom(id, PRISM_USER_ID, 0.0, 20);
+            linksMap.set(id, links.map((l: any) => ({
+              target_id: l.target_id,
+              strength: l.strength ?? 1.0,
+            })));
+          } catch {
+            linksMap.set(id, []);
+          }
+        }
+
+        // Step C: Compute activation for each result and re-rank
+        actrMetrics = { baseLevels: [], spreadings: [], sigmoids: [], composites: [] };
+
+        for (const r of results as any[]) {
+          const id = r.id;
+          if (!id) continue;
+
+          // B_i: Base-level activation from access log
+          const accessTimestamps = accessLogMap.get(id) || [];
+          // If no access log entries, use created_at as single proxy
+          const timestamps = accessTimestamps.length > 0
+            ? accessTimestamps
+            : [new Date(r.created_at || now)];
+          const Bi = baseLevelActivation(timestamps, now, PRISM_ACTR_DECAY);
+
+          // S_i: Candidate-scoped spreading activation
+          const outboundLinks = linksMap.get(id) || [];
+          const Si = candidateScopedSpreadingActivation(outboundLinks, candidateIdSet);
+
+          // Composite retrieval score
+          const composite = compositeRetrievalScore(
+            typeof r.similarity === "number" ? r.similarity : 0,
+            Bi + Si,
+            PRISM_ACTR_WEIGHT_SIMILARITY,
+            PRISM_ACTR_WEIGHT_ACTIVATION,
+            PRISM_ACTR_SIGMOID_MIDPOINT,
+            PRISM_ACTR_SIGMOID_STEEPNESS
+          );
+
+          // Attach to result for re-sorting and display
+          r._actr_Bi = Bi;
+          r._actr_Si = Si;
+          r._actr_composite = composite;
+
+          actrMetrics.baseLevels.push(Bi);
+          actrMetrics.spreadings.push(Si);
+          actrMetrics.composites.push(composite);
+        }
+
+        // Re-sort by composite score (descending)
+        (results as any[]).sort((a: any, b: any) => (b._actr_composite ?? 0) - (a._actr_composite ?? 0));
+
+        debugLog(
+          `[session_search_memory] ACT-R re-ranking applied to ${results.length} candidates (returning top ${limit}): ` +
+          `mean B_i=${(actrMetrics.baseLevels.reduce((a, b) => a + b, 0) / actrMetrics.baseLevels.length).toFixed(3)}, ` +
+          `mean composite=${(actrMetrics.composites.reduce((a, b) => a + b, 0) / actrMetrics.composites.length).toFixed(3)}`
+        );
+      } catch (actrErr) {
+        // ACT-R failures are non-fatal — degrade to similarity-only ordering
+        debugLog(`[session_search_memory] ACT-R re-ranking failed (non-fatal): ${actrErr instanceof Error ? actrErr.message : String(actrErr)}`);
+      }
     }
 
-    // Format results with similarity scores + effective importance
+    // v7.0: Slice the re-ranked candidate pool back to the requested limit.
+    // This MUST happen after re-ranking but BEFORE recording access events,
+    // so we only log access for results actually delivered to the LLM.
+    results.splice(limit);
+
+    // Fire-and-forget: record access events for the final delivered results
+    // v7.0: Writes to both access_log buffer AND legacy last_accessed_at
+    const finalIds = results.map((r: any) => r.id).filter(Boolean);
+    if (finalIds.length > 0) {
+      const queryHash = query.substring(0, 64);
+      recordMemoryAccess(finalIds, queryHash);
+    }
+
+    // Format results with similarity scores + effective importance + ACT-R
     const formatted = results.map((r: any, i: number) => {
-      const score = typeof r.similarity === "number"
+      const simScore = typeof r.similarity === "number"
         ? `${(r.similarity * 100).toFixed(1)}%`
         : "N/A";
 
-      // Dynamic importance decay
+      // Dynamic importance decay (uses ACT-R internally when enabled)
       const baseImportance = r.importance ?? 0;
       const effectiveImportance = computeEffectiveImportance(baseImportance, r.last_accessed_at, r.created_at);
 
@@ -512,10 +622,16 @@ export async function sessionSearchMemoryHandler(args: unknown) {
         ? `  Importance: ${effectiveImportance}${effectiveImportance !== baseImportance ? ` (base: ${baseImportance}, decayed)` : ""}\n`
         : "";
 
-      return `[${i + 1}] ${score} similar — ${r.session_date || "unknown date"}\n` +
+      // v7.0: Append ACT-R composite score when available
+      const actrStr = r._actr_composite !== undefined
+        ? `  ACT-R: composite=${r._actr_composite.toFixed(3)} (B=${r._actr_Bi?.toFixed(2)}, S=${r._actr_Si?.toFixed(3)})\n`
+        : "";
+
+      return `[${i + 1}] ${simScore} similar — ${r.session_date || "unknown date"}\n` +
         `  Project: ${r.project}\n` +
         `  Summary: ${r.summary}\n` +
         importanceStr +
+        actrStr +
         (r.decisions?.length ? `  Decisions: ${r.decisions.join("; ")}\n` : "") +
         (r.files_changed?.length ? `  Files: ${r.files_changed.join(", ")}\n` : "");
     }).join("\n");
@@ -534,6 +650,10 @@ export async function sessionSearchMemoryHandler(args: unknown) {
       const topScore = results.length > 0 && typeof results[0].similarity === "number"
         ? results[0].similarity
         : null;
+
+      // v7.0: Compute ACT-R trace metrics (means)
+      const mean = (arr: number[]) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : undefined;
+
       const trace = createMemoryTrace({
         strategy: "semantic",
         query,
@@ -544,6 +664,11 @@ export async function sessionSearchMemoryHandler(args: unknown) {
         storageMs,
         totalMs,
         project: project || null,
+        // v7.0: ACT-R observability
+        actrEnabled: PRISM_ACTR_ENABLED,
+        actrBaseLevelMean: actrMetrics ? mean(actrMetrics.baseLevels) : undefined,
+        actrSpreadingMean: actrMetrics ? mean(actrMetrics.spreadings) : undefined,
+        actrCompositeMean: actrMetrics ? mean(actrMetrics.composites) : undefined,
       });
       contentBlocks.push(traceToContentBlock(trace));
     }

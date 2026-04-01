@@ -781,6 +781,50 @@ export interface StorageBackend {
    * @param vector - The 768-word Uint32Array representing the concept.
    */
   saveHdcConcept(concept: string, vector: Uint32Array): Promise<void>;
+
+  // ─── v7.0: ACT-R Access Log (Activation Memory) ────────────────
+  //
+  // These methods support the ACT-R base-level activation model.
+  // Every memory retrieval logs an access event. The access log enables
+  // B_i = ln(Σ t_j^(-d)) — combining recency and frequency into a
+  // single activation score.
+
+  /**
+   * Record a memory access event. Delegates to an in-memory buffer
+   * (AccessLogBuffer) that flushes periodically — callers pay zero
+   * async overhead. This is intentionally SYNCHRONOUS (fire-and-forget).
+   *
+   * Rule #1: Write contention prevention via batched inserts.
+   *
+   * @param entryId - The session_ledger entry that was accessed/retrieved
+   * @param contextHash - Optional hash of the search query context
+   */
+  logAccess(entryId: string, contextHash?: string): void;
+
+  /**
+   * Batch-fetch access timestamps for multiple entries in a single query.
+   * Uses SQL window functions: ROW_NUMBER() OVER (PARTITION BY entry_id
+   * ORDER BY accessed_at DESC) to limit per-entry results efficiently.
+   *
+   * Rule #2: Prevents N+1 query explosion on batch fetches.
+   *
+   * @param entryIds - Array of entry IDs to fetch access logs for
+   * @param maxPerEntry - Maximum timestamps per entry (default: 50)
+   * @returns Map from entryId → array of Date objects (most-recent first)
+   */
+  getAccessLog(
+    entryIds: string[],
+    maxPerEntry?: number
+  ): Promise<Map<string, Date[]>>;
+
+  /**
+   * Prune access log entries older than N days.
+   * Called by the sleep-cycle scheduler to keep the access log bounded.
+   *
+   * @param olderThanDays - Delete entries older than this many days
+   * @returns Number of rows pruned
+   */
+  pruneAccessLog(olderThanDays: number): Promise<number>;
 }
 
 // ─── v6.0: Memory Link Type ───────────────────────────────────

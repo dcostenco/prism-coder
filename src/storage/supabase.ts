@@ -39,6 +39,7 @@ import {
 } from "./interface.js";
 
 import { debugLog } from "../utils/logger.js";
+import { PRISM_USER_ID } from "../config.js";
 import { getSetting as cfgGet, setSetting as cfgSet, getAllSettings as cfgGetAll } from "./configStorage.js";
 import { runAutoMigrations } from "./supabaseMigrations.js";
 
@@ -1380,6 +1381,88 @@ export class SupabaseStorage implements StorageBackend {
     } catch (e: any) {
       debugLog("[SupabaseStorage] backfillLinks failed: " + e.message);
       return { temporal: 0, keyword: 0, provenance: 0 };
+    }
+  }
+
+  // ─── v7.0: ACT-R Access Log (Supabase Parity) ───────────────
+  //
+  // Implements the same StorageBackend contract as SQLite:
+  //   - logAccess: fire-and-forget write
+  //   - getAccessLog: batch top-N timestamps per entry
+  //   - pruneAccessLog: retention delete count
+  //
+  // All operations route through SECURITY DEFINER RPCs for tenant-safe access.
+
+  logAccess(entryId: string, contextHash?: string): void {
+    supabaseRpc("prism_log_access", {
+      p_user_id: PRISM_USER_ID,
+      p_entry_id: entryId,
+      p_accessed_at: new Date().toISOString(),
+      p_context_hash: contextHash || null,
+    }).catch((e: any) => {
+      debugLog(`[SupabaseStorage] logAccess fallback/no-op: ${e.message}`);
+    });
+  }
+
+  async getAccessLog(
+    entryIds: string[],
+    maxPerEntry: number = 50
+  ): Promise<Map<string, Date[]>> {
+    const result = new Map<string, Date[]>();
+    if (!entryIds || entryIds.length === 0) return result;
+
+    try {
+      const rows = await supabaseRpc("prism_get_access_log", {
+        p_user_id: PRISM_USER_ID,
+        p_entry_ids: entryIds,
+        p_max_per_entry: maxPerEntry,
+      });
+
+      const data = Array.isArray(rows) ? rows : [];
+      for (const row of data as any[]) {
+        const entryId = row.entry_id as string | undefined;
+        const accessedAtRaw = row.accessed_at as string | undefined;
+        if (!entryId || !accessedAtRaw) continue;
+
+        if (!result.has(entryId)) result.set(entryId, []);
+        result.get(entryId)!.push(new Date(accessedAtRaw));
+      }
+
+      return result;
+    } catch (e: any) {
+      debugLog(`[SupabaseStorage] getAccessLog fallback/no-op: ${e.message}`);
+      return result;
+    }
+  }
+
+  async pruneAccessLog(olderThanDays: number): Promise<number> {
+    try {
+      const rpcResult = await supabaseRpc("prism_prune_access_log", {
+        p_older_than_days: olderThanDays,
+      });
+
+      if (typeof rpcResult === "number") return rpcResult;
+      if (Array.isArray(rpcResult) && rpcResult.length > 0) {
+        const first = rpcResult[0] as any;
+        if (typeof first === "number") return first;
+        if (first && typeof first.deleted_count !== "undefined") {
+          return Number(first.deleted_count) || 0;
+        }
+        if (first && typeof first.prism_prune_access_log !== "undefined") {
+          return Number(first.prism_prune_access_log) || 0;
+        }
+      }
+      if (rpcResult && typeof (rpcResult as any).deleted_count !== "undefined") {
+        return Number((rpcResult as any).deleted_count) || 0;
+      }
+      if (rpcResult && typeof (rpcResult as any).prism_prune_access_log !== "undefined") {
+        return Number((rpcResult as any).prism_prune_access_log) || 0;
+      }
+
+      return 0;
+    } catch (e: any) {
+      debugLog(`[SupabaseStorage] pruneAccessLog fallback/no-op: ${e.message}`);
+      return 0;
     }
   }
 }

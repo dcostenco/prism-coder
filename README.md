@@ -24,6 +24,7 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [Quick Start](#-quick-start)
 - [The Magic Moment](#-the-magic-moment)
 - [Setup Guides](#-setup-guides)
+- [Universal Import](#-universal-import-bring-your-history)
 - [What Makes Prism Different](#-what-makes-prism-different)
 - [Use Cases](#-use-cases)
 - [What's New](#-whats-new)
@@ -42,6 +43,10 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 Every time you start a new conversation with an AI coding assistant, it starts from scratch. You re-explain your architecture, re-describe your decisions, re-list your TODOs. Hours of context — gone.
 
 **Prism gives your agent a brain that persists.** Save what matters at the end of each session. Load it back instantly on the next one. Your agent remembers what it did, what it learned, and what's left to do.
+
+> 📌 **Terminology:** Throughout this doc, **"Prism"** refers to the MCP server and storage engine. **"Mind Palace"** refers to the visual dashboard UI at `localhost:3000` — your window into the agent's brain. They work together; the dashboard is optional.
+
+**Starting in v7.0**, Prism doesn't just *store* memories — it **ranks them like a human brain.** The ACT-R activation model (from cognitive science) means memories that were accessed recently and frequently surface first, while stale context fades naturally. Combine that with candidate-scoped spreading activation and you get retrieval quality that no flat vector search can match.
 
 ---
 
@@ -63,7 +68,28 @@ Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`,
 
 > **Note on Windows/Restricted Shells:** If your MCP client complains that `npx` is not found, use the absolute path to your node binary (e.g. `C:\Program Files\nodejs\npx.cmd`) or install globally with caution.
 
-**That's it.** Restart your client. All tools are available. Dashboard at `http://localhost:3000`. *(Note: The MCP server automatically starts this UI on port 3000 when connected. If you have a Next.js/React app running, port 3000 might already be in use.)*
+**That's it.** Restart your client. All tools are available. The **Mind Palace Dashboard** (the visual UI for your agent's brain) starts automatically at `http://localhost:3000`. You don't need to keep a tab open — the dashboard runs in the background and the MCP tools work with or without it.
+
+<details>
+<summary>Port 3000 already in use? (Next.js / Vite / etc.)</summary>
+
+Add `PRISM_DASHBOARD_PORT` to your MCP config env block:
+
+```json
+{
+  "mcpServers": {
+    "prism-mcp": {
+      "command": "npx",
+      "args": ["-y", "prism-mcp-server"],
+      "env": { "PRISM_DASHBOARD_PORT": "3001" }
+    }
+  }
+}
+```
+
+Then open `http://localhost:3001` instead.
+</details>
+
 
 ### Capability Matrix
 
@@ -77,7 +103,7 @@ Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`,
 | Semantic vector search | ❌ | ✅ `GOOGLE_API_KEY` |
 | Morning Briefings | ❌ | ✅ `GOOGLE_API_KEY` |
 | Auto-compaction | ❌ | ✅ `GOOGLE_API_KEY` |
-| Web Scholar research | ❌ | ✅ `BRAVE_API_KEY` + `FIRECRAWL_API_KEY` (or `TAVILY_API_KEY`) |
+| Web Scholar research | ❌ | ✅ [`BRAVE_API_KEY`](#environment-variables) + [`FIRECRAWL_API_KEY`](#environment-variables) (or `TAVILY_API_KEY`) |
 | VLM image captioning | ❌ | ✅ Provider key |
 
 > 🔑 The core Mind Palace works **100% offline** with zero API keys. Cloud keys unlock intelligence features. See [Environment Variables](#environment-variables).
@@ -183,39 +209,6 @@ Add to your Continue `config.json` or Cline MCP settings:
 
 </details>
 
-### Migration
-
-<details>
-<summary><strong>Migrating Existing History (Claude, Gemini, OpenAI)</strong></summary>
-
-Prism can ingest months of historical sessions from other tools to give your Mind Palace a massive head start. Import via the **CLI** or directly from the [Mind Palace Dashboard](#-mind-palace-dashboard) Import tab (file picker + manual path + dry-run toggle).
-
-#### Supported Formats
-* **Claude Code** (`.jsonl` logs) — Automatically handles streaming chunk deduplication and `requestId` normalization.
-* **Gemini** (JSON history arrays) — Supports large-file streaming for 100MB+ exports.
-* **OpenAI** (JSON chat completion history) — Normalizes disparate tool-call structures into the unified Ledger schema.
-
-#### How to Run
-
-**Option 1 — CLI:**
-
-```bash
-# Ingest Claude Code history
-npx -y prism-mcp-server universal-import --format claude --path ~/path/to/claude_log.jsonl --project my-project
-
-# Dry run (verify mapping without saving)
-npx -y prism-mcp-server universal-import --format gemini --path ./gemini_history.json --dry-run
-```
-
-**Option 2 — Dashboard:** Open `localhost:3000`, navigate to the **Import** tab, select the format and file, and click Import. Supports dry-run preview. See the [dashboard screenshot](#-mind-palace-dashboard) above.
-
-#### Key Features
-* **OOM-Safe Streaming:** Processes massive log files line-by-line using `stream-json`.
-* **Idempotent Dedup:** Content-hash prevents duplicate imports on re-run (`skipCount` reported).
-* **Chronological Integrity:** Uses timestamp fallbacks and `requestId` sorting to ensure your memory timeline is accurate.
-* **Smart Context Mapping:** Extracts `cwd`, `gitBranch`, and tool usage patterns into searchable metadata.
-
-</details>
 
 <details>
 <summary><strong>Claude Code — Lifecycle Autoload (.clauderules)</strong></summary>
@@ -329,6 +322,39 @@ Then add to your MCP config:
 
 ---
 
+## 📥 Universal Import — Bring Your History
+
+Switching to Prism? Don't leave months of AI session history behind. Prism can **ingest historical sessions from Claude Code, Gemini, and OpenAI** and give your Mind Palace an instant head start — no manual re-entry required.
+
+Import via the **CLI** or directly from the Mind Palace Dashboard (**Import** tab → file picker + dry-run toggle).
+
+### Supported Formats
+* **Claude Code** (`.jsonl` logs) — Automatically handles streaming chunk deduplication and `requestId` normalization.
+* **Gemini** (JSON history arrays) — Supports large-file streaming for 100MB+ exports.
+* **OpenAI** (JSON chat completion history) — Normalizes disparate tool-call structures into the unified Ledger schema.
+
+### How to Import
+
+**Option 1 — CLI:**
+
+```bash
+# Ingest Claude Code history
+npx -y prism-mcp-server universal-import --format claude --path ~/path/to/claude_log.jsonl --project my-project
+
+# Dry run (verify mapping without saving)
+npx -y prism-mcp-server universal-import --format gemini --path ./gemini_history.json --dry-run
+```
+
+**Option 2 — Dashboard:** Open `localhost:3000`, navigate to the **Import** tab, select the format and file, and click Import. Supports dry-run preview.
+
+### Why It's Safe to Re-Run
+* **OOM-Safe Streaming:** Processes massive log files line-by-line using `stream-json`.
+* **Idempotent Dedup:** Content-hash prevents duplicate imports on re-run (`skipCount` reported).
+* **Chronological Integrity:** Uses timestamp fallbacks and `requestId` sorting to preserve your memory timeline.
+* **Smart Context Mapping:** Extracts `cwd`, `gitBranch`, and tool usage patterns into searchable metadata.
+
+---
+
 ## ✨ What Makes Prism Different
 
 
@@ -410,6 +436,44 @@ Then continue a specific thread with a follow-up message to the selected agent, 
 
 ## 🆕 What's New
 
+### v7.0.0 — ACT-R Activation Memory ✅
+> **Current stable release.** Memory retrieval now uses a scientifically-grounded cognitive model.
+
+- 🧠 **ACT-R Base-Level Activation** — `B_i = ln(Σ t_j^(-d))` computes recency × frequency activation per memory. Recent, frequently-accessed memories surface first; cold memories fade to near-zero. Based on Anderson's *Adaptive Control of Thought—Rational* (ACM, 2025).
+- 🔗 **Candidate-Scoped Spreading Activation** — `S_i = Σ(W × strength)` for links within the current search result set only. Prevents "God node" centrality from dominating rankings (Rule #5).
+- 📐 **Parameterized Sigmoid Normalization** — Calibrated `σ(x) = 1/(1 + e^(-k(x - x₀)))` with midpoint at -2.0 maps the natural ACT-R activation range (-10 to +5) into discriminating (0, 1) scores.
+- 🏗️ **Composite Retrieval Scoring** — `Score = 0.7 × similarity + 0.3 × σ(activation)` — similarity dominates, activation re-ranks. Fully configurable weights via `PRISM_ACTR_WEIGHT_*` env vars.
+- ⚡ **AccessLogBuffer** — In-memory write buffer with 5-second batch flush prevents SQLite `SQLITE_BUSY` contention under parallel agent tool calls. Deduplicates within flush windows.
+- 🗂️ **Access Log Infrastructure** — New `memory_access_log` table with `logAccess()`, `getAccessLog()`, `pruneAccessLog()` across both SQLite and Supabase backends. Creation seeds initial access (zero cold-start penalty).
+- 🧹 **Background Access Log Pruning** — Scheduler automatically prunes access logs exceeding retention window (default: 90 days). Configurable via `PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS`.
+- 🧪 **49-Test ACT-R Suite** — Pure-function unit tests covering base-level activation, spreading activation, sigmoid normalization, composite scoring, AccessLogBuffer lifecycle, deduplication, chunking, and edge cases.
+- 📊 **705 Tests** — 32 suites, all passing, zero regressions.
+
+<details>
+<summary><strong>🔬 Live Example: v6.5 vs v7.0 Retrieval Behavior</strong></summary>
+
+Consider an agent searching for "OAuth migration" with 3 memories in the result set:
+
+| Memory | Cosine Similarity | Last Accessed | Access Count (30d) |
+|--------|:-:|:-:|:-:|
+| A: "PKCE flow decision" | 0.82 | 2 hours ago | 12× |
+| B: "OAuth library comparison" | 0.85 | 14 days ago | 2× |
+| C: "Auth middleware refactor" | 0.81 | 30 minutes ago | 8× |
+
+**v6.5 (pure similarity):** B > A > C — the stale library comparison wins because it has the highest cosine score, even though the agent hasn't looked at it in two weeks.
+
+**v7.0 (ACT-R re-ranking):**
+
+| Memory | Similarity (0.7×) | ACT-R σ(B+S) (0.3×) | **Composite** |
+|--------|:-:|:-:|:-:|
+| A | 0.574 | 0.3 × 0.94 = 0.282 | **0.856** |
+| C | 0.567 | 0.3 × 0.91 = 0.273 | **0.840** |
+| B | 0.595 | 0.3 × 0.12 = 0.036 | **0.631** |
+
+**Result:** The actively-used PKCE decision (A) and the just-touched middleware (C) surface above the stale comparison (B). The agent gets the context it's *actually working with*, not just the closest embedding.
+
+</details>
+
 ### v6.5.3 — Auth Hardening ✅
 - 🔒 **Rate Limiting** — Login endpoint (`POST /api/auth/login`) protected by sliding-window rate limiter (5 attempts per 60s per IP). Resets on success.
 - 🔒 **CORS Hardening** — Dynamic `Origin` echo with `Allow-Credentials` when auth enabled (replaces wildcard `*`).
@@ -425,7 +489,6 @@ Then continue a specific thread with a follow-up message to the selected agent, 
 - 🔄 **Safe Backend Fallback** — If Supabase is requested but env is invalid/unresolved, Prism now auto-falls back to local SQLite so `/api/projects` and dashboard boot remain operational.
 
 ### v6.5 — HDC Cognitive Routing ✅
-> **Current stable release.** The Mind Palace gains a brain-inspired routing engine.
 
 - 🧠 **Hyperdimensional Cognitive Routing** — New `session_cognitive_route` tool composes the agent's current state, role, and action into a single 768-dim binary hypervector via XOR binding, then resolves it to a semantic concept via Hamming distance. Three-outcome policy gateway: `direct` / `clarify` / `fallback`.
 - 🎛️ **Per-Project Threshold Overrides** — Fallback and clarify thresholds are configurable per-project and persisted via the existing `getSetting`/`setSetting` contract (no new migrations).
@@ -497,7 +560,7 @@ Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as p
 | **Primary Interface** | **Native MCP** (Tools, Prompts, Resources) | REST API & Python/TS SDKs | REST API & Python/TS SDKs | Native MCP (Tools only) |
 | **Storage Engine** | **BYO SQLite or Supabase** | Managed Cloud / VectorDBs | Managed Cloud / Postgres | Local SQLite only |
 | **Context Assembly** | **Progressive (Quick/Std/Deep)** | Top-K Semantic Search | Top-K + Temporal Summaries | Basic Entity Search |
-| **Memory Mechanics** | **Ebbinghaus Decay, SDM, HDC** | Basic Vector + Entity | Fading Temporal Graph | None (Infinite growth) |
+| **Memory Mechanics** | **ACT-R Activation (recency×freq), SDM, HDC** | Basic Vector + Entity | Fading Temporal Graph | None (Infinite growth) |
 | **Multi-Agent Sync** | **CRDT (Add-Wins / LWW)** | Cloud locks | Postgres locks | ❌ None (Data races) |
 | **Data Compression** | **TurboQuant (7x smaller vectors)** | ❌ Standard F32 Vectors | ❌ Standard Vectors | ❌ No Vectors |
 | **Observability** | **OTel Traces + Built-in PWA UI** | Cloud Dashboard | Cloud Dashboard | ❌ None |
@@ -511,7 +574,7 @@ Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as p
 Mem0 and Zep are APIs that *can* be wrapped into an MCP server. Prism was built *for* MCP from day one. Instead of wasting tokens on "search" tool calls, Prism uses **MCP Prompts** (`/resume_session`) to inject context *before* the LLM thinks, and **MCP Resources** (`memory://project/handoff`) to attach live, subscribing context.
 
 #### 2. Academic-Grade Cognitive Computer Science
-The giants use standard RAG (Retrieval-Augmented Generation). Prism uses biological and academic models of memory: **TurboQuant** for extreme vector compression, **Ebbinghaus curves** for importance decay, and **Sparse Distributed Memory (SDM)**. This makes Prism vastly more efficient on a local machine than running a giant Postgres/pgvector instance.
+The giants use standard RAG (Retrieval-Augmented Generation). Prism uses biological and academic models of memory: **ACT-R base-level activation** (`B_i = ln(Σ t_j^(-d))`) for recency–frequency re-ranking, **TurboQuant** for extreme vector compression, **Ebbinghaus curves** for importance decay, and **Sparse Distributed Memory (SDM)**. The result is retrieval quality that follows how human memory actually works — not just nearest-neighbor cosine distance. And all of it runs on a laptop without a Postgres/pgvector instance.
 
 #### 3. True Multi-Agent Coordination (CRDTs)
 If Cursor (Agent A) and Claude Desktop (Agent B) try to update a Mem0 or standard SQLite database at the exact same time, you get a race condition and data loss. Prism uses **Optimistic Concurrency Control (OCC) with CRDT OR-Maps** — mathematically guaranteeing that simultaneous agent edits merge safely. Enterprise-grade distributed systems on a local machine.
@@ -634,6 +697,14 @@ Requires `PRISM_ENABLE_HIVEMIND=true`.
 
 ## Environment Variables
 
+> **🚦 TL;DR — Just want the best experience fast?** Set these three keys and you're done:
+> ```
+> GOOGLE_API_KEY=...      # Unlocks: semantic search, Morning Briefings, auto-compaction
+> BRAVE_API_KEY=...       # Unlocks: Web Scholar research + Brave Answers
+> FIRECRAWL_API_KEY=...   # Unlocks: Web Scholar deep scraping (or use TAVILY_API_KEY instead)
+> ```
+> **Zero keys = zero problem.** Core session memory, keyword search, time travel, and the full dashboard work 100% offline. Cloud keys are optional power-ups.
+
 <details>
 <summary><strong>Full variable reference</strong></summary>
 
@@ -662,6 +733,11 @@ Requires `PRISM_ENABLE_HIVEMIND=true`.
 | `PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN` | No | Max articles per Scholar run (default: `3`) |
 | `PRISM_HDC_ENABLED` | No | `"true"` (default) to enable HDC cognitive routing pipeline |
 | `PRISM_HDC_EXPLAINABILITY_ENABLED` | No | `"true"` (default) to include convergence/distance/ambiguity in cognitive route responses |
+| `PRISM_ACTR_ENABLED` | No | `"true"` (default) to enable ACT-R activation re-ranking on semantic search |
+| `PRISM_ACTR_DECAY` | No | ACT-R decay parameter `d` (default: `0.5`). Higher values = faster recency drop-off |
+| `PRISM_ACTR_WEIGHT_SIMILARITY` | No | Composite score similarity weight (default: `0.7`) |
+| `PRISM_ACTR_WEIGHT_ACTIVATION` | No | Composite score ACT-R activation weight (default: `0.3`) |
+| `PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS` | No | Days before access logs are pruned by background scheduler (default: `90`) |
 
 </details>
 
@@ -751,6 +827,10 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 | **v6.1** | Prism-Port Vault Export — Obsidian/Logseq `.zip` with YAML frontmatter & `[[Wikilinks]]` | Data sovereignty, PKM interop | ✅ Shipped |
 | **v6.1** | Cognitive Load & Semantic Search — dynamic graph thinning, search highlights | Contextual working memory | ✅ Shipped |
 | **v6.2** | Synthesize & Prune — automated edge synthesis, graph pruning, SLO observability | Implicit associative memory | ✅ Shipped |
+| **v7.0** | ACT-R Base-Level Activation — `B_i = ln(Σ t_j^(-d))` recency×frequency re-ranking over similarity candidates | Anderson's ACT-R (Adaptive Control of Thought—Rational, ACM 2025) | ✅ Shipped |
+| **v7.0** | Candidate-Scoped Spreading Activation — `S_i = Σ(W × strength)` bounded to search result set; prevents God-node dominance | Spreading activation networks (Collins & Loftus, 1975) | ✅ Shipped |
+| **v7.0** | Composite Retrieval Scoring — `0.7 × similarity + 0.3 × σ(activation)`; configurable via `PRISM_ACTR_WEIGHT_*` | Hybrid cognitive-neural retrieval models | ✅ Shipped |
+| **v7.0** | AccessLogBuffer — in-memory batch-write buffer with 5s flush; prevents SQLite `SQLITE_BUSY` under parallel agents | Production reliability engineering | ✅ Shipped |
 | **v7.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) | 🔭 Horizon |
 | **v8+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
 
@@ -765,10 +845,13 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 ### v6.2: The "Synthesize & Prune" Phase ✅
 Shipped in v6.2.0. Edge synthesis, graph pruning with SLO observability, temporal decay heatmaps, active recall prompt generation, and full dashboard metrics integration.
 
-### v6.5: Cognitive Architecture (Primary)
-Full Superposed Memory (SDM) + Hyperdimensional Computing (HDC/VSA) becomes the next major implementation phase, targeting compositional memory states and faster associative retrieval at scale.
+### v6.5: Cognitive Architecture ✅
+Shipped. Full Superposed Memory (SDM) + Hyperdimensional Computing (HDC/VSA) cognitive routing pipeline. Compositional memory states via XOR binding, Hamming resolution, and policy-gated routing (direct / clarify / fallback). 705 tests passing.
 
-### After v6.5: Future Tracks
+### v7.0: ACT-R Activation Memory ✅
+Shipped. Scientifically-grounded retrieval re-ranking via ACT-R base-level activation (`B_i = ln(Σ t_j^(-d))`), candidate-scoped spreading activation, parameterized sigmoid normalization, composite scoring, and zero-cold-start access log infrastructure. 49 dedicated unit tests, 705 total passing.
+
+### Future Tracks
 - **v7.x: Affect-Tagged Memory** — Recall prioritization improves by weighting memories with affective/contextual valence, making surfaced context more behaviorally useful.
 - **v8+: Zero-Search Retrieval** — Direct vector-addressed recall (“just ask the vector”) reduces retrieval indirection and moves Prism toward truly native associative memory.
 

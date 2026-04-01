@@ -108,6 +108,9 @@ vi.mock("../../src/config.js", () => ({
   PRISM_GRAPH_PRUNE_PROJECT_COOLDOWN_MS:  600_000,
   PRISM_GRAPH_PRUNE_SWEEP_BUDGET_MS:      30_000,
   PRISM_GRAPH_PRUNE_MAX_PROJECTS_PER_SWEEP: 25,
+  // ACT-R v7.0 config — required by backgroundScheduler.ts transitive import
+  PRISM_ACTR_ENABLED:                     false,
+  PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS:   90,
 }));
 
 vi.mock("../../src/utils/logger.js", () => ({

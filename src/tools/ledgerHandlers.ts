@@ -93,7 +93,7 @@ import { notifyResourceUpdate } from "../server.js";
  *
  * After saving, generates an embedding vector for the entry via fire-and-forget.
  */
-import { computeEffectiveImportance, updateLastAccessed } from "../utils/cognitiveMemory.js";
+import { computeEffectiveImportance, recordMemoryAccess } from "../utils/cognitiveMemory.js";
 export async function sessionSaveLedgerHandler(args: unknown) {
   if (!isSessionSaveLedgerArgs(args)) {
     throw new Error("Invalid arguments for session_save_ledger");
@@ -785,7 +785,7 @@ export async function sessionLoadContextHandler(args: unknown) {
   }
   if (d.recent_sessions?.length) {
     const resultIds = d.recent_sessions.map((r: any) => r.id).filter(Boolean);
-    if (resultIds.length > 0) updateLastAccessed(resultIds);
+    if (resultIds.length > 0) recordMemoryAccess(resultIds);
 
     formattedContext += `\n⏳ Recent Sessions:\n` + d.recent_sessions.map((s: any) => {
       let impStr = "";

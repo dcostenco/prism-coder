@@ -285,3 +285,49 @@ export const PRISM_GRAPH_PRUNE_SWEEP_BUDGET_MS = parseInt(
 export const PRISM_GRAPH_PRUNE_MAX_PROJECTS_PER_SWEEP = parseInt(
   process.env.PRISM_GRAPH_PRUNE_MAX_PROJECTS_PER_SWEEP || "25", 10
 );
+
+// ─── v7.0: ACT-R Cognitive Memory Activation ────────────────
+// Scientifically-grounded retrieval re-ranking based on the ACT-R
+// cognitive architecture. Replaces simple Ebbinghaus decay with
+// a composite similarity + activation model.
+
+/** Master switch for ACT-R activation-based re-ranking. */
+export const PRISM_ACTR_ENABLED = process.env.PRISM_ACTR_ENABLED === "true";
+
+/** ACT-R decay parameter d in t^(-d). Higher = faster forgetting. (Paper default: 0.5) */
+export const PRISM_ACTR_DECAY = parseFloat(process.env.PRISM_ACTR_DECAY || "0.5");
+
+/** Weight of cosine similarity in composite score. (Default: 0.7 — similarity dominates) */
+export const PRISM_ACTR_WEIGHT_SIMILARITY = parseFloat(
+  process.env.PRISM_ACTR_WEIGHT_SIMILARITY || "0.7"
+);
+
+/** Weight of activation boost in composite score. (Default: 0.3 — activation re-ranks) */
+export const PRISM_ACTR_WEIGHT_ACTIVATION = parseFloat(
+  process.env.PRISM_ACTR_WEIGHT_ACTIVATION || "0.3"
+);
+
+/** Sigmoid midpoint: activation value that maps to 0.5 boost. (Default: -2.0) */
+export const PRISM_ACTR_SIGMOID_MIDPOINT = parseFloat(
+  process.env.PRISM_ACTR_SIGMOID_MIDPOINT || "-2.0"
+);
+
+/** Sigmoid steepness k. Higher = sharper discrimination. (Default: 1.0) */
+export const PRISM_ACTR_SIGMOID_STEEPNESS = parseFloat(
+  process.env.PRISM_ACTR_SIGMOID_STEEPNESS || "1.0"
+);
+
+/** Max access log entries per entry for base-level activation. (Default: 50) */
+export const PRISM_ACTR_MAX_ACCESSES_PER_ENTRY = parseInt(
+  process.env.PRISM_ACTR_MAX_ACCESSES_PER_ENTRY || "50", 10
+);
+
+/** AccessLogBuffer flush interval in milliseconds. (Default: 5000ms) */
+export const PRISM_ACTR_BUFFER_FLUSH_MS = parseInt(
+  process.env.PRISM_ACTR_BUFFER_FLUSH_MS || "5000", 10
+);
+
+/** Days to retain access log entries before pruning. (Default: 90) */
+export const PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS = parseInt(
+  process.env.PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS || "90", 10
+);

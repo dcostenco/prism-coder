@@ -27,6 +27,8 @@ import {
   PRISM_GRAPH_PRUNE_PROJECT_COOLDOWN_MS,
   PRISM_GRAPH_PRUNE_SWEEP_BUDGET_MS,
   PRISM_GRAPH_PRUNE_MAX_PROJECTS_PER_SWEEP,
+  PRISM_ACTR_ENABLED,
+  PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS,
 } from "./config.js";
 import { debugLog } from "./utils/logger.js";
 import { runWebScholar } from "./scholar/webScholar.js";
@@ -143,6 +145,10 @@ export interface SchedulerConfig {
   graphPruneSweepBudgetMs: number;
   /** Max projects to evaluate in prune task per sweep (default: 25) */
   graphPruneMaxProjectsPerSweep: number;
+  /** Prune stale ACT-R access log entries (default: true when ACT-R is enabled) */
+  enableAccessLogPrune: boolean;
+  /** Days of access log history to retain (default: PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS) */
+  accessLogRetentionDays: number;
 }
 
 export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
@@ -166,6 +172,8 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
   graphPruneProjectCooldownMs: PRISM_GRAPH_PRUNE_PROJECT_COOLDOWN_MS,
   graphPruneSweepBudgetMs: PRISM_GRAPH_PRUNE_SWEEP_BUDGET_MS,
   graphPruneMaxProjectsPerSweep: PRISM_GRAPH_PRUNE_MAX_PROJECTS_PER_SWEEP,
+  enableAccessLogPrune: PRISM_ACTR_ENABLED,
+  accessLogRetentionDays: PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS,
 };
 
 // ─── Scheduler State ─────────────────────────────────────────
@@ -231,6 +239,7 @@ export interface SchedulerSweepResult {
       minStrength: number;
       error?: string;
     };
+    accessLogPrune: { ran: boolean; deleted: number; error?: string };
   };
 }
 
@@ -272,6 +281,7 @@ export function startScheduler(config?: Partial<SchedulerConfig>): () => void {
     cfg.enableSdmFlush && "SdmFlush",
     cfg.enableEdgeSynthesis && "EdgeSynthesis",
     cfg.enableGraphPruning && "GraphPruning",
+    cfg.enableAccessLogPrune && "AccessLogPrune",
   ].filter(Boolean).join(", ");
 
   console.error(
@@ -400,6 +410,7 @@ export async function runSchedulerSweep(
         durationMs: 0,
         minStrength: cfg.graphPruneMinStrength,
       },
+      accessLogPrune: { ran: false, deleted: 0 },
     },
   };
 
@@ -807,6 +818,24 @@ export async function runSchedulerSweep(
     }
   }
 
+  // ── Task 9: ACT-R Access Log Prune (v7.0) ──────────────────
+  // Removes stale rows from memory_access_log older than the
+  // configured retention window (default: 90 days). Prevents
+  // unbounded table growth from the ACT-R frequency tracking.
+  if (cfg.enableAccessLogPrune) {
+    try {
+      result.tasks.accessLogPrune.ran = true;
+      const deleted = await storage.pruneAccessLog(cfg.accessLogRetentionDays);
+      result.tasks.accessLogPrune.deleted = deleted;
+      if (deleted > 0) {
+        debugLog(`[Scheduler] Access log prune: deleted ${deleted} stale entries (>${cfg.accessLogRetentionDays}d)`);
+      }
+    } catch (err) {
+      result.tasks.accessLogPrune.error = err instanceof Error ? err.message : String(err);
+      debugLog(`[Scheduler] Access log prune error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   } finally {
     clearInterval(heartbeatInterval!);
     // Release Supabase distributed lock explicitly so the next sweep
@@ -852,6 +881,9 @@ export async function runSchedulerSweep(
   }
   if (result.tasks.edgeSynthesis.ran && result.tasks.edgeSynthesis.projectsSynthesized > 0) {
     parts.push(`Synthesis:${result.tasks.edgeSynthesis.newLinks} links in ${result.tasks.edgeSynthesis.projectsSynthesized} projects`);
+  }
+  if (result.tasks.accessLogPrune.ran && result.tasks.accessLogPrune.deleted > 0) {
+    parts.push(`AccessLog:${result.tasks.accessLogPrune.deleted} stale entries pruned`);
   }
 
   const summaryLine = parts.length > 0

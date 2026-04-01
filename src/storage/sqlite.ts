@@ -21,6 +21,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { randomUUID } from "crypto";
+import { AccessLogBuffer } from "../utils/accessLogBuffer.js";
+import { PRISM_ACTR_BUFFER_FLUSH_MS } from "../config.js";
 import { getSetting as cfgGet, setSetting as cfgSet, getAllSettings as cfgGetAll } from "./configStorage.js";
 
 import type {
@@ -44,6 +46,7 @@ import { getSdmEngine } from "../sdm/sdmEngine.js";
 export class SqliteStorage implements StorageBackend {
   private db!: Client;
   private dbPath!: string;
+  private accessLogBuffer!: AccessLogBuffer;
 
   // ─── Lifecycle ─────────────────────────────────────────────
 
@@ -90,10 +93,20 @@ export class SqliteStorage implements StorageBackend {
     // Run all migrations
     await this.runMigrations();
 
+    // v7.0: Initialize the ACT-R access log write buffer.
+    // The buffer batches logAccess() calls into periodic single-INSERT flushes
+    // to prevent SQLite SQLITE_BUSY contention (Rule #1).
+    this.accessLogBuffer = new AccessLogBuffer(this.db, PRISM_ACTR_BUFFER_FLUSH_MS);
+
     debugLog(`[SqliteStorage] Initialized at ${this.dbPath}`);
   }
 
   async close(): Promise<void> {
+    // v7.0: Drain the access log buffer before closing the DB connection.
+    // This ensures any buffered access events are persisted on shutdown.
+    if (this.accessLogBuffer) {
+      await this.accessLogBuffer.dispose();
+    }
     this.db.close();
     debugLog("[SqliteStorage] Closed");
   }
@@ -588,6 +601,46 @@ export class SqliteStorage implements StorageBackend {
       if (!e.message?.includes("duplicate column name")) throw e;
     }
 
+    // ─── v7.0 Migration: ACT-R Memory Access Log ──────────────
+    //
+    // REVIEWER NOTE: This table drives the ACT-R base-level activation
+    // formula: B_i = ln(Σ t_j^(-d)). Each row is a single "access" event
+    // recorded fire-and-forget via AccessLogBuffer.
+    //
+    // DESIGN:
+    //   - INTEGER PRIMARY KEY = SQLite implicit rowid (fastest inserts)
+    //   - entry_id NOT NULL FK → session_ledger (ON DELETE CASCADE)
+    //   - accessed_at TEXT ISO-8601 — enables julianday() math in queries
+    //   - context_hash TEXT — optional search query fingerprint for
+    //     future "what queries retrieve this memory?" analytics
+    //
+    // INDEXES:
+    //   - (entry_id, accessed_at DESC): covers the window-function query
+    //     used by getAccessLog(). DESC order makes recent-first scans
+    //     sequential reads (no reverse B-tree traversal).
+    //   - (accessed_at): covers the retention sweep in pruneAccessLog().
+    //
+    // STORAGE: ~80 bytes/row → 100K accesses ≈ 8 MB → laptop-safe.
+
+    await this.db.execute(`
+      CREATE TABLE IF NOT EXISTS memory_access_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id TEXT NOT NULL,
+        accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
+        context_hash TEXT DEFAULT NULL,
+        FOREIGN KEY (entry_id) REFERENCES session_ledger(id) ON DELETE CASCADE
+      )
+    `);
+
+    await this.db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_access_log_entry_time
+       ON memory_access_log(entry_id, accessed_at DESC)`
+    );
+    await this.db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_access_log_time
+       ON memory_access_log(accessed_at)`
+    );
+
     // ─── v6.1 Migration: Integrity Check ──────────────────────
     //
     // REVIEWER NOTE: PRAGMA integrity_check scans the B-tree structure of
@@ -811,6 +864,18 @@ export class SqliteStorage implements StorageBackend {
         now,
       ],
     });
+
+    // ── v7.0 Rule #3: Creation = Access Seeding ─────────────────────
+    // Seed the access log with a single event at creation time so that
+    // brand-new entries have a non-empty access history. Without this,
+    // new entries would have B_i = -∞ (ln(0)) and never surface in
+    // ACT-R re-ranking until they're accessed at least once.
+    //
+    // Uses the buffer for consistency — the creation seed is batched
+    // with other access events and flushed on the next cycle.
+    if (this.accessLogBuffer) {
+      this.accessLogBuffer.push(id, 'creation_seed');
+    }
 
     // Return Supabase-compatible shape: handlers expect [{ id, ... }]
     return [{ id, project: entry.project, created_at: now }];
@@ -1062,13 +1127,16 @@ export class SqliteStorage implements StorageBackend {
   async updateLastAccessed(ids: string[]): Promise<void> {
     if (!ids || ids.length === 0) return;
     const CHUNK_SIZE = 500;
+    const now = new Date().toISOString(); // JS generates ISO-8601 with Z suffix
 
     for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
       const chunk = ids.slice(i, i + CHUNK_SIZE);
       const placeholders = chunk.map(() => "?").join(", ");
+
+      // Pass 'now' as the first argument, followed by the chunk IDs
       await this.db.execute({
-        sql: `UPDATE session_ledger SET last_accessed_at = datetime('now') WHERE id IN (${placeholders})`,
-        args: chunk,
+        sql: `UPDATE session_ledger SET last_accessed_at = ? WHERE id IN (${placeholders})`,
+        args: [now, ...chunk],
       });
     }
   }
@@ -3070,6 +3138,93 @@ export class SqliteStorage implements StorageBackend {
       `temporal=${temporal}, keyword=${keyword}, provenance=${provenance}`
     );
     return { temporal, keyword, provenance };
+  }
+
+  // ─── v7.0: ACT-R Access Log Methods ────────────────────────────
+  //
+  // These three methods support the ACT-R base-level activation model.
+  // Read the interface.ts docstrings for the full spec.
+
+  /**
+   * Record a memory access event (synchronous, fire-and-forget via buffer).
+   * Rule #1: Write contention prevention.
+   */
+  logAccess(entryId: string, contextHash?: string): void {
+    this.accessLogBuffer.push(entryId, contextHash);
+  }
+
+  /**
+   * Batch-fetch access timestamps for multiple entries using window functions.
+   * Rule #2: Prevents N+1 query explosion.
+   *
+   * SQL STRATEGY:
+   *   Uses ROW_NUMBER() OVER (PARTITION BY entry_id ORDER BY accessed_at DESC)
+   *   to rank accesses per entry, then filters to the top `maxPerEntry`.
+   *   This converts N separate queries into 1 query with O(N*K) work
+   *   where N = entries and K = max accesses per entry.
+   *
+   *   We use a CTE subquery pattern because SQLite doesn't support
+   *   WHERE on a window function alias in the same SELECT scope.
+   */
+  async getAccessLog(
+    entryIds: string[],
+    maxPerEntry: number = 50
+  ): Promise<Map<string, Date[]>> {
+    const result = new Map<string, Date[]>();
+
+    if (entryIds.length === 0) return result;
+
+    // Build parameterized IN clause
+    const placeholders = entryIds.map(() => "?").join(", ");
+
+    const rows = await this.db.execute({
+      sql: `
+        WITH ranked AS (
+          SELECT
+            entry_id,
+            accessed_at,
+            ROW_NUMBER() OVER (
+              PARTITION BY entry_id
+              ORDER BY accessed_at DESC
+            ) AS rn
+          FROM memory_access_log
+          WHERE entry_id IN (${placeholders})
+        )
+        SELECT entry_id, accessed_at
+        FROM ranked
+        WHERE rn <= ?
+        ORDER BY entry_id, accessed_at DESC
+      `,
+      args: [...entryIds, maxPerEntry],
+    });
+
+    // Assemble the Map from flat rows
+    for (const row of rows.rows) {
+      const entryId = row.entry_id as string;
+      const accessedAt = new Date(row.accessed_at as string);
+
+      if (!result.has(entryId)) {
+        result.set(entryId, []);
+      }
+      result.get(entryId)!.push(accessedAt);
+    }
+
+    return result;
+  }
+
+  /**
+   * Prune access log entries older than N days.
+   * Called by the sleep-cycle scheduler to bound table growth.
+   */
+  async pruneAccessLog(olderThanDays: number): Promise<number> {
+    const result = await this.db.execute({
+      sql: `DELETE FROM memory_access_log
+            WHERE accessed_at < datetime('now', ?)`,
+      args: [`-${olderThanDays} days`],
+    });
+    const pruned = result.rowsAffected;
+    debugLog(`[SqliteStorage] pruneAccessLog: removed ${pruned} entries older than ${olderThanDays} days`);
+    return pruned;
   }
 }
 

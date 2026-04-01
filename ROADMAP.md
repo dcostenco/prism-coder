@@ -1,12 +1,28 @@
 # Prism MCP — Roadmap
 
-> Full project board: GitHub Projects (internal tracking)
+> Full release history: [`CHANGELOG.md`](CHANGELOG.md) · Issue tracking: [GitHub Issues](../../issues)
 
 ---
 
 ## 🏆 Shipped
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
+
+### ✅ v7.0.0 — ACT-R Cognitive Activation Memory
+
+| Feature | Detail |
+|---------|--------|
+| 🧠 **ACT-R Activation Model** | Scientifically-grounded memory retrieval based on Anderson's ACT-R cognitive architecture. Base-level activation `B_i = ln(Σ t_j^{-d})` replaces flat similarity search with recency × frequency scoring that mirrors human memory decay. |
+| 🔗 **Candidate-Scoped Spreading Activation** | Activation spreads only within the current search result set — prevents "God node" centrality bias where highly-connected nodes dominate every query. |
+| 📊 **Composite Scoring** | `0.7 × similarity + 0.3 × σ(activation)` blends semantic relevance with cognitive activation. Sigmoid normalization keeps activation in `[0,1]` regardless of access pattern. |
+| 🔄 **AccessLogBuffer** | In-memory batch-write buffer with 5-second flush window resolves `SQLITE_BUSY` contention during parallel multi-agent tool calls. Graceful shutdown via `BackgroundTaskRegistry`. |
+| 🚀 **Zero Cold-Start** | Memory creation seeds an initial access log entry — new memories are immediately rankable, no warm-up period needed. |
+| 🗄️ **Supabase Parity** | Migration 037 (`actr_access_log`) + Supabase SQL functions for access log writes and activation computation. Full feature parity with SQLite backend. |
+| ⚙️ **Full Configurability** | 5 new env vars: `PRISM_ACTR_ENABLED`, `PRISM_ACTR_DECAY`, `PRISM_ACTR_WEIGHT_SIMILARITY`, `PRISM_ACTR_WEIGHT_ACTIVATION`, `PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS`. |
+| 📖 **Documentation Overhaul** | README refreshed with Mind Palace terminology, Universal Import top-level section, Quick Start port-conflict collapsible, TL;DR env var guide, and live v7.0.0 dashboard screenshot. |
+| 🧪 **705 Tests** | 32 suites (49 new ACT-R tests across activation math, access log buffer, SQLite/Supabase parity). Zero regressions. |
+
+---
 
 ### ✅ v6.5.1 — Dashboard Project-Load Hotfix
 
@@ -82,171 +98,46 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 ---
 
-### ✅ v5.5.0 — Architectural Hardening
+<details>
+<summary><strong>📜 Earlier releases (v5.5 → v3.0) — click to expand</strong></summary>
 
-| Feature | Detail |
-|---------|--------|
-| 🛡️ **Transactional Migrations** | SQLite DDL rebuilds wrapped in explicit `BEGIN/COMMIT` blocks. A crash mid-migration can no longer corrupt schema or lose handoff state. |
-| 🛑 **Graceful Shutdown Registry** | `BackgroundTaskRegistry` uses 5-second `Promise.race()` to await all in-flight flushes (embeddings, SDM writes, OTel spans) before process exit. No more orphaned I/O. |
-| 🕰️ **Thundering Herd Prevention** | Maintenance scheduler migrated from `setInterval` to state-aware recursive `setTimeout`. Expensive routines can never stack. |
-| 🚀 **Zero-Thrashing SDM Scans** | `Int32Array` scratchpad allocations hoisted outside hot decode loop. Eliminates V8 GC pressure on large memory banks. |
-| 🧪 **374 Tests** | Zero regressions across 17 test suites. |
+> For full details on every release, see [`CHANGELOG.md`](CHANGELOG.md).
 
----
+| Version | Codename | Highlights |
+|---------|----------|------------|
+| **v5.5.0** | Architectural Hardening | Transactional migrations, graceful shutdown registry, thundering herd prevention, zero-thrashing SDM scans. 374 tests. |
+| **v5.4.0** | Concurrency & Autonomous Research | CRDT OR-Map handoff merging, background purge scheduler, autonomous Web Scholar, Scholar ↔ Hivemind integration. |
+| **v5.3.0** | Hivemind Health Watchdog | State-machine agent lifecycle, loop detection, Telepathy alert injection. |
+| **v5.2.0** | Cognitive Memory & Universal Migration | Ebbinghaus importance decay, context-weighted retrieval, Universal History Migration (Claude/Gemini/ChatGPT), SQL injection prevention. |
+| **v5.1.0** | Knowledge Graph Editor & Deep Storage | Deep storage purge (~90% vector savings), interactive graph editor with filtering and node surgery. |
+| **v5.0.0** | Quantized Agentic Memory | TurboQuant ~7× embedding compression, three-tier search (FTS5 → sqlite-vec → JS fallback), atomic backfill. |
+| **v4.6.0** | OpenTelemetry Observability | MCP root spans, `TracingLLMProvider` decorator, GDPR-safe attributes, Jaeger dashboard. |
+| **v4.5.x** | VLM Multimodal Memory & GDPR Export | Auto-captioning pipeline, semantic image search, GDPR Art. 20 export, concurrent safety tests. |
+| **v4.4.0** | Pluggable LLM Adapters (BYOM) | OpenAI/Anthropic/Gemini/Ollama providers, air-gapped mode, split text+embedding config. |
+| **v4.0–4.3** | Behavioral Memory & IDE Sync | Experience events, importance scoring, knowledge → `.cursorrules` sync, project repo registry. |
+| **v3.x** | Memory Lifecycle & Agent Hivemind | Data retention (TTL), auto-compaction, role-scoped memory, Telepathy real-time sync. |
 
-### ✅ v5.4.0 — Concurrency, Automation & Autonomous Research
-
-| Feature | Detail |
-|---------|--------|
-| 🔄 **CRDT Handoff Merging** | Custom OR-Map engine replaces strict OCC rejection. Add-Wins OR-Set for arrays (`open_todos`), Last-Writer-Wins for scalars. 3-way merge via `getHandoffAtVersion()`. `disable_merge` bypass for strict mode. |
-| ⏰ **Background Purge Scheduler** | Unified `setInterval` loop (default: 12h) runs TTL sweep, importance decay, auto-compaction, and deep storage purge. Dashboard status card. `PRISM_SCHEDULER_ENABLED` / `PRISM_SCHEDULER_INTERVAL_MS`. |
-| 🌐 **Autonomous Web Scholar** | Brave Search → Firecrawl scrape → LLM synthesis → Prism ledger injection. Task-aware topic selection biases toward active Hivemind agent tasks. Reentrancy guard, 15K content cap, configurable schedule. |
-| 🐝 **Scholar ↔ Hivemind** | Scholar registers as `scholar` role, emits pipeline-stage heartbeats, broadcasts Telepathy alerts on completion. Zero overhead when Hivemind is off. |
-| 📖 **Architecture Docs** | 3 new sections in `docs/ARCHITECTURE.md` with mermaid diagrams covering Hivemind, Scheduler, and Scholar. |
-
----
-
-### ✅ v5.3.0 — Hivemind Health Watchdog
-
-| Feature | Detail |
-|---------|--------|
-| 🐝 **Hivemind Health Watchdog** | State-machine lifecycle (initializing → idle → monitoring → alerting → recovering). Detects stuck agents, scheduling loops, and resource exhaustion. |
-| 🔁 **Loop Detection** | Identifies repeating agent behavior patterns and injects corrective Telepathy alerts before runaway cycles waste resources. |
-| 📡 **Telepathy Alert Injection** | Watchdog findings broadcast as Telepathy events — all agents see health warnings without polling. |
+</details>
 
 ---
 
-### ✅ v5.2.0 — Cognitive Memory & Universal Migration
+## 📊 The State of Prism (v7.0.0)
 
-| Feature | Detail |
-|---------|--------|
-| 🧠 **Ebbinghaus Importance Decay** | `effective_importance = base × 0.95^days` at retrieval time. Frequently accessed memories stay prominent; neglected ones fade naturally. |
-| 🎯 **Context-Weighted Retrieval** | `context_boost` parameter on `session_search_memory` prepends project context to query before embedding — biases results toward current work. |
-| 🔄 **Universal History Migration** | Strategy Pattern adapters for Claude Code (JSONL), Gemini (StreamArray), OpenAI (JSON). `p-limit(5)` concurrency, content-hash dedup, `--dry-run`. |
-| 🧹 **Smart Consolidation** | Enhanced compaction prompts extract recurring principles alongside summaries. |
-| 🛡️ **SQL Injection Prevention** | 17-column allowlist on `patchLedger()` blocks column-name injection. |
+With v7.0.0 shipped, Prism is a **production-hardened, scientifically-grounded, self-organizing AI Operating System**:
 
----
-
-### ✅ v5.1.0 — Knowledge Graph Editor & Deep Storage
-
-| Feature | Detail |
-|---------|--------|
-| 🗑️ **Deep Storage Mode** | `prism_purge_embeddings` reclaims ~90% of vector storage by purging float32 vectors for entries with TurboQuant blobs. |
-| 🕸️ **Knowledge Graph Editor** | Graph filtering (project, date range, importance) and interactive node editor panel to surgically rename/delete keywords. |
-
----
-
-### ✅ v5.0.0 — Quantized Agentic Memory
-
-| Feature | Detail |
-|---------|--------|
-| 🧮 **TurboQuant Math Core** | Pure TypeScript port of Google's TurboQuant (ICLR 2026) — Lloyd-Max codebook, QR rotation, QJL error correction. Zero dependencies. |
-| 📦 **~7× Embedding Compression** | 768-dim embeddings shrink from 3,072 bytes to ~400 bytes (4-bit) via variable bit-packing. |
-| 🔍 **Asymmetric Similarity** | Unbiased inner product estimator: query as float32 vs compressed blobs. No decompression needed. |
-| 🗄️ **Three-Tier Search** | FTS5 → sqlite-vec float32 → TurboQuant JS fallback. Search works even without native vector extension. |
-| 🛠️ **Backfill Handler** | `session_backfill_embeddings` repairs AND compresses existing entries in a single atomic update. |
-
----
-
-### ✅ v4.6.0 — OpenTelemetry Observability
-
-| Feature | Detail |
-|---------|--------|
-| 🔭 **MCP Root Span** | `mcp.call_tool` wraps every tool invocation. Context propagated via AsyncLocalStorage — no ref-passing. |
-| 🎨 **TracingLLMProvider** | Decorator at the factory boundary. Zero changes to vendor adapters (Gemini/OpenAI/Anthropic). Instruments text, embedding, and VLM generation. |
-| ⚙️ **Worker Spans** | `worker.vlm_caption` in `imageCaptioner.ts` correctly parents fire-and-forget async tasks to the root MCP span. |
-| 🔒 **Shutdown Flush** | `shutdownTelemetry()` is step-0 in `lifecycle.ts` — flushes `BatchSpanProcessor` before DBs close on SIGTERM/disconnect. |
-| 🖥️ **Dashboard UI** | 🔭 Observability tab: enable toggle, OTLP endpoint, service name, inline Jaeger docker quick-start, ASCII waterfall diagram. |
-| ✅ **GDPR-safe** | Span attributes: char counts + sizes only. Never prompt content, embeddings, or base64 image data. |
-
-**Trace waterfall:**
-```
-mcp.call_tool  [session_save_image, ~50 ms]
-  └─ worker.vlm_caption          [~2–5 s, outlives parent ✓]
-       └─ llm.generate_image_description  [~1–4 s]
-       └─ llm.generate_embedding          [~200 ms]
-```
-
----
-
-### ✅ v4.5.1 — GDPR Export & Test Hardening
-
-| Feature | Detail |
-|---------|--------|
-| 📦 **`session_export_memory`** | ZIP export of all project memory (JSON + Markdown). Satisfies GDPR Art. 20 Right to Portability. API keys redacted, embeddings stripped. |
-| 🧪 **270 Tests** | Concurrent export safety, API-key redaction edge cases (incl. `db_password` non-redaction regression), MCP contract under concurrent load. |
-
----
-
-### ✅ v4.5.0 — VLM Multimodal Memory
-
-| Feature | Detail |
-|---------|--------|
-| 👁️ **Auto-Captioning Pipeline** | `session_save_image` → VLM → handoff visual_memory → ledger entry → inline embedding. Fire-and-forget, never blocks MCP response. |
-| 🔍 **Free Semantic Search** | Captions stored as standard ledger entries — `session_search_memory` finds images by meaning with zero schema changes. |
-| 🛡️ **Provider Size Guards** | Anthropic 5MB hard cap. Gemini/OpenAI 20MB soft cap. Pre-flight check before API call. |
-| 🔄 **OCC Retry on Handoff** | Read-modify-write with 2-attempt OCC retry loop to survive concurrent handoff saves. |
-
----
-
-### ✅ v4.4.0 — Pluggable LLM Adapters (BYOM)
-
-| Feature | Detail |
-|---------|--------|
-| 🔌 **Provider Adapters** | OpenAI, Anthropic Claude, Gemini, Ollama (local). Split provider: text and embedding independently configurable. |
-| 🛡️ **Air-Gapped Mode** | Zero cloud API keys — full local execution via `http://127.0.0.1:11434`. |
-| 🔀 **Cost-Optimized** | Claude 3.5 Sonnet + `nomic-embed-text` (free, local) = best-in-class reasoning + free embeddings. |
-
----
-
-### ✅ v4.3.0 — The Bridge: Knowledge Sync Rules
-
-Active Behavioral Memory meets IDE context. Graduated insights (importance ≥ 7) auto-sync into `.cursorrules` / `.clauderules` via `knowledge_sync_rules` — idempotent sentinel-based file writing.
-
----
-
-### ✅ v4.2.0 — Project Repo Registry
-
-Dashboard UI maps projects to repo directories. `session_save_ledger` validates `files_changed` paths and warns on mismatch. Dynamic tool descriptions replace `PRISM_AUTOLOAD_PROJECTS` env var — dashboard is sole source of truth.
-
----
-
-### ✅ v4.1.0 — Auto-Migration & Multi-Instance
-
-Zero-config Supabase schema upgrades via `prism_apply_ddl` RPC on startup. `PRISM_INSTANCE` env var for side-by-side server instances without PID lock conflicts.
-
----
-
-### ✅ v4.0.0 — Behavioral Memory
-
-`session_save_experience` with event types, confidence scores, and importance decay. Auto-injects correction warnings into `session_load_context`. Dynamic role resolution from dashboard.
-
----
-
-### ✅ v3.x — Memory Lifecycle & Agent Hivemind
-
-v3.1: Data retention (TTL), auto-compaction, PKM export, analytics sparklines.  
-v3.0: Role-scoped memory, agent registration/heartbeat, Telepathy (real-time cross-agent sync).
-
----
-
-## 📊 The State of Prism (v6.5.1)
-
-With v6.5.0 shipped, Prism is a **production-hardened, self-organizing, cognitively-routed AI Operating System**:
-
+- **Scientifically-Grounded** — ACT-R activation model (`B_i = ln(Σ t_j^{-d})`) ranks memories by recency × frequency, mirroring human cognitive decay. Candidate-scoped spreading activation prevents centrality bias.
 - **Cognitively-Routed** — HDC state machine composes agent context into binary hypervectors and resolves semantic concepts via Hamming distance. Policy gateway routes with configurable thresholds.
 - **Self-Organizing** — Edge Synthesis + Graph Pruning form an autonomous cognitive loop: the graph grows connective tissue overnight and prunes dead weight on schedule.
-- **Cognitive** — Ebbinghaus decay + context-boosted retrieval + Intuitive Recall + Active Recall quizzes = memory that knows what matters *right now*.
+- **Cognitive** — Composite scoring (similarity + activation) + context-boosted retrieval + Active Recall quizzes = memory that knows what matters *right now*.
 - **Observable** — SLO dashboard tracks synthesis success rate, net link growth, prune ratio, sweep latency, and cognitive route distribution. Warning badges fire proactively.
-- **Zero Cold-Start** — Universal Migration imports years of Claude/Gemini/ChatGPT history on day one.
+- **Zero Cold-Start** — Universal Migration imports years of Claude/Gemini/ChatGPT history on day one. New memories are access-seeded immediately.
 - **Scale** — TurboQuant 10× compression + Deep Storage Purge + SQLite VACUUM. Decades of session history on a laptop.
 - **Safe** — Full type-guard matrix across all 30+ MCP tools. LLM-hallucinated payloads are rejected at the boundary.
 - **Convergent** — CRDT OR-Map handoff merging. Multiple agents, zero conflicts.
 - **Autonomous** — Web Scholar researches while you sleep. Task-aware, Hivemind-integrated.
-- **Hardened** — Transactional migrations, graceful shutdown, thundering herd prevention, prototype pollution guards, tenant-safe graph writes.
+- **Hardened** — Transactional migrations, graceful shutdown, thundering herd prevention, AccessLogBuffer batch writes, prototype pollution guards, tenant-safe graph writes.
 - **Quality** — Interactive Knowledge Graph Editor + Behavioral Memory that learns from mistakes.
-- **Reliability** — 566 passing tests across 30 suites.
+- **Reliability** — 705 passing tests across 32 suites.
 - **Observability** — OpenTelemetry span waterfalls + SLO metrics + cognitive route telemetry for every tool call, LLM hop, background worker, and graph sweep.
 - **Multimodal** — VLM auto-captioning turns screenshots into semantically searchable memory.
 - **Security** — SQL injection prevention, path traversal guard, GDPR Art. 17+20 compliance.
@@ -255,7 +146,7 @@ With v6.5.0 shipped, Prism is a **production-hardened, self-organizing, cognitiv
 
 ## 🗺️ Next on the Horizon
 
-### 📱 Mind Palace Mobile PWA — Supporting Track
+### 📱 Mind Palace Mobile PWA `[Backlog]`
 
 **Problem:** The dashboard is desktop-only. Quick check-ins on mobile require a laptop.
 
@@ -268,19 +159,21 @@ With v6.5.0 shipped, Prism is a **production-hardened, self-organizing, cognitiv
 
 ### 🔭 Future Cognitive Tracks
 
-#### v7.x — Affect-Tagged Memory
+#### v8.x — Affect-Tagged Memory `[Researching]`
 - **Problem:** Pure semantic relevance misses urgency and emotional salience in real-world agent collaboration.
 - **Benefit:** Recall prioritization improves by weighting memories with affective/contextual valence, making surfaced context more behaviorally useful.
-- **Dependency:** Builds on v6.5 compositional memory states so affect can be attached and retrieved as first-class signal.
+- **Dependency:** Builds on v7.0 ACT-R activation and v6.5 compositional memory states so affect can be attached and retrieved as first-class signal.
 
-#### v8+ — Zero-Search Retrieval
+#### v9+ — Zero-Search Retrieval `[Exploring]`
 - **Problem:** Index/ANN retrieval layers add latency, complexity, and operational overhead at very large memory scales.
 - **Benefit:** Direct vector-addressed recall (“just ask the vector”) reduces retrieval indirection and moves Prism toward truly native associative memory.
-- **Dependency:** Requires stable SDM/HDC primitives and production-grade retrieval calibration from v6.5/v7.x.
+- **Dependency:** Requires stable SDM/HDC primitives, ACT-R activation calibration, and production-grade retrieval from v7.x/v8.x.
 
 ---
 
 ## 🧰 Infrastructure Backlog
+
+> 🤝 **Want to contribute?** These items are great entry points for new contributors. Most are self-contained and don't require deep knowledge of the cognitive pipeline. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for guidelines.
 
 | Feature | Notes |
 |---------|-------|
