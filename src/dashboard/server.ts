@@ -31,6 +31,13 @@ import { getLLMProvider } from "../utils/llm/factory.js";
 import { buildVaultDirectory } from "../utils/vaultExporter.js";
 import { redactSettings } from "../tools/commonHelpers.js";
 import { handleGraphRoutes } from "./graphRouter.js";
+import {
+  safeCompare,
+  generateToken,
+  isAuthenticated,
+  createRateLimiter,
+  type AuthConfig,
+} from "./authUtils.js";
 
 
 const PORT = parseInt(process.env.PRISM_DASHBOARD_PORT || "3000", 10);
@@ -82,51 +89,19 @@ export async function startDashboardServer(): Promise<void> {
   const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
   const activeSessions = new Map<string, number>(); // token → expiry timestamp
 
-  /** Generate a random session token */
-  function generateToken(): string {
-    const chars = "abcdef0123456789";
-    let token = "";
-    for (let i = 0; i < 64; i++) {
-      token += chars[Math.floor(Math.random() * chars.length)];
-    }
-    return token;
-  }
+  // Auth config object — injectable for testing via authUtils.ts
+  const authConfig: AuthConfig = {
+    authEnabled: AUTH_ENABLED,
+    authUser: AUTH_USER,
+    authPass: AUTH_PASS,
+    activeSessions,
+  };
 
-  /** Timing-safe string comparison to prevent timing attacks */
-  function safeCompare(a: string, b: string): boolean {
-    if (a.length !== b.length) return false;
-    let result = 0;
-    for (let i = 0; i < a.length; i++) {
-      result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-    }
-    return result === 0;
-  }
-
-  /** Check if request is authenticated (returns true if auth is disabled) */
-  function isAuthenticated(req: http.IncomingMessage): boolean {
-    if (!AUTH_ENABLED) return true;
-
-    // Check session cookie first
-    const cookies = req.headers.cookie || "";
-    const match = cookies.match(/prism_session=([a-f0-9]{64})/);
-    if (match) {
-      const token = match[1];
-      const expiry = activeSessions.get(token);
-      if (expiry && expiry > Date.now()) return true;
-      // Expired — clean up
-      if (expiry) activeSessions.delete(token);
-    }
-
-    // Check Basic Auth header
-    const authHeader = req.headers.authorization || "";
-    if (authHeader.startsWith("Basic ")) {
-      const decoded = Buffer.from(authHeader.slice(6), "base64").toString("utf-8");
-      const [user, pass] = decoded.split(":");
-      return safeCompare(user || "", AUTH_USER) && safeCompare(pass || "", AUTH_PASS);
-    }
-
-    return false;
-  }
+  // v6.5.1: Rate limiter for login endpoint — 5 attempts per 60 seconds per IP
+  const loginRateLimiter = createRateLimiter({
+    maxAttempts: 5,
+    windowMs: 60 * 1000,
+  });
 
   /** Render a styled login page matching the Mind Palace theme */
   function renderLoginPage(): string {
@@ -183,9 +158,18 @@ return false;}
   }
 
   const httpServer = http.createServer(async (req, res) => {
-    // CORS headers for local dev
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    // v6.5.1: CORS — restrict origin when auth is enabled to prevent CSRF
+    if (AUTH_ENABLED) {
+      const origin = req.headers.origin || "";
+      // Only echo back the origin if present (browser-initiated requests)
+      if (origin) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Access-Control-Allow-Credentials", "true");
+      }
+    } else {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    }
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
     if (req.method === "OPTIONS") {
@@ -196,12 +180,21 @@ return false;}
     // ─── v5.1: Auth login endpoint (always accessible) ───
     const reqUrl = new URL(req.url || "/", `http://${req.headers.host}`);
     if (AUTH_ENABLED && reqUrl.pathname === "/api/auth/login" && req.method === "POST") {
+      // v6.5.1: Rate limiting — prevent brute-force attacks
+      const clientIP = (req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
+      if (!loginRateLimiter.isAllowed(clientIP)) {
+        res.writeHead(429, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: "Too many login attempts. Try again later." }));
+      }
+
       const body = await readBody(req);
       try {
         const { user, pass } = JSON.parse(body);
         if (safeCompare(user || "", AUTH_USER) && safeCompare(pass || "", AUTH_PASS)) {
           const token = generateToken();
           activeSessions.set(token, Date.now() + SESSION_TTL_MS);
+          // Reset rate limiter on successful login
+          loginRateLimiter.reset(clientIP);
           res.writeHead(200, {
             "Content-Type": "application/json",
             "Set-Cookie": `prism_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_TTL_MS / 1000}`,
@@ -213,8 +206,24 @@ return false;}
       return res.end(JSON.stringify({ error: "Invalid credentials" }));
     }
 
+    // ─── v6.5.1: Logout endpoint — invalidates session server-side ───
+    if (AUTH_ENABLED && reqUrl.pathname === "/api/auth/logout" && req.method === "POST") {
+      // Extract and invalidate the session token from the cookie
+      const cookies = req.headers.cookie || "";
+      const match = cookies.match(/prism_session=([a-f0-9]{64})/);
+      if (match) {
+        activeSessions.delete(match[1]);
+      }
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        // Clear the cookie on the client side
+        "Set-Cookie": `prism_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+      });
+      return res.end(JSON.stringify({ ok: true }));
+    }
+
     // ─── v5.1: Auth gate — block unauthenticated requests ───
-    if (AUTH_ENABLED && !isAuthenticated(req)) {
+    if (AUTH_ENABLED && !isAuthenticated(req, authConfig)) {
       // For API calls, return 401 JSON
       if (reqUrl.pathname.startsWith("/api/")) {
         res.writeHead(401, { "Content-Type": "application/json" });
