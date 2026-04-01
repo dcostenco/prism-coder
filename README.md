@@ -447,41 +447,49 @@ Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.z
 
 ## ⚔️ How Prism Compares
 
-While standard Memory MCPs act as passive filing cabinets, Prism is an **active cognitive architecture** that manages its own health, compresses its own data, and learns autonomously in the background.
+Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as passive filing cabinets — they wait for the LLM to search them. **Prism is an active cognitive architecture.** Designed specifically for the **Model Context Protocol (MCP)**, Prism doesn't just store vectors; it manages the LLM's context window autonomously.
 
-| Feature | 🧠 **Prism MCP** | Official Anthropic Memory | Cloud APIs (Mem0 / Zep) | Simple SQLite/File MCPs |
-|:---|:---:|:---:|:---:|:---:|
-| **Paradigm** | **Active & Autonomous** | Passive Entity Graph | Passive Vector Store | Passive Log |
-| **Context Assembly** | **Progressive (Quick/Std/Deep)** | Manual JSON retrieval | Similarity Search only | Dump all / exact match |
-| **Graph Generation** | **Auto-Synthesized (Edges)** | Manual (LLM must write JSON) | Often none / black box | None |
-| **Context Window Mgmt** | **Auto-Compaction & Decay** | Endless unbounded growth | Requires paid API logic | Manual deletion required |
-| **Storage Engine** | **Local SQLite OR Supabase** | Local File | Cloud Only (Vendor lock-in) | Local SQLite |
-| **Vector Search** | **Three-Tier (Native / TQ / FTS5)** | ❌ None | ✅ Yes (Remote) | ❌ None |
-| **Vector Compression** | **TurboQuant (10× smaller)** | ❌ N/A | ❌ Expensive/Opaque | ❌ N/A |
-| **Multi-Agent Sync** | **CRDTs + Hivemind Watchdog** | ❌ Single-agent only | ✅ Paid feature | ❌ Data collisions |
-| **Observability** | **OTel Traces + Web Dashboard** | ❌ None | ✅ Web Dashboard | ❌ None |
-| **Data Portability** | **Prism-Port (Obsidian Vault ZIP)** | ❌ Raw JSON | ❌ API Export | ❌ Raw DB file |
-| **Cost Model** | **Free + BYOM (Ollama)** | Free (limited) | Per-API-call pricing | Free (limited) |
+### 📊 Feature-by-Feature Comparison
 
-### 🏆 Why Prism Wins: The "Big Three" Differentiators
+| Feature / Architecture | 🧠 Prism MCP | 🐘 Mem0 | ⚡ Zep | 🧪 Anthropic Base MCP |
+| :--- | :--- | :--- | :--- | :--- |
+| **Primary Interface** | **Native MCP** (Tools, Prompts, Resources) | REST API & Python/TS SDKs | REST API & Python/TS SDKs | Native MCP (Tools only) |
+| **Storage Engine** | **BYO SQLite or Supabase** | Managed Cloud / VectorDBs | Managed Cloud / Postgres | Local SQLite only |
+| **Context Assembly** | **Progressive (Quick/Std/Deep)** | Top-K Semantic Search | Top-K + Temporal Summaries | Basic Entity Search |
+| **Memory Mechanics** | **Ebbinghaus Decay, SDM, HDC** | Basic Vector + Entity | Fading Temporal Graph | None (Infinite growth) |
+| **Multi-Agent Sync** | **CRDT (Add-Wins / LWW)** | Cloud locks | Postgres locks | ❌ None (Data races) |
+| **Data Compression** | **TurboQuant (7x smaller vectors)** | ❌ Standard F32 Vectors | ❌ Standard Vectors | ❌ No Vectors |
+| **Observability** | **OTel Traces + Built-in PWA UI** | Cloud Dashboard | Cloud Dashboard | ❌ None |
+| **Maintenance** | **Autonomous Background Scheduler** | Manual/API driven | Automated (Cloud) | ❌ Manual |
+| **Data Portability** | **Prism-Port (Obsidian/Logseq Vault)** | JSON Export | JSON Export | Raw `.db` file |
+| **Cost Model** | **Free + BYOM (Ollama)** | Per-API-call pricing | Per-API-call pricing | Free (limited) |
 
-**1. Zero Cold-Starts with Progressive Loading & OCC**
-Other systems require the LLM to waste tokens and reasoning steps asking "What was I doing?" and calling tools to fetch memory. Prism uses MCP Resources to instantly inject the live project state into the context window *before* the LLM generates its first token. CRDT-backed Optimistic Concurrency Control ensures multiple agents (e.g., Claude + Cursor) can work on the same project simultaneously without data collisions.
+### 🏆 Where Prism Crushes the Giants
 
-**2. Self-Cleaning & Self-Optimizing**
-If you use a standard memory tool long enough, it clogs the LLM's context window with thousands of obsolete tokens. Prism runs an autonomous Background Scheduler that:
-- **Ebbinghaus Decays** older, unreferenced memories — importance fades unless reinforced.
-- **Auto-Compacts** large session histories into dense, LLM-generated summaries.
-- **Deep Purges** high-precision vectors, replacing them with 400-byte TurboQuant compressed blobs, saving ~90% of disk space.
+#### 1. MCP-Native, Not an Adapted API
+Mem0 and Zep are APIs that *can* be wrapped into an MCP server. Prism was built *for* MCP from day one. Instead of wasting tokens on "search" tool calls, Prism uses **MCP Prompts** (`/resume_session`) to inject context *before* the LLM thinks, and **MCP Resources** (`memory://project/handoff`) to attach live, subscribing context.
+
+#### 2. Academic-Grade Cognitive Computer Science
+The giants use standard RAG (Retrieval-Augmented Generation). Prism uses biological and academic models of memory: **TurboQuant** for extreme vector compression, **Ebbinghaus curves** for importance decay, and **Sparse Distributed Memory (SDM)**. This makes Prism vastly more efficient on a local machine than running a giant Postgres/pgvector instance.
+
+#### 3. True Multi-Agent Coordination (CRDTs)
+If Cursor (Agent A) and Claude Desktop (Agent B) try to update a Mem0 or standard SQLite database at the exact same time, you get a race condition and data loss. Prism uses **Optimistic Concurrency Control (OCC) with CRDT OR-Maps** — mathematically guaranteeing that simultaneous agent edits merge safely. Enterprise-grade distributed systems on a local machine.
+
+#### 4. The PKM "Prism-Port" Export
+AI memory is a black box. Developers hate black boxes. Prism exports memory directly into an **Obsidian/Logseq-compatible Markdown Vault** with YAML frontmatter and `[[Wikilinks]]`. Neither Mem0 nor Zep do this.
+
+#### 5. Self-Cleaning & Self-Optimizing
+If you use a standard memory tool long enough, it clogs the LLM's context window with thousands of obsolete tokens. Prism runs an autonomous [Background Scheduler](src/backgroundScheduler.ts) that Ebbinghaus-decays older memories, auto-compacts session histories into dense summaries, and deep-purges high-precision vectors — saving ~90% of disk space automatically.
+
+### 🤝 Where the Giants Currently Win (Honest Trade-offs)
+
+1. **Framework Integrations:** Mem0 and Zep have pre-built integrations for LangChain, LlamaIndex, Flowise, AutoGen, CrewAI, etc. Prism requires the host application to support the MCP protocol.
+2. **Managed Cloud Infrastructure:** The giants offer SaaS. Users pay $20/month and don't think about databases. Prism users must set up their own local SQLite or provision their own Supabase instance.
+3. **Implicit Memory Extraction (NER):** Zep automatically extracts names, places, and facts from raw chat logs using NLP models. Prism relies on the LLM explicitly calling the `session_save_ledger` tool to structure its own memories.
 
 > 💰 **Token Economics:** Progressive Context Loading (Quick ~50 tokens / Standard ~200 / Deep ~1000+) plus auto-compaction means you never blow your Claude/OpenAI token budget fetching 50 pages of raw chat history.
-
-**3. The Associative Memory Graph**
-Prism doesn't just store logs; it connects them. When a session is saved, Prism automatically creates temporal chains (what happened next) and keyword overlap edges. In the background, Edge Synthesis actively scans for latent relationships and *synthesizes* new graph edges between conceptually similar but disconnected memories — turning passive storage into an active, self-organizing knowledge graph.
-
-> 🔌 **BYOM (Bring Your Own Model):** While tools like Mem0 charge per API call, Prism's pluggable architecture lets you run `nomic-embed-text` locally via Ollama for **free vectors**, while using Claude or GPT for high-level reasoning. Zero vendor lock-in.
 >
-> 🏛️ **Prism-Port for PKM:** Prism turns your AI's brain into a readable [Obsidian](https://obsidian.md) / [Logseq](https://logseq.com) vault. Export with `session_export_memory(format='vault')` — complete with YAML frontmatter, `[[Wikilinks]]`, and keyword backlink indices. No more black-box AI memory.
+> 🔌 **BYOM (Bring Your Own Model):** While tools like Mem0 charge per API call, Prism's pluggable architecture lets you run `nomic-embed-text` locally via Ollama for **free vectors**, while using Claude or GPT for high-level reasoning. Zero vendor lock-in.
 
 ---
 
