@@ -87,41 +87,44 @@ export const PRISM_STORAGE: "local" | "supabase" =
 // are registered. These tools allow AI agents to persist and recover
 // context between sessions.
 
-export const SUPABASE_URL = process.env.SUPABASE_URL;
-export const SUPABASE_KEY = process.env.SUPABASE_KEY;
-
-/**
- * SESSION_MEMORY_ENABLED — Master toggle for session persistence tools.
- *
- * Hardcoded to `true` since v3.0. This flag was originally used to gate
- * session memory tools when Supabase credentials were optional. Now that
- * session memory is a core feature (both SQLite and Supabase backends),
- * it is always enabled.
- *
- * The flag is kept (rather than removed) because several modules import
- * it for conditional registration of MCP tools. Removing it would require
- * a broader refactor with no functional benefit.
- */
-export const SESSION_MEMORY_ENABLED = true;
-// Note: debug() is defined at the bottom of this file; these lines
-// execute at import time after the full module is loaded by Node.
-if (!SESSION_MEMORY_ENABLED) {
-  console.error("Info: Session memory disabled (set PRISM_STORAGE=local or configure Supabase)");
+function sanitizeEnv(value?: string): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  // Treat unresolved template placeholders as unset (e.g. "${SUPABASE_URL}")
+  if (!trimmed || trimmed.includes("${")) return undefined;
+  return trimmed;
 }
 
-// ─── Optional: Multi-Tenant User ID ──────────────────────────
-// REVIEWER NOTE: When multiple users share the same Supabase instance,
-// PRISM_USER_ID isolates their data. Each user sets a unique ID in their
-// Claude Desktop config. All queries are scoped to this user_id.
-//
-// Defaults to "default" for backward compatibility — existing single-user
-// installations work without any config changes.
-//
-// For enterprise: use a stable unique identifier (UUID, email hash, etc.)
-// For personal use: any unique string works (e.g., "alice", "bob")
+function isHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
+export const SUPABASE_URL = sanitizeEnv(process.env.SUPABASE_URL);
+export const SUPABASE_KEY = sanitizeEnv(process.env.SUPABASE_KEY);
+export const SUPABASE_CONFIGURED =
+  !!SUPABASE_URL &&
+  !!SUPABASE_KEY &&
+  isHttpUrl(SUPABASE_URL);
+
+if (process.env.SUPABASE_URL && !SUPABASE_URL) {
+  console.error(
+    "Warning: SUPABASE_URL appears unresolved/empty (e.g. template placeholder). Falling back to local storage unless explicitly fixed."
+  );
+}
+if (SUPABASE_URL && !isHttpUrl(SUPABASE_URL)) {
+  console.error("Warning: SUPABASE_URL is not a valid http(s) URL. Falling back to local storage.");
+}
+// Session memory remains core-enabled in both local and Supabase modes.
+export const SESSION_MEMORY_ENABLED = true;
+
+// Optional multi-tenant scope ID (used by storage queries and handoffs).
 export const PRISM_USER_ID = process.env.PRISM_USER_ID || "default";
-// Multi-tenant info logged at debug level in startServer()
+
 
 // ─── v2.1: Auto-Capture Feature ─────────────────────────────
 // REVIEWER NOTE: Automatically captures HTML snapshots of local dev servers
