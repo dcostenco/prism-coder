@@ -391,9 +391,34 @@ Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.z
 
 **Morning Briefings** — After 4+ hours away, Prism auto-synthesizes a 3-bullet action plan from your last sessions.
 
+### Claude Code: Parallel Explore Agent Workflows
+
+When you need to quickly map a large auth system, launch multiple `Explore` subagents in parallel and merge their findings:
+
+```text
+Run 3 Explore agents in parallel.
+1) Map auth architecture
+2) List auth API endpoints
+3) Find auth test coverage gaps
+Research only, no code changes.
+Return a merged summary.
+```
+
+Then continue a specific thread with a follow-up message to the selected agent, such as deeper refresh-token edge-case analysis.
+
 ---
 
 ## 🆕 What's New
+
+### v6.5.3 — Auth Hardening ✅
+- 🔒 **Rate Limiting** — Login endpoint (`POST /api/auth/login`) protected by sliding-window rate limiter (5 attempts per 60s per IP). Resets on success.
+- 🔒 **CORS Hardening** — Dynamic `Origin` echo with `Allow-Credentials` when auth enabled (replaces wildcard `*`).
+- 🚪 **Logout Endpoint** — `POST /api/auth/logout` invalidates session server-side and clears client cookie.
+- 🧪 **42-Test Auth Suite** — Unit + HTTP integration tests covering `safeCompare`, `generateToken`, `isAuthenticated`, `createRateLimiter`, login/logout lifecycle, rate limiting, and CORS.
+- 🏗️ **Auth Module Extraction** — Decoupled auth logic from `server.ts` closures into testable `authUtils.ts`.
+
+### v6.5.2 — SDM/HDC Test Hardening ✅
+- 🧪 **37 New Edge-Case Tests** — Hardened the cognitive routing pipeline (HDC engine, PolicyGateway, StateMachine, SDM engine) with boundary condition tests. 571 → 608 total tests.
 
 ### v6.5.1 — Dashboard Project-Load Hotfix ✅
 - 🩹 **Project Selector Recovery** — Fixed a startup path where the dashboard selector could stay stuck on "Loading projects..." when Supabase env vars were unresolved placeholders.

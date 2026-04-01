@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [6.5.3] - 2026-04-01
+
+### Added
+- **Dashboard Auth Test Suite** — 42 new tests (`tests/dashboard/auth.test.ts`) covering the entire auth system: `safeCompare` timing-safety, `generateToken` entropy, `isAuthenticated` cookie/Basic Auth flows, `createRateLimiter` sliding window, and full HTTP integration tests for login, logout, auth gate, rate limiting, and CORS.
+- **Rate Limiting** — `POST /api/auth/login` is now protected by a sliding-window rate limiter (5 attempts per 60 seconds per IP). Resets on successful login. Stale entries are auto-pruned to prevent memory leaks.
+- **Logout Endpoint** — `POST /api/auth/logout` invalidates the session token server-side (deletes from `activeSessions` map) and clears the client cookie via `Max-Age=0`.
+- **Auth Utilities Module** — Extracted `safeCompare`, `generateToken`, `isAuthenticated`, and `createRateLimiter` from `server.ts` closures into `src/dashboard/authUtils.ts` for testability and reuse.
+
+### Security
+- **CORS Hardening** — When `AUTH_ENABLED`, `Access-Control-Allow-Origin` is now set dynamically to the request's `Origin` header (not wildcard `*`), and `Access-Control-Allow-Credentials: true` is sent. Wildcard `*` is only used when auth is disabled.
+- **Cryptographic Token Generation** — `generateToken()` now uses `crypto.randomBytes(32).toString("hex")` instead of `Math.random()` for session tokens.
+- **Colon-Safe Password Parsing** — Basic Auth credential extraction now uses `indexOf(":")` instead of `split(":")` to correctly handle passwords containing colon characters.
+
+### Engineering
+- 42 new auth tests (unit + HTTP integration), zero regressions in existing 14 dashboard API tests
+- New file: `src/dashboard/authUtils.ts` — extracted pure functions with injectable `AuthConfig`
+- New file: `tests/dashboard/auth.test.ts` — 5 describe blocks, 42 test cases
+
+---
+
+## [6.5.2] - 2026-04-01
+
+### Engineering
+- **SDM/HDC Edge-Case Test Hardening** — 37 new tests (571 → 608 total) covering critical boundary conditions across the cognitive routing pipeline:
+  - **HDC Engine** — Bind length mismatch rejection, empty bundle handling, single-vector identity, XOR self-inverse property, permute empty/single-word edge cases, density preservation invariant.
+  - **PolicyGateway** — All 4 constructor rejection paths, exact-at-threshold boundary routing (0.85 → CLARIFY, 0.95 → AUTO_ROUTE), null-concept override behavior.
+  - **StateMachine** — Constructor/transition dimension guards, defensive cloning, `injectStateForTesting` guard, initial-state immutability.
+  - **SDM Engine** — Hamming identity/complement properties, reverse mode cross-talk isolation, write/read dimension guards, k=0 boundary, `importState` guard, `exportState` → `importState` lossless roundtrip.
+
+---
+
 ## [6.5.1] - 2026-04-01
 
 ### Fixed
