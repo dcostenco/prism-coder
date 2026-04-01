@@ -985,7 +985,7 @@ export function renderDashboardHTML(version: string): string {
             min="0" max="100000" step="500"
             style="padding: 0.2rem 0.5rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); width: 90px; text-align: right;"
             onchange="saveSetting('max_tokens', this.value)"
-            oninput="clearTimeout(this._t); this._t=setTimeout(()=>saveSetting('max_tokens',this.value),800)" />
+            oninput="clearTimeout(this._t); var _s=this; this._t=setTimeout(function(){saveSetting('max_tokens',_s.value)},800)" />
         </div>
 
         <div class="setting-section">Boot Settings <span class="boot-badge">Restart Required</span></div>
