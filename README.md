@@ -6,7 +6,7 @@
 [![Smithery](https://img.shields.io/badge/Smithery-listed-6B4FBB)](https://smithery.ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 **Your AI agent forgets everything between sessions. Prism fixes that.**
 
@@ -33,7 +33,7 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [Architecture](#architecture)
 - [Scientific Foundation](#-scientific-foundation)
 - [Product Roadmap](#-product-roadmap)
-- [Limitations](#limitations)
+- [Troubleshooting FAQ](#-troubleshooting-faq)
 
 ---
 
@@ -747,9 +747,21 @@ Full Superposed Memory (SDM) + Hyperdimensional Computing (HDC/VSA) becomes the 
 - **v7.x: Affect-Tagged Memory** — Recall prioritization improves by weighting memories with affective/contextual valence, making surfaced context more behaviorally useful.
 - **v8+: Zero-Search Retrieval** — Direct vector-addressed recall (“just ask the vector”) reduces retrieval indirection and moves Prism toward truly native associative memory.
 
----
 
-## Limitations
+## ❓ Troubleshooting FAQ
+
+**Q: Why is the dashboard project selector stuck on "Loading projects..."?**
+A: This usually means Supabase env values are unresolved placeholders (for example `${SUPABASE_URL}`) or invalid. As of v6.5.1 Prism auto-falls back to local SQLite, but you should still fix env values for cloud mode.
+
+**Q: Why is semantic search quality weak or inconsistent?**
+A: Check embedding provider configuration and key availability. Missing embedding credentials reduce semantic recall quality and can shift behavior toward keyword-heavy matches.
+
+**Q: How do I delete a bad memory entry?**
+A: Use `session_forget_memory` for targeted soft/hard deletion. For manual cleanup and merge workflows, use the dashboard graph editor.
+
+**Q: How do I verify the install quickly?**
+A: Run `npm run build && npm test`, then open the Mind Palace dashboard (`localhost:3000`) and confirm projects load plus Graph Health renders.
+
 
 - **LLM-dependent features require an API key.** Semantic search, Morning Briefings, auto-compaction, and VLM captioning need a `GOOGLE_API_KEY` (Gemini) or equivalent provider key. Without one, Prism falls back to keyword-only search (FTS5).
 - **Auto-load is model- and client-dependent.** Session auto-loading relies on both the LLM following system prompt instructions *and* the MCP client completing tool registration before the model's first turn. Prism provides platform-specific [Setup Guides](#-setup-guides) and a server-side fallback (v5.2.1) that auto-pushes context after 10 seconds.

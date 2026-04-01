@@ -11,9 +11,8 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - **Config Sanitization** — Added Supabase env sanitization and URL validation to ignore unresolved placeholder strings and invalid non-http(s) values.
 
-### Validation
-- Dashboard project loading retested on clean server process.
-- Build and targeted dashboard route tests passing.
+### Release Process
+- Delivered as a **single pull request** post-publish hardening pass to keep code + docs + release notes aligned in one review artifact.
 
 ---
 
