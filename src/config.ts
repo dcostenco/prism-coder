@@ -338,7 +338,7 @@ export const PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS = parseInt(
 // Set PRISM_TASK_ROUTER_ENABLED=true to unlock the session_task_route tool.
 
 /** Master switch for the task router tool. */
-export const PRISM_TASK_ROUTER_ENABLED = process.env.PRISM_TASK_ROUTER_ENABLED === "true";
+export const PRISM_TASK_ROUTER_ENABLED_ENV = process.env.PRISM_TASK_ROUTER_ENABLED === "true";
 
 /** Confidence threshold below which routing defaults to the host model. (Default: 0.6) */
 export const PRISM_TASK_ROUTER_CONFIDENCE_THRESHOLD = parseFloat(

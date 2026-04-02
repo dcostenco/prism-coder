@@ -1005,6 +1005,13 @@ export function renderDashboardHTML(version: string): string {
         </div>
         <div class="setting-row">
           <div>
+            <div class="setting-label">Task Router</div>
+            <div class="setting-desc">Route tasks to local Claw agent (PRISM_TASK_ROUTER_ENABLED)</div>
+          </div>
+          <div class="toggle" id="toggle-task-router" onclick="toggleBootSetting('task_router_enabled', this)"></div>
+        </div>
+        <div class="setting-row">
+          <div>
             <div class="setting-label">Storage Backend</div>
             <div class="setting-desc">Switch between SQLite and Supabase</div>
           </div>
@@ -2780,6 +2787,8 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
         // Boot toggles
         if (s.hivemind_enabled === 'true') document.getElementById('toggle-hivemind').classList.add('active');
         else document.getElementById('toggle-hivemind').classList.remove('active');
+        if (s.task_router_enabled === 'true') document.getElementById('toggle-task-router').classList.add('active');
+        else document.getElementById('toggle-task-router').classList.remove('active');
         
         // Storage Backend
         if (s.PRISM_STORAGE) {

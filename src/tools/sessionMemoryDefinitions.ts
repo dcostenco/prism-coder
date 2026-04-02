@@ -1464,8 +1464,9 @@ export const SESSION_TASK_ROUTE_TOOL: Tool = {
     "2. Read the `target` field in the response\n" +
     "3. If target is `claw`, call `claw_run_task` with the task description\n" +
     "4. If target is `host`, handle the task yourself\n\n" +
-    "**v7.1.0:** Uses deterministic keyword/scope heuristics. " +
-    "Experience-based ML routing is planned for v7.2.0.",
+    "**v7.1.0/v7.2.0:** Uses deterministic keyword/scope heuristics.\n" +
+    "When a project is specified, routing is enhanced by analyzing past experience events " +
+    "(success/failure/correction) to adjust confidence scores based on historical outcomes.",
   inputSchema: {
     type: "object",
     properties: {
