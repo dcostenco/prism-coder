@@ -22,6 +22,10 @@ import {
   isSessionTaskRouteArgs,
 } from "./sessionMemoryDefinitions.js";
 
+import { getStorage } from "../storage/index.js";
+import { getExperienceBias } from "./routerExperience.js";
+import { toKeywordArray } from "../utils/keywordExtractor.js";
+
 import {
   PRISM_TASK_ROUTER_CONFIDENCE_THRESHOLD,
   PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY,
@@ -35,6 +39,12 @@ export interface TaskRouteResult {
   complexity_score: number;
   rationale: string;
   recommended_tool: string | null;
+  experience?: {
+    bias: number;
+    sample_count: number;
+    rationale: string;
+  };
+  _rawComposite?: number;
 }
 
 // ─── Keyword Lists ───────────────────────────────────────────
@@ -248,6 +258,7 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
     complexity_score,
     rationale,
     recommended_tool: target === "claw" ? "claw_run_task" : null,
+    _rawComposite: composite,
   };
 }
 
@@ -275,6 +286,44 @@ export async function sessionTaskRouteHandler(
   }
 
   const result = computeRoute(args);
+
+  // v7.2.0: Experience-based bias adjustment
+  if (args.project) {
+    try {
+      const storage = await getStorage();
+      const taskKeywords = toKeywordArray(args.task_description);
+      const exp = await getExperienceBias(args.project, taskKeywords, storage);
+
+      if (exp.sampleCount >= 5) {
+        // Adjust confidence: positive bias → boost claw confidence, negative → reduce
+        const adjustedComposite = Math.max(-1.0, Math.min(1.0, (result._rawComposite || 0) + exp.bias));
+        
+        // Recalculate target and complexity if bias flipped the composite sign
+        const complexityRaw = Math.round(5.5 - adjustedComposite * 4.5);
+        const complexity_score = Math.max(1, Math.min(10, complexityRaw));
+        const isClaw = adjustedComposite > 0 && complexity_score <= PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY;
+        const confidence = Math.min(0.99, Math.round((0.5 + Math.abs(adjustedComposite) * 0.5) * 100) / 100);
+        const target = isClaw && confidence >= PRISM_TASK_ROUTER_CONFIDENCE_THRESHOLD ? "claw" : "host";
+
+        result.target = target;
+        result.confidence = confidence;
+        result.complexity_score = complexity_score;
+        result.recommended_tool = target === "claw" ? "claw_run_task" : null;
+        
+        result.experience = {
+          bias: exp.bias,
+          sample_count: exp.sampleCount,
+          rationale: exp.rationale,
+        };
+      }
+    } catch (err) {
+      // Non-fatal: experience lookup failure should never block routing
+      // Note: intentionally throwing away the error to keep the original raw heuristic result.
+    }
+  }
+
+  // Remove the private field from the final output
+  delete result._rawComposite;
 
   return {
     content: [

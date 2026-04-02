@@ -75,7 +75,7 @@ import {
   PRISM_SCHEDULER_ENABLED, PRISM_SCHEDULER_INTERVAL_MS,
   PRISM_SCHOLAR_ENABLED,
   PRISM_HDC_ENABLED,
-  PRISM_TASK_ROUTER_ENABLED,
+  PRISM_TASK_ROUTER_ENABLED_ENV,
 } from "./config.js";
 import { startWatchdog, drainAlerts } from "./hivemindWatchdog.js";
 import { startScheduler, startScholarScheduler } from "./backgroundScheduler.js";
@@ -367,7 +367,7 @@ export function createServer() {
     // v3.0: Agent Hivemind tools — only when PRISM_ENABLE_HIVEMIND=true
     ...(PRISM_ENABLE_HIVEMIND ? AGENT_REGISTRY_TOOLS : []),
     // v7.1: Task Router tool — only when PRISM_TASK_ROUTER_ENABLED=true
-    ...(PRISM_TASK_ROUTER_ENABLED ? [SESSION_TASK_ROUTE_TOOL] : []),
+    ...(getSettingSync("task_router_enabled", String(PRISM_TASK_ROUTER_ENABLED_ENV)) === "true" ? [SESSION_TASK_ROUTE_TOOL] : []),
   ];
 
   const server = new Server(
@@ -912,7 +912,7 @@ export function createServer() {
 
           case "session_task_route":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
-            if (!PRISM_TASK_ROUTER_ENABLED) throw new Error("Task router not enabled. Set PRISM_TASK_ROUTER_ENABLED=true.");
+            if (getSettingSync("task_router_enabled", String(PRISM_TASK_ROUTER_ENABLED_ENV)) !== "true") throw new Error("Task router not enabled. Enable it in the dashboard or set PRISM_TASK_ROUTER_ENABLED=true.");
             result = await sessionTaskRouteHandler(args); break;
 
           default:
