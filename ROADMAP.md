@@ -175,7 +175,9 @@ With v7.1.0 shipped, Prism is a **production-hardened, scientifically-grounded, 
 | 🔄 **Autonomous Pipeline Runner** | Continuous loop that chains `plan → execute (host/claw) → verify (claw-as-validator) → iterate` cycles. Bounded by configurable max iterations and time budget. |
 | 🛡️ **Safety Boundaries** | Hard limits on iteration count (`PRISM_DARK_FACTORY_MAX_ITERATIONS`), wall-clock time (`PRISM_DARK_FACTORY_TIMEOUT_MINUTES`), and file mutation scope. Emergency kill switch via dashboard. |
 | 📊 **Pipeline Telemetry** | OpenTelemetry spans for each pipeline stage. Dashboard card showing active pipelines, iteration count, pass/fail rates, and estimated completion. |
-| 🔀 **Multi-Agent Coordination** | Orchestrate host model + multiple Claw instances for parallel verification. Hivemind integration for cross-agent state awareness. |
+| 🔀 **Native Local Execution (`claw_run_task`)** | Add a true `claw_run_task` MCP tool *inside* Prism to orchestrate local models natively. Route-approved tasks execute locally and return compact, strict-capped payloads (summary/diffs, no full logs unless requested). |
+| 🧠 **Agent Delegation Strategy** | Delegate generation-heavy, bounded tasks (scaffolding, testing, linting, migrations) to Claw. Keep the Host for synthesis-heavy tasks (architecture, cross-module reasoning, integration decisions). |
+| 🔄 **Closed Feedback Loop** | Integrate native Claw results with Prism's `session_save_experience` to dynamically improve the Host's task router win rates on a per-project basis. |
 | 📈 **Accuracy Stacking ("9's Dashboard")** | Real-time accuracy metrics across verification layers. Visual indicator showing current confidence level (e.g., "99.7% — 2.5σ") inspired by Six Sigma methodology. |
 
 **Dependency:** Requires v7.2.0 Verification Harness as the safety net. Without front-loaded testing, autonomous execution is unsafe.
