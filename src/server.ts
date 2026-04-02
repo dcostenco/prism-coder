@@ -197,6 +197,13 @@ import {
   agentListTeamHandler,
   // v7.1: Task Router
   sessionTaskRouteHandler,
+  // v7.3: Dark Factory Pipeline tools
+  SESSION_START_PIPELINE_TOOL,
+  SESSION_CHECK_PIPELINE_STATUS_TOOL,
+  SESSION_ABORT_PIPELINE_TOOL,
+  sessionStartPipelineHandler,
+  sessionCheckPipelineStatusHandler,
+  sessionAbortPipelineHandler,
 } from "./tools/index.js";
 
 // ─── Dynamic Tool Registration ───────────────────────────────────
@@ -370,6 +377,8 @@ export function createServer() {
     ...(PRISM_ENABLE_HIVEMIND ? AGENT_REGISTRY_TOOLS : []),
     // v7.1: Task Router tool — only when PRISM_TASK_ROUTER_ENABLED=true
     ...(getSettingSync("task_router_enabled", String(PRISM_TASK_ROUTER_ENABLED_ENV)) === "true" ? [SESSION_TASK_ROUTE_TOOL] : []),
+    // v7.3: Dark Factory pipeline tools — only when PRISM_DARK_FACTORY_ENABLED=true
+    ...(PRISM_DARK_FACTORY_ENABLED ? [SESSION_START_PIPELINE_TOOL, SESSION_CHECK_PIPELINE_STATUS_TOOL, SESSION_ABORT_PIPELINE_TOOL] : []),
   ];
 
   const server = new Server(
@@ -916,6 +925,23 @@ export function createServer() {
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
             if (getSettingSync("task_router_enabled", String(PRISM_TASK_ROUTER_ENABLED_ENV)) !== "true") throw new Error("Task router not enabled. Enable it in the dashboard or set PRISM_TASK_ROUTER_ENABLED=true.");
             result = await sessionTaskRouteHandler(args); break;
+
+          // ─── v7.3: Dark Factory Pipeline Tools ───
+
+          case "session_start_pipeline":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            if (!PRISM_DARK_FACTORY_ENABLED) throw new Error("Dark Factory not enabled. Set PRISM_DARK_FACTORY_ENABLED=true.");
+            result = await sessionStartPipelineHandler(args); break;
+
+          case "session_check_pipeline_status":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            if (!PRISM_DARK_FACTORY_ENABLED) throw new Error("Dark Factory not enabled. Set PRISM_DARK_FACTORY_ENABLED=true.");
+            result = await sessionCheckPipelineStatusHandler(args); break;
+
+          case "session_abort_pipeline":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            if (!PRISM_DARK_FACTORY_ENABLED) throw new Error("Dark Factory not enabled. Set PRISM_DARK_FACTORY_ENABLED=true.");
+            result = await sessionAbortPipelineHandler(args); break;
 
           default:
             result = {

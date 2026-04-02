@@ -82,3 +82,20 @@ export { agentRegisterHandler, agentHeartbeatHandler, agentListTeamHandler } fro
 // Registered when PRISM_TASK_ROUTER_ENABLED=true.
 // server.ts handles the conditional registration.
 export { sessionTaskRouteHandler } from "./taskRouterHandler.js";
+
+// ── Dark Factory Pipeline Tools (v7.3 — Autonomous Execution, Optional) ──
+// Registered when PRISM_DARK_FACTORY_ENABLED=true.
+// server.ts handles the conditional registration.
+export {
+  SESSION_START_PIPELINE_TOOL,
+  SESSION_CHECK_PIPELINE_STATUS_TOOL,
+  SESSION_ABORT_PIPELINE_TOOL,
+  isStartPipelineArgs,
+  isCheckPipelineStatusArgs,
+  isAbortPipelineArgs,
+} from "./pipelineDefinitions.js";
+export {
+  sessionStartPipelineHandler,
+  sessionCheckPipelineStatusHandler,
+  sessionAbortPipelineHandler,
+} from "./pipelineHandlers.js";
