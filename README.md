@@ -28,6 +28,7 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [What Makes Prism Different](#-what-makes-prism-different)
 - [Use Cases](#-use-cases)
 - [What's New](#-whats-new)
+  - [v7.2 Executive Function (Roadmap)](#v720--the-executive-function-update-)
 - [How Prism Compares](#-how-prism-compares)
 - [Tool Reference](#-tool-reference)
 - [Environment Variables](#environment-variables)
@@ -385,6 +386,9 @@ Powered by a pure TypeScript port of Google's TurboQuant (inspired by Google's I
 ### 🐝 Multi-Agent Hivemind
 Multiple agents (dev, QA, PM) can work on the same project with **role-isolated memory**. Agents discover each other automatically, share context in real-time via Telepathy sync, and see a team roster during context loading. → [Multi-agent setup example](examples/multi-agent-hivemind/)
 
+### 🚦 Task Router
+Prism can score coding tasks and recommend whether to keep execution on the host model or delegate to local Claw. This enables faster handling of small, local-safe edits while preserving host execution for non-delegable or higher-complexity work. In client startup/skill flows, use defensive delegation: route only coding tasks, call `session_task_route` only when available, delegate to `claw` only when executor tooling exists and task is non-destructive, and fallback to host when router/executor is unavailable. → [Task router real-life example](examples/router_real_life_test.ts)
+
 ### 🖼️ Visual Memory
 Save UI screenshots, architecture diagrams, and bug states to a searchable vault. Images are auto-captioned by a VLM (Claude Vision / GPT-4V / Gemini) and become semantically searchable across sessions.
 
@@ -407,7 +411,7 @@ Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.z
 
 **Consulting / multi-project** — Switch between client projects with progressive loading: `quick` (~50 tokens), `standard` (~200), or `deep` (~1000+).
 
-**Visual debugging** — Save UI screenshots to searchable memory. Find that CSS bug from last week by description.
+**Complex refactoring (v7.2 planned)** — Prism’s roadmap adds plan-first execution for multi-step changes with persistent plan-state tracking across sessions.
 
 **Team onboarding** — New team member's agent loads the full project history instantly.
 
@@ -435,6 +439,27 @@ Then continue a specific thread with a follow-up message to the selected agent, 
 ---
 
 ## 🆕 What's New
+
+### v7.2.0 — The "Executive Function" Update 🔭
+> **Planned roadmap release.** Extends Prism from persistent memory toward autonomous plan execution.
+
+- 🗺️ **Autonomous Plan Decomposition (planned)** — Proposed `session_plan_decompose` tool to transform ambiguous multi-step goals into a structured task DAG.
+- 🔄 **Self-Healing Execution Loop (planned)** — Proposed plan-state engine to capture failed steps, suggest corrective actions, and re-queue recoverable sub-tasks before escalation.
+- 📉 **DAG Plan Visualizer (planned)** — Proposed dashboard Plan/Goal Monitor to render step progress, dependency state, and execution pivots in real time.
+- 🧠 **Context-Aware Goal Tracking (planned)** — Proposed active-plan injection during context loading so agents track not only prior work but current plan position.
+- ⚙️ **Recursive Tool Chaining (planned)** — Proposed middleware path for lower-latency plan-step updates across complex workflows.
+- 🧪 **Plan Integrity Tests (planned)** — Proposed suite validating plan-state persistence across interruptions and session handoffs.
+
+<details>
+<summary><strong>🔬 Concept Example: Before vs. After v7.2</strong></summary>
+
+**Scenario:** "Refactor the Auth module and update the unit tests."
+
+**Before (linear prompting):** The agent executes in sequence but can lose place after errors unless the host prompt restates state.
+
+**After (executive planning):** Agent decomposes to a DAG, executes per-step, recovers from failures via plan-state retries, and resumes from the correct dependency node.
+
+</details>
 
 ### v7.1.0 — Prism Task Router (Heuristic + ML Experience) ✅
 > **Current stable release.** Multi-agent task routing with dynamic local vs host model delegation.
@@ -713,6 +738,17 @@ Requires `PRISM_TASK_ROUTER_ENABLED=true` (or dashboard toggle).
 
 </details>
 
+<details>
+<summary><strong>Executive Planning (Planned for v7.2)</strong></summary>
+
+| Tool | Purpose |
+|------|---------|
+| `session_plan_decompose` | Decompose natural language goals into a structured DAG of tasks |
+| `session_plan_step_update` | Atomically update the status/result of a specific sub-task |
+| `session_plan_get_active` | Retrieve the current execution DAG and task statuses |
+
+</details>
+
 ---
 
 ## Environment Variables
@@ -855,6 +891,7 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 | **v7.0** | Candidate-Scoped Spreading Activation — `S_i = Σ(W × strength)` bounded to search result set; prevents God-node dominance | Spreading activation networks (Collins & Loftus, 1975) | ✅ Shipped |
 | **v7.0** | Composite Retrieval Scoring — `0.7 × similarity + 0.3 × σ(activation)`; configurable via `PRISM_ACTR_WEIGHT_*` | Hybrid cognitive-neural retrieval models | ✅ Shipped |
 | **v7.0** | AccessLogBuffer — in-memory batch-write buffer with 5s flush; prevents SQLite `SQLITE_BUSY` under parallel agents | Production reliability engineering | ✅ Shipped |
+| **v7.2** | Executive Planning & DAG tracking | Prefrontal cortex executive control + Directed Acyclic Graph planning | 🔭 Horizon |
 | **v7.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) | 🔭 Horizon |
 | **v8+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
 
@@ -877,6 +914,9 @@ Shipped. Deterministic task routing (`session_task_route`) with optional experie
 
 ### v7.0: ACT-R Activation Memory ✅
 Shipped. Scientifically-grounded retrieval re-ranking via ACT-R base-level activation (`B_i = ln(Σ t_j^(-d))`), candidate-scoped spreading activation, parameterized sigmoid normalization, composite scoring, and zero-cold-start access log infrastructure. 49 dedicated unit tests, 705 total passing.
+
+### v7.2: Executive Function 🔭
+Planned. Adds autonomous plan decomposition, DAG-backed step tracking, and self-healing execution loops for complex multi-step operations.
 
 ### Future Tracks
 - **v7.x: Affect-Tagged Memory** — Recall prioritization improves by weighting memories with affective/contextual valence, making surfaced context more behaviorally useful.
