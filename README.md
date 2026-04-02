@@ -709,7 +709,7 @@ Requires `PRISM_TASK_ROUTER_ENABLED=true` (or dashboard toggle).
 
 | Tool | Purpose |
 |------|---------|
-| `session_task_route` | Scores task complexity and recommends host vs. local Claw delegation (`claw_run_task` when delegable) |
+| `session_task_route` | Scores task complexity and recommends host vs. local Claw delegation (`claw_run_task` when delegable; host fallback when executor/tooling is unavailable) |
 
 </details>
 
@@ -823,6 +823,7 @@ Each MCP client has its own mechanism for ensuring Prism context loads on sessio
 
 - **Claude Code** — Lifecycle hooks (`SessionStart` / `Stop`)
 - **Gemini / Antigravity** — Three-layer architecture (User Rules + AGENTS.md + Startup Skill)
+- **Task Router Integration (v7.2 guidance)** — For client startup/skills, use defensive delegation flow: route only coding tasks, call `session_task_route` only when available, delegate to `claw` only when executor exists and task is non-destructive, and fallback to host if router/executor is unavailable.
 - **Cursor / Windsurf / VS Code** — System prompt instructions
 
 All platforms benefit from the **server-side fallback** (v5.2.1): if `session_load_context` hasn't been called within 10 seconds, Prism auto-pushes context via `sendLoggingMessage`.
