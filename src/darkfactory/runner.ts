@@ -256,7 +256,26 @@ async function runnerTick(): Promise<void> {
       (a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()
     )[0];
 
-    const spec: PipelineSpec = JSON.parse(pipeline.spec);
+    // Poison Pill Guard: Parse spec with localized error handling.
+    // If a pipeline has corrupt/invalid JSON in its spec column,
+    // we MUST mark it FAILED immediately. Otherwise the runner will
+    // re-fetch the same broken pipeline every tick (infinite loop).
+    let spec: PipelineSpec;
+    try {
+      spec = JSON.parse(pipeline.spec);
+    } catch (parseErr) {
+      debugLog(`[DarkFactory] Pipeline ${pipeline.id} has invalid spec JSON — marking FAILED.`);
+      try {
+        await storage.savePipeline({
+          ...pipeline,
+          status: 'FAILED',
+          error: `Invalid spec JSON: ${parseErr instanceof Error ? parseErr.message : 'parse error'}`,
+        });
+      } catch {
+        // Status guard — already terminated
+      }
+      return;
+    }
 
     // Safety check: wall-clock runtime exceeded?
     if (SafetyController.isRuntimeExceeded(pipeline)) {

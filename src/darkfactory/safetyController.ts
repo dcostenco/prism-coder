@@ -61,7 +61,10 @@ export class SafetyController {
     const resolvedTarget = path.resolve(targetPath);
     const resolvedWorkspace = path.resolve(spec.workingDirectory);
     
-    if (!resolvedTarget.startsWith(resolvedWorkspace)) {
+    // Path Traversal Guard: A naive startsWith() check is vulnerable to
+    // prefix collisions — e.g. /app/workspace-hacked passes startsWith('/app/workspace').
+    // We require EITHER exact match OR the target starts with workspace + path separator.
+    if (resolvedTarget !== resolvedWorkspace && !resolvedTarget.startsWith(resolvedWorkspace + path.sep)) {
       debugLog(`[Safety] Rejecting out-of-scope path resolution: ${targetPath}`);
       return false;
     }
