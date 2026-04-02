@@ -8,6 +8,18 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v7.1.0 — Prism Task Router (Heuristic + ML Experience)
+
+| Feature | Detail |
+|---------|--------|
+| 🚦 **Heuristic Routing Engine** | Deterministic `session_task_route` tool dynamically routes tasks to either the host cloud model or local agent (Claw) based on task description, file count, and scope. Evaluated over 5 core signals. |
+| 🤖 **Experience-Based ML Routing** | Cold-start protected ML layer leverages historical performance (Win Rate) extracted by the `routerExperience` system to apply dynamic confidence boosts or penalties to the routing score. |
+| 🖥️ **Dashboard Integration** | Added controls in `src/dashboard/ui.ts` under Node Editor settings to visually monitor and toggle Prism Task Router configuration. |
+| 🧩 **Tool Discoverability** | Fully integrates `session_task_route` into the external registry through `createSandboxServer`, ensuring scanners can enumerate task delegating capabilities robustly. |
+| 🧪 **Test Coverage** | Comprehensive suite spanning 33 tests across `task-router.test.ts` and `router-experience.test.ts`, verifying cold starts, structural biases, and signal weighting. |
+
+---
+
 ### ✅ v7.0.0 — ACT-R Cognitive Activation Memory
 
 | Feature | Detail |

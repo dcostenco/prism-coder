@@ -436,8 +436,17 @@ Then continue a specific thread with a follow-up message to the selected agent, 
 
 ## 🆕 What's New
 
+### v7.1.0 — Prism Task Router (Heuristic + ML Experience) ✅
+> **Current stable release.** Multi-agent task routing with dynamic local vs host model delegation.
+
+- 🚦 **Heuristic Routing Engine** — Deterministic `session_task_route` tool dynamically routes tasks to either the host cloud model or local agent (Claw) based on task description, file count, and scope. Evaluated over 5 core signals.
+- 🤖 **Experience-Based ML Routing** — Cold-start protected ML layer leverages the historical performance (Win Rate) extracted by the `routerExperience` system to apply dynamic confidence boosts or penalties into the routing score.
+- 🧪 **Live Testing Samples** — Demo script added in [`examples/router_real_life_test.ts`](examples/router_real_life_test.ts) for deterministic `computeRoute()` scenarios (simple vs complex tasks), with a note that experience-adjusted routing is applied in `session_task_route` handler path.
+- 🖥️ **Dashboard Integration** — Added visual monitor and configuration toggles directly in `src/dashboard/ui.ts` under Node Editor settings.
+- 🧩 **Tool Discoverability** — Fully integrates `session_task_route` into the external registry.
+
 ### v7.0.0 — ACT-R Activation Memory ✅
-> **Current stable release.** Memory retrieval now uses a scientifically-grounded cognitive model.
+> **Previous stable release.** Memory retrieval now uses a scientifically-grounded cognitive model.
 
 - 🧠 **ACT-R Base-Level Activation** — `B_i = ln(Σ t_j^(-d))` computes recency × frequency activation per memory. Recent, frequently-accessed memories surface first; cold memories fade to near-zero. Based on Anderson's *Adaptive Control of Thought—Rational* (ACM, 2025).
 - 🔗 **Candidate-Scoped Spreading Activation** — `S_i = Σ(W × strength)` for links within the current search result set only. Prevents "God node" centrality from dominating rankings (Rule #5).
@@ -693,6 +702,17 @@ Requires `PRISM_ENABLE_HIVEMIND=true`.
 
 </details>
 
+<details>
+<summary><strong>Task Routing (1 tool)</strong></summary>
+
+Requires `PRISM_TASK_ROUTER_ENABLED=true` (or dashboard toggle).
+
+| Tool | Purpose |
+|------|---------|
+| `session_task_route` | Scores task complexity and recommends host vs. local Claw delegation (`claw_run_task` when delegable) |
+
+</details>
+
 ---
 
 ## Environment Variables
@@ -731,6 +751,9 @@ Requires `PRISM_ENABLE_HIVEMIND=true`.
 | `PRISM_SCHOLAR_INTERVAL_MS` | No | Scholar interval in ms (default: `0` = manual only) |
 | `PRISM_SCHOLAR_TOPICS` | No | Comma-separated research topics (default: `"ai,agents"`) |
 | `PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN` | No | Max articles per Scholar run (default: `3`) |
+| `PRISM_TASK_ROUTER_ENABLED` | No | `"true"` to enable task-router tool registration |
+| `PRISM_TASK_ROUTER_CONFIDENCE_THRESHOLD` | No | Min confidence required to delegate to Claw (default: `0.6`) |
+| `PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY` | No | Max complexity score delegable to Claw (default: `4`) |
 | `PRISM_HDC_ENABLED` | No | `"true"` (default) to enable HDC cognitive routing pipeline |
 | `PRISM_HDC_EXPLAINABILITY_ENABLED` | No | `"true"` (default) to include convergence/distance/ambiguity in cognitive route responses |
 | `PRISM_ACTR_ENABLED` | No | `"true"` (default) to enable ACT-R activation re-ranking on semantic search |
@@ -847,6 +870,9 @@ Shipped in v6.2.0. Edge synthesis, graph pruning with SLO observability, tempora
 
 ### v6.5: Cognitive Architecture ✅
 Shipped. Full Superposed Memory (SDM) + Hyperdimensional Computing (HDC/VSA) cognitive routing pipeline. Compositional memory states via XOR binding, Hamming resolution, and policy-gated routing (direct / clarify / fallback). 705 tests passing.
+
+### v7.1: Prism Task Router ✅
+Shipped. Deterministic task routing (`session_task_route`) with optional experience-based confidence adjustment for host vs. local Claw delegation.
 
 ### v7.0: ACT-R Activation Memory ✅
 Shipped. Scientifically-grounded retrieval re-ranking via ACT-R base-level activation (`B_i = ln(Σ t_j^(-d))`), candidate-scoped spreading activation, parameterized sigmoid normalization, composite scoring, and zero-cold-start access log infrastructure. 49 dedicated unit tests, 705 total passing.
