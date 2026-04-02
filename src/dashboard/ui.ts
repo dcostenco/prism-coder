@@ -603,6 +603,7 @@ export function renderDashboardHTML(version: string): string {
     <div class="main-tabs" style="display:flex; gap: 1rem; border-bottom: 1px solid var(--border-glass); margin-bottom: 1.5rem; padding-bottom: 0;">
       <button class="s-tab active" id="mtab-project" onclick="switchMainTab('project')" style="font-size: 1rem;">📁 Project View</button>
       <button class="s-tab" id="mtab-search" onclick="switchMainTab('search')" style="font-size: 1rem;">🔍 Vector Search</button>
+      <button class="s-tab" id="mtab-factory" onclick="switchMainTab('factory')" style="font-size: 1rem;">🏭 Factory</button>
     </div>
 
     <div id="welcome" class="empty">
@@ -927,6 +928,29 @@ export function renderDashboardHTML(version: string): string {
             Enter a query to search the neural ledger via embeddings...
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Dark Factory View (v7.3) -->
+    <div id="factory-content" class="fade-in" style="display:none; margin: 0 auto; max-width: 1000px; padding: 0 1rem;">
+      <div class="card">
+        <div class="card-title" style="display:flex;align-items:center;">
+          <span class="dot" style="background:var(--accent-amber)"></span>
+          Dark Factory — Autonomous Pipelines 🏭
+          <div style="flex:1"></div>
+          <button onclick="loadPipelines()" class="refresh-btn">↻</button>
+        </div>
+        <div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center;">
+          <select id="factoryStatusFilter" class="input-modern" style="font-size:0.75rem;padding:0.3rem 0.5rem" onchange="loadPipelines()">
+            <option value="">All Statuses</option>
+            <option value="RUNNING">⏳ Running</option>
+            <option value="COMPLETED">✅ Completed</option>
+            <option value="FAILED">❌ Failed</option>
+            <option value="ABORTED">🛑 Aborted</option>
+          </select>
+          <span id="factoryCount" style="font-size:0.75rem;color:var(--text-muted);margin-left:auto"></span>
+        </div>
+        <div id="factoryList" style="font-size:0.85rem;color:var(--text-muted)">Loading pipelines...</div>
       </div>
     </div>
 
@@ -1351,15 +1375,102 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
     function switchMainTab(tabId) {
       document.getElementById('mtab-project').classList.toggle('active', tabId === 'project');
       document.getElementById('mtab-search').classList.toggle('active', tabId === 'search');
+      document.getElementById('mtab-factory').classList.toggle('active', tabId === 'factory');
       
-      if (tabId === 'project') {
-        document.getElementById('content').style.display = ''; // revert to CSS 'grid'
-        document.getElementById('search-content').style.display = 'none';
-      } else {
-        document.getElementById('content').style.display = 'none';
-        document.getElementById('search-content').style.display = 'block';
+      document.getElementById('content').style.display = tabId === 'project' ? '' : 'none';
+      document.getElementById('search-content').style.display = tabId === 'search' ? 'block' : 'none';
+      document.getElementById('factory-content').style.display = tabId === 'factory' ? 'block' : 'none';
+      
+      if (tabId === 'search') {
         document.getElementById('searchInput').focus();
       }
+      if (tabId === 'factory') {
+        loadPipelines();
+      }
+    }
+
+    // ─── DARK FACTORY (v7.3) ───
+    var factoryPollTimer = null;
+
+    function loadPipelines() {
+      var statusFilter = document.getElementById('factoryStatusFilter').value;
+      var url = '/api/pipelines';
+      if (statusFilter) url += '?status=' + encodeURIComponent(statusFilter);
+
+      fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var list = document.getElementById('factoryList');
+          var count = document.getElementById('factoryCount');
+          var pipelines = data.pipelines || [];
+          count.textContent = pipelines.length + ' pipeline' + (pipelines.length !== 1 ? 's' : '');
+
+          if (pipelines.length === 0) {
+            list.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-muted)"><div style="font-size:2rem;margin-bottom:0.5rem">🏭</div>No pipelines found. Use <code>session_start_pipeline</code> to create one.</div>';
+            return;
+          }
+
+          var html = '<div style="display:flex;flex-direction:column;gap:0.5rem">';
+          for (var i = 0; i < pipelines.length; i++) {
+            var p = pipelines[i];
+            var emoji = p.status === 'COMPLETED' ? '✅' : p.status === 'FAILED' ? '❌' : p.status === 'ABORTED' ? '🛑' : p.status === 'RUNNING' ? '⏳' : '📋';
+            var statusColor = p.status === 'COMPLETED' ? 'var(--accent-green)' : p.status === 'FAILED' ? 'var(--accent-rose)' : p.status === 'ABORTED' ? 'var(--accent-amber)' : p.status === 'RUNNING' ? 'var(--accent-purple)' : 'var(--text-muted)';
+            var isActive = p.status === 'RUNNING';
+            var objective = (p.parsedSpec && p.parsedSpec.objective) ? p.parsedSpec.objective : '(unknown)';
+            if (objective.length > 120) objective = objective.slice(0, 120) + '…';
+            var maxIter = (p.parsedSpec && p.parsedSpec.maxIterations) ? p.parsedSpec.maxIterations : '?';
+
+            html += '<div style="padding:0.75rem 1rem;background:rgba(15,23,42,0.6);border-radius:8px;border-left:3px solid ' + statusColor + ';">';
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem">';
+            html += '<span style="font-weight:600;color:var(--text-primary)">' + emoji + ' ' + p.status + '</span>';
+            html += '<span style="font-size:0.7rem;font-family:var(--font-mono);color:var(--text-muted)">' + p.id.slice(0, 8) + '…</span>';
+            html += '</div>';
+            html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.35rem">' + objective + '</div>';
+            html += '<div style="display:flex;gap:1rem;font-size:0.72rem;color:var(--text-muted);flex-wrap:wrap">';
+            html += '<span>📁 ' + (p.project || '?') + '</span>';
+            html += '<span>🔄 ' + p.iteration + ' / ' + maxIter + '</span>';
+            html += '<span>📍 ' + (p.current_step || '?') + '</span>';
+            html += '<span>🕐 ' + new Date(p.updated_at).toLocaleString() + '</span>';
+            html += '</div>';
+            if (p.error) {
+              html += '<div style="font-size:0.72rem;color:var(--accent-rose);margin-top:0.35rem;padding:0.3rem 0.5rem;background:rgba(244,63,94,0.08);border-radius:4px">⚠ ' + p.error.slice(0, 200) + '</div>';
+            }
+            if (isActive) {
+              html += '<div style="margin-top:0.5rem"><button onclick="abortPipeline(\'' + p.id + '\')" class="cleanup-btn" style="font-size:0.72rem">🛑 Abort Pipeline</button></div>';
+            }
+            html += '</div>';
+          }
+          html += '</div>';
+          list.innerHTML = html;
+
+          // Auto-poll if any pipeline is running
+          var hasRunning = pipelines.some(function(p) { return p.status === 'RUNNING'; });
+          clearInterval(factoryPollTimer);
+          if (hasRunning) {
+            factoryPollTimer = setInterval(function() {
+              if (document.getElementById('factory-content').style.display !== 'none') loadPipelines();
+              else clearInterval(factoryPollTimer);
+            }, 10000);
+          }
+        })
+        .catch(function(err) {
+          document.getElementById('factoryList').innerHTML = '<div style="color:var(--accent-rose);padding:1rem">Failed to load pipelines: ' + err.message + '</div>';
+        });
+    }
+
+    function abortPipeline(id) {
+      if (!confirm('Abort pipeline ' + id.slice(0, 8) + '…?')) return;
+      fetch('/api/pipelines/' + id + '/abort', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.ok) {
+            showToast('Pipeline aborted');
+            loadPipelines();
+          } else {
+            showToast('Failed: ' + (data.error || 'Unknown error'));
+          }
+        })
+        .catch(function(err) { showToast('Abort failed: ' + err.message); });
     }
 
     var searchTimeout = null;

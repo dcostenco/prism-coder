@@ -812,6 +812,110 @@ return false;}
       }
 
 
+      // ─── API: Dark Factory Pipelines (v7.3) ───────────────────
+
+      // GET /api/pipelines — List pipelines (optional ?status=RUNNING&project=myproj)
+      if (url.pathname === "/api/pipelines" && req.method === "GET") {
+        try {
+          const s = await getStorageSafe();
+          if (!s) {
+            res.writeHead(503, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "Storage initializing..." }));
+          }
+
+          const statusFilter = (url.searchParams.get("status") || undefined) as import("../storage/interface.js").PipelineState["status"] | undefined;
+          const projectFilter = url.searchParams.get("project") || undefined;
+
+          const pipelines = await s.listPipelines(projectFilter, statusFilter, PRISM_USER_ID);
+
+          // Parse spec JSON for frontend consumption
+          const enriched = pipelines.map((p: any) => {
+            let parsedSpec = null;
+            try { parsedSpec = JSON.parse(p.spec); } catch { /* corrupt spec */ }
+            return { ...p, parsedSpec };
+          });
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ pipelines: enriched }));
+        } catch (err) {
+          console.error("[Dashboard] Pipeline list error:", err);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Failed to list pipelines" }));
+        }
+      }
+
+      // GET /api/pipelines/:id — Single pipeline detail
+      if (url.pathname.startsWith("/api/pipelines/") && !url.pathname.includes("/abort") && req.method === "GET") {
+        try {
+          const pipelineId = url.pathname.replace("/api/pipelines/", "");
+          if (!pipelineId) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "Missing pipeline ID" }));
+          }
+
+          const s = await getStorageSafe();
+          if (!s) {
+            res.writeHead(503, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "Storage initializing..." }));
+          }
+
+          const pipeline = await s.getPipeline(pipelineId, PRISM_USER_ID);
+          if (!pipeline) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "Pipeline not found" }));
+          }
+
+          let parsedSpec = null;
+          try { parsedSpec = JSON.parse(pipeline.spec); } catch { /* corrupt spec */ }
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ ...pipeline, parsedSpec }));
+        } catch (err) {
+          console.error("[Dashboard] Pipeline detail error:", err);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Failed to get pipeline" }));
+        }
+      }
+
+      // POST /api/pipelines/:id/abort — Dashboard kill switch
+      if (url.pathname.match(/^\/api\/pipelines\/[^/]+\/abort$/) && req.method === "POST") {
+        try {
+          const pipelineId = url.pathname.replace("/api/pipelines/", "").replace("/abort", "");
+
+          const s = await getStorageSafe();
+          if (!s) {
+            res.writeHead(503, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "Storage initializing..." }));
+          }
+
+          const pipeline = await s.getPipeline(pipelineId, PRISM_USER_ID);
+          if (!pipeline) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "Pipeline not found" }));
+          }
+
+          // Already terminated?
+          if (["COMPLETED", "FAILED", "ABORTED"].includes(pipeline.status)) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ ok: true, status: pipeline.status, message: `Pipeline already in terminal state: ${pipeline.status}` }));
+          }
+
+          await s.savePipeline({
+            ...pipeline,
+            status: "ABORTED",
+            error: "Manually aborted via dashboard kill switch.",
+          });
+
+          console.error(`[Dashboard] Pipeline ${pipelineId} aborted via dashboard.`);
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ ok: true, status: "ABORTED", message: "Pipeline aborted. Runner will stop on next tick." }));
+        } catch (err) {
+          console.error("[Dashboard] Pipeline abort error:", err);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Failed to abort pipeline" }));
+        }
+      }
 
 
       if (url.pathname === "/manifest.json" && req.method === "GET") {
