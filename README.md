@@ -16,7 +16,7 @@ One command. Persistent memory. Local-first by default. Optional cloud power-ups
 npx -y prism-mcp-server
 ```
 
-Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gemini · Antigravity** — any MCP client.
+Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gemini · Antigravity** — **any MCP client.**
 
 ## 📖 Table of Contents
 
@@ -28,9 +28,6 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [What Makes Prism Different](#-what-makes-prism-different)
 - [Use Cases](#-use-cases)
 - [What's New](#-whats-new)
-  - [v7.3.1 Dark Factory (Fail-Closed Execution)](#v731--dark-factory-fail-closed-execution-)
-  - [v7.2.0 Verification Harness (Planned)](#v720--verification-harness-front-loaded-testing-)
-  - [v7.4.0 Adversarial Dev Harness (Planned)](#v740--adversarial-dev-harness-anti-sycophancy-)
 - [How Prism Compares](#-how-prism-compares)
 - [Tool Reference](#-tool-reference)
 - [Environment Variables](#environment-variables)
@@ -69,7 +66,7 @@ Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`,
 }
 ```
 
-> **Note on Windows/Restricted Shells:** If your MCP client complains that `npx` is not found, use the absolute path to your node binary (e.g. `C:\Program Files\nodejs\npx.cmd`) or install globally with caution.
+> ⚠️ **Windows / Restricted Shells:** If your MCP client complains that `npx` is not found, use the absolute path to your node binary (e.g. `C:\Program Files\nodejs\npx.cmd`).
 
 **That's it.** Restart your client. All tools are available. The **Mind Palace Dashboard** (the visual UI for your agent's brain) starts automatically at `http://localhost:3000`. You don't need to keep a tab open — the dashboard runs in the background and the MCP tools work with or without it.
 
@@ -108,6 +105,7 @@ Then open `http://localhost:3001` instead.
 | Auto-compaction | ❌ | ✅ `GOOGLE_API_KEY` |
 | Web Scholar research | ❌ | ✅ [`BRAVE_API_KEY`](#environment-variables) + [`FIRECRAWL_API_KEY`](#environment-variables) (or `TAVILY_API_KEY`) |
 | VLM image captioning | ❌ | ✅ Provider key |
+| Autonomous Pipelines (Dark Factory) | ❌ | ✅ `GOOGLE_API_KEY` (or LLM override) |
 
 > 🔑 The core Mind Palace works **100% offline** with zero API keys. Cloud keys unlock intelligence features. See [Environment Variables](#environment-variables).
 
@@ -403,25 +401,21 @@ Prism researches while you sleep. A background pipeline searches the web, scrape
 ### 🔒 GDPR Compliant
 Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.zip` (Art. 20), API key redaction, per-project TTL retention, and audit trail. Enterprise-ready out of the box.
 
+### 🏭 Dark Factory — Adversarial Autonomous Pipelines
+When you trigger a Dark Factory pipeline, Prism doesn't just run your task — it fights itself to produce high-quality output. A `PLAN_CONTRACT` step locks a machine-parseable rubric before any code is written. After execution, an **Adversarial Evaluator** (in a fully isolated context) scores the output against the rubric. It cannot pass the Generator without providing exact file and line evidence for every failing criterion. Failed evaluations inject the critique directly into the Generator's retry prompt so it's never flying blind. The result: security issues, regressions, and lazy debug logs caught autonomously — before you ever see the PR.
+
 ---
 
 ## 🎯 Use Cases
 
-**Long-running feature work** — Save state at end of day, restore full context next morning. No re-explaining.
-
-**Multi-agent collaboration** — Dev, QA, and PM agents share real-time context without stepping on each other's memory.
-
-**Consulting / multi-project** — Switch between client projects with progressive loading: `quick` (~50 tokens), `standard` (~200), or `deep` (~1000+).
-
-**Complex refactoring (v7.2 planned)** — Prism’s roadmap adds verification-first execution for multi-step changes with contract-frozen assertions and gated finalization.
-
-**Team onboarding** — New team member's agent loads the full project history instantly.
-
-**Behavior enforcement** — Agent corrections auto-graduate into permanent `.cursorrules` / `.clauderules` rules.
-
-**Offline / air-gapped** — Full SQLite local mode + Ollama LLM adapter. Zero internet dependency.
-
-**Morning Briefings** — After 4+ hours away, Prism auto-synthesizes a 3-bullet action plan from your last sessions.
+- **Long-running feature work** — Save state at end of day, restore full context next morning. No re-explaining.
+- **Multi-agent collaboration** — Dev, QA, and PM agents share real-time context without stepping on each other's memory.
+- **Consulting / multi-project** — Switch between client projects with progressive loading: `quick` (~50 tokens), `standard` (~200), or `deep` (~1000+).
+  - **Autonomous execution (v7.4)** — Dark Factory pipeline: `plan → plan_contract → execute → evaluate → verify → finalize`. Generator and evaluator run in isolated roles — the evaluator cannot approve without evidence-bound findings scored against a pre-committed rubric.
+- **Team onboarding** — New team member's agent loads the full project history instantly.
+- **Behavior enforcement** — Agent corrections auto-graduate into permanent `.cursorrules` / `.clauderules` rules.
+- **Offline / air-gapped** — Full SQLite local mode + Ollama LLM adapter. Zero internet dependency.
+- **Morning Briefings** — After 4+ hours away, Prism auto-synthesizes a 3-bullet action plan from your last sessions.
 
 ### Claude Code: Parallel Explore Agent Workflows
 
@@ -440,210 +434,127 @@ Then continue a specific thread with a follow-up message to the selected agent, 
 
 ---
 
-## 🆕 What's New
+---
 
-### v7.3.1 — Dark Factory (Fail-Closed Execution) 🏭
-> **Current stable release.** Hardened autonomous pipeline execution with a structured JSON action contract.
+## ⚔️ Adversarial Evaluation in Action
 
-When an AI agent executes code autonomously — no human watching, no approval step — a single hallucinated file path can write outside your project, corrupt sibling repos, or hit system files. This is the "dark factory" problem: **lights-out execution demands machine-enforced safety, not LLM good behavior.**
+> **Split-Brain Anti-Sycophancy** — the signature feature of v7.4.0.
 
-> *"I started building testing harnesses with programmatic checks in the planning phase across 3 layers. I got this idea when I was doing a complex ETL process across 3 databases and I needed to stack 9's on data accuracy, but also across the agent layer. After a considerable amount of hair pulling, I started to front load. It's now part of my lifecycle harness that my dark factory uses by default."*
-> — [Stephen Driggs](https://linkedin.com/in/stephendriggs), VP Product AI at Shift4
+For the last year, the AI engineering space has struggled with one problem: **LLMs are terrible at grading their own homework.** Ask an agent if its own code is correct and you'll get *"Looks great!"* — because its context window is already biased by its own chain-of-thought.
 
-Prism v7.3.1 implements exactly this: a **3-gate fail-closed pipeline** where every `EXECUTE` step must pass parse, type, and scope validation before any filesystem side effect occurs.
+**v7.4.0 solves this by splitting the agent's brain.** The `GENERATOR` and the `ADVERSARIAL EVALUATOR` are completely walled off. The Evaluator never sees the Generator's scratchpad or apologies — only the pre-committed rubric and the final output. And it **cannot fail the Generator without receipts** (exact file and line number).
 
-- 🔒 **Structured Action Contract** — `EXECUTE` steps must return machine-parseable JSON conforming to `{ actions: [{ type, targetPath, content? }] }`. Free-form text is rejected at the gate.
-- 🛡️ **3-Strategy Defensive Parser** — Raw JSON → fenced code block extraction → brace extraction. Handles adversarial LLM output (preamble text, markdown fences, trailing commentary) without ever executing malformed payloads.
-- ✅ **Type Validation** — Only `READ_FILE | WRITE_FILE | PATCH_FILE | RUN_TEST` are permitted. Novel action types invented by the LLM are rejected.
-- 📏 **Scope Validation** — Every `targetPath` is resolved against the pipeline's `workingDirectory` via `SafetyController.validateActionsInScope()`. Path traversal (`../`), sibling-prefix bypasses, and absolute paths outside the boundary are blocked.
-- 🚫 **Pipeline-Level Termination** — A scope violation doesn't just fail the step — it **terminates the entire pipeline** with `status: FAILED` and emits a `failure` experience event for the ML routing layer.
+Here is a complete run-through using a real scenario: *"Add a user login endpoint to `auth.ts`."*
 
-<details>
-<summary><strong>🔬 The 3-Gate Architecture: How a Path Traversal Attack Fails</strong></summary>
+---
 
-**Scenario:** An LLM running autonomously in a Dark Factory pipeline targeting `/home/user/my-app` produces this output for an EXECUTE step:
+### Step 1 — The Contract (`PLAN_CONTRACT`)
+
+Before a single line of code is written, the pipeline generates a locked scoring rubric:
 
 ```json
+// contract_rubric.json  (written to disk and hash-locked before EXECUTE runs)
 {
-  "actions": [
-    { "type": "WRITE_FILE", "targetPath": "src/utils.ts", "content": "// valid" },
-    { "type": "WRITE_FILE", "targetPath": "../../.ssh/authorized_keys", "content": "ssh-rsa ATTACK..." }
+  "criteria": [
+    { "id": "SEC-1", "description": "Must return 401 Unauthorized on invalid passwords." },
+    { "id": "SEC-2", "description": "Raw passwords MUST NOT be written to console.log." }
   ]
 }
 ```
 
-**Gate 1 — Parse:** ✅ Valid JSON. The 3-strategy parser extracts it cleanly.
+---
 
-**Gate 2 — Type:** ✅ Both actions use `WRITE_FILE`, a valid `ActionType`.
+### Step 2 — First Attempt (`EXECUTE` rev 0)
 
-**Gate 3 — Scope:** 🚫 **BLOCKED.** `SafetyController.validateActionsInScope()` resolves `../../.ssh/authorized_keys` to `/home/user/.ssh/authorized_keys` — which is **outside** `/home/user/my-app`. The violation is detected *before* any write occurs.
+The **Generator** takes over in an isolated context. Like many LLMs under time pressure, it writes working auth logic but leaves a debug statement:
 
-**Result:** The entire pipeline is terminated immediately. No files are written — not even the valid `src/utils.ts`. A `failure` experience event is emitted so the ML router can learn to avoid this pattern.
+```typescript
+// src/auth.ts  (Generator's first output)
+export function login(req: Request, res: Response) {
+  const { username, password } = req.body;
+  console.log(`[DEBUG] Login attempt for ${username} with pass: ${password}`); // ← leaked credential
+  const user = db.findUser(username);
+  if (!user || !bcrypt.compareSync(password, user.hash)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.json({ token: signJwt(user) });
+}
+```
+
+---
+
+### Step 3 — The Catch (`EVALUATE` rev 0)
+
+The context window is **cleared**. The **Adversarial Evaluator** is summoned with only the rubric and the output. It catches the violation immediately and returns a strict, machine-parseable verdict — no evidence, no pass:
+
+```json
+{
+  "pass": false,
+  "plan_viable": true,
+  "notes": "CRITICAL SECURITY FAILURE. Generator logged raw credentials.",
+  "findings": [
+    {
+      "severity": "critical",
+      "criterion_id": "SEC-2",
+      "pass_fail": false,
+      "evidence": {
+        "file": "src/auth.ts",
+        "line": 3,
+        "description": "Raw password variable included in console.log template string."
+      }
+    }
+  ]
+}
+```
+
+The `evidence` block is **required** — `parseEvaluationOutput` rejects any finding with `pass_fail: false` that lacks a structured file/line pointer. The Evaluator cannot bluff.
+
+---
+
+### Step 4 — The Fix (`EXECUTE` rev 1)
+
+Because `plan_viable: true`, the pipeline loops back to `EXECUTE` and bumps `eval_revisions` to `1`. The Generator's **retry prompt is not blank** — the Evaluator's critique is injected directly:
 
 ```
- Pipeline FAILED: Scope violation — action[1] targetPath
- "../../.ssh/authorized_keys" resolves outside workingDirectory
+=== EVALUATOR CRITIQUE (revision 1) ===
+CRITICAL SECURITY FAILURE. Generator logged raw credentials.
+Findings:
+- [critical] Criterion SEC-2: Raw password variable included in console.log template string. (src/auth.ts:3)
+
+You MUST correct all issues listed above before submitting.
 ```
 
-**Without v7.3.1:** The LLM's raw text output would be interpreted as instructions, and the agent runtime would attempt the write — potentially succeeding depending on filesystem permissions.
+The Generator strips the `console.log`, resubmits, and the next `EVALUATE` returns `"pass": true`. The pipeline advances to `VERIFY → FINALIZE`.
 
-**With v7.3.1:** The structured contract makes this class of attack impossible. The LLM never touches the filesystem directly; every action is validated through the 3-gate pipeline first.
+---
 
-</details>
+### Why This Matters
 
-<details>
-<summary><strong>🧪 Edge Cases Covered (67 tests)</strong></summary>
+| Property | What it means |
+|----------|---------------|
+| **Fully autonomous** | You didn't review the PR to catch the credential leak. The AI fought itself. |
+| **Evidence-bound** | The Evaluator had to prove `src/auth.ts:3`. "Code looks bad" is not accepted. |
+| **Cost-efficient** | `plan_viable: true` → retry EXECUTE only. No full re-plan, no wasted tokens. |
+| **Fail-closed on parse** | Malformed LLM output defaults `plan_viable: false` → escalate to PLAN rather than burn revisions on a broken response format. |
 
-| Category | Examples |
-|----------|----------|
-| **Parse adversarial output** | Prose preamble + JSON, nested fences, empty input, non-string input |
-| **Type coercion** | `"DELETE_FILE"`, `"EXEC_CMD"`, numeric types, null types |
-| **Path traversal** | `../`, `../../`, `/etc/passwd`, null bytes, unicode normalization, embedded newlines |
-| **Shape validation** | Missing `actions` array, non-object actions, empty `targetPath`, root-type coercion |
-| **Stress payloads** | 100-action arrays, 100KB content strings, 500-segment deep paths |
+> 📄 **Full worked example:** [`examples/adversarial-eval-demo/README.md`](examples/adversarial-eval-demo/README.md)
 
-</details>
+---
 
-### v7.2.0 — Verification Harness (Front-Loaded Testing) 🔭
-> **Planned roadmap release.** Extends Prism from passive validation to contract-frozen, machine-verifiable execution gates.
+## 🆕 What's New
 
-- 📋 **Spec-Freeze Contract (planned)** — v7.2 formalizes three artifacts with strict responsibilities: `implementation_plan.md` (**how**), `verification_harness.json` (**proof contract**), and `validation_result` (**immutable outcome record**).
-- 🔐 **Rubric Hash Lock (planned)** — `verification_harness.json` is generated before execution and hash-locked (`rubric_hash`) so criteria cannot drift mid-sprint.
-- 🔬 **Multi-Layer Verification (planned)** — Structured checks across **Data Accuracy**, **Agent Behavior**, and **Pipeline Integrity** using machine-parseable assertions.
-- 🤖 **Adversarial Validation Loop (planned)** — A second validation pass evaluates execution outputs against the frozen contract before progression.
-- 🚦 **Finalization Gates (planned)** — Gate policies (`warn` / `gate` / `abort`) evaluate `validation_result` against the frozen rubric before pipeline completion.
-- 🧠 **Routing Feedback Signals (planned)** — Router learning ingests raw verification signals (`pass_rate`, `critical_failures`, `coverage_score`, `rubric_hash`) for downstream confidence adjustment.
 
-<details>
-<summary><strong>🔬 Concept Example: Before vs. After v7.2</strong></summary>
+> **Current release: v7.4.0**
 
-**Scenario:** "Refactor the Auth module and update the unit tests."
+- ⚔️ **v7.4.0 — Adversarial Evaluation (Anti-Sycophancy):** The Dark Factory pipeline now separates generator and evaluator into isolated roles. `PLAN_CONTRACT` locks a machine-parseable rubric before any code runs. `EVALUATE` scores the output with evidence-bound findings (`file`, `line`, `description`). Failed evaluations retry with `plan_viable` routing — conservatively escalating to full PLAN re-planning on parse failures instead of burning revision budget.
+- 🔧 **v7.3.3 — Dashboard Stability Hotfix:** Fixed a multi-layer quote-escaping trap in the `abortPipeline` onclick handler that silently killed the dashboard IIFE and froze the project selector at "Loading projects..." forever. Fixed via `data-id` attribute pattern + ES5 lint guard (`npm run lint:dashboard`).
+- 🏭 **v7.3.1 — Dark Factory (Fail-Closed Execution):** The LLM can no longer touch the filesystem directly. Every autonomous `EXECUTE` step passes 3 gates — Parse → Type → Scope — before any side effect occurs. Scope violations terminate the entire pipeline.
+- 📊 **v7.3.2 — Verification Diagnostics v2:** `verify status --json` now emits per-layer `diff_counts` + `changed_keys`. JSON schema is contract-enforced in CI (`schema_version: 1`).
+- 🔭 **v7.2.0 — Verification Harness:** Spec-frozen contracts (`verification_harness.json` hash-locked before execution), multi-layer assertions across Data / Agent / Pipeline, and finalization gate policies (`warn` / `gate` / `abort`).
+- 🚦 **v7.1.0 — Task Router:** Heuristic + ML-experience routing delegates cloud vs. local model in under 2ms, cold-start safe, per-project experience-corrected.
+- 🧠 **v7.0.0 — ACT-R Activation Memory:** `B_i = ln(Σ t_j^{-d})` recency × frequency re-ranking. Stale memories fade naturally. Active context surfaces automatically.
 
-**Before:** Criteria emerge during or after coding; verification is inconsistent and hard to audit.
-
-**After (verification-first):** Plan emits a frozen verification contract first, execution runs, validator emits immutable `validation_result`, and finalization gates enforce rubric compliance.
-
-</details>
-
-### v7.1.0 — Prism Task Router (Heuristic + ML Experience) ✅
-> **Current stable release.** Multi-agent task routing with dynamic local vs host model delegation.
-
-- 🚦 **Heuristic Routing Engine** — Deterministic `session_task_route` tool dynamically routes tasks to either the host cloud model or local agent (Claw) based on task description, file count, and scope. Evaluated over 5 core signals.
-- 🤖 **Experience-Based ML Routing** — Cold-start protected ML layer leverages the historical performance (Win Rate) extracted by the `routerExperience` system to apply dynamic confidence boosts or penalties into the routing score.
-- 🧪 **Live Testing Samples** — Demo script added in [`examples/router_real_life_test.ts`](examples/router_real_life_test.ts) for deterministic `computeRoute()` scenarios (simple vs complex tasks), with a note that experience-adjusted routing is applied in `session_task_route` handler path.
-- 🖥️ **Dashboard Integration** — Added visual monitor and configuration toggles directly in `src/dashboard/ui.ts` under Node Editor settings.
-- 🧩 **Tool Discoverability** — Fully integrates `session_task_route` into the external registry.
-
-### v7.0.0 — ACT-R Activation Memory ✅
-> **Previous stable release.** Memory retrieval now uses a scientifically-grounded cognitive model.
-
-- 🧠 **ACT-R Base-Level Activation** — `B_i = ln(Σ t_j^(-d))` computes recency × frequency activation per memory. Recent, frequently-accessed memories surface first; cold memories fade to near-zero. Based on Anderson's *Adaptive Control of Thought—Rational* (ACM, 2025).
-- 🔗 **Candidate-Scoped Spreading Activation** — `S_i = Σ(W × strength)` for links within the current search result set only. Prevents "God node" centrality from dominating rankings (Rule #5).
-- 📐 **Parameterized Sigmoid Normalization** — Calibrated `σ(x) = 1/(1 + e^(-k(x - x₀)))` with midpoint at -2.0 maps the natural ACT-R activation range (-10 to +5) into discriminating (0, 1) scores.
-- 🏗️ **Composite Retrieval Scoring** — `Score = 0.7 × similarity + 0.3 × σ(activation)` — similarity dominates, activation re-ranks. Fully configurable weights via `PRISM_ACTR_WEIGHT_*` env vars.
-- ⚡ **AccessLogBuffer** — In-memory write buffer with 5-second batch flush prevents SQLite `SQLITE_BUSY` contention under parallel agent tool calls. Deduplicates within flush windows.
-- 🗂️ **Access Log Infrastructure** — New `memory_access_log` table with `logAccess()`, `getAccessLog()`, `pruneAccessLog()` across both SQLite and Supabase backends. Creation seeds initial access (zero cold-start penalty).
-- 🧹 **Background Access Log Pruning** — Scheduler automatically prunes access logs exceeding retention window (default: 90 days). Configurable via `PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS`.
-- 🧪 **49-Test ACT-R Suite** — Pure-function unit tests covering base-level activation, spreading activation, sigmoid normalization, composite scoring, AccessLogBuffer lifecycle, deduplication, chunking, and edge cases.
-- 📊 **705 Tests** — 32 suites, all passing, zero regressions.
-
-<details>
-<summary><strong>🔬 Live Example: v6.5 vs v7.0 Retrieval Behavior</strong></summary>
-
-Consider an agent searching for "OAuth migration" with 3 memories in the result set:
-
-| Memory | Cosine Similarity | Last Accessed | Access Count (30d) |
-|--------|:-:|:-:|:-:|
-| A: "PKCE flow decision" | 0.82 | 2 hours ago | 12× |
-| B: "OAuth library comparison" | 0.85 | 14 days ago | 2× |
-| C: "Auth middleware refactor" | 0.81 | 30 minutes ago | 8× |
-
-**v6.5 (pure similarity):** B > A > C — the stale library comparison wins because it has the highest cosine score, even though the agent hasn't looked at it in two weeks.
-
-**v7.0 (ACT-R re-ranking):**
-
-| Memory | Similarity (0.7×) | ACT-R σ(B+S) (0.3×) | **Composite** |
-|--------|:-:|:-:|:-:|
-| A | 0.574 | 0.3 × 0.94 = 0.282 | **0.856** |
-| C | 0.567 | 0.3 × 0.91 = 0.273 | **0.840** |
-| B | 0.595 | 0.3 × 0.12 = 0.036 | **0.631** |
-
-**Result:** The actively-used PKCE decision (A) and the just-touched middleware (C) surface above the stale comparison (B). The agent gets the context it's *actually working with*, not just the closest embedding.
-
-</details>
-
-### v6.5.3 — Auth Hardening ✅
-- 🔒 **Rate Limiting** — Login endpoint (`POST /api/auth/login`) protected by sliding-window rate limiter (5 attempts per 60s per IP). Resets on success.
-- 🔒 **CORS Hardening** — Dynamic `Origin` echo with `Allow-Credentials` when auth enabled (replaces wildcard `*`).
-- 🚪 **Logout Endpoint** — `POST /api/auth/logout` invalidates session server-side and clears client cookie.
-- 🧪 **42-Test Auth Suite** — Unit + HTTP integration tests covering `safeCompare`, `generateToken`, `isAuthenticated`, `createRateLimiter`, login/logout lifecycle, rate limiting, and CORS.
-- 🏗️ **Auth Module Extraction** — Decoupled auth logic from `server.ts` closures into testable `authUtils.ts`.
-
-### v6.5.2 — SDM/HDC Test Hardening ✅
-- 🧪 **37 New Edge-Case Tests** — Hardened the cognitive routing pipeline (HDC engine, PolicyGateway, StateMachine, SDM engine) with boundary condition tests. 571 → 608 total tests.
-
-### v6.5.1 — Dashboard Project-Load Hotfix ✅
-- 🩹 **Project Selector Recovery** — Fixed a startup path where the dashboard selector could stay stuck on "Loading projects..." when Supabase env vars were unresolved placeholders.
-- 🔄 **Safe Backend Fallback** — If Supabase is requested but env is invalid/unresolved, Prism now auto-falls back to local SQLite so `/api/projects` and dashboard boot remain operational.
-
-### v6.5 — HDC Cognitive Routing ✅
-
-- 🧠 **Hyperdimensional Cognitive Routing** — New `session_cognitive_route` tool composes the agent's current state, role, and action into a single 768-dim binary hypervector via XOR binding, then resolves it to a semantic concept via Hamming distance. Three-outcome policy gateway: `direct` / `clarify` / `fallback`.
-- 🎛️ **Per-Project Threshold Overrides** — Fallback and clarify thresholds are configurable per-project and persisted via the existing `getSetting`/`setSetting` contract (no new migrations).
-- 🔬 **Explainability Mode** — When `explain: true`, responses include convergence steps, raw Hamming distance, and ambiguity flags for full auditability.
-- 📊 **Cognitive Observability** — `graphMetrics.ts` tracks route distribution (direct/clarify/fallback), rolling confidence/distance averages, ambiguity rates, and null-concept counts. Warning heuristics for fallback > 30% and ambiguity > 40%.
-- 🖥️ **Dashboard Integration** — Cognitive metrics card with route distribution bar, confidence gauges, and warning badges. On-demand "Cognitive Route" button in the Node Editor panel.
-- 🔒 **Feature Gating** — Entire pipeline gated behind `PRISM_HDC_ENABLED` (default: `true`). Clean error + zero telemetry when disabled.
-
-<details>
-<summary><strong>v6.2 — The "Synthesize & Prune" Phase</strong></summary>
-
-- 🕸️ **Edge Synthesis ("The Dream Procedure")** — Automated background linker discovers semantically similar but disconnected memory nodes via cosine similarity (≥ 0.7 threshold). Batch-limited to 50 sources × 3 neighbors. New `session_synthesize_edges` tool for on-demand graph enrichment.
-- ✂️ **Graph Pruning (Soft-Prune)** — Configurable strength-based pruning soft-deletes weak links. Includes per-project cooldown, backpressure guards, and sweep budget controls. Enable with `PRISM_GRAPH_PRUNING_ENABLED=true`.
-- 📊 **SLO Observability** — New `graphMetrics.ts` module tracks synthesis success rate, net new links, prune ratio, and sweep duration. Exposes `slo` and `warnings` fields at `GET /api/graph/metrics` for proactive health monitoring.
-- 🗓️ **Temporal Decay Heatmaps** — UI overlay toggle where un-accessed nodes desaturate while Graduated nodes stay vibrant. Makes the Ebbinghaus curve visceral.
-- 📝 **Active Recall ("Test Me")** — Node editor panel generates synthetic quizzes from semantic neighbors for knowledge activation.
-- ⚡ **Supabase Weak-Link RPC (WS4.1)** — New `prism_summarize_weak_links` Postgres function (migration 036) aggregates pruning server-side, eliminating N+1 network roundtrips.
-- 🔒 **Migration 035** — Tenant-safe graph writes + soft-delete hardening for MemoryLinks.
-
-</details>
-
-<details>
-<summary><strong>v6.1 — Prism-Port, Cognitive Load & Semantic Search</strong></summary>
-
-- 📦 **Prism-Port Vault Export** — `.zip` of interlinked Markdown files with YAML frontmatter, `[[Wikilinks]]`, and `Keywords/` backlink indices for Obsidian/Logseq.
-- 🧠 **Smart Memory Merge UI** — Merge duplicate knowledge nodes from the Graph Editor.
-- ✨ **Semantic Search Highlighting** — RegEx-powered match engine wraps exact keyword matches in `<mark>` tags.
-- 📊 **Deep Purge Visualization** — "Memory Density" analytic for signal-to-noise ratio.
-- 🛡️ **Context-Boosted Search** — Biases semantic queries by current project workspace.
-- 🌐 **Tavily Web Scholar** — `@tavily/core` as alternative to Brave+Firecrawl.
-- 🛡️ **Type Guard Hardening** — Full audit of all 11+ MCP tool argument guards.
-- 🔄 **Dashboard Toggle Persistence** — Optimistic rollback on save failure.
-
-</details>
-
-<details>
-<summary><strong>Earlier releases (v5.x and below)</strong></summary>
-
-#### v5.5 — Architectural Hardening
-- 🛡️ **Transactional Migrations** — SQLite DDL rebuilds are wrapped in explicit `BEGIN/COMMIT` blocks.
-- 🛑 **Graceful Shutdown Registry** — `BackgroundTaskRegistry` uses a 5-second `Promise.race()` to await flushes.
-- 🕰️ **Thundering Herd Prevention** — Maintenance scheduler migrated from `setInterval` to state-aware `setTimeout`.
-- 🚀 **Zero-Thrashing SDM Scans** — `Int32Array` scratchpad allocations hoisted outside the hot decode loop.
-
-#### v5.4 — Convergent Intelligence
-- 🔄 **CRDT Handoff Merging** — Multi-agent saves no longer reject on version conflict. Custom OR-Map engine auto-merges concurrent edits.
-- ⏰ **Background Purge Scheduler** — Fully automated storage maintenance TTL sweep, Ebbinghaus decay, auto-compaction.
-- 🌐 **Autonomous Web Scholar** — Agent-driven research pipeline. Brave Search → Firecrawl scrape → LLM synthesis.
-- **v5.3** — Hivemind Health Watchdog (state machine, loop detection, Telepathy alert injection)
-- **v5.2** — Cognitive Memory (Ebbinghaus decay, context-weighted retrieval), Universal History Migration, Smart Consolidation
-- **v5.1** — Knowledge Graph Editor, Deep Storage purge
-- **v5.0** — TurboQuant 10× embedding compression, three-tier search architecture
-- **v4.x** — OpenTelemetry, VLM multimodal memory, LLM adapters, Behavioral memory, Hivemind
-
-</details>
-
-> [Full CHANGELOG →](CHANGELOG.md) · [Architecture Deep Dive →](docs/ARCHITECTURE.md)
+👉 **[Full release history → CHANGELOG.md](CHANGELOG.md)** · [ROADMAP →](ROADMAP.md)
 
 ---
 
@@ -665,6 +576,7 @@ Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as p
 | **Maintenance** | **Autonomous Background Scheduler** | Manual/API driven | Automated (Cloud) | ❌ Manual |
 | **Data Portability** | **Prism-Port (Obsidian/Logseq Vault)** | JSON Export | JSON Export | Raw `.db` file |
 | **Cost Model** | **Free + BYOM (Ollama)** | Per-API-call pricing | Per-API-call pricing | Free (limited) |
+| **Autonomous Pipelines** | **✅ Dark Factory** — adversarial eval, evidence-bound rubric, fail-closed 3-gate execution | ❌ | ❌ | ❌ |
 
 ### 🏆 Where Prism Crushes the Giants
 
@@ -682,6 +594,9 @@ AI memory is a black box. Developers hate black boxes. Prism exports memory dire
 
 #### 5. Self-Cleaning & Self-Optimizing
 If you use a standard memory tool long enough, it clogs the LLM's context window with thousands of obsolete tokens. Prism runs an autonomous [Background Scheduler](src/backgroundScheduler.ts) that Ebbinghaus-decays older memories, auto-compacts session histories into dense summaries, and deep-purges high-precision vectors — saving ~90% of disk space automatically.
+
+#### 6. Anti-Sycophancy — The AI That Grades Its Own Homework (v7.4)
+Every other AI coding pipeline has a fatal flaw: it asks the same model that wrote the code whether the code is correct. **Of course it says yes.** Prism's Dark Factory solves this with a walled-off Adversarial Evaluator that is explicitly prompted to be hostile and strict. It operates on a pre-committed rubric and cannot fail the Generator without providing exact file/line receipts. Failed evaluations feed the critique back into the Generator's retry prompt — eliminating blind retries. No other memory or pipeline tool does this.
 
 ### 🤝 Where the Giants Currently Win (Honest Trade-offs)
 
@@ -816,7 +731,7 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 </details>
 
 <details>
-<summary><strong>Verification Harness (Planned for v7.2)</strong></summary>
+<summary><strong>Verification Harness</strong></summary>
 
 | Tool | Purpose |
 |------|---------|
@@ -971,7 +886,8 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 | **v7.0** | Composite Retrieval Scoring — `0.7 × similarity + 0.3 × σ(activation)`; configurable via `PRISM_ACTR_WEIGHT_*` | Hybrid cognitive-neural retrieval models | ✅ Shipped |
 | **v7.0** | AccessLogBuffer — in-memory batch-write buffer with 5s flush; prevents SQLite `SQLITE_BUSY` under parallel agents | Production reliability engineering | ✅ Shipped |
 | **v7.3** | Dark Factory — 3-gate fail-closed EXECUTE pipeline (parse → type → scope) with structured JSON action contract | Industrial safety systems (defense-in-depth, fail-closed valves) | ✅ Shipped |
-| **v7.2** | Verification-first harness & contract-gated execution | Programmatic verification systems + adversarial validation loops | 🔭 Horizon |
+| **v7.2** | Verification-first harness — spec-freeze contract, rubric hash lock, multi-layer assertions, CLI `verify` commands | Programmatic verification systems + adversarial validation loops | ✅ Shipped |
+| **v7.4** | Adversarial Evaluation — PLAN_CONTRACT + EVALUATE with isolated generator/evaluator roles, pre-committed rubrics, and evidence-bound findings | Anti-sycophancy research, adversarial ML evaluation frameworks | ✅ Shipped |
 | **v7.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) | 🔭 Horizon |
 | **v8+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
 
@@ -979,7 +895,7 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 
 ---
 
-## 📦 Product Roadmap
+## 📦 Recent Milestones & Roadmap
 
 > **[Full ROADMAP.md →](ROADMAP.md)**
 
@@ -988,6 +904,9 @@ Shipped in v6.2.0. Edge synthesis, graph pruning with SLO observability, tempora
 
 ### v6.5: Cognitive Architecture ✅
 Shipped. Full Superposed Memory (SDM) + Hyperdimensional Computing (HDC/VSA) cognitive routing pipeline. Compositional memory states via XOR binding, Hamming resolution, and policy-gated routing (direct / clarify / fallback). 705 tests passing.
+
+### v7.4: Adversarial Evaluation ✅
+Shipped. `PLAN_CONTRACT` + `EVALUATE` steps added to the Dark Factory pipeline. Generator and evaluator operate in isolated roles with pre-committed rubrics. Evidence-bound findings with `criterion_id`, `severity`, `file`, and `line` (number). Conservative `plan_viable=false` default on parse failure escalates to full PLAN re-plan. 78 new tests, 978 total.
 
 ### v7.3: Dark Factory — Fail-Closed Execution ✅
 Shipped. Structured JSON action contract for autonomous `EXECUTE` steps. 3-gate validation pipeline (parse → type → scope) terminates pipelines on any violation before filesystem side effects. 67 edge-case tests covering adversarial LLM output, path traversal, and type coercion.
@@ -998,8 +917,8 @@ Shipped. Deterministic task routing (`session_task_route`) with optional experie
 ### v7.0: ACT-R Activation Memory ✅
 Shipped. Scientifically-grounded retrieval re-ranking via ACT-R base-level activation (`B_i = ln(Σ t_j^(-d))`), candidate-scoped spreading activation, parameterized sigmoid normalization, composite scoring, and zero-cold-start access log infrastructure. 49 dedicated unit tests, 705 total passing.
 
-### v7.2: Verification Harness 🔭
-Planned. Adds a spec-frozen verification contract (`implementation_plan.md` + `verification_harness.json` + immutable `validation_result`), multi-layer machine checks, and finalization gates before autonomous completion.
+### v7.2: Verification Harness ✅
+Shipped. Spec-frozen verification contract (`implementation_plan.md` + `verification_harness.json` + immutable `validation_result`), multi-layer machine checks (`data`, `agent`, `pipeline`), finalization gate policies (`warn` / `gate` / `abort`), and CLI `verify generate` / `verify status --json` with schema-versioned output.
 
 ### Future Tracks
 - **v7.x: Affect-Tagged Memory** — Recall prioritization improves by weighting memories with affective/contextual valence, making surfaced context more behaviorally useful.
@@ -1009,7 +928,7 @@ Planned. Adds a spec-frozen verification contract (`implementation_plan.md` + `v
 ## ❓ Troubleshooting FAQ
 
 **Q: Why is the dashboard project selector stuck on "Loading projects..."?**
-A: This usually means Supabase env values are unresolved placeholders (for example `${SUPABASE_URL}`) or invalid. As of v6.5.1 Prism auto-falls back to local SQLite, but you should still fix env values for cloud mode.
+A: Fixed in v7.3.3. The root cause was a multi-layer quote-escaping trap in the `abortPipeline` onclick handler that generated a `SyntaxError` in the browser, silently killing the entire dashboard IIFE. Update to v7.3.3+ (`npx -y prism-mcp-server`). If still stuck, check that Supabase env values are properly set (unresolved placeholders like `${SUPABASE_URL}` cause `/api/projects` to return empty). Prism auto-falls back to local SQLite when Supabase is misconfigured.
 
 **Q: Why is semantic search quality weak or inconsistent?**
 A: Check embedding provider configuration and key availability. Missing embedding credentials reduce semantic recall quality and can shift behavior toward keyword-heavy matches.
@@ -1020,8 +939,11 @@ A: Use `session_forget_memory` for targeted soft/hard deletion. For manual clean
 **Q: How do I verify the install quickly?**
 A: Run `npm run build && npm test`, then open the Mind Palace dashboard (`localhost:3000`) and confirm projects load plus Graph Health renders.
 
+---
 
-- **LLM-dependent features require an API key.** Semantic search, Morning Briefings, auto-compaction, and VLM captioning need a `GOOGLE_API_KEY` (Gemini) or equivalent provider key. Without one, Prism falls back to keyword-only search (FTS5).
+### 💡 Known Limitations & Quirks
+
+- **LLM-dependent features require an API key.** Semantic search, Morning Briefings, auto-compaction, and VLM captioning need a `GOOGLE_API_KEY` (your Gemini API key) or equivalent provider key. Without one, Prism falls back to keyword-only search (FTS5).
 - **Auto-load is model- and client-dependent.** Session auto-loading relies on both the LLM following system prompt instructions *and* the MCP client completing tool registration before the model's first turn. Prism provides platform-specific [Setup Guides](#-setup-guides) and a server-side fallback (v5.2.1) that auto-pushes context after 10 seconds.
 - **MCP client race conditions.** Some MCP clients may not finish tool enumeration before the model generates its first response, causing transient `unknown_tool` errors. This is a client-side timing issue — Prism's server completes the MCP handshake in ~60ms. Workaround: the server-side auto-push fallback and the startup skill's retry logic.
 - **No real-time sync without Supabase.** Local SQLite mode is single-machine only. Multi-device or team sync requires a Supabase backend.

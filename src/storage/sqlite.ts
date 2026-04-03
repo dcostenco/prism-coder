@@ -655,13 +655,34 @@ export class SqliteStorage implements StorageBackend {
         status TEXT NOT NULL,
         current_step TEXT NOT NULL,
         iteration INTEGER NOT NULL,
+        eval_revisions INTEGER DEFAULT 0,
         started_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         spec TEXT NOT NULL,
         error TEXT,
-        last_heartbeat TEXT
+        last_heartbeat TEXT,
+        contract_payload TEXT,
+        notes TEXT
       )
     `);
+
+    // ─── v7.4.0 Migration: Adversarial Eval Revisions ─────────
+    try {
+      await this.db.execute(`ALTER TABLE dark_factory_pipelines ADD COLUMN eval_revisions INTEGER DEFAULT 0`);
+      debugLog("[SqliteStorage] v7.4.0 migration: added eval_revisions column");
+      // Backfill existing rows — ALTER TABLE DEFAULT only applies to new inserts;
+      // rows that existed before the migration will have NULL until explicitly set.
+      await this.db.execute(`UPDATE dark_factory_pipelines SET eval_revisions = 0 WHERE eval_revisions IS NULL`);
+      debugLog("[SqliteStorage] v7.4.0 migration: backfilled eval_revisions = 0");
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
+    try {
+      await this.db.execute(`ALTER TABLE dark_factory_pipelines ADD COLUMN contract_payload TEXT`);
+      await this.db.execute(`ALTER TABLE dark_factory_pipelines ADD COLUMN notes TEXT`);
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
     
     await this.db.execute(
       `CREATE INDEX IF NOT EXISTS idx_pipelines_status ON dark_factory_pipelines(user_id, project, status)`
@@ -3343,16 +3364,19 @@ export class SqliteStorage implements StorageBackend {
 
     await this.db.execute({
       sql: `
-        INSERT INTO dark_factory_pipelines (id, project, user_id, status, current_step, iteration, started_at, updated_at, spec, error, last_heartbeat)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO dark_factory_pipelines (id, project, user_id, status, current_step, iteration, eval_revisions, started_at, updated_at, spec, error, last_heartbeat, contract_payload, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           status = excluded.status,
           current_step = excluded.current_step,
           iteration = excluded.iteration,
+          eval_revisions = excluded.eval_revisions,
           updated_at = excluded.updated_at,
           spec = excluded.spec,
           error = excluded.error,
-          last_heartbeat = excluded.last_heartbeat
+          last_heartbeat = excluded.last_heartbeat,
+          contract_payload = excluded.contract_payload,
+          notes = excluded.notes
       `,
       args: [
         updatedState.id,
@@ -3361,11 +3385,14 @@ export class SqliteStorage implements StorageBackend {
         updatedState.status,
         updatedState.current_step,
         updatedState.iteration,
+        updatedState.eval_revisions ?? 0,
         updatedState.started_at,
         updatedState.updated_at,
         updatedState.spec,
         updatedState.error || null,
-        updatedState.last_heartbeat || null
+        updatedState.last_heartbeat || null,
+        updatedState.contract_payload ? JSON.stringify(updatedState.contract_payload) : null,
+        updatedState.notes || null
       ]
     });
   }
@@ -3375,9 +3402,12 @@ export class SqliteStorage implements StorageBackend {
       sql: `SELECT * FROM dark_factory_pipelines WHERE id = ? AND user_id = ?`,
       args: [id, userId]
     });
-    
     if (result.rows.length === 0) return null;
-    return result.rows[0] as unknown as PipelineState;
+    const row = result.rows[0] as any;
+    return {
+      ...row,
+      contract_payload: row.contract_payload ? JSON.parse(row.contract_payload) : undefined
+    } as PipelineState;
   }
 
   async listPipelines(project: string | undefined, status: PipelineStatus | undefined, userId: string): Promise<PipelineState[]> {
@@ -3397,7 +3427,10 @@ export class SqliteStorage implements StorageBackend {
     const sql = `SELECT * FROM dark_factory_pipelines ${where} ORDER BY updated_at DESC`;
     
     const result = await this.db.execute({ sql, args });
-    return result.rows as unknown as PipelineState[];
+    return result.rows.map((row: any) => ({
+      ...row,
+      contract_payload: row.contract_payload ? JSON.parse(row.contract_payload) : undefined
+    })) as PipelineState[];
   }
 
   // ─── Verification Harness (v7.2.0) ───────────────────────────

@@ -1,5 +1,5 @@
 import { PipelineState, PipelineStatus } from '../storage/interface.js';
-import { PipelineSpec, DarkFactoryStep, ActionPayload, VALID_ACTION_TYPES } from './schema.js';
+import { PipelineSpec, DarkFactoryStep, ActionPayload, VALID_ACTION_TYPES, DEFAULT_MAX_REVISIONS } from './schema.js';
 import { PRISM_DARK_FACTORY_MAX_RUNTIME_MS } from '../config.js';
 import { debugLog } from '../utils/logger.js';
 import path from 'path';
@@ -36,13 +36,6 @@ export class SafetyController {
     'FAILED':  ['RUNNING'],  // Allow retry from failed state
   };
 
-  /**
-   * Legal step transitions for the pipeline execution state machine.
-   * FINALIZE is entered from VERIFY when iteration == maxIterations or success.
-   */
-  private static readonly STEP_ORDER: DarkFactoryStep[] = [
-    'INIT', 'PLAN', 'EXECUTE', 'VERIFY', 'FINALIZE'
-  ];
 
   /**
    * Prevents runaway LLM invocation loops by enforcing the max iteration envelope.
@@ -167,8 +160,15 @@ export class SafetyController {
    * Used by clawInvocation.ts instead of inline prompt construction.
    */
   static generateBoundaryPrompt(spec: PipelineSpec, state: PipelineState): string {
+    let modeDescription = 'an autonomous code agent';
+    if (state.current_step === 'PLAN_CONTRACT' || state.current_step === 'EVALUATE') {
+      modeDescription = 'an ADVERSARIAL EVALUATOR enforcing strict quality constraints against a generated output';
+    } else if (state.current_step === 'EXECUTE') {
+      modeDescription = 'a GENERATOR executing code constrained by a strict rubric';
+    }
+
     const lines: string[] = [
-      `You are Prism Dark Factory, operating in the background as an autonomous code agent.`,
+      `You are Prism Dark Factory, operating in the background as ${modeDescription}.`,
       `You are strictly limited to code actions within the defined scope.`,
       ``,
       `── Operational Boundaries ──`,
@@ -176,6 +176,7 @@ export class SafetyController {
       `Project: ${state.project}`,
       `Current Step: ${state.current_step}`,
       `Iteration: ${state.iteration} / ${spec.maxIterations}`,
+      `Revision: ${state.eval_revisions ?? 0} / ${spec.maxRevisions ?? DEFAULT_MAX_REVISIONS}`,
       `Restricted Workspace: ${spec.workingDirectory || '(unrestricted)'}`,
     ];
 
@@ -199,37 +200,65 @@ export class SafetyController {
     return lines.join('\n');
   }
 
-  /**
-   * Determine the next step in the pipeline execution sequence.
-   * Returns null if the pipeline should terminate (FINALIZE reached or iteration exceeded).
-   */
   static getNextStep(
-    currentStep: DarkFactoryStep,
-    iteration: number,
+    state: PipelineState,
     spec: PipelineSpec,
-    verifyPassed: boolean
-  ): { step: DarkFactoryStep; iteration: number } | null {
+    stepPassed: boolean,
+    planViable: boolean = true
+  ): { step: DarkFactoryStep; iteration: number; eval_revisions?: number } | null {
+    const currentStep = state.current_step as DarkFactoryStep;
+    const iteration = state.iteration;
+    const eval_revisions = state.eval_revisions ?? 0;
+
     switch (currentStep) {
       case 'INIT':
-        return { step: 'PLAN', iteration };
+        return { step: 'PLAN', iteration, eval_revisions };
       
       case 'PLAN':
-        return { step: 'EXECUTE', iteration };
+        return { step: 'PLAN_CONTRACT', iteration, eval_revisions };
+        
+      case 'PLAN_CONTRACT':
+        return { step: 'EXECUTE', iteration, eval_revisions };
       
       case 'EXECUTE':
-        return { step: 'VERIFY', iteration };
+        return { step: 'EVALUATE', iteration, eval_revisions };
+        
+      case 'EVALUATE':
+        if (stepPassed) {
+          // Contract passed, move to VERIFY
+          return { step: 'VERIFY', iteration, eval_revisions: 0 };
+        }
+        
+        // Contract failed.
+        if (planViable) {
+          // Fall back to EXECUTE but increment revision counter
+          const nextRevision = eval_revisions + 1;
+          const maxRev = spec.maxRevisions ?? DEFAULT_MAX_REVISIONS;
+          if (nextRevision >= maxRev) {
+            // Exceeded max revisions — pipeline fails
+            return null;
+          }
+          return { step: 'EXECUTE', iteration, eval_revisions: nextRevision };
+        } else {
+          // Fall back all the way to PLAN
+          const nextIteration = iteration + 1;
+          if (!SafetyController.validateIterationLimit(nextIteration, spec)) {
+            return null;
+          }
+          return { step: 'PLAN', iteration: nextIteration, eval_revisions: 0 };
+        }
       
       case 'VERIFY':
-        if (verifyPassed) {
-          return { step: 'FINALIZE', iteration };
+        if (stepPassed) {
+          return { step: 'FINALIZE', iteration, eval_revisions };
         }
         // Verification failed — loop back to PLAN with incremented iteration
-        const nextIteration = iteration + 1;
-        if (!SafetyController.validateIterationLimit(nextIteration, spec)) {
+        const nextIterationVerify = iteration + 1;
+        if (!SafetyController.validateIterationLimit(nextIterationVerify, spec)) {
           // Exceeded max iterations — force finalize with failure
           return null;
         }
-        return { step: 'PLAN', iteration: nextIteration };
+        return { step: 'PLAN', iteration: nextIterationVerify, eval_revisions: 0 };
       
       case 'FINALIZE':
         return null; // Terminal step

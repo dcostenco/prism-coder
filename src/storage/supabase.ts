@@ -1504,7 +1504,13 @@ export class SupabaseStorage implements StorageBackend {
           updated_at: updatedState.updated_at,
           spec: updatedState.spec,
           error: updatedState.error || null,
-          last_heartbeat: updatedState.last_heartbeat || null
+          last_heartbeat: updatedState.last_heartbeat || null,
+          // ─── v7.4: Adversarial Evaluation fields ───
+          eval_revisions: updatedState.eval_revisions ?? 0,
+          contract_payload: updatedState.contract_payload
+            ? JSON.stringify(updatedState.contract_payload)
+            : null,
+          notes: updatedState.notes || null,
         },
         { on_conflict: "id" },
         { Prefer: "return=minimal,resolution=merge-duplicates" }
@@ -1528,7 +1534,12 @@ export class SupabaseStorage implements StorageBackend {
       });
       const rows = Array.isArray(result) ? result : [];
       if (rows.length === 0) return null;
-      return rows[0] as unknown as PipelineState;
+      const row = rows[0] as any;
+      // ─── v7.4: Deserialize contract_payload from JSON TEXT ───
+      if (row.contract_payload && typeof row.contract_payload === "string") {
+        try { row.contract_payload = JSON.parse(row.contract_payload); } catch { /* leave as-is */ }
+      }
+      return row as unknown as PipelineState;
     } catch (e: any) {
       if (e.message?.includes("PGRST202") || e.message?.includes("Could not find the relation")) return null;
       throw e;
@@ -1545,7 +1556,14 @@ export class SupabaseStorage implements StorageBackend {
       if (status) query.status = `eq.${status}`;
       
       const result = await supabaseGet("dark_factory_pipelines", query);
-      return (Array.isArray(result) ? result : []) as unknown as PipelineState[];
+      const rows = (Array.isArray(result) ? result : []) as any[];
+      // ─── v7.4: Deserialize contract_payload from JSON TEXT ───
+      return rows.map(row => {
+        if (row.contract_payload && typeof row.contract_payload === "string") {
+          try { row.contract_payload = JSON.parse(row.contract_payload); } catch { /* leave as-is */ }
+        }
+        return row;
+      }) as unknown as PipelineState[];
     } catch (e: any) {
       if (e.message?.includes("PGRST202") || e.message?.includes("Could not find the relation")) return [];
       throw e;

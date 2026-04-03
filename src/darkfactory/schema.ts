@@ -1,4 +1,4 @@
-export type DarkFactoryStep = 'INIT' | 'PLAN' | 'EXECUTE' | 'VERIFY' | 'FINALIZE';
+export type DarkFactoryStep = 'INIT' | 'PLAN' | 'PLAN_CONTRACT' | 'EXECUTE' | 'EVALUATE' | 'VERIFY' | 'FINALIZE';
 
 /**
  * Defines the parameters for a Dark Factory run
@@ -9,6 +9,9 @@ export interface PipelineSpec {
   
   /** Maximum number of PLAN->EXECUTE->VERIFY loop iterations */
   maxIterations: number;
+
+  /** Maximum number of EXECUTE <-> EVALUATE internal revisions per execution. Default: DEFAULT_MAX_REVISIONS. */
+  maxRevisions?: number;
   
   /** The context directory where files are allowed to be modified */
   workingDirectory?: string;
@@ -73,4 +76,38 @@ export interface ActionPayload {
 export interface ExecutionStepResult {
   actions: ActionPayload[];
   notes?: string;
+}
+
+/**
+ * The pre-negotiated scoring rubric agreed upon by Generator and Evaluator
+ * during the PLAN_CONTRACT phase.
+ */
+export interface ContractPayload {
+  criteria: Array<{
+    id: string;
+    description: string;
+  }>;
+}
+
+/** Default max adversarial revisions per EXECUTE phase (used when spec.maxRevisions is unset). */
+export const DEFAULT_MAX_REVISIONS = 3;
+
+/**
+ * Output from the EVALUATE adversarial critique step.
+ */
+export interface EvaluationPayload {
+  pass: boolean;
+  plan_viable: boolean;
+  notes?: string;
+  findings: Array<{
+    severity: 'critical' | 'warning' | 'info';
+    criterion_id: string;
+    pass_fail: boolean;
+    evidence: {
+      file: string;
+      /** Line number (1-indexed) where the finding was observed. */
+      line: number;
+      description: string;
+    };
+  }>;
 }

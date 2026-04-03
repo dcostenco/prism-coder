@@ -906,6 +906,11 @@ export interface AnalyticsData {
 
 export type PipelineStatus = 'PENDING' | 'RUNNING' | 'PAUSED' | 'ABORTED' | 'COMPLETED' | 'FAILED';
 
+/** Structural alias for ContractPayload (avoids circular import from darkfactory/schema). */
+export interface PipelineContractPayload {
+  criteria: Array<{ id: string; description: string }>;
+}
+
 export interface PipelineState {
   id: string;
   project: string;
@@ -913,11 +918,15 @@ export interface PipelineState {
   status: PipelineStatus;
   current_step: string;
   iteration: number;
+  eval_revisions?: number;
   started_at: string;
   updated_at: string;
   spec: string; // JSON string of PipelineSpec
   error?: string | null;
   last_heartbeat?: string | null;
+  /** v7.4: Adversarial contract rubric, deserialized from JSON TEXT storage. */
+  contract_payload?: PipelineContractPayload | null;
+  notes?: string | null;
 }
 
 // ─── v7.2.0: Verification Harness + Validation Result ──────────────
