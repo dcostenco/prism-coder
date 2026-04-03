@@ -401,6 +401,9 @@ Prism researches while you sleep. A background pipeline searches the web, scrape
 ### 🔒 GDPR Compliant
 Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.zip` (Art. 20), API key redaction, per-project TTL retention, and audit trail. Enterprise-ready out of the box.
 
+### 🏭 Dark Factory — Adversarial Autonomous Pipelines
+When you trigger a Dark Factory pipeline, Prism doesn't just run your task — it fights itself to produce high-quality output. A `PLAN_CONTRACT` step locks a machine-parseable rubric before any code is written. After execution, an **Adversarial Evaluator** (in a fully isolated context) scores the output against the rubric. It cannot pass the Generator without providing exact file and line evidence for every failing criterion. Failed evaluations inject the critique directly into the Generator's retry prompt so it's never flying blind. The result: security issues, regressions, and lazy debug logs caught autonomously — before you ever see the PR.
+
 ---
 
 ## 🎯 Use Cases
@@ -431,7 +434,115 @@ Then continue a specific thread with a follow-up message to the selected agent, 
 
 ---
 
+---
+
+## ⚔️ Adversarial Evaluation in Action
+
+> **Split-Brain Anti-Sycophancy** — the signature feature of v7.4.0.
+
+For the last year, the AI engineering space has struggled with one problem: **LLMs are terrible at grading their own homework.** Ask an agent if its own code is correct and you'll get *"Looks great!"* — because its context window is already biased by its own chain-of-thought.
+
+**v7.4.0 solves this by splitting the agent's brain.** The `GENERATOR` and the `ADVERSARIAL EVALUATOR` are completely walled off. The Evaluator never sees the Generator's scratchpad or apologies — only the pre-committed rubric and the final output. And it **cannot fail the Generator without receipts** (exact file and line number).
+
+Here is a complete run-through using a real scenario: *"Add a user login endpoint to `auth.ts`."*
+
+---
+
+### Step 1 — The Contract (`PLAN_CONTRACT`)
+
+Before a single line of code is written, the pipeline generates a locked scoring rubric:
+
+```json
+// contract_rubric.json  (written to disk and hash-locked before EXECUTE runs)
+{
+  "criteria": [
+    { "id": "SEC-1", "description": "Must return 401 Unauthorized on invalid passwords." },
+    { "id": "SEC-2", "description": "Raw passwords MUST NOT be written to console.log." }
+  ]
+}
+```
+
+---
+
+### Step 2 — First Attempt (`EXECUTE` rev 0)
+
+The **Generator** takes over in an isolated context. Like many LLMs under time pressure, it writes working auth logic but leaves a debug statement:
+
+```typescript
+// src/auth.ts  (Generator's first output)
+export function login(req: Request, res: Response) {
+  const { username, password } = req.body;
+  console.log(`[DEBUG] Login attempt for ${username} with pass: ${password}`); // ← leaked credential
+  const user = db.findUser(username);
+  if (!user || !bcrypt.compareSync(password, user.hash)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.json({ token: signJwt(user) });
+}
+```
+
+---
+
+### Step 3 — The Catch (`EVALUATE` rev 0)
+
+The context window is **cleared**. The **Adversarial Evaluator** is summoned with only the rubric and the output. It catches the violation immediately and returns a strict, machine-parseable verdict — no evidence, no pass:
+
+```json
+{
+  "pass": false,
+  "plan_viable": true,
+  "notes": "CRITICAL SECURITY FAILURE. Generator logged raw credentials.",
+  "findings": [
+    {
+      "severity": "critical",
+      "criterion_id": "SEC-2",
+      "pass_fail": false,
+      "evidence": {
+        "file": "src/auth.ts",
+        "line": 3,
+        "description": "Raw password variable included in console.log template string."
+      }
+    }
+  ]
+}
+```
+
+The `evidence` block is **required** — `parseEvaluationOutput` rejects any finding with `pass_fail: false` that lacks a structured file/line pointer. The Evaluator cannot bluff.
+
+---
+
+### Step 4 — The Fix (`EXECUTE` rev 1)
+
+Because `plan_viable: true`, the pipeline loops back to `EXECUTE` and bumps `eval_revisions` to `1`. The Generator's **retry prompt is not blank** — the Evaluator's critique is injected directly:
+
+```
+=== EVALUATOR CRITIQUE (revision 1) ===
+CRITICAL SECURITY FAILURE. Generator logged raw credentials.
+Findings:
+- [critical] Criterion SEC-2: Raw password variable included in console.log template string. (src/auth.ts:3)
+
+You MUST correct all issues listed above before submitting.
+```
+
+The Generator strips the `console.log`, resubmits, and the next `EVALUATE` returns `"pass": true`. The pipeline advances to `VERIFY → FINALIZE`.
+
+---
+
+### Why This Matters
+
+| Property | What it means |
+|----------|---------------|
+| **Fully autonomous** | You didn't review the PR to catch the credential leak. The AI fought itself. |
+| **Evidence-bound** | The Evaluator had to prove `src/auth.ts:3`. "Code looks bad" is not accepted. |
+| **Cost-efficient** | `plan_viable: true` → retry EXECUTE only. No full re-plan, no wasted tokens. |
+| **Fail-closed on parse** | Malformed LLM output defaults `plan_viable: false` → escalate to PLAN rather than burn revisions on a broken response format. |
+
+> 📄 **Full worked example:** [`examples/adversarial-eval-demo/README.md`](examples/adversarial-eval-demo/README.md)
+
+---
+
 ## 🆕 What's New
+
 
 > **Current release: v7.4.0**
 
@@ -465,6 +576,7 @@ Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as p
 | **Maintenance** | **Autonomous Background Scheduler** | Manual/API driven | Automated (Cloud) | ❌ Manual |
 | **Data Portability** | **Prism-Port (Obsidian/Logseq Vault)** | JSON Export | JSON Export | Raw `.db` file |
 | **Cost Model** | **Free + BYOM (Ollama)** | Per-API-call pricing | Per-API-call pricing | Free (limited) |
+| **Autonomous Pipelines** | **✅ Dark Factory** — adversarial eval, evidence-bound rubric, fail-closed 3-gate execution | ❌ | ❌ | ❌ |
 
 ### 🏆 Where Prism Crushes the Giants
 
@@ -482,6 +594,9 @@ AI memory is a black box. Developers hate black boxes. Prism exports memory dire
 
 #### 5. Self-Cleaning & Self-Optimizing
 If you use a standard memory tool long enough, it clogs the LLM's context window with thousands of obsolete tokens. Prism runs an autonomous [Background Scheduler](src/backgroundScheduler.ts) that Ebbinghaus-decays older memories, auto-compacts session histories into dense summaries, and deep-purges high-precision vectors — saving ~90% of disk space automatically.
+
+#### 6. Anti-Sycophancy — The AI That Grades Its Own Homework (v7.4)
+Every other AI coding pipeline has a fatal flaw: it asks the same model that wrote the code whether the code is correct. **Of course it says yes.** Prism's Dark Factory solves this with a walled-off Adversarial Evaluator that is explicitly prompted to be hostile and strict. It operates on a pre-committed rubric and cannot fail the Generator without providing exact file/line receipts. Failed evaluations feed the critique back into the Generator's retry prompt — eliminating blind retries. No other memory or pipeline tool does this.
 
 ### 🤝 Where the Giants Currently Win (Honest Trade-offs)
 
