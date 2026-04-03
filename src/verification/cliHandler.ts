@@ -15,6 +15,10 @@ const DEFAULT_HARNESS_PATH = './verification_harness.json';
  * and output is consistent across local/CI flows.
  */
 export interface VerifyStatusResult {
+  /**
+   * Formal compatibility contract for JSON integrations.
+   * Additive changes remain v1. Breaking field mutations require v2 bump.
+   */
   schema_version: 1;
   project: string;
   /** No runs recorded yet */
@@ -54,6 +58,10 @@ export interface VerifyStatusResult {
  * Canonical result shape for `verify generate`.
  */
 export interface GenerateHarnessResult {
+  /**
+   * Formal compatibility contract for JSON integrations.
+   * Additive changes remain v1. Breaking field mutations require v2 bump.
+   */
   schema_version: 1;
   project: string;
   success: boolean;
