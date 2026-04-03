@@ -7,7 +7,58 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
-### ✅ v7.1.0 — Prism Task Router (Heuristic + ML Experience)
+### ✅ v7.3.3 — Dashboard Stability Hotfix
+
+| Fix | Detail |
+|-----|--------|
+| 🐛 **`abortPipeline` SyntaxError** | A lone `\'` escape in the template literal was consumed as a JS escape sequence, producing `''` (bare quotes, no backslash) in the served HTML. The browser's parser saw two adjacent string literals → `SyntaxError: Unexpected string` → the entire inline IIFE silently failed → project dropdown frozen at "Loading..." forever. Fixed via `data-id` attribute pattern, eliminating multi-layer escaping entirely. |
+| 🛡️ **ES5 Lint Guard** | `scripts/lint-dashboard-es5.cjs` (exposed as `npm run lint:dashboard`) scans the inline `<script>` block for ES6+ syntax and the lone-backslash quote-escape trap at CI/pre-commit time. |
+
+---
+### ✅ v7.3.2 — Verification Diagnostics v2
+
+| Feature | Detail |
+|---------|--------|
+| 📊 **`diff_counts` + `changed_keys`** | `verify status --json` now emits per-layer `diff_counts` (assertions checked/passed/failed/warned) and `changed_keys` (keys that changed vs baseline). Additive, non-breaking — `schema_version: 1`. |
+| 📃 **JSON Compatibility Contract** | Formal schema contract (`docs/verification-json-contract.md`) enforced by a process-level integration test — any breaking JSON change fails CI before shipping. |
+| 🔀 **CLI Compute/Render Separation** | `computeVerificationStatus()` and `renderVerificationStatus()` are now separate — `--json` bypasses the renderer entirely, guaranteeing clean machine output. |
+
+---
+### ✅ v7.3.1 — Dark Factory: Fail-Closed Execution Engine 🏭
+
+> **The LLM never touches the filesystem directly. Every action passes through three gates before any side effect occurs.**
+
+| Feature | Detail |
+|---------|--------|
+| 🔒 **Gate 1 — Adversarial Parser** | 3-strategy cascading extractor (direct JSON → fenced code → prose stripping) handles the full spectrum of real-world LLM output. |
+| 🔒 **Gate 2 — Type Validation** | Every action validated against the `ActionType` enum. Hallucinated or coerced action types rejected before any filesystem call. |
+| 🔒 **Gate 3 — Scope Validation** | Every `targetPath` resolved against `workingDirectory`. Path traversal (`../`), absolute paths, null bytes, unicode normalization attacks, sibling-prefix bypass — all blocked. Scope violation terminates the **entire pipeline**, preventing partial writes. |
+| ☠️ **Poison Pill Defense** | Malicious payloads (root-targeting `DELETE_FILE`, multi-MB content bombing) caught at Gate 2/Gate 3 before execution. |
+| 📊 **Factory Dashboard Tab** | Real-time pipeline visualization: status, gate indicators, iteration count, elapsed time, emergency kill switch. |
+| 🧪 **67 Adversarial Tests** | Full surface coverage: parse strategies, type coercion, path traversal vectors, null bytes, unicode normalization, 100-action stress payloads, 100KB content strings, 500-segment deep paths. |
+
+---
+### ✅ v7.3.0 — Dark Factory: Foundation 🏭
+
+| Feature | Detail |
+|---------|--------|
+| 🗄️ **Pipeline Storage Layer** | `pipelines` table (SQLite + Supabase parity) with full lifecycle tracking: `PENDING → RUNNING → COMPLETED/FAILED/ABORTED`, iteration count, working directory, tenant isolation. |
+| 🔄 **Background Pipeline Runner** | Chains `plan → execute → verify → iterate` without blocking MCP RPC threads. Hard limits: `PRISM_DARK_FACTORY_MAX_ITERATIONS` (default: `10`), `PRISM_DARK_FACTORY_TIMEOUT_MINUTES` (default: `30`). |
+| 🤝 **Native Claw Delegation** | `ClawInvocation` routes generation-heavy tasks (scaffolding, testing, linting) to the local model. Host triggers and immediately acks; orchestration runs concurrently in the background. |
+
+---
+### ✅ v7.2.0 — Verification Harness (Front-Loaded Testing) 🔭
+
+| Feature | Detail |
+|---------|--------|
+| 🔐 **Spec-Freeze Contract** | `verification_harness.json` is generated and hash-locked (`rubric_hash`) *before* execution. Criteria cannot drift mid-sprint. |
+| 🔬 **Multi-Layer Verification** | Assertions across **Data Accuracy**, **Agent Behavior**, and **Pipeline Integrity** — independently configurable, machine-parseable. |
+| 🚦 **Finalization Gate Policies** | `warn` / `gate` / `abort` — autonomous pipelines cannot finalize when blocking criteria fail. |
+| 📊 **`validation_result` Experience Event** | Per-layer pass/fail outcomes feed directly into the v7.1.0 ML routing feedback loop. |
+| ⌨️ **CLI Commands** | `verify generate` · `verify status` — both with `--json` for machine-readable CI output. Exit `0` for pass/warn/bypassed; `1` for blocked drift. |
+
+---
+### ✅ v7.1.0 — Prism Task Router (Heuristic + ML Experience) 🚦
 
 | Feature | Detail |
 |---------|--------|
@@ -124,79 +175,31 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 </details>
 
----
-## 📊 The State of Prism (v7.1.0)
+## 📊 The State of Prism (v7.3.3)
 
-With v7.1.0 shipped, Prism is a **production-hardened, scientifically-grounded, self-organizing AI Operating System**:
+With v7.3.3 shipped, Prism is a **production-hardened, fail-closed, autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*:
 
-- **Intelligently Routed** — Heuristic and ML-driven Task Router dynamically delegates to host cloud models or local agents (Claw) based on complexity, scope, and cold-start protected historical win rates.
-- **Scientifically-Grounded** — ACT-R activation model (`B_i = ln(Σ t_j^{-d})`) ranks memories by recency × frequency, mirroring human cognitive decay. Candidate-scoped spreading activation prevents centrality bias.
-- **Cognitively-Routed** — HDC state machine composes agent context into binary hypervectors and resolves semantic concepts via Hamming distance. Policy gateway routes with configurable thresholds.
+- **Fail-Closed by Default** — The Dark Factory 3-gate pipeline (Parse → Type → Scope) means the LLM never writes a byte to disk directly. Every action is validated before any side effect occurs.
+- **Autonomously Verified** — Verification Harness generates spec-freeze contracts before execution, hash-locks them (`rubric_hash`), and gates finalization against immutable outcomes.
+- **Intelligently Routed** — Heuristic + ML Task Router delegates cloud vs. local in under 2ms, cold-start safe, experience-corrected per project.
+- **Scientifically-Grounded** — ACT-R activation model (`B_i = ln(Σ t_j^{-d})`) ranks memories by recency × frequency. Candidate-scoped spreading activation prevents centrality bias.
+- **Cognitively-Routed** — HDC binary hypervectors + Hamming distance concept resolution + policy gateway. Three-outcome routing: `direct / clarify / fallback`.
 - **Self-Organizing** — Edge Synthesis + Graph Pruning form an autonomous cognitive loop: the graph grows connective tissue overnight and prunes dead weight on schedule.
-- **Cognitive** — Composite scoring (similarity + activation) + context-boosted retrieval + Active Recall quizzes = memory that knows what matters *right now*.
-- **Observable** — SLO dashboard tracks synthesis success rate, net link growth, prune ratio, sweep latency, and cognitive route distribution. Warning badges fire proactively.
+- **Observable** — SLO dashboard: synthesis success rate, net link growth, prune ratio, sweep latency, cognitive route distribution, pipeline gate pass/fail. Warning badges fire proactively.
+- **Diagnostically Rich** — `verify status --json` emits `diff_counts` + `changed_keys` per layer. JSON contract is CI-enforced and schema-versioned.
 - **Zero Cold-Start** — Universal Migration imports years of Claude/Gemini/ChatGPT history on day one. New memories are access-seeded immediately.
 - **Scale** — TurboQuant 10× compression + Deep Storage Purge + SQLite VACUUM. Decades of session history on a laptop.
-- **Safe** — Full type-guard matrix across all 30+ MCP tools. LLM-hallucinated payloads are rejected at the boundary.
+- **Safe** — Full type-guard matrix across all 30+ MCP tools. Path traversal, poison pill payloads, null-byte injection — all blocked at the gate layer before any execution.
 - **Convergent** — CRDT OR-Map handoff merging. Multiple agents, zero conflicts.
-- **Autonomous** — Web Scholar researches while you sleep. Task-aware, Hivemind-integrated.
-- **Hardened** — Transactional migrations, graceful shutdown, thundering herd prevention, AccessLogBuffer batch writes, prototype pollution guards, tenant-safe graph writes.
-- **Quality** — Interactive Knowledge Graph Editor + Behavioral Memory that learns from mistakes.
-- **Reliability** — 705 passing tests across 32 suites.
-- **Observability** — OpenTelemetry span waterfalls + SLO metrics + cognitive route telemetry for every tool call, LLM hop, background worker, and graph sweep.
+- **Autonomous** — Web Scholar researches while you sleep. Dark Factory executes while you sleep. Task Router delegates while you sleep.
+- **Hardened** — Transactional migrations, graceful shutdown, AccessLogBuffer batch writes, prototype pollution guards, tenant-safe graph writes, ES5-lint-guarded dashboard.
+- **Reliable** — 700+ passing tests. ES5 lint guard on all dashboard inline scripts. JSON contract CI enforcement on all CLI output schemas.
 - **Multimodal** — VLM auto-captioning turns screenshots into semantically searchable memory.
-- **Security** — SQL injection prevention, path traversal guard, GDPR Art. 17+20 compliance.
+- **Security** — SQL injection prevention, path traversal guard, Poison Pill defense, GDPR Art. 17+20 compliance.
 
 ---
 ## 🗺️ Next on the Horizon
 
-### 🧪 v7.2.0 — Verification Harness (Front-Loaded Testing) `[Planned]`
-**Problem:** Agents plan and execute but have no structured, programmatically enforced verification layer. Test assertions are afterthoughts, not first-class planning artifacts. Complex multi-database ETL, data migrations, and agentic pipelines require "stacking 9's" on accuracy — which demands front-loaded, machine-parseable validation at every layer.
-**Solution:** A planning-phase verification harness that forces the agent to emit programmatically verifiable test assertions *before* execution begins, then automatically validates them post-execution.
-
-#### ✅ v7.2 Spec-Freeze Acceptance Contract
-
-To prevent implementation drift, v7.2 freezes three artifacts and their responsibilities:
-
-1. `implementation_plan.md` — execution strategy (**how** to implement).
-2. `verification_harness.json` — machine-parseable assertions and scoring rubric (**how to prove correctness**).
-3. `validation_result` — immutable verification outcome record (**what actually passed/failed**).
-
-Contract rules:
-- `verification_harness.json` is generated before execution and hash-locked (`rubric_hash`) for the sprint.
-- Finalization gates evaluate `validation_result` against the frozen rubric, not regenerated criteria.
-- Router learning ingests raw verification signals (`pass_rate`, `critical_failures`, `coverage_score`, `rubric_hash`) and derives confidence adjustments downstream.
-- Verification data must be queryable/auditable in dedicated storage (avoid opaque ad-hoc blobs for primary records).
-
-| Feature | Detail |
-|---------|--------|
-| 📋 **Planning-Phase Test Generation** | New planning skill that requires the agent to emit machine-parseable test specifications (JSON test specs) during `implementation_plan.md` creation. Tests define expected outcomes, data invariants, and acceptance criteria *before* any code is written. |
-| 🔬 **Multi-Layer Verification Framework** | Structured verification across 3 layers: **Data Accuracy** (schema validation, row-count checks, referential integrity), **Agent Behavior** (output format, tool call correctness, state transitions), and **Pipeline Integrity** (end-to-end flow completion, idempotency, error handling). |
-| 🤖 **Claw-as-Validator (Adversarial Loop)** | After execution, a second `claw_run_task` call runs the generated test specs against the actual output — creating a generate → execute → validate adversarial loop between host and local agent. |
-| 📊 **`validation_result` Experience Event** | New experience event type that records test pass/fail results with per-layer granularity. Feeds directly into the v7.1.0 ML routing feedback loop, enabling the router to learn which task types need tighter validation. |
-| 🚦 **Verification Gates** | Configurable pass/fail gates that block progression when critical assertions fail. Supports `warn` (log and continue), `gate` (block until resolved), and `abort` (rollback) severity levels. |
-| ⚙️ **Configuration** | `PRISM_VERIFICATION_HARNESS_ENABLED` (default: `false`), `PRISM_VERIFICATION_LAYERS` (comma-separated: `data,agent,pipeline`), `PRISM_VERIFICATION_DEFAULT_SEVERITY` (default: `warn`). |
-
-**Dependency:** Builds on v7.1.0 experience-based ML routing for the feedback loop integration.
-
----
-### 🏭 v7.3.0 — Dark Factory Orchestration `[Exploring]`
-**Problem:** Even with verification harnesses, Prism remains session-based and human-triggered. Autonomous "dark factory" pipelines — where agents execute, validate, and iterate without human intervention — require a continuous orchestration layer that doesn't exist today.
-**Solution:** A lightweight pipeline runner that chains plan → execute → verify → iterate cycles autonomously, gated by the verification harness and bounded by configurable safety limits.
-
-| Feature | Detail |
-|---------|--------|
-| 🔄 **Autonomous Pipeline Runner** | Continuous background loop that chains `plan → execute → verify → iterate` cycles natively. Runs decoupled from MCP RPC cycles to avoid 60s host client timeouts. |
-| 🛡️ **Safety Boundaries** | Hard limits on iteration count (`PRISM_DARK_FACTORY_MAX_ITERATIONS`), wall-clock time (`PRISM_DARK_FACTORY_TIMEOUT_MINUTES`), and file mutation scope. Emergency kill switch via dashboard. |
-| 📊 **Pipeline Telemetry** | OpenTelemetry spans for each pipeline stage. Dedicated "Factory" dashboard tab with real-time pipeline visualization. |
-| 🔀 **Native Local Execution (BYOM)** | Prism acts as an internal LLM client using existing BYOM adapters. Host models trigger `session_start_pipeline`, Prism immediately acks, and orchestrates local models concurrently in the background. |
-| 🧠 **Agent Delegation Strategy** | Delegate generation-heavy, bounded tasks (scaffolding, testing, linting) to Claw. Keep the Host for synthesis-heavy tasks (architecture, cross-module reasoning). |
-| 🔄 **Closed Feedback Loop** | Background pipeline exits automatically log `session_save_experience` events to dynamically improve the Host's task router win rates on a per-project basis. |
-| 📈 **Accuracy Stacking ("9's Dashboard")** | Real-time accuracy metrics across verification layers. Visual indicator showing current confidence level (e.g., "99.7% — 2.5σ") inspired by Six Sigma methodology. |
-
-**Dependency:** Requires v7.2.0 Verification Harness as the safety net. Without front-loaded testing, autonomous execution is unsafe.
-
----
 ### ⚔️ v7.4.0 — Adversarial Dev Harness (Anti-Sycophancy) `[Planned]`
 **Problem:** In autonomous coding loops, self-evaluation is structurally biased: the same reasoning policy that generates code often under-detects its own deep defects. Prompting alone cannot reliably remove this bias.
 **Solution:** Introduce a native generator/evaluator sprint architecture with isolated contexts, pre-committed scoring contracts, and evidence-bound review gates before promotion.
