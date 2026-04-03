@@ -17,11 +17,13 @@ All notable changes to this project will be documented in this file.
 - **`PipelineState.contract_payload`** — Type narrowed from `any` to `PipelineContractPayload | null` for end-to-end type safety.
 - **`evalPlanViable` conservative default** — When `EVALUATE` step output cannot be parsed (malformed LLM response), `planViable` now defaults to `false` (escalate to PLAN re-plan) instead of `true` (burn EXECUTE revisions). Prevents looping on systematically broken LLM output.
 - **EVALUATE notes persisted** — `result.notes` from the `EVALUATE` step is now forwarded to `pipeline.notes` alongside `EXECUTE` notes. Previously, evaluator findings were discarded from the persistent pipeline record.
+- **Generator Feedback Loop** — The Evaluator's critique (`EvaluationPayload.findings`) is now correctly serialized and injected directly into the `EXECUTE` prompt during revision loops (`eval_revisions > 0`). The Generator is no longer blind to why it failed — it receives the full line-by-line evidence (criterion, severity, file, line) from the previous evaluation.
 - **TurboQuant warm-up** — Moved to `setImmediate` in `server.ts` to prevent event loop blocking during the MCP stdio handshake.
 
 ### Fixed
 - **`parseContractOutput` per-criterion validation** — Each criterion element is now validated to have string `id` and `description` fields. Primitive elements (e.g. `[42, "bad"]`) are rejected with a position-keyed error message.
 - **`parseEvaluationOutput` findings array guard** — `findings` field is now validated to be an array when present. Non-array values (e.g. `"findings": "none"`) are rejected at the parser boundary.
+- **Strict Evidence Validation** — `parseEvaluationOutput` now enforces deep element-level validation on the `findings` array. Evaluator findings with `pass_fail: false` that are missing an `evidence` object (file and line pointers) are strictly rejected. Prevents LLM hallucination of unsupported severity claims with no evidence anchor.
 - **`contract_rubric.json` write isolation** — `fs.writeFileSync` is now wrapped in try/catch. Disk/permission errors immediately mark the pipeline `FAILED` instead of leaving it stuck in `RUNNING` indefinitely.
 - **Dead `STEP_ORDER` array removed** — Unused constant in `safetyController.ts` replaced by the authoritative `switch` statement.
 - **`'evaluation_result' as any`** — Invalid event type replaced with the correct `'learning'` literal for the experience ledger call.
@@ -193,6 +195,7 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [6.1.9] - 2026-03-31
 
 ### Added
 - **Tavily Support** — Added `@tavily/core` integration as a robust alternative to Brave + Firecrawl for the Web Scholar pipeline. Supports `performTavilySearch` and `performTavilyExtract`.

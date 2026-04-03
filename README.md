@@ -105,6 +105,7 @@ Then open `http://localhost:3001` instead.
 | Auto-compaction | ❌ | ✅ `GOOGLE_API_KEY` |
 | Web Scholar research | ❌ | ✅ [`BRAVE_API_KEY`](#environment-variables) + [`FIRECRAWL_API_KEY`](#environment-variables) (or `TAVILY_API_KEY`) |
 | VLM image captioning | ❌ | ✅ Provider key |
+| Autonomous Pipelines (Dark Factory) | ❌ | ✅ `GOOGLE_API_KEY` (or LLM override) |
 
 > 🔑 The core Mind Palace works **100% offline** with zero API keys. Cloud keys unlock intelligence features. See [Environment Variables](#environment-variables).
 
@@ -615,7 +616,7 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 </details>
 
 <details>
-<summary><strong>Verification Harness (Planned for v7.2)</strong></summary>
+<summary><strong>Verification Harness</strong></summary>
 
 | Tool | Purpose |
 |------|---------|
@@ -779,7 +780,7 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 
 ---
 
-## 📦 Product Roadmap
+## 📦 Recent Milestones & Roadmap
 
 > **[Full ROADMAP.md →](ROADMAP.md)**
 
