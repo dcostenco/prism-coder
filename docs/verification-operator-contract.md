@@ -48,11 +48,21 @@ Returns `VerifyStatusResult`.
   - `diff`: Optional object (Added in Phase 2 diagnostics)
     - `added`: Array of TestAssertion objects (local id not matched in stored)
     - `removed`: Array of TestAssertion objects (stored id not matched in local)
-    - `modified`: Array of TestAssertion objects (id matched, payload changed)
-    *Note: Diff arrays are guaranteed to be sorted by `id`.*
+    - `modified`: Array of ModifiedTestAssertion objects (id matched, payload changed)
+      - Inherits all TestAssertion fields
+      - `changed_keys`: Array of strings — top-level field names that differ between stored and local versions (Diagnostics v2)
+    *Note: Diff arrays are guaranteed to be sorted by `id`. `changed_keys` is sorted alphabetically.*
+  - `diff_counts`: Optional object (Diagnostics v2 — parser ergonomics)
+    - `added`: integer — count of added assertions
+    - `removed`: integer — count of removed assertions
+    - `modified`: integer — count of modified assertions
+    *Note: Counts are guaranteed to match the lengths of the corresponding `diff` arrays.*
 
 ### Diff Semantics
 Rename heuristics are intentionally deferred. v1 diff semantics are strict-by-id to guarantee predictable behavior for CI consumers without ambiguous false-positives. A renamed test is represented deterministically as one `removed` test and one `added` test.
+
+### Modified Entry Metadata (Diagnostics v2)
+Each entry in `diff.modified` carries a `changed_keys` array listing the top-level assertion fields that changed (e.g., `["description", "assertion"]`). This enables operators to quickly triage modifications without deep-diffing the full object. The `id` field is never listed in `changed_keys` since it is the matching key.
 
 ### 2. `prism verify generate --json`
 
