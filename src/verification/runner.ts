@@ -8,6 +8,8 @@ import {
   type VerificationResult,
   type VerificationConfig,
   type SeverityLevel,
+  type VerificationHarness,
+  computeRubricHash,
 } from "./schema.js";
 import { evaluateSeverityGates, resolveEffectiveSeverity } from "./severityPolicy.js";
 
@@ -17,6 +19,10 @@ import { evaluateSeverityGates, resolveEffectiveSeverity } from "./severityPolic
 function deepMatch(actual: any, expected: any): boolean {
   if (typeof expected !== 'object' || expected === null) {
     return actual === expected;
+  }
+  // H1 fix: Guard against null/undefined/primitive actual before iterating
+  if (typeof actual !== 'object' || actual === null) {
+    return false;
   }
   for (const key of Object.keys(expected)) {
     if (typeof actual[key] === 'object') {
@@ -251,11 +257,24 @@ export interface RunSuiteOptions {
   minSeverity?: SeverityLevel;
   /** Global config for severity gate evaluation */
   config?: VerificationConfig;
+  /** Optional verification harness to validate the rubric hash against */
+  harness?: VerificationHarness;
 }
 
 // ─── v7.2.0: Enhanced Verification Runner ───────────────────
 
 export class VerificationRunner {
+
+  /**
+   * Validates that the provided tests match the expected rubric hash from the harness.
+   * Throws an error if the hash does not match, ensuring test integrity.
+   */
+  static verifyRubricHash(tests: TestAssertion[], harness: VerificationHarness): void {
+    const computed = computeRubricHash(tests);
+    if (computed !== harness.rubric_hash) {
+      throw new Error(`Rubric hash mismatch. Expected ${harness.rubric_hash}, but computeRubricHash returned ${computed}. The tests have been modified since the harness was created.`);
+    }
+  }
 
   /**
    * v7.2.0 enhanced suite runner.
@@ -265,6 +284,7 @@ export class VerificationRunner {
    * - Retry logic for transient failures
    * - Dependency chain resolution
    * - Structured VerificationResult with per-layer breakdown
+   * - Rubric hash validation if a harness is provided
    */
   static async runSuite(
     jsonContent: string,
@@ -274,12 +294,17 @@ export class VerificationRunner {
     const config = options?.config ?? DEFAULT_CONFIG;
     const filterLayers = options?.layers ?? config.layers;
     const minSeverity = options?.minSeverity;
+    const harness = options?.harness;
 
     let assertionResults: AssertionResult[] = [];
 
     try {
       const parsed = JSON.parse(jsonContent);
       const suite = TestSuiteSchema.parse(parsed);
+
+      if (harness) {
+        VerificationRunner.verifyRubricHash(suite.tests, harness);
+      }
 
       const { preparedById, orderedIds, precomputed } = prepareAssertions(
         suite.tests,
@@ -548,11 +573,15 @@ export class VerificationRunner {
         return ops > 10000;
       });
 
-      // v7.2.0 FIX: Properly inject inputs as a JSON string literal,
-      // then JSON.parse inside the VM. The previous approach broke on
-      // object/array inputs due to unquoted interpolation.
+      // C3 fix: Use vm.newString() + vm.setProp() to safely pass JSON
+      // into the VM without any string escaping. This prevents injection
+      // attacks from crafted input values containing quotes or backslashes.
       const inputsJson = JSON.stringify(inputs);
-      const parseResult = vm.evalCode(`JSON.parse('${inputsJson.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')`);
+      const inputsJsonHandle = vm.newString(inputsJson);
+      vm.setProp(vm.global, "__inputsJson", inputsJsonHandle);
+      inputsJsonHandle.dispose();
+
+      const parseResult = vm.evalCode(`JSON.parse(__inputsJson)`);
       if (parseResult.error) {
         const err = vm.dump(parseResult.error);
         parseResult.error.dispose();

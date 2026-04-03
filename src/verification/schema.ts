@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "crypto";
 
 // ─── v7.2.0: Severity Levels ────────────────────────────────
 //  warn  → log and continue
@@ -108,4 +109,94 @@ export interface VerificationConfig {
   enabled: boolean;
   layers: string[];
   default_severity: SeverityLevel;
+}
+
+// ─── v7.2.0: Verification Harness (hash-locked rubric) ───────
+//
+// CONTRACT (immutability):
+//   - Generated once during the planning phase, BEFORE any code changes.
+//   - rubric_hash = computeRubricHash(tests)  — computed at generation time
+//     and stamped onto the harness; VerificationRunner re-derives and
+//     compares before executing any suite (tampering → synthetic abort).
+//   - Never regenerated mid-sprint; ANY change to `tests` invalidates the hash.
+
+/**
+ * A v7.2 Verification Harness — the machine-parseable rubric generated
+ * before execution begins. Hash-locked for the sprint via rubric_hash.
+ */
+export interface VerificationHarness {
+  /** Project this harness belongs to */
+  project: string;
+  /** Sprint/conversation identifier */
+  conversation_id: string;
+  /** ISO-8601 timestamp when the harness was generated */
+  created_at: string;
+  /** SHA-256 hex of computeRubricHash(tests) — anchors the rubric */
+  rubric_hash: string;
+  /** Minimum pass rate (0–1) required to gate finalization */
+  min_pass_rate: number;
+  /** The frozen test assertions */
+  tests: TestAssertion[];
+  /** Optional metadata (implementation_plan path, sprint label, etc.) */
+  metadata?: Record<string, unknown>;
+}
+
+// ─── v7.2.0: Validation Result (immutable run record) ────────
+//
+// CONTRACT (immutability):
+//   - Created once after VerificationRunner.runSuite() completes.
+//   - Never mutated; reruns produce NEW records (different id).
+//   - rubric_hash MUST match the harness that was used.
+//   - Feeds into ML routing feedback (pass_rate, critical_failures).
+
+/**
+ * Immutable record of a single verification run outcome.
+ * Persisted to verification_runs table for auditability.
+ */
+export interface ValidationResult {
+  /** UUID generated at persist time */
+  id: string;
+  /** Foreign key → verification_harnesses.rubric_hash */
+  rubric_hash: string;
+  /** Project identifier */
+  project: string;
+  /** Sprint/conversation identifier */
+  conversation_id: string;
+  /** ISO-8601 timestamp */
+  run_at: string;
+  /** true if NO non-skipped assertion failed */
+  passed: boolean;
+  /** Fraction of non-skipped assertions that passed */
+  pass_rate: number;
+  /** Count of abort/gate-severity assertions that failed */
+  critical_failures: number;
+  /** Fraction of assertions actually executed (not skipped) */
+  coverage_score: number;
+  /** Full VerificationResult JSON string */
+  result_json: string;
+  /** Severity gate outcome */
+  gate_action: "continue" | "block" | "abort";
+  /** If the user bypassed the gate constraint via --force */
+  gate_override?: boolean;
+  /** Annotated reason for overriding */
+  override_reason?: string;
+}
+
+// ─── v7.2.0: Rubric Hash Utility ─────────────────────────────
+
+/**
+ * Compute a deterministic SHA-256 hash over the test assertions.
+ *
+ * Sorts by `id` before hashing so that insertion order does NOT affect
+ * the result. This ensures the hash is stable across environments
+ * even when tests are stored in different orders.
+ *
+ * @param tests - The array of TestAssertion to hash
+ * @returns Lowercase hex SHA-256 digest
+ */
+export function computeRubricHash(tests: TestAssertion[]): string {
+  const sorted = [...tests].sort((a, b) => a.id.localeCompare(b.id));
+  return createHash("sha256")
+    .update(JSON.stringify(sorted))
+    .digest("hex");
 }

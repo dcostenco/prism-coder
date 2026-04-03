@@ -78,6 +78,20 @@ export async function getExperienceBias(
           relevantCount++;
         }
       }
+
+      // GAP-1 fix: Ingest validation_result events into ML routing bias.
+      // The v7.2 spec requires that "Router learning ingests raw verification
+      // signals (pass_rate, critical_failures, coverage_score, rubric_hash)."
+      // confidence_score >= 80 indicates a passing verification suite.
+      if (eventType === "validation_result") {
+        const confidence = raw.confidence_score || 50;
+        if (confidence >= 80) {
+          successCount++;
+        } else {
+          failureCount++;
+        }
+        relevantCount++;
+      }
     }
     
     if (relevantCount < MIN_SAMPLES) {

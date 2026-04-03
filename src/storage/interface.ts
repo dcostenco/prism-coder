@@ -21,6 +21,8 @@
 
 // ─── Type Definitions ─────────────────────────────────────────
 
+import { VerificationHarness, ValidationResult } from "../verification/schema.js";
+
 /**
  * A single immutable session log entry.
  * These are append-only — once created, they are never modified
@@ -838,6 +840,23 @@ export interface StorageBackend {
   
   /** List pipelines, optionally filtered by project and status */
   listPipelines(project: string | undefined, status: PipelineStatus | undefined, userId: string): Promise<PipelineState[]>;
+
+  // ─── Verification Harness (v7.2.0) ───────────────────────────
+
+  /** Save a VerificationHarness into immutable storage (H7: tenant-isolated) */
+  saveVerificationHarness(harness: VerificationHarness, userId: string): Promise<void>;
+
+  /** Retrieve a VerificationHarness by its uniquely identifying rubric_hash (H7: tenant-isolated) */
+  getVerificationHarness(rubric_hash: string, userId: string): Promise<VerificationHarness | null>;
+
+  /** Save a single ValidationResult for a test run (H7: tenant-isolated) */
+  saveVerificationRun(result: ValidationResult, userId: string): Promise<void>;
+
+  /** List verification runs for a project (ordered by run_at DESC) (H7: tenant-isolated) */
+  listVerificationRuns(project: string, userId: string): Promise<ValidationResult[]>;
+
+  /** Retrieve a specific ValidationResult by ID (H7: tenant-isolated) */
+  getVerificationRun(id: string, userId: string): Promise<ValidationResult | null>;
 }
 
 // ─── v6.0: Memory Link Type ───────────────────────────────────
@@ -900,3 +919,7 @@ export interface PipelineState {
   error?: string | null;
   last_heartbeat?: string | null;
 }
+
+// ─── v7.2.0: Verification Harness + Validation Result ──────────────
+// Imported from schema to keep types co-located with their Zod schemas.
+export type { VerificationHarness, ValidationResult } from "../verification/schema.js";
