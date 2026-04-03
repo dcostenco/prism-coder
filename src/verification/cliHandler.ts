@@ -9,6 +9,17 @@ const DEFAULT_HARNESS_PATH = './verification_harness.json';
 
 import { TestAssertion } from './schema.js';
 
+/**
+ * Extended TestAssertion carrying field-level change metadata.
+ * Used in drift.diff.modified to surface exactly which keys changed
+ * between the stored and local versions of an assertion.
+ * Additive extension — schema_version stays 1.
+ */
+export interface ModifiedTestAssertion extends TestAssertion {
+  /** Top-level keys whose values differ between stored and local versions */
+  changed_keys: string[];
+}
+
 // ─── Typed result shapes ──────────────────────────────────────────────────────
 
 /**
@@ -53,7 +64,13 @@ export interface VerifyStatusResult {
     diff?: {
       added: TestAssertion[];
       removed: TestAssertion[];
-      modified: TestAssertion[];
+      modified: ModifiedTestAssertion[];
+    };
+    /** Diagnostics v2: Summary counts for parser ergonomics */
+    diff_counts?: {
+      added: number;
+      removed: number;
+      modified: number;
     };
   };
   /** Stable action string for operators / CI integrations */
@@ -158,10 +175,17 @@ function renderVerifyStatus(result: VerifyStatusResult, jsonMode: boolean): void
   }
 
   // Render Diff if available
+  if (d.diff_counts) {
+    console.log(`\n   Diff Summary: +${d.diff_counts.added} added, ~${d.diff_counts.modified} modified, -${d.diff_counts.removed} removed`);
+  }
   if (d.diff) {
     console.log('\n   Changes Detected:');
     for (const add of d.diff.added) console.log(`   + ${add.id}: ${add.description}`);
-    for (const mod of d.diff.modified) console.log(`   ~ ${mod.id}: ${mod.description}`);
+    for (const mod of d.diff.modified) {
+      const keys = (mod as ModifiedTestAssertion).changed_keys;
+      const keySuffix = keys?.length ? ` [${keys.join(', ')}]` : '';
+      console.log(`   ~ ${mod.id}: ${mod.description}${keySuffix}`);
+    }
     for (const rem of d.diff.removed) console.log(`   - ${rem.id}: ${rem.description}`);
   }
 }
@@ -263,7 +287,8 @@ export async function computeVerifyStatus(
   const strictEnv = isStrictVerificationEnv();
   
   // Phase 2 Diagnostics: Compute Structured Diff
-  let diff: { added: TestAssertion[]; removed: TestAssertion[]; modified: TestAssertion[] } | undefined;
+  let diff: { added: TestAssertion[]; removed: TestAssertion[]; modified: ModifiedTestAssertion[] } | undefined;
+  let diffCounts: { added: number; removed: number; modified: number } | undefined;
 
   try {
     const historicalHarness = await storage.getVerificationHarness?.(storedHash, userId);
@@ -284,7 +309,16 @@ export async function computeVerifyStatus(
           const storedStr = JSON.stringify(storedTest);
           const localStr = JSON.stringify(localTest);
           if (storedStr !== localStr) {
-            diff.modified.push(localTest);
+            // Diagnostics v2: Compute changed_keys — top-level fields that differ
+            const allKeys = new Set([...Object.keys(storedTest), ...Object.keys(localTest)]);
+            const changedKeys: string[] = [];
+            for (const key of allKeys) {
+              if (JSON.stringify((storedTest as any)[key]) !== JSON.stringify((localTest as any)[key])) {
+                changedKeys.push(key);
+              }
+            }
+            changedKeys.sort();
+            diff.modified.push({ ...localTest, changed_keys: changedKeys });
           }
         }
       }
@@ -299,14 +333,21 @@ export async function computeVerifyStatus(
       diff.added.sort((a, b) => a.id.localeCompare(b.id));
       diff.removed.sort((a, b) => a.id.localeCompare(b.id));
       diff.modified.sort((a, b) => a.id.localeCompare(b.id));
+
+      // Diagnostics v2: Compute summary counts
+      diffCounts = {
+        added: diff.added.length,
+        removed: diff.removed.length,
+        modified: diff.modified.length,
+      };
     }
   } catch {
     // Failure to load historical harness skips structured diff output (safe default)
-    // Downstream consumers parse JSON and know `diff` is optional per schema constraints.
+    // Downstream consumers parse JSON and know `diff`/`diff_counts` are optional per schema constraints.
   }
 
-  const driftBase = diff 
-    ? { stored_hash: storedHash, local_hash: localHash, strict_env: strictEnv, diff }
+  const driftBase = (diff && diffCounts)
+    ? { stored_hash: storedHash, local_hash: localHash, strict_env: strictEnv, diff, diff_counts: diffCounts }
     : { stored_hash: storedHash, local_hash: localHash, strict_env: strictEnv };
 
   const action = "run 'prism verify generate' to update your harness";

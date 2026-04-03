@@ -24,6 +24,7 @@ import {
   handleVerifyStatus,
   computeVerifyStatus,
   computeGenerateHarness,
+  ModifiedTestAssertion,
 } from '../../src/verification/cliHandler.js';
 import { StorageBackend } from '../../src/storage/interface.js';
 import * as fs from 'fs/promises';
@@ -262,6 +263,90 @@ describe('computeVerifyStatus', () => {
       expect(storage.getVerificationHarness).toHaveBeenCalledWith(storedHash, 'default');
     });
 
+    it('includes diff_counts matching diff array lengths', async () => {
+      const storedHarness = {
+        ...HARNESS_OBJ,
+        tests: [
+          { id: 't1', description: 'same', assertion: { type: 'sqlite_query' } },
+          { id: 't2', description: 'will-modify', assertion: { type: 'http_status' } },
+          { id: 't3', description: 'will-remove', assertion: { type: 'file_exists' } }
+        ]
+      };
+      const storedHash = computeRubricHash(storedHarness.tests as any);
+
+      const localHarness = {
+        ...HARNESS_OBJ,
+        tests: [
+          { id: 't1', description: 'same', assertion: { type: 'sqlite_query' } },
+          { id: 't2', description: 'modified!', assertion: { type: 'http_status' } },
+          { id: 't4', description: 'added', assertion: { type: 'file_contains' } }
+        ]
+      };
+
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(localHarness));
+      const storage = makeStorage([{ ...BASE_RUN, rubric_hash: storedHash }]);
+      storage.getVerificationHarness = vi.fn().mockResolvedValue(storedHarness);
+
+      const result = await computeVerifyStatus(storage, 'proj');
+
+      expect(result.drift?.diff_counts).toBeDefined();
+      expect(result.drift!.diff_counts!.added).toBe(1);
+      expect(result.drift!.diff_counts!.removed).toBe(1);
+      expect(result.drift!.diff_counts!.modified).toBe(1);
+
+      // Counts must match array lengths
+      expect(result.drift!.diff_counts!.added).toBe(result.drift!.diff!.added.length);
+      expect(result.drift!.diff_counts!.removed).toBe(result.drift!.diff!.removed.length);
+      expect(result.drift!.diff_counts!.modified).toBe(result.drift!.diff!.modified.length);
+    });
+
+    it('populates changed_keys on modified entries with exact field names', async () => {
+      const storedHarness = {
+        ...HARNESS_OBJ,
+        tests: [
+          { id: 't1', description: 'original', severity: 'warn', assertion: { type: 'sqlite_query', target: 'a', expected: 'a' } },
+          { id: 't2', description: 'unchanged', severity: 'warn', assertion: { type: 'http_status', target: 'b', expected: 'b' } },
+        ]
+      };
+      const storedHash = computeRubricHash(storedHarness.tests as any);
+
+      const localHarness = {
+        ...HARNESS_OBJ,
+        tests: [
+          // t1: description and assertion changed, severity unchanged
+          { id: 't1', description: 'updated', severity: 'warn', assertion: { type: 'sqlite_query', target: 'a', expected: 'z' } },
+          // t2: only severity changed
+          { id: 't2', description: 'unchanged', severity: 'abort', assertion: { type: 'http_status', target: 'b', expected: 'b' } },
+        ]
+      };
+
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(localHarness));
+      const storage = makeStorage([{ ...BASE_RUN, rubric_hash: storedHash }]);
+      storage.getVerificationHarness = vi.fn().mockResolvedValue(storedHarness);
+
+      const result = await computeVerifyStatus(storage, 'proj');
+      const modified = result.drift!.diff!.modified as ModifiedTestAssertion[];
+
+      expect(modified).toHaveLength(2);
+
+      // t1: description + assertion changed
+      const t1 = modified.find(m => m.id === 't1')!;
+      expect(t1.changed_keys).toContain('description');
+      expect(t1.changed_keys).toContain('assertion');
+      expect(t1.changed_keys).not.toContain('severity');
+      expect(t1.changed_keys).not.toContain('id');
+
+      // t2: only severity changed
+      const t2 = modified.find(m => m.id === 't2')!;
+      expect(t2.changed_keys).toEqual(['severity']);
+
+      // changed_keys must be sorted alphabetically
+      for (const mod of modified) {
+        const sorted = [...mod.changed_keys].sort();
+        expect(mod.changed_keys).toEqual(sorted);
+      }
+    });
+
     it('safely skips diff generation if historical harness fails to load', async () => {
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(HARNESS_OBJ));
       const storage = makeStorage([{ ...BASE_RUN, rubric_hash: 'old-hash' }]);
@@ -270,6 +355,7 @@ describe('computeVerifyStatus', () => {
       const result = await computeVerifyStatus(storage, 'proj');
       expect(result.synchronized).toBe(false);
       expect(result.drift?.diff).toBeUndefined(); // Should degrade gracefully
+      expect(result.drift?.diff_counts).toBeUndefined(); // Counts also absent
     });
   });
 });
@@ -423,6 +509,77 @@ describe('handleVerifyStatus', () => {
     expect(logSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('renders diff_counts summary and changed_keys brackets in human mode', async () => {
+    const storedHarness = {
+      ...HARNESS_OBJ,
+      tests: [
+        { id: 't1', description: 'original', severity: 'warn', assertion: { type: 'sqlite_query', target: 'a', expected: 'a' } },
+        { id: 't2', description: 'will-remove', severity: 'warn', assertion: { type: 'file_exists', target: 'b', expected: 'b' } },
+      ]
+    };
+    const storedHash = computeRubricHash(storedHarness.tests as any);
+
+    const localHarness = {
+      ...HARNESS_OBJ,
+      tests: [
+        { id: 't1', description: 'updated', severity: 'warn', assertion: { type: 'sqlite_query', target: 'a', expected: 'a' } },
+        { id: 't3', description: 'brand-new', severity: 'warn', assertion: { type: 'file_contains', target: 'c', expected: 'c' } },
+      ]
+    };
+
+    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(localHarness));
+    const storage = makeStorage([{ ...BASE_RUN, rubric_hash: storedHash }]);
+    storage.getVerificationHarness = vi.fn().mockResolvedValue(storedHarness);
+
+    await handleVerifyStatus(storage, 'proj');
+
+    const allLogs = logSpy.mock.calls.flat().join('\n');
+
+    // Diff Summary line
+    expect(allLogs).toContain('+1 added');
+    expect(allLogs).toContain('~1 modified');
+    expect(allLogs).toContain('-1 removed');
+
+    // Changed keys bracket on modified entry
+    expect(allLogs).toContain('~ t1: updated [description]');
+  });
+
+  it('emits diff_counts and changed_keys in --json mode', async () => {
+    const storedHarness = {
+      ...HARNESS_OBJ,
+      tests: [
+        { id: 't1', description: 'original', severity: 'warn', assertion: { type: 'sqlite_query', target: 'a', expected: 'a' } },
+      ]
+    };
+    const storedHash = computeRubricHash(storedHarness.tests as any);
+
+    const localHarness = {
+      ...HARNESS_OBJ,
+      tests: [
+        { id: 't1', description: 'changed', severity: 'warn', assertion: { type: 'sqlite_query', target: 'a', expected: 'a' } },
+      ]
+    };
+
+    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(localHarness));
+    const storage = makeStorage([{ ...BASE_RUN, rubric_hash: storedHash }]);
+    storage.getVerificationHarness = vi.fn().mockResolvedValue(storedHarness);
+
+    await handleVerifyStatus(storage, 'proj', false, 'default', true);
+
+    const raw = (stdoutSpy.mock.calls[0][0] as string).trim();
+    const parsed = JSON.parse(raw);
+
+    // JSON stability: diff_counts present
+    expect(parsed.drift.diff_counts).toEqual({ added: 0, removed: 0, modified: 1 });
+
+    // JSON stability: changed_keys on modified entries
+    expect(parsed.drift.diff.modified[0].changed_keys).toEqual(['description']);
+    expect(parsed.drift.diff.modified[0].id).toBe('t1');
+
+    // schema_version unchanged
+    expect(parsed.schema_version).toBe(1);
   });
 });
 

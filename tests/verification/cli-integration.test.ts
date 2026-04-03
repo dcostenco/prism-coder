@@ -119,6 +119,26 @@ describe('CLI Integration — Operator Contract & JSON Modes', () => {
       expect(parsed.drift.diff.added[0].id).toBe('drift-test');
       expect(parsed.drift.diff.removed).toHaveLength(0);
       expect(parsed.drift.diff.modified).toHaveLength(0);
+
+      // Diagnostics v2: diff_counts
+      expect(parsed.drift.diff_counts).toBeDefined();
+      expect(parsed.drift.diff_counts.added).toBe(1);
+      expect(parsed.drift.diff_counts.removed).toBe(0);
+      expect(parsed.drift.diff_counts.modified).toBe(0);
+
+      // Schema stability
+      expect(parsed.schema_version).toBe(1);
+    });
+
+    it('Local Dev (text mode) renders diff_counts summary line', async () => {
+      const { stdout } = await exec(`npx tsx "${cliPath}" verify status -p test-proj`, execOpts);
+      
+      // Diff Summary line should appear in human output
+      expect(stdout).toContain('+1 added');
+      expect(stdout).toContain('~0 modified');
+      expect(stdout).toContain('-0 removed');
+      // Individual changes line
+      expect(stdout).toContain('+ drift-test:');
     });
 
     it('CI Environment (CI=true, force=false) -> BLOCKED, exit 1', async () => {
