@@ -325,8 +325,21 @@ export function parseEvaluationOutput(raw: string): { parsed: EvaluationPayload 
   }
 
   const p = parsed as any;
-  if (p.findings !== undefined && !Array.isArray(p.findings)) {
-    return { parsed: null, error: 'Shape Error: "findings" must be an array when present' };
+  if (p.findings !== undefined) {
+    if (!Array.isArray(p.findings)) {
+      return { parsed: null, error: 'Shape Error: "findings" must be an array when present' };
+    }
+    // Fix #3: Each failing finding must supply an evidence object so the
+    // Evaluator cannot submit bare severity claims without evidence pointers.
+    for (let i = 0; i < p.findings.length; i++) {
+      const f = p.findings[i];
+      if (!f || typeof f !== 'object') {
+        return { parsed: null, error: `Shape Error: findings[${i}] must be an object` };
+      }
+      if (f.pass_fail === false && (!f.evidence || typeof f.evidence !== 'object')) {
+        return { parsed: null, error: `Shape Error: findings[${i}] is missing required "evidence" object for failure` };
+      }
+    }
   }
 
   return { parsed: parsed as EvaluationPayload, error: null };
@@ -426,13 +439,23 @@ async function executeStep(
         };
       }
       
+      // Fix #2: Serialize findings array into notes so the Generator's retry
+      // prompt receives the full line-by-line critique, not just a summary string.
+      const findingsText = parsed.findings && parsed.findings.length > 0
+        ? '\nFindings:\n' + parsed.findings.map((f: any) =>
+            `- [${f.severity}] Criterion ${f.criterion_id}: ${
+              f.evidence?.description || 'Failed'
+            } (${f.evidence?.file || 'unknown'}:${f.evidence?.line ?? '?'})`
+          ).join('\n')
+        : '';
+
       return {
         iteration: pipeline.iteration,
         step,
         started_at: stepStart,
         completed_at: new Date().toISOString(),
         success: parsed.pass,
-        notes: parsed.notes || `Evaluation complete: ${parsed.pass ? 'PASS' : 'FAIL'}`,
+        notes: (parsed.notes || `Evaluation complete: ${parsed.pass ? 'PASS' : 'FAIL'}`) + findingsText,
         evaluationPayload: parsed, // Passthrough for orchestrator logic
       } as any;
     }

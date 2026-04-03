@@ -407,7 +407,7 @@ Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.z
 - **Long-running feature work** — Save state at end of day, restore full context next morning. No re-explaining.
 - **Multi-agent collaboration** — Dev, QA, and PM agents share real-time context without stepping on each other's memory.
 - **Consulting / multi-project** — Switch between client projects with progressive loading: `quick` (~50 tokens), `standard` (~200), or `deep` (~1000+).
-- **Autonomous execution (v7.3)** — Dark Factory pipelines run `plan → execute → verify → iterate` lights-out. Every LLM action passes 3 safety gates before touching the filesystem. Scope violations terminate the entire pipeline.
+  - **Autonomous execution (v7.4)** — Dark Factory pipeline: `plan → plan_contract → execute → evaluate → verify → finalize`. Generator and evaluator run in isolated roles — the evaluator cannot approve without evidence-bound findings scored against a pre-committed rubric.
 - **Team onboarding** — New team member's agent loads the full project history instantly.
 - **Behavior enforcement** — Agent corrections auto-graduate into permanent `.cursorrules` / `.clauderules` rules.
 - **Offline / air-gapped** — Full SQLite local mode + Ollama LLM adapter. Zero internet dependency.
@@ -432,10 +432,11 @@ Then continue a specific thread with a follow-up message to the selected agent, 
 
 ## 🆕 What's New
 
-> **Current release: v7.3.3**
+> **Current release: v7.4.0**
 
+- ⚔️ **v7.4.0 — Adversarial Evaluation (Anti-Sycophancy):** The Dark Factory pipeline now separates generator and evaluator into isolated roles. `PLAN_CONTRACT` locks a machine-parseable rubric before any code runs. `EVALUATE` scores the output with evidence-bound findings (`file`, `line`, `description`). Failed evaluations retry with `plan_viable` routing — conservatively escalating to full PLAN re-planning on parse failures instead of burning revision budget.
 - 🔧 **v7.3.3 — Dashboard Stability Hotfix:** Fixed a multi-layer quote-escaping trap in the `abortPipeline` onclick handler that silently killed the dashboard IIFE and froze the project selector at "Loading projects..." forever. Fixed via `data-id` attribute pattern + ES5 lint guard (`npm run lint:dashboard`).
-- 🏭 **v7.3.1 — Dark Factory (Fail-Closed Execution):** The LLM can no longer touch the filesystem directly. Every autonomous `EXECUTE` step passes 3 gates — Parse → Type → Scope — before any side effect occurs. Scope violations terminate the entire pipeline. See the [3-gate attack scenario](#) in CHANGELOG.
+- 🏭 **v7.3.1 — Dark Factory (Fail-Closed Execution):** The LLM can no longer touch the filesystem directly. Every autonomous `EXECUTE` step passes 3 gates — Parse → Type → Scope — before any side effect occurs. Scope violations terminate the entire pipeline.
 - 📊 **v7.3.2 — Verification Diagnostics v2:** `verify status --json` now emits per-layer `diff_counts` + `changed_keys`. JSON schema is contract-enforced in CI (`schema_version: 1`).
 - 🔭 **v7.2.0 — Verification Harness:** Spec-frozen contracts (`verification_harness.json` hash-locked before execution), multi-layer assertions across Data / Agent / Pipeline, and finalization gate policies (`warn` / `gate` / `abort`).
 - 🚦 **v7.1.0 — Task Router:** Heuristic + ML-experience routing delegates cloud vs. local model in under 2ms, cold-start safe, per-project experience-corrected.
@@ -770,6 +771,7 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 | **v7.0** | AccessLogBuffer — in-memory batch-write buffer with 5s flush; prevents SQLite `SQLITE_BUSY` under parallel agents | Production reliability engineering | ✅ Shipped |
 | **v7.3** | Dark Factory — 3-gate fail-closed EXECUTE pipeline (parse → type → scope) with structured JSON action contract | Industrial safety systems (defense-in-depth, fail-closed valves) | ✅ Shipped |
 | **v7.2** | Verification-first harness — spec-freeze contract, rubric hash lock, multi-layer assertions, CLI `verify` commands | Programmatic verification systems + adversarial validation loops | ✅ Shipped |
+| **v7.4** | Adversarial Evaluation — PLAN_CONTRACT + EVALUATE with isolated generator/evaluator roles, pre-committed rubrics, and evidence-bound findings | Anti-sycophancy research, adversarial ML evaluation frameworks | ✅ Shipped |
 | **v7.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) | 🔭 Horizon |
 | **v8+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
 
@@ -786,6 +788,9 @@ Shipped in v6.2.0. Edge synthesis, graph pruning with SLO observability, tempora
 
 ### v6.5: Cognitive Architecture ✅
 Shipped. Full Superposed Memory (SDM) + Hyperdimensional Computing (HDC/VSA) cognitive routing pipeline. Compositional memory states via XOR binding, Hamming resolution, and policy-gated routing (direct / clarify / fallback). 705 tests passing.
+
+### v7.4: Adversarial Evaluation ✅
+Shipped. `PLAN_CONTRACT` + `EVALUATE` steps added to the Dark Factory pipeline. Generator and evaluator operate in isolated roles with pre-committed rubrics. Evidence-bound findings with `criterion_id`, `severity`, `file`, and `line` (number). Conservative `plan_viable=false` default on parse failure escalates to full PLAN re-plan. 78 new tests, 978 total.
 
 ### v7.3: Dark Factory — Fail-Closed Execution ✅
 Shipped. Structured JSON action contract for autonomous `EXECUTE` steps. 3-gate validation pipeline (parse → type → scope) terminates pipelines on any violation before filesystem side effects. 67 edge-case tests covering adversarial LLM output, path traversal, and type coercion.

@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.4.0] - 2026-04-03
+
+### Added
+- **Adversarial Evaluation Framework** — `PLAN_CONTRACT` and `EVALUATE` steps added to the Dark Factory pipeline, implementing a native generator/evaluator sprint architecture with isolated contexts and pre-committed scoring contracts.
+  - `PLAN_CONTRACT` — Before any code changes, generator and evaluator agree on a machine-parseable rubric (`ContractPayload`: criteria with `id` + `description` fields). Contract is written to `contract_rubric.json` in the working directory.
+  - `EVALUATE` — After `EXECUTE`, an isolated adversarial evaluator scores the output against the contract. Structured findings include `severity`, `criterion_id`, `pass_fail`, and evidence pointers (`file`, `line`, `description`).
+  - Pipeline state machine: `PLAN → PLAN_CONTRACT → EXECUTE → EVALUATE → VERIFY → FINALIZE`
+- **`DEFAULT_MAX_REVISIONS` constant** — Replaces magic number `3` across `schema.ts` and `safetyController.ts`. Configurable via `spec.maxRevisions`.
+- **78 new adversarial unit tests** (`tests/darkfactory/adversarial-eval.test.ts`) covering all parser branches, transition logic, deadlock/oscillation scenarios, conservative-default behavior, and context-bleed guards.
+
+### Changed
+- **`EvaluationPayload.findings[].evidence.line`** — Type corrected from `string` to `number` (1-indexed line number). `EVALUATE_SCHEMA` LLM prompt updated to match.
+- **`PipelineState.contract_payload`** — Type narrowed from `any` to `PipelineContractPayload | null` for end-to-end type safety.
+- **`evalPlanViable` conservative default** — When `EVALUATE` step output cannot be parsed (malformed LLM response), `planViable` now defaults to `false` (escalate to PLAN re-plan) instead of `true` (burn EXECUTE revisions). Prevents looping on systematically broken LLM output.
+- **EVALUATE notes persisted** — `result.notes` from the `EVALUATE` step is now forwarded to `pipeline.notes` alongside `EXECUTE` notes. Previously, evaluator findings were discarded from the persistent pipeline record.
+- **TurboQuant warm-up** — Moved to `setImmediate` in `server.ts` to prevent event loop blocking during the MCP stdio handshake.
+
+### Fixed
+- **`parseContractOutput` per-criterion validation** — Each criterion element is now validated to have string `id` and `description` fields. Primitive elements (e.g. `[42, "bad"]`) are rejected with a position-keyed error message.
+- **`parseEvaluationOutput` findings array guard** — `findings` field is now validated to be an array when present. Non-array values (e.g. `"findings": "none"`) are rejected at the parser boundary.
+- **`contract_rubric.json` write isolation** — `fs.writeFileSync` is now wrapped in try/catch. Disk/permission errors immediately mark the pipeline `FAILED` instead of leaving it stuck in `RUNNING` indefinitely.
+- **Dead `STEP_ORDER` array removed** — Unused constant in `safetyController.ts` replaced by the authoritative `switch` statement.
+- **`'evaluation_result' as any`** — Invalid event type replaced with the correct `'learning'` literal for the experience ledger call.
+- **SQLite backfill migration** — `ALTER TABLE DEFAULT` only applies to new inserts; existing rows now explicitly have `eval_revisions = 0` set via a `WHERE eval_revisions IS NULL` backfill `UPDATE`.
+- **Supabase `listPipelines` parity** — `contract_payload` was missing JSON deserialization in `listPipelines`. Fixed to match the behavior of `getPipeline`.
+
+### Storage Schema (v7.4.0 migration)
+- New columns on `dark_factory_pipelines`: `eval_revisions INTEGER DEFAULT 0`, `contract_payload TEXT`, `notes TEXT`
+- Supabase: same columns via `prism_apply_ddl` RPC
+- SQLite backfill: `UPDATE ... SET eval_revisions = 0 WHERE eval_revisions IS NULL`
+
+### Engineering
+- 978 tests across 44 suites (78 new adversarial evaluation tests), all passing, zero regressions
+- TypeScript: clean, zero errors
+- 10 files changed, +1027 / -73
+
+---
+
 ## [7.0.0] - 2026-04-01
 
 ### Added

@@ -7,6 +7,24 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v7.4.0 — Adversarial Evaluation (Anti-Sycophancy) ⚔️
+
+> **Problem:** In autonomous coding loops, self-evaluation is structurally biased — the same reasoning policy that generates code under-detects its own deep defects.
+> **Solution:** Native generator/evaluator sprint architecture with isolated contexts, pre-committed scoring contracts, and evidence-bound review gates before promotion.
+
+| Feature | Detail |
+|---------|--------|
+| 🧭 **`PLAN_CONTRACT` Step** | Before any code execution, the generator commits to a machine-parseable rubric (`ContractPayload`). Each criterion has a string `id` and `description`. Contract is written to `contract_rubric.json` and locked before any code changes. |
+| ⚔️ **`EVALUATE` Step** | After `EXECUTE`, an isolated adversarial evaluator scores the output against the contract. Findings include `severity`, `criterion_id`, `pass_fail`, and evidence pointers (`file`, `line {number}`, `description`). |
+| 🔁 **Intelligent Revision Flow** | Fail + `plan_viable=true` → EXECUTE retry (burns `eval_revisions`). Fail + `plan_viable=false` → full PLAN re-plan (resets revisions, increments iteration). Pass → VERIFY. |
+| 🔒 **Conservative Parse Failure Handling** | Malformed LLM output defaults `plan_viable=false` — escalates to PLAN instead of burning revision budget on a broken response format. |
+| 📐 **Per-Criterion Shape Validation** | `parseContractOutput` rejects criteria missing `id`/`description` fields or containing primitives. `parseEvaluationOutput` rejects non-array `findings`. |
+| 🛡️ **Disk-Error Pipeline Guard** | `contract_rubric.json` write failures now immediately mark the pipeline `FAILED` — prevents infinite loops on disk/permission errors. |
+| 🗄️ **Storage Parity** | New `eval_revisions`, `contract_payload`, `notes` columns on `dark_factory_pipelines` (SQLite + Supabase). SQLite backfill migration included for existing rows. |
+| 🧠 **Experience Ledger Integration** | Evaluation outcomes emitted as `learning` events — feeds the ML routing feedback loop. |
+| 🧪 **978 Tests** | 44 suites (78 new adversarial evaluation tests covering all parser branches, transition logic, deadlock/oscillation scenarios). TypeScript: clean. |
+
+---
 ### ✅ v7.3.3 — Dashboard Stability Hotfix
 
 | Fix | Detail |
@@ -175,12 +193,14 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 </details>
 
-## 📊 The State of Prism (v7.3.3)
+## 📊 The State of Prism (v7.4.0)
 
-With v7.3.3 shipped, Prism is a **production-hardened, fail-closed, autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*:
+With v7.4.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised* and *without letting them grade their own homework*:
 
-- **Fail-Closed by Default** — The Dark Factory 3-gate pipeline (Parse → Type → Scope) means the LLM never writes a byte to disk directly. Every action is validated before any side effect occurs.
-- **Autonomously Verified** — Verification Harness generates spec-freeze contracts before execution, hash-locks them (`rubric_hash`), and gates finalization against immutable outcomes.
+- **Anti-Sycophancy by Design** — The Adversarial Evaluation (PLAN_CONTRACT → EVALUATE) pipeline separates generator and evaluator into isolated roles with pre-committed rubrics. The evaluator cannot approve without evidence; the generator cannot skip the contract.
+- **Fail-Closed by Default** — Dark Factory 3-gate pipeline (Parse → Type → Scope) means the LLM never writes a byte to disk directly. Every action validated before any side effect.
+- **Conservatively Fail-Safe** — Parse failures default `plan_viable=false` — escalating to full PLAN re-planning instead of burning revision budget on broken LLM output.
+- **Autonomously Verified** — Verification Harness generates spec-freeze contracts before execution, hash-locks them, and gates finalization against immutable outcomes.
 - **Intelligently Routed** — Heuristic + ML Task Router delegates cloud vs. local in under 2ms, cold-start safe, experience-corrected per project.
 - **Scientifically-Grounded** — ACT-R activation model (`B_i = ln(Σ t_j^{-d})`) ranks memories by recency × frequency. Candidate-scoped spreading activation prevents centrality bias.
 - **Cognitively-Routed** — HDC binary hypervectors + Hamming distance concept resolution + policy gateway. Three-outcome routing: `direct / clarify / fallback`.
@@ -191,32 +211,14 @@ With v7.3.3 shipped, Prism is a **production-hardened, fail-closed, autonomous A
 - **Scale** — TurboQuant 10× compression + Deep Storage Purge + SQLite VACUUM. Decades of session history on a laptop.
 - **Safe** — Full type-guard matrix across all 30+ MCP tools. Path traversal, poison pill payloads, null-byte injection — all blocked at the gate layer before any execution.
 - **Convergent** — CRDT OR-Map handoff merging. Multiple agents, zero conflicts.
-- **Autonomous** — Web Scholar researches while you sleep. Dark Factory executes while you sleep. Task Router delegates while you sleep.
-- **Hardened** — Transactional migrations, graceful shutdown, AccessLogBuffer batch writes, prototype pollution guards, tenant-safe graph writes, ES5-lint-guarded dashboard.
-- **Reliable** — 700+ passing tests. ES5 lint guard on all dashboard inline scripts. JSON contract CI enforcement on all CLI output schemas.
+- **Autonomous** — Web Scholar researches while you sleep. Dark Factory executes while you sleep. Task Router delegates while you sleep. Adversarial Evaluator keeps the output honest.
+- **Reliable** — 978 passing tests. ES5 lint guard on all dashboard inline scripts. JSON contract CI enforcement on all CLI output schemas.
 - **Multimodal** — VLM auto-captioning turns screenshots into semantically searchable memory.
 - **Security** — SQL injection prevention, path traversal guard, Poison Pill defense, GDPR Art. 17+20 compliance.
 
 ---
 ## 🗺️ Next on the Horizon
 
-### ⚔️ v7.4.0 — Adversarial Dev Harness (Anti-Sycophancy) `[Planned]`
-**Problem:** In autonomous coding loops, self-evaluation is structurally biased: the same reasoning policy that generates code often under-detects its own deep defects. Prompting alone cannot reliably remove this bias.
-**Solution:** Introduce a native generator/evaluator sprint architecture with isolated contexts, pre-committed scoring contracts, and evidence-bound review gates before promotion.
-
-| Feature | Detail |
-|---------|--------|
-| 🧭 **Contract-First Sprint Stage** | Add a `PLAN_CONTRACT` phase before `EXECUTE`. Generator and Evaluator agree on a machine-parseable rubric (criteria, weights, required checks, minimum passing score) before any code changes are applied. |
-| 🥊 **Dual-Agent Isolation** | Split implementation and critique into separate roles/contexts (and optional model separation). Evaluator is prohibited from approving without evidence and cannot reuse generator chain state. |
-| 📏 **Evidence-Bound Scoring** | Evaluator outputs structured findings with `severity`, `criterion_id`, `score(1-10)`, and evidence pointers (file path, diff hunk, test/log reference). Unsupported claims are rejected. |
-| 🚦 **Gate Policies** | New gate modes (`warn`, `block`, `abort`) enforce progression by contract score and critical-finding thresholds. Autonomous pipelines cannot finalize when blocking criteria fail. |
-| ⚖️ **Disagreement Escalation** | Optional second-pass evaluator for borderline/ambiguous outcomes. High disagreement triggers clarify/escalate workflow instead of silent acceptance. |
-| 🧪 **Sandbox-to-Promotion Flow** | Run generator output in isolated workspace/worktree; only promote to main pipeline state when evaluator + verification gates pass. |
-| 🧠 **Routing Feedback Integration** | Persist evaluator outcomes as structured experience events so task routing can learn where adversarial review materially improves quality. |
-
-**Dependency:** Extends v7.2 Verification Harness and integrates with v7.3 Dark Factory orchestration/fail-closed gates.
-
----
 ### 📱 Mind Palace Mobile PWA `[Backlog]`
 **Problem:** The dashboard is desktop-only. Quick check-ins on mobile require a laptop.
 **Solution:** Progressive Web App with responsive glassmorphism layout, offline-first IndexedDB cache, and push notifications for agent activity.

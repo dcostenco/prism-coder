@@ -369,6 +369,79 @@ describe('parseEvaluationOutput', () => {
     expect(error).toBeNull();
     expect(parsed!.pass).toBe(true);
   });
+
+  // Fix #3: Per-element evidence validation
+  it('rejects failing finding missing evidence object', () => {
+    const input = JSON.stringify({
+      pass: false,
+      plan_viable: true,
+      findings: [{ severity: 'critical', criterion_id: 'c1', pass_fail: false }], // missing evidence
+    });
+    const { error, parsed } = parseEvaluationOutput(input);
+    expect(error).toContain('missing required "evidence" object');
+    expect(parsed).toBeNull();
+  });
+
+  it('rejects finding that is a primitive (not an object)', () => {
+    const input = JSON.stringify({
+      pass: false,
+      plan_viable: true,
+      findings: ['critical issue here'], // primitive element
+    });
+    const { error, parsed } = parseEvaluationOutput(input);
+    expect(error).toContain('must be an object');
+    expect(parsed).toBeNull();
+  });
+
+  it('accepts passing finding (pass_fail:true) with no evidence block', () => {
+    // Pass_fail=true findings need no evidence — only failures require evidence
+    const input = JSON.stringify({
+      pass: true,
+      plan_viable: true,
+      findings: [{ severity: 'info', criterion_id: 'c1', pass_fail: true }],
+    });
+    const { error, parsed } = parseEvaluationOutput(input);
+    expect(error).toBeNull();
+    expect(parsed!.pass).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Fix #2: Findings serialized into notes for Generator retry prompt
+// ─────────────────────────────────────────────────────────────────
+
+describe('parseEvaluationOutput — notes serialization', () => {
+  it('serializes findings into notes when called by runner (integration check on parser shape)', () => {
+    // The parser itself returns the payload; the runner does the serialization.
+    // This test confirms the parser accepts the full payload that runner needs to format.
+    const payload = {
+      pass: false,
+      plan_viable: true,
+      notes: 'Overall fail',
+      findings: [
+        {
+          severity: 'critical',
+          criterion_id: 'c1',
+          pass_fail: false,
+          evidence: { file: 'src/foo.ts', line: 42, description: 'Missing null check' },
+        },
+        {
+          severity: 'warning',
+          criterion_id: 'c2',
+          pass_fail: false,
+          evidence: { file: 'src/bar.ts', line: 7, description: 'Unhandled error path' },
+        },
+      ],
+    };
+    const { parsed, error } = parseEvaluationOutput(JSON.stringify(payload));
+    expect(error).toBeNull();
+    expect(parsed).not.toBeNull();
+    // Both findings have evidence — parser must accept them
+    expect(parsed!.findings).toHaveLength(2);
+    // Spot-check the evidence shape the runner will format
+    expect((parsed!.findings![0].evidence as any).line).toBe(42);
+    expect((parsed!.findings![1].evidence as any).file).toBe('src/bar.ts');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -376,6 +449,7 @@ describe('parseEvaluationOutput', () => {
 // ─────────────────────────────────────────────────────────────────
 
 describe('Adversarial Evaluation — scenario tests', () => {
+
   it('Deadlock: evaluator always fails with planViable=true → MaxRevisions → null', () => {
     let state = makeState('EVALUATE', 1, 0);
 

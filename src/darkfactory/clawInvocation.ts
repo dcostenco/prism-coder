@@ -97,7 +97,13 @@ export async function invokeClawAgent(
   let isJsonMode = false;
 
   if (state.current_step === 'EXECUTE') {
-    stepPrompt = `Based on the system instructions, execute the necessary actions for the current step (${state.current_step}).\n\n${EXECUTE_JSON_SCHEMA}`;
+    let revisionContext = '';
+    // If we are retrying after an EVALUATE failure, state.notes holds the serialized evaluator critique.
+    // Inject it so the Generator knows exactly what to fix rather than retrying blindly.
+    if (state.eval_revisions && state.eval_revisions > 0) {
+      revisionContext = `\n\n=== EVALUATOR CRITIQUE (revision ${state.eval_revisions}) ===\n${state.notes || 'Fix previous errors.'}\n\nYou MUST correct all issues listed above before submitting.`;
+    }
+    stepPrompt = `Based on the system instructions, execute the necessary actions for the current step (${state.current_step}).${revisionContext}\n\n${EXECUTE_JSON_SCHEMA}`;
     isJsonMode = true;
   } else if (state.current_step === 'PLAN_CONTRACT') {
     stepPrompt = `Based on the system instructions from the PLAN phase, formulate a strict, boolean-testable contract rubric.\n\n${PLAN_CONTRACT_SCHEMA}`;

@@ -1,8 +1,8 @@
 {
   "name": "prism-mcp-server",
-  "version": "7.3.3",
+  "version": "7.4.0",
   "mcpName": "io.github.dcostenco/prism-mcp",
-  "description": "The Mind Palace for AI Agents — fail-closed Dark Factory autonomous pipelines (3-gate parse→type→scope validation), persistent memory (SQLite/Supabase), ACT-R cognitive retrieval, behavioral learning & IDE rules sync, multi-agent Hivemind, time travel, visual dashboard. Zero-config local mode.",
+  "description": "The Mind Palace for AI Agents — adversarial evaluation (PLAN_CONTRACT→EVALUATE anti-sycophancy), fail-closed Dark Factory autonomous pipelines (3-gate parse→type→scope), persistent memory (SQLite/Supabase), ACT-R cognitive retrieval, behavioral learning & IDE rules sync, multi-agent Hivemind, time travel, visual dashboard. Zero-config local mode.",
   "module": "index.ts",
   "type": "module",
   "main": "dist/server.js",
