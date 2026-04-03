@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "lint:dashboard": "node scripts/lint-dashboard-es5.cjs",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
