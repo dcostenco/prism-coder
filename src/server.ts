@@ -1329,6 +1329,25 @@ export async function startServer() {
     });
   }
 
+  // ─── v7.4: TurboQuant Compressor Async Warmup ────────────
+  // The first call to getDefaultCompressor() triggers construction of a
+  // 768×768 rotation matrix (~15ms of synchronous CPU). Pre-warm via
+  // setImmediate so it runs after the current event-loop tick completes,
+  // preventing the stdio handshake from being blocked during startup.
+  // Fire-and-forget — non-critical; subsequent calls hit the singleton cache.
+  setImmediate(() => {
+    try {
+      // Dynamic import avoids loading turboquant.ts at module-parse time
+      // (the construction side-effects run only when actually needed).
+      import("./utils/turboquant.js").then(({ getDefaultCompressor }) => {
+        getDefaultCompressor();
+        console.error("[Prism] TurboQuant compressor pre-warmed (rotation matrix ready)");
+      }).catch(err => {
+        console.error(`[TurboQuant] Warmup failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      });
+    } catch { /* warmup is a best-effort optimization */ }
+  });
+
   // Keep the process alive — without this, Node.js would exit
   // because there are no active event loop handles after the
   // synchronous setup completes.

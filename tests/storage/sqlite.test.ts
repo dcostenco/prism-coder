@@ -471,3 +471,146 @@ describe("System Settings (Dashboard)", () => {
     expect(allSettings.hivemind_enabled).toBe("false");
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// 6. DARK FACTORY PIPELINES & VERIFICATION HARNESS (v7.3 / v7.4)
+// ═══════════════════════════════════════════════════════════════════
+
+describe("Dark Factory Pipelines & Verification Harness", () => {
+  // Use unique IDs per test run to prevent shared-state contamination across runs.
+  // SQLite's terminal-state guard throws "already COMPLETED" when a subsequent
+  // run reuses a pipeline ID that was transitioned to a terminal state in a
+  // prior test. Unique suffixes ensure each run starts from a clean slate.
+  const RUN_SUFFIX = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const PI_ID = `pipe-${RUN_SUFFIX}`;
+  const VH_HASH = `rubric-hash-${RUN_SUFFIX}`;
+  const VR_ID = `run-${RUN_SUFFIX}`;
+
+  /**
+   * Tests saving and retrieving a pipeline state, including new v7.4 fields
+   * like eval_revisions, contract_payload, and notes.
+   */
+  it("should save and retrieve a PipelineState with adversarial eval info", async () => {
+    const pipeline = {
+      id: PI_ID,
+      project: TEST_PROJECT,
+      user_id: TEST_USER_ID,
+      status: "RUNNING",
+      current_step: "EVALUATE",
+      iteration: 1,
+      eval_revisions: 2,
+      started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      spec: JSON.stringify({ name: "Fix all tests" }),
+      contract_payload: {
+        criteria: [{ id: "c1", description: "Must pass type check" }]
+      },
+      notes: "Adversarial evaluator rejected first revision",
+    };
+
+    // Save pipeline
+    await expect(storage.savePipeline(pipeline)).resolves.not.toThrow();
+
+    // Get pipeline
+    const fetched = await storage.getPipeline(PI_ID, TEST_USER_ID);
+    expect(fetched).not.toBeNull();
+    expect(fetched.id).toBe(PI_ID);
+    expect(fetched.eval_revisions).toBe(2);
+    expect(fetched.notes).toBe("Adversarial evaluator rejected first revision");
+    expect(fetched.contract_payload).toBeDefined();
+    expect(fetched.contract_payload.criteria[0].id).toBe("c1");
+  });
+
+  /**
+   * Tests listPipelines filtering by status and project.
+   */
+  it("should list pipelines by project and status", async () => {
+    const pipelines = await storage.listPipelines(TEST_PROJECT, "RUNNING", TEST_USER_ID);
+    // The shared DB may have accumulated RUNNING records from prior runs.
+    // Just verify OUR pipeline appears in the RUNNING list.
+    expect(pipelines.length).toBeGreaterThanOrEqual(1);
+    expect(pipelines.some((p: any) => p.id === PI_ID)).toBe(true);
+
+    const completedPipelines = await storage.listPipelines(TEST_PROJECT, "COMPLETED", TEST_USER_ID);
+    // OUR pipeline should not be in COMPLETED yet (it's still RUNNING).
+    expect(completedPipelines.some((p: any) => p.id === PI_ID)).toBe(false);
+  });
+
+  /**
+   * Tests safety guards: should throw if pipeline is already terminal.
+   */
+  it("should enforce safe pipeline state transitions", async () => {
+    // Transition to COMPLETED
+    const completedState = {
+      id: PI_ID,
+      project: TEST_PROJECT,
+      user_id: TEST_USER_ID,
+      status: "COMPLETED",
+      current_step: "FINAL_EVAL",
+      iteration: 2,
+      started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      spec: "{}",
+    };
+    await expect(storage.savePipeline(completedState)).resolves.not.toThrow();
+
+    // Trying to update it again should throw terminal protection error
+    const failedUpdate = { ...completedState, status: "RUNNING" };
+    await expect(storage.savePipeline(failedUpdate)).rejects.toThrow(/already COMPLETED/);
+  });
+
+  /**
+   * Tests Verification Harness storage.
+   */
+  it("should save and get VerificationHarness", async () => {
+    const harness = {
+      rubric_hash: VH_HASH,
+      project: TEST_PROJECT,
+      conversation_id: "conv-123",
+      created_at: new Date().toISOString(),
+      min_pass_rate: 0.9,
+      tests: [{ id: "t1", command: "npm test" }]
+    };
+
+    await expect(storage.saveVerificationHarness(harness, TEST_USER_ID)).resolves.not.toThrow();
+
+    const fetched = await storage.getVerificationHarness(VH_HASH, TEST_USER_ID);
+    expect(fetched).not.toBeNull();
+    expect(fetched.rubric_hash).toBe(VH_HASH);
+    expect(fetched.tests.length).toBe(1);
+  });
+
+  /**
+   * Tests Verification Run storage.
+   */
+  it("should save and retrieve ValidationResult run details", async () => {
+    const vr = {
+      id: VR_ID,
+      rubric_hash: VH_HASH,
+      project: TEST_PROJECT,
+      conversation_id: "conv-123",
+      run_at: new Date().toISOString(),
+      passed: true,
+      pass_rate: 1.0,
+      critical_failures: 0,
+      coverage_score: 85,
+      result_json: "{}",
+      gate_action: "PROCEED",
+      gate_override: false,
+    };
+
+    await expect(storage.saveVerificationRun(vr as any, TEST_USER_ID)).resolves.not.toThrow();
+
+    const fetched = await storage.getVerificationRun(VR_ID, TEST_USER_ID);
+    expect(fetched).not.toBeNull();
+    expect(fetched.id).toBe(VR_ID);
+    expect(fetched.passed).toBe(true);
+    expect(fetched.gate_override).toBe(false);
+
+    const list = await storage.listVerificationRuns(TEST_PROJECT, TEST_USER_ID);
+    // The list may contain runs from prior test invocations (shared in-memory DB).
+    // Assert our run appears in the list rather than requiring exactly 1 row.
+    expect(list.length).toBeGreaterThanOrEqual(1);
+    expect(list.some((r: any) => r.id === VR_ID)).toBe(true);
+  });
+});

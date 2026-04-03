@@ -34,6 +34,39 @@ RULES:
 - If you cannot complete the task, return: {"actions": [], "notes": "reason"}
 `.trim();
 
+const PLAN_CONTRACT_SCHEMA = `
+You MUST respond with ONLY a valid JSON object matching this schema:
+{
+  "criteria": [
+    {
+      "id": "string (unique identifier, e.g. 'req-1')",
+      "description": "string (clear, testable condition)"
+    }
+  ]
+}
+`.trim();
+
+const EVALUATE_SCHEMA = `
+You MUST respond with ONLY a valid JSON object matching this schema:
+{
+  "pass": true | false,
+  "plan_viable": true | false,
+  "notes": "string (optional summary)",
+  "findings": [
+    {
+      "severity": "critical" | "warning" | "info",
+      "criterion_id": "string (must match a contract criterion id)",
+      "pass_fail": true | false,
+      "evidence": {
+        "file": "string",
+        "line": 42,
+        "description": "string"
+      }
+    }
+  ]
+}
+`.trim();
+
 /**
  * Invocation wrapper that routes payload specs to the local Claw agent model (Qwen 2.5),
  * or the active LLM provider as fallback.
@@ -59,18 +92,41 @@ export async function invokeClawAgent(
   // Scope injection via SafetyController — single source of truth
   const systemPrompt = SafetyController.generateBoundaryPrompt(spec, state);
 
-  // v7.3.1: EXECUTE steps get structured JSON output instructions
-  const isExecuteStep = state.current_step === 'EXECUTE';
-  const executePrompt = isExecuteStep
-    ? `Based on the system instructions, execute the necessary actions for the current step (${state.current_step}).\n\n${EXECUTE_JSON_SCHEMA}`
-    : `Based on the system instructions, execute the necessary task for the current step (${state.current_step}). Respond with your actions and observations.`;
+  // Inject the appropriate JSON schema according to the step
+  let stepPrompt = `Based on the system instructions, execute the necessary task for the current step (${state.current_step}). Respond with your actions and observations.`;
+  let isJsonMode = false;
 
-  debugLog(`[ClawInvocation] Launching agent on pipeline ${state.id} step=${state.current_step} iter=${state.iteration} with ${timeoutMs}ms limit.${isExecuteStep ? ' (JSON mode)' : ''}`);
+  if (state.current_step === 'EXECUTE') {
+    let revisionContext = '';
+    // If we are retrying after an EVALUATE failure, state.notes holds the serialized evaluator critique.
+    // Inject it so the Generator knows exactly what to fix rather than retrying blindly.
+    if (state.eval_revisions && state.eval_revisions > 0) {
+      revisionContext = `\n\n=== EVALUATOR CRITIQUE (revision ${state.eval_revisions}) ===\n${state.notes || 'Fix previous errors.'}\n\nYou MUST correct all issues listed above before submitting.`;
+    }
+    stepPrompt = `Based on the system instructions, execute the necessary actions for the current step (${state.current_step}).${revisionContext}\n\n${EXECUTE_JSON_SCHEMA}`;
+    isJsonMode = true;
+  } else if (state.current_step === 'PLAN_CONTRACT') {
+    stepPrompt = `Based on the system instructions from the PLAN phase, formulate a strict, boolean-testable contract rubric.\n\n${PLAN_CONTRACT_SCHEMA}`;
+    isJsonMode = true;
+  } else if (state.current_step === 'EVALUATE') {
+    stepPrompt = `Based on the system instructions, evaluate the GENERATOR's execution against the PLAN_CONTRACT rubric. BE STRICT.
+    
+=== GENERATOR'S ACTIONS ===
+${state.notes || 'No notes provided'}
+
+=== CONTRACT RUBRIC ===
+${state.contract_payload ? JSON.stringify(state.contract_payload.criteria, null, 2) : '(See contract_rubric.json on disk)'}
+
+${EVALUATE_SCHEMA}`;
+    isJsonMode = true;
+  }
+
+  debugLog(`[ClawInvocation] Launching agent on pipeline ${state.id} step=${state.current_step} iter=${state.iteration} with ${timeoutMs}ms limit.${isJsonMode ? ' (JSON mode)' : ''}`);
 
   try {
     // Timeout Promise to ensure the runner thread does not block indefinitely
     const timeboundExecution = Promise.race([
-      llm.generateText(executePrompt, systemPrompt),
+      llm.generateText(stepPrompt, systemPrompt),
       new Promise<string>((_, reject) => 
         setTimeout(() => reject(new Error('LLM_EXECUTION_TIMEOUT')), timeoutMs)
       )
