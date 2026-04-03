@@ -66,16 +66,16 @@ async function checkSchema(packageName, version) {
 async function run() {
     console.log("Checking MCP schemas...");
 
-    // Check camoufox 1.4.0
-    console.log("Checking camoufox 1.4.0...");
-    const c14 = await checkSchema("camoufox-mcp-server", "1.4.0");
-    if (c14) {
+    // Check camoufox 1.1.0 (schema compatible with Claude Code VS Code tool validator)
+    console.log("Checking camoufox 1.1.0...");
+    const c11 = await checkSchema("camoufox-mcp-server", "1.1.0");
+    if (c11) {
         // Look for browse tool schema
-        const browse = c14.tools.find(t => t.name === "mcp__camoufox__browse" || t.name === "browse" || t.name === "camoufox_browse");
+        const browse = c11.tools.find(t => t.name === "mcp__camoufox__browse" || t.name === "browse" || t.name === "camoufox_browse");
         if (browse) {
-            console.log("Camoufox 1.4.0 'browse' schema:", JSON.stringify(browse.inputSchema, null, 2));
+            console.log("Camoufox 1.1.0 'browse' schema:", JSON.stringify(browse.inputSchema, null, 2));
         } else {
-            console.log("Camoufox 1.4.0 'browse' tool not found. Tools: " + c14.tools.map(t => t.name));
+            console.log("Camoufox 1.1.0 'browse' tool not found. Tools: " + c11.tools.map(t => t.name));
         }
     }
 }

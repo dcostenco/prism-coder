@@ -45,7 +45,7 @@ const SERVERS = [
   {
     name: 'camoufox',
     command: serverCommand('camoufox', 'npx'),
-    args: serverArgs('camoufox', ['-y', 'camoufox-mcp-server']),
+    args: serverArgs('camoufox', ['-y', 'camoufox-mcp-server@1.1.0']),
     testTool: { name: 'browse', arguments: { url: 'https://httpbin.org/user-agent', headless: true, timeout: 15000 } },
     expectInResponse: 'user-agent'
   },
