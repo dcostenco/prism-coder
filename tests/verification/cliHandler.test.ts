@@ -210,6 +210,68 @@ describe('computeVerifyStatus', () => {
     expect(result.last_run?.gate_override).toBe(true);
     expect(result.last_run?.override_reason).toBe('Known flaky — ticket #42');
   });
+
+  describe('Phase 2 Diagnostics: Structured Drift Diff', () => {
+    it('populates added, removed, and modified structurally and strictly by ID', async () => {
+      // Historical harness (stored)
+      const storedHarness = {
+        ...HARNESS_OBJ,
+        tests: [
+          { id: 't1', description: 'same', assertion: { type: 'sqlite_query' } },
+          { id: 't2', description: 'will-modify', assertion: { type: 'http_status' } },
+          { id: 't3', description: 'will-remove', assertion: { type: 'file_exists' } }
+        ]
+      };
+      const storedHash = computeRubricHash(storedHarness.tests as any);
+
+      // Local harness
+      const localHarness = {
+        ...HARNESS_OBJ,
+        tests: [
+          { id: 't1', description: 'same', assertion: { type: 'sqlite_query' } }, // same
+          { id: 't2', description: 'modified!', assertion: { type: 'http_status' } }, // modified
+          { id: 't4', description: 'added', assertion: { type: 'file_contains' } } // added
+        ]
+      };
+      const localHash = computeRubricHash(localHarness.tests as any);
+
+      // Mock the filesystem
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(localHarness));
+      
+      // Setup Storage mock
+      const storage = makeStorage([{ ...BASE_RUN, rubric_hash: storedHash }]);
+      storage.getVerificationHarness = vi.fn().mockResolvedValue(storedHarness);
+
+      const result = await computeVerifyStatus(storage, 'proj');
+
+      expect(result.synchronized).toBe(false);
+      expect(result.drift?.diff).toBeDefined();
+      
+      const diff = result.drift!.diff!;
+      expect(diff.added).toHaveLength(1);
+      expect(diff.added[0].id).toBe('t4');
+
+      expect(diff.removed).toHaveLength(1);
+      expect(diff.removed[0].id).toBe('t3');
+
+      expect(diff.modified).toHaveLength(1);
+      expect(diff.modified[0].id).toBe('t2');
+      expect(diff.modified[0].description).toBe('modified!');
+      
+      // Ensure sorted by ID
+      expect(storage.getVerificationHarness).toHaveBeenCalledWith(storedHash, 'default');
+    });
+
+    it('safely skips diff generation if historical harness fails to load', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(HARNESS_OBJ));
+      const storage = makeStorage([{ ...BASE_RUN, rubric_hash: 'old-hash' }]);
+      storage.getVerificationHarness = vi.fn().mockRejectedValue(new Error('DB Error'));
+
+      const result = await computeVerifyStatus(storage, 'proj');
+      expect(result.synchronized).toBe(false);
+      expect(result.drift?.diff).toBeUndefined(); // Should degrade gracefully
+    });
+  });
 });
 
 // ─── handleVerifyStatus — render + exitCode side-effects ──────────────────────

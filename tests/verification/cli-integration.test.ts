@@ -112,6 +112,13 @@ describe('CLI Integration — Operator Contract & JSON Modes', () => {
       expect(parsed.drift.strict_env).toBe(false);
       expect(parsed.drift.policy).toBe('warn');
       expect(parsed.exit_code).toBe(0);
+      
+      // Phase 2 Diagnostics diff
+      expect(parsed.drift.diff).toBeDefined();
+      expect(parsed.drift.diff.added).toHaveLength(1);
+      expect(parsed.drift.diff.added[0].id).toBe('drift-test');
+      expect(parsed.drift.diff.removed).toHaveLength(0);
+      expect(parsed.drift.diff.modified).toHaveLength(0);
     });
 
     it('CI Environment (CI=true, force=false) -> BLOCKED, exit 1', async () => {

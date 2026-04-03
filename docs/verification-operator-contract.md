@@ -41,9 +41,18 @@ Returns `VerifyStatusResult`.
   - `gate_override`: boolean or number
   - `override_reason`: string or null
 - `drift`: Optional object
-  - `is_drift`: boolean
+  - `stored_hash`: string
+  - `local_hash`: string
   - `strict_env`: boolean
   - `policy`: string ("warn" | "blocked" | "bypassed")
+  - `diff`: Optional object (Added in Phase 2 diagnostics)
+    - `added`: Array of TestAssertion objects (local id not matched in stored)
+    - `removed`: Array of TestAssertion objects (stored id not matched in local)
+    - `modified`: Array of TestAssertion objects (id matched, payload changed)
+    *Note: Diff arrays are guaranteed to be sorted by `id`.*
+
+### Diff Semantics
+Rename heuristics are intentionally deferred. v1 diff semantics are strict-by-id to guarantee predictable behavior for CI consumers without ambiguous false-positives. A renamed test is represented deterministically as one `removed` test and one `added` test.
 
 ### 2. `prism verify generate --json`
 

@@ -7,6 +7,8 @@ import { computeRubricHash, VerificationHarness } from './schema.js';
 /** H5 fix: Centralize the harness file path as a constant */
 const DEFAULT_HARNESS_PATH = './verification_harness.json';
 
+import { TestAssertion } from './schema.js';
+
 // ─── Typed result shapes ──────────────────────────────────────────────────────
 
 /**
@@ -47,6 +49,12 @@ export interface VerifyStatusResult {
     /** Policy outcome: 'blocked' | 'warn' | 'bypassed' */
     policy: 'blocked' | 'warn' | 'bypassed';
     strict_env: boolean;
+    /** Phase 2: Added in v1. Structured representation of test permutations */
+    diff?: {
+      added: TestAssertion[];
+      removed: TestAssertion[];
+      modified: TestAssertion[];
+    };
   };
   /** Stable action string for operators / CI integrations */
   recommended_action: string | null;
@@ -148,6 +156,14 @@ function renderVerifyStatus(result: VerifyStatusResult, jsonMode: boolean): void
     console.warn(hashLine);
     console.warn(`   Recommended: run 'prism verify generate' to update your harness.`);
   }
+
+  // Render Diff if available
+  if (d.diff) {
+    console.log('\n   Changes Detected:');
+    for (const add of d.diff.added) console.log(`   + ${add.id}: ${add.description}`);
+    for (const mod of d.diff.modified) console.log(`   ~ ${mod.id}: ${mod.description}`);
+    for (const rem of d.diff.removed) console.log(`   - ${rem.id}: ${rem.description}`);
+  }
 }
 
 /** Render a GenerateHarnessResult as human-readable console output */
@@ -245,7 +261,54 @@ export async function computeVerifyStatus(
 
   // Drift detected
   const strictEnv = isStrictVerificationEnv();
-  const driftBase = { stored_hash: storedHash, local_hash: localHash, strict_env: strictEnv };
+  
+  // Phase 2 Diagnostics: Compute Structured Diff
+  let diff: { added: TestAssertion[]; removed: TestAssertion[]; modified: TestAssertion[] } | undefined;
+
+  try {
+    const historicalHarness = await storage.getVerificationHarness?.(storedHash, userId);
+    if (historicalHarness) {
+      diff = { added: [], removed: [], modified: [] };
+      const dbTests = historicalHarness.tests as TestAssertion[];
+      const localTests = localHarness.tests;
+
+      const storedMap = new Map(dbTests.map(t => [t.id, t]));
+      const localMap = new Map(localTests.map(t => [t.id, t]));
+
+      for (const [id, localTest] of localMap.entries()) {
+        const storedTest = storedMap.get(id);
+        if (!storedTest) {
+          diff.added.push(localTest);
+        } else {
+          // Compare JSON stringification for deep equality
+          const storedStr = JSON.stringify(storedTest);
+          const localStr = JSON.stringify(localTest);
+          if (storedStr !== localStr) {
+            diff.modified.push(localTest);
+          }
+        }
+      }
+
+      for (const [id, storedTest] of storedMap.entries()) {
+        if (!localMap.has(id)) {
+          diff.removed.push(storedTest);
+        }
+      }
+
+      // Ensure stable ordering by ID
+      diff.added.sort((a, b) => a.id.localeCompare(b.id));
+      diff.removed.sort((a, b) => a.id.localeCompare(b.id));
+      diff.modified.sort((a, b) => a.id.localeCompare(b.id));
+    }
+  } catch {
+    // Failure to load historical harness skips structured diff output (safe default)
+    // Downstream consumers parse JSON and know `diff` is optional per schema constraints.
+  }
+
+  const driftBase = diff 
+    ? { stored_hash: storedHash, local_hash: localHash, strict_env: strictEnv, diff }
+    : { stored_hash: storedHash, local_hash: localHash, strict_env: strictEnv };
+
   const action = "run 'prism verify generate' to update your harness";
 
   if (force) {
