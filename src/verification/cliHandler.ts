@@ -15,6 +15,7 @@ const DEFAULT_HARNESS_PATH = './verification_harness.json';
  * and output is consistent across local/CI flows.
  */
 export interface VerifyStatusResult {
+  schema_version: 1;
   project: string;
   /** No runs recorded yet */
   no_runs: boolean;
@@ -53,6 +54,7 @@ export interface VerifyStatusResult {
  * Canonical result shape for `verify generate`.
  */
 export interface GenerateHarnessResult {
+  schema_version: 1;
   project: string;
   success: boolean;
   /** Already registered with same hash and --force not set */
@@ -182,6 +184,7 @@ export async function computeVerifyStatus(
   userId: string = 'default',
 ): Promise<VerifyStatusResult> {
   const base: VerifyStatusResult = {
+    schema_version: 1,
     project,
     no_runs: false,
     harness_missing: false,
@@ -296,6 +299,7 @@ export async function computeGenerateHarness(
   userId: string = 'default',
 ): Promise<GenerateHarnessResult> {
   const base: GenerateHarnessResult = {
+    schema_version: 1,
     project,
     success: false,
     already_exists: false,

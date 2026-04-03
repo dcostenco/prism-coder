@@ -350,7 +350,8 @@ describe('handleVerifyStatus', () => {
     const raw = (stdoutSpy.mock.calls[0][0] as string).trim();
     const parsed = JSON.parse(raw);
 
-    // Stable required keys
+    // Stable required keys matching the Operator Contract
+    expect(parsed.schema_version).toBe(1);
     expect(parsed).toHaveProperty('project');
     expect(parsed).toHaveProperty('no_runs');
     expect(parsed).toHaveProperty('synchronized');
