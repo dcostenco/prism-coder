@@ -24,10 +24,15 @@ import type { PipelineSpec, DarkFactoryStep, IterationResult, ExecutionStepResul
 import { VALID_ACTION_TYPES } from './schema.js';
 import { SafetyController } from './safetyController.js';
 import { invokeClawAgent } from './clawInvocation.js';
-import { PRISM_DARK_FACTORY_POLL_MS, PRISM_DARK_FACTORY_MAX_RUNTIME_MS, PRISM_USER_ID } from '../config.js';
+import { PRISM_DARK_FACTORY_POLL_MS, PRISM_DARK_FACTORY_MAX_RUNTIME_MS, PRISM_USER_ID, PRISM_VERIFICATION_LAYERS, PRISM_VERIFICATION_DEFAULT_SEVERITY } from '../config.js';
 import { debugLog } from '../utils/logger.js';
 import path from 'path';
 import fs from 'fs';
+import * as crypto from 'crypto';
+import { Gatekeeper } from '../verification/gatekeeper.js';
+import { VerificationRunner } from '../verification/runner.js';
+import { computeRubricHash, type ValidationResult, type VerificationConfig, type VerificationHarness } from '../verification/schema.js';
+import { VerificationGateError } from '../errors.js';
 
 /** Interval handle for graceful shutdown */
 let runnerInterval: ReturnType<typeof setInterval> | null = null;
@@ -551,8 +556,106 @@ async function runnerTick(): Promise<void> {
       return;
     }
 
-    // Determine next step based on result
     const currentStep = pipeline.current_step as DarkFactoryStep;
+
+    // ── Phase 4: Verification Pipeline Orchestrator ──
+    if (currentStep === 'VERIFY' && spec.workingDirectory) {
+      const harnessPath = path.join(path.resolve(spec.workingDirectory), 'verification_harness.json');
+      if (fs.existsSync(harnessPath)) {
+        try {
+          const rawHarness = fs.readFileSync(harnessPath, 'utf8');
+          const harnessData = JSON.parse(rawHarness);
+
+          // GAP-5 fix: Persist the harness so CLI drift detection works for DarkFactory runs
+          const rubricHash = computeRubricHash(harnessData.tests);
+          const harness: VerificationHarness = {
+            ...harnessData,
+            project: pipeline.project,
+            conversation_id: `dark-factory-${pipeline.id}`,
+            created_at: new Date().toISOString(),
+            rubric_hash: rubricHash,
+          };
+          await storage.saveVerificationHarness(harness, pipeline.user_id);
+
+          // GAP-2 fix: Build VerificationConfig from env vars so PRISM_VERIFICATION_LAYERS
+          // and PRISM_VERIFICATION_DEFAULT_SEVERITY are respected in DarkFactory pipelines
+          const vConfig: VerificationConfig = {
+            enabled: true,
+            layers: PRISM_VERIFICATION_LAYERS,
+            default_severity: PRISM_VERIFICATION_DEFAULT_SEVERITY,
+          };
+          const verificationResult = await VerificationRunner.runSuite(rawHarness, {
+            harness,
+            layers: PRISM_VERIFICATION_LAYERS,
+            config: vConfig,
+          });
+          
+          const coverageScore = verificationResult.total > 0 ? (verificationResult.total - verificationResult.skipped_count) / verificationResult.total : 0;
+          const executedCount = verificationResult.total - verificationResult.skipped_count;
+          const passRate = executedCount > 0 ? verificationResult.passed_count / executedCount : 0;
+
+          // GAP-4 fix: Use proper ValidationResult type instead of `any`
+          const valResult: ValidationResult = {
+            id: crypto.randomUUID(),
+            rubric_hash: rubricHash,
+            project: pipeline.project,
+            conversation_id: `dark-factory-${pipeline.id}`,
+            run_at: new Date().toISOString(),
+            passed: passRate >= harnessData.min_pass_rate && verificationResult.severity_gate.action !== "abort",
+            pass_rate: passRate,
+            critical_failures: verificationResult.severity_gate.failed_assertions.length,
+            coverage_score: coverageScore,
+            result_json: JSON.stringify(verificationResult),
+            gate_action: verificationResult.severity_gate.action,
+            gate_override: false,
+          };
+          
+          const { canContinue, validatedResult } = Gatekeeper.executeGate(valResult); 
+          await storage.saveVerificationRun(validatedResult, pipeline.user_id);
+
+          // GAP-3 fix: Emit verification experience event for ML routing feedback
+          try {
+            const confidenceScore = Math.round(passRate * 100);
+            await storage.saveLedger({
+              project: pipeline.project,
+              conversation_id: `dark-factory-${pipeline.id}`,
+              user_id: pipeline.user_id,
+              event_type: 'validation_result',
+              summary: `[VERIFY] ${verificationResult.passed_count}/${verificationResult.total} passed (gate: ${verificationResult.severity_gate.action})`,
+              keywords: ['dark-factory', 'verification', pipeline.project],
+              importance: verificationResult.severity_gate.action === 'abort' ? 2 : 0,
+              confidence_score: confidenceScore,
+            });
+          } catch { /* experience events are advisory — never block execution */ }
+
+          if (!canContinue) {
+             result.success = false;
+             result.notes = (result.notes ? result.notes + '\n\n' : '') + `[GATE BLOCKED] Pipeline verification runner failed the security gate.`;
+          } else {
+             result.success = result.success && validatedResult.passed;
+          }
+        } catch (err: any) {
+          if (err instanceof VerificationGateError) {
+            debugLog(`[DarkFactory] Pipeline ${pipeline.id} ABORTED by Verification Gate.`);
+            try {
+              await storage.savePipeline({
+                ...pipeline,
+                status: 'FAILED',
+                error: `[GATE ABORT] ${err.message}`,
+              });
+            } catch { /* Status guard */ }
+            await emitExperienceEvent(pipeline, 'failure', `[GATE ABORT] ${err.message}`);
+            return;
+          } else {
+            console.error(`[DarkFactory] Verification harness crash: ${err.message}`);
+            result.success = false;
+            result.notes = `[GATE CRASH] Verification suite failed to execute: ${err.message}`;
+          }
+        }
+      }
+    }
+
+    // Determine next step based on result
     const nextStep = SafetyController.getNextStep(
       currentStep,
       pipeline.iteration,

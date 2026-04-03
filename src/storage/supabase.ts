@@ -38,6 +38,8 @@ import {
   MemoryLink,              // v6.0: Associative Memory Graph
   PipelineState,           // v7.3: Dark Factory Pipeline
   PipelineStatus,          // v7.3: Dark Factory Pipeline
+  VerificationHarness,     // v7.2.0: Verification Harness
+  ValidationResult,        // v7.2.0: Verification Harness
 } from "./interface.js";
 
 import { debugLog } from "../utils/logger.js";
@@ -1546,6 +1548,127 @@ export class SupabaseStorage implements StorageBackend {
       return (Array.isArray(result) ? result : []) as unknown as PipelineState[];
     } catch (e: any) {
       if (e.message?.includes("PGRST202") || e.message?.includes("Could not find the relation")) return [];
+      throw e;
+    }
+  }
+
+  // ─── Verification Harness (v7.2.0) ───────────────────────────
+
+  async saveVerificationHarness(harness: VerificationHarness, userId: string): Promise<void> {
+    try {
+      await supabasePost(
+        "verification_harnesses",
+        {
+          rubric_hash: harness.rubric_hash,
+          project: harness.project,
+          conversation_id: harness.conversation_id,
+          created_at: harness.created_at,
+          min_pass_rate: harness.min_pass_rate,
+          tests: JSON.stringify(harness.tests),
+          metadata: harness.metadata ? JSON.stringify(harness.metadata) : null,
+          user_id: userId
+        },
+        { on_conflict: "rubric_hash" },
+        { Prefer: "return=representation,resolution=merge-duplicates" }
+      );
+    } catch (e: any) {
+      if (e.message?.includes("PGRST116") || e.message?.includes("duplicate key")) {
+        return;
+      }
+      throw e;
+    }
+  }
+
+  async getVerificationHarness(rubric_hash: string, userId: string): Promise<VerificationHarness | null> {
+    try {
+      const rows = await supabaseGet("verification_harnesses", {
+        "rubric_hash": `eq.${rubric_hash}`,
+        "user_id": `eq.${userId}`
+      });
+      if (!Array.isArray(rows) || rows.length === 0) return null;
+      const row = rows[0] as any;
+      return {
+        ...row,
+        tests: JSON.parse(row.tests),
+        metadata: row.metadata ? JSON.parse(row.metadata) : undefined
+      } as VerificationHarness;
+    } catch (e: any) {
+      if (e.message?.includes("PGRST202") || e.message?.includes("Could not find the relation")) return null;
+      throw e;
+    }
+  }
+
+  async saveVerificationRun(result: ValidationResult, userId: string): Promise<void> {
+    try {
+      await supabasePost(
+        "verification_runs",
+        {
+          id: result.id,
+          rubric_hash: result.rubric_hash,
+          project: result.project,
+          conversation_id: result.conversation_id,
+          run_at: result.run_at,
+          // H2 fix: Use native booleans for Supabase/PostgreSQL (not 0/1 integers)
+          passed: result.passed,
+          pass_rate: result.pass_rate,
+          critical_failures: result.critical_failures,
+          coverage_score: result.coverage_score,
+          result_json: result.result_json,
+          gate_action: result.gate_action,
+          gate_override: result.gate_override ?? false,
+          override_reason: result.override_reason || null,
+          user_id: userId
+        },
+        { on_conflict: "id" },
+        { Prefer: "return=representation,resolution=ignore-duplicates" }
+      );
+    } catch (e: any) {
+      if (e.message?.includes("PGRST116") || e.message?.includes("duplicate key")) {
+        return;
+      }
+      throw e;
+    }
+  }
+
+  async listVerificationRuns(project: string, userId: string): Promise<ValidationResult[]> {
+    try {
+      const query: Record<string, string> = {
+        project: `eq.${project}`,
+        user_id: `eq.${userId}`,
+        order: "run_at.desc"
+      };
+      const rows = await supabaseGet("verification_runs", query);
+      if (!Array.isArray(rows)) return [];
+      return rows.map((row: any) => ({
+        ...row,
+        passed: Boolean(row.passed),
+        // H2 fix: Use Boolean() consistently (native booleans from Supabase)
+        gate_override: Boolean(row.gate_override),
+        override_reason: row.override_reason || undefined
+      })) as unknown as ValidationResult[];
+    } catch (e: any) {
+      if (e.message?.includes("PGRST202") || e.message?.includes("Could not find the relation")) return [];
+      throw e;
+    }
+  }
+
+  async getVerificationRun(id: string, userId: string): Promise<ValidationResult | null> {
+    try {
+      const rows = await supabaseGet("verification_runs", {
+        id: `eq.${id}`,
+        user_id: `eq.${userId}`
+      });
+      if (!Array.isArray(rows) || rows.length === 0) return null;
+      const row = rows[0] as any;
+      return {
+        ...row,
+        passed: Boolean(row.passed),
+        // H2 fix: Use Boolean() consistently (native booleans from Supabase)
+        gate_override: Boolean(row.gate_override),
+        override_reason: row.override_reason || undefined
+      } as ValidationResult;
+    } catch (e: any) {
+      if (e.message?.includes("PGRST202") || e.message?.includes("Could not find the relation")) return null;
       throw e;
     }
   }

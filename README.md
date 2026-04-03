@@ -29,7 +29,8 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [Use Cases](#-use-cases)
 - [What's New](#-whats-new)
   - [v7.3.1 Dark Factory (Fail-Closed Execution)](#v731--dark-factory-fail-closed-execution-)
-  - [v7.2.0 The "Executive Function" Update (Planned)](#v720--the-executive-function-update-)
+  - [v7.2.0 Verification Harness (Planned)](#v720--verification-harness-front-loaded-testing-)
+  - [v7.4.0 Adversarial Dev Harness (Planned)](#v740--adversarial-dev-harness-anti-sycophancy-)
 - [How Prism Compares](#-how-prism-compares)
 - [Tool Reference](#-tool-reference)
 - [Environment Variables](#environment-variables)
@@ -412,7 +413,7 @@ Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.z
 
 **Consulting / multi-project** — Switch between client projects with progressive loading: `quick` (~50 tokens), `standard` (~200), or `deep` (~1000+).
 
-**Complex refactoring (v7.2 planned)** — Prism’s roadmap adds plan-first execution for multi-step changes with persistent plan-state tracking across sessions.
+**Complex refactoring (v7.2 planned)** — Prism’s roadmap adds verification-first execution for multi-step changes with contract-frozen assertions and gated finalization.
 
 **Team onboarding** — New team member's agent loads the full project history instantly.
 
@@ -503,24 +504,24 @@ Prism v7.3.1 implements exactly this: a **3-gate fail-closed pipeline** where ev
 
 </details>
 
-### v7.2.0 — The "Executive Function" Update 🔭
-> **Planned roadmap release.** Extends Prism from persistent memory toward autonomous plan execution.
+### v7.2.0 — Verification Harness (Front-Loaded Testing) 🔭
+> **Planned roadmap release.** Extends Prism from passive validation to contract-frozen, machine-verifiable execution gates.
 
-- 🗺️ **Autonomous Plan Decomposition (planned)** — Proposed `session_plan_decompose` tool to transform ambiguous multi-step goals into a structured task DAG.
-- 🔄 **Self-Healing Execution Loop (planned)** — Proposed plan-state engine to capture failed steps, suggest corrective actions, and re-queue recoverable sub-tasks before escalation.
-- 📉 **DAG Plan Visualizer (planned)** — Proposed dashboard Plan/Goal Monitor to render step progress, dependency state, and execution pivots in real time.
-- 🧠 **Context-Aware Goal Tracking (planned)** — Proposed active-plan injection during context loading so agents track not only prior work but current plan position.
-- ⚙️ **Recursive Tool Chaining (planned)** — Proposed middleware path for lower-latency plan-step updates across complex workflows.
-- 🧪 **Plan Integrity Tests (planned)** — Proposed suite validating plan-state persistence across interruptions and session handoffs.
+- 📋 **Spec-Freeze Contract (planned)** — v7.2 formalizes three artifacts with strict responsibilities: `implementation_plan.md` (**how**), `verification_harness.json` (**proof contract**), and `validation_result` (**immutable outcome record**).
+- 🔐 **Rubric Hash Lock (planned)** — `verification_harness.json` is generated before execution and hash-locked (`rubric_hash`) so criteria cannot drift mid-sprint.
+- 🔬 **Multi-Layer Verification (planned)** — Structured checks across **Data Accuracy**, **Agent Behavior**, and **Pipeline Integrity** using machine-parseable assertions.
+- 🤖 **Adversarial Validation Loop (planned)** — A second validation pass evaluates execution outputs against the frozen contract before progression.
+- 🚦 **Finalization Gates (planned)** — Gate policies (`warn` / `gate` / `abort`) evaluate `validation_result` against the frozen rubric before pipeline completion.
+- 🧠 **Routing Feedback Signals (planned)** — Router learning ingests raw verification signals (`pass_rate`, `critical_failures`, `coverage_score`, `rubric_hash`) for downstream confidence adjustment.
 
 <details>
 <summary><strong>🔬 Concept Example: Before vs. After v7.2</strong></summary>
 
 **Scenario:** "Refactor the Auth module and update the unit tests."
 
-**Before (linear prompting):** The agent executes in sequence but can lose place after errors unless the host prompt restates state.
+**Before:** Criteria emerge during or after coding; verification is inconsistent and hard to audit.
 
-**After (executive planning):** Agent decomposes to a DAG, executes per-step, recovers from failures via plan-state retries, and resumes from the correct dependency node.
+**After (verification-first):** Plan emits a frozen verification contract first, execution runs, validator emits immutable `validation_result`, and finalization gates enforce rubric compliance.
 
 </details>
 
@@ -815,13 +816,13 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 </details>
 
 <details>
-<summary><strong>Executive Planning (Planned for v7.2)</strong></summary>
+<summary><strong>Verification Harness (Planned for v7.2)</strong></summary>
 
 | Tool | Purpose |
 |------|---------|
-| `session_plan_decompose` | Decompose natural language goals into a structured DAG of tasks |
-| `session_plan_step_update` | Atomically update the status/result of a specific sub-task |
-| `session_plan_get_active` | Retrieve the current execution DAG and task statuses |
+| `session_plan_decompose` | Decompose natural language goals into an execution plan that references verification requirements |
+| `session_plan_step_update` | Atomically update step status/result with verification context |
+| `session_plan_get_active` | Retrieve active plan state and current verification gating position |
 
 </details>
 
@@ -970,7 +971,7 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 | **v7.0** | Composite Retrieval Scoring — `0.7 × similarity + 0.3 × σ(activation)`; configurable via `PRISM_ACTR_WEIGHT_*` | Hybrid cognitive-neural retrieval models | ✅ Shipped |
 | **v7.0** | AccessLogBuffer — in-memory batch-write buffer with 5s flush; prevents SQLite `SQLITE_BUSY` under parallel agents | Production reliability engineering | ✅ Shipped |
 | **v7.3** | Dark Factory — 3-gate fail-closed EXECUTE pipeline (parse → type → scope) with structured JSON action contract | Industrial safety systems (defense-in-depth, fail-closed valves) | ✅ Shipped |
-| **v7.2** | Executive Planning & DAG tracking | Prefrontal cortex executive control + Directed Acyclic Graph planning | 🔭 Horizon |
+| **v7.2** | Verification-first harness & contract-gated execution | Programmatic verification systems + adversarial validation loops | 🔭 Horizon |
 | **v7.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) | 🔭 Horizon |
 | **v8+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
 
@@ -997,8 +998,8 @@ Shipped. Deterministic task routing (`session_task_route`) with optional experie
 ### v7.0: ACT-R Activation Memory ✅
 Shipped. Scientifically-grounded retrieval re-ranking via ACT-R base-level activation (`B_i = ln(Σ t_j^(-d))`), candidate-scoped spreading activation, parameterized sigmoid normalization, composite scoring, and zero-cold-start access log infrastructure. 49 dedicated unit tests, 705 total passing.
 
-### v7.2: Executive Function 🔭
-Planned. Adds autonomous plan decomposition, DAG-backed step tracking, and self-healing execution loops for complex multi-step operations.
+### v7.2: Verification Harness 🔭
+Planned. Adds a spec-frozen verification contract (`implementation_plan.md` + `verification_harness.json` + immutable `validation_result`), multi-layer machine checks, and finalization gates before autonomous completion.
 
 ### Future Tracks
 - **v7.x: Affect-Tagged Memory** — Recall prioritization improves by weighting memories with affective/contextual valence, making surfaced context more behaviorally useful.

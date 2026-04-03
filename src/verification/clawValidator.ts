@@ -18,6 +18,7 @@
  *  - PRISM_VERIFICATION_HARNESS_ENABLED=true
  */
 
+import { createHash } from "crypto";
 import { TestSuiteSchema, type TestSuite } from "./schema.js";
 
 export interface ClawValidationRequest {
@@ -269,7 +270,7 @@ export function mergeSuggestedAssertions(
         ...suite.tests,
         ...suggestions.map((s: any) => ({
           ...s,
-          id: s.id || `claw-suggestion-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: s.id || `claw-suggestion-${createHash("sha256").update(JSON.stringify(s)).digest("hex").slice(0, 12)}`,
           severity: s.severity || "warn",
         })),
       ],

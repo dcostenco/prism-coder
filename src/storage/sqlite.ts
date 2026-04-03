@@ -40,6 +40,8 @@ import type {
   MemoryLink,              // v6.0: Associative Memory Graph
   PipelineState,           // v7.3: Dark Factory Pipeline
   PipelineStatus,          // v7.3: Dark Factory Pipeline
+  VerificationHarness,     // v7.2.0
+  ValidationResult,        // v7.2.0
 } from "./interface.js";
 
 import { debugLog } from "../utils/logger.js";
@@ -663,6 +665,72 @@ export class SqliteStorage implements StorageBackend {
     
     await this.db.execute(
       `CREATE INDEX IF NOT EXISTS idx_pipelines_status ON dark_factory_pipelines(user_id, project, status)`
+    );
+
+    // ─── v7.2.0 Migration: Verification Harness ────────────────
+    await this.db.execute(`
+      CREATE TABLE IF NOT EXISTS verification_harnesses (
+        rubric_hash TEXT PRIMARY KEY,
+        project TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        min_pass_rate REAL NOT NULL,
+        tests TEXT NOT NULL,
+        metadata TEXT,
+        user_id TEXT NOT NULL DEFAULT 'default'
+      )
+    `);
+
+    await this.db.execute(`
+      CREATE TABLE IF NOT EXISTS verification_runs (
+        id TEXT PRIMARY KEY,
+        rubric_hash TEXT NOT NULL,
+        project TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        run_at TEXT NOT NULL,
+        passed INTEGER NOT NULL,
+        pass_rate REAL NOT NULL,
+        critical_failures INTEGER NOT NULL,
+        coverage_score REAL NOT NULL,
+        result_json TEXT NOT NULL,
+        gate_action TEXT NOT NULL,
+        gate_override INTEGER,
+        override_reason TEXT,
+        user_id TEXT NOT NULL DEFAULT 'default',
+        FOREIGN KEY(rubric_hash) REFERENCES verification_harnesses(rubric_hash)
+      )
+    `);
+
+    await this.db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_verification_runs_project ON verification_runs(project, run_at DESC)`
+    );
+
+    // ─── v7.3 Migration: Pipeline Orchestration Overrides ────────
+    try {
+      await this.db.execute(`ALTER TABLE verification_runs ADD COLUMN gate_override INTEGER`);
+    } catch (e: any) {
+      if (!e.message?.includes('duplicate column name')) console.warn('Migration warning:', e.message);
+    }
+    try {
+      await this.db.execute(`ALTER TABLE verification_runs ADD COLUMN override_reason TEXT`);
+    } catch (e: any) {
+      if (!e.message?.includes('duplicate column name')) console.warn('Migration warning:', e.message);
+    }
+
+    // ─── H7 Migration: Tenant isolation for verification tables ────────
+    try {
+      await this.db.execute(`ALTER TABLE verification_harnesses ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'`);
+    } catch (e: any) {
+      if (!e.message?.includes('duplicate column name')) console.warn('Migration warning:', e.message);
+    }
+    try {
+      await this.db.execute(`ALTER TABLE verification_runs ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'`);
+    } catch (e: any) {
+      if (!e.message?.includes('duplicate column name')) console.warn('Migration warning:', e.message);
+    }
+    // H7: Create index after the column exists (post-migration)
+    await this.db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_verification_runs_user ON verification_runs(user_id, project)`
     );
 
     // ─── v6.1 Migration: Integrity Check ──────────────────────
@@ -3330,6 +3398,103 @@ export class SqliteStorage implements StorageBackend {
     
     const result = await this.db.execute({ sql, args });
     return result.rows as unknown as PipelineState[];
+  }
+
+  // ─── Verification Harness (v7.2.0) ───────────────────────────
+
+  async saveVerificationHarness(harness: VerificationHarness, userId: string): Promise<void> {
+    await this.db.execute({
+      sql: `
+        INSERT INTO verification_harnesses (rubric_hash, project, conversation_id, created_at, min_pass_rate, tests, metadata, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(rubric_hash) DO UPDATE SET
+          metadata = excluded.metadata
+      `,
+      args: [
+        harness.rubric_hash,
+        harness.project,
+        harness.conversation_id,
+        harness.created_at,
+        harness.min_pass_rate,
+        JSON.stringify(harness.tests),
+        harness.metadata ? JSON.stringify(harness.metadata) : null,
+        userId
+      ]
+    });
+  }
+
+  async getVerificationHarness(rubric_hash: string, userId: string): Promise<VerificationHarness | null> {
+    const result = await this.db.execute({
+      sql: `SELECT * FROM verification_harnesses WHERE rubric_hash = ? AND user_id = ?`,
+      args: [rubric_hash, userId]
+    });
+
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0] as any;
+    return {
+      ...row,
+      tests: JSON.parse(row.tests),
+      metadata: row.metadata ? JSON.parse(row.metadata) : undefined
+    } as VerificationHarness;
+  }
+
+  async saveVerificationRun(result: ValidationResult, userId: string): Promise<void> {
+    await this.db.execute({
+      sql: `
+        INSERT INTO verification_runs (
+          id, rubric_hash, project, conversation_id, run_at, 
+          passed, pass_rate, critical_failures, coverage_score, result_json, gate_action, gate_override, override_reason, user_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO NOTHING
+      `,
+      args: [
+        result.id,
+        result.rubric_hash,
+        result.project,
+        result.conversation_id,
+        result.run_at,
+        result.passed ? 1 : 0,
+        result.pass_rate,
+        result.critical_failures,
+        result.coverage_score,
+        result.result_json,
+        result.gate_action,
+        result.gate_override ? 1 : 0,
+        result.override_reason || null,
+        userId
+      ]
+    });
+  }
+
+  async listVerificationRuns(project: string, userId: string): Promise<ValidationResult[]> {
+    const result = await this.db.execute({
+      sql: `SELECT * FROM verification_runs WHERE project = ? AND user_id = ? ORDER BY run_at DESC`,
+      args: [project, userId]
+    });
+
+    return result.rows.map(row => ({
+      ...row,
+      passed: Boolean(row.passed),
+      gate_override: (row as any).gate_override === 1,
+      override_reason: (row as any).override_reason || undefined
+    })) as unknown as ValidationResult[];
+  }
+
+  async getVerificationRun(id: string, userId: string): Promise<ValidationResult | null> {
+    const result = await this.db.execute({
+      sql: `SELECT * FROM verification_runs WHERE id = ? AND user_id = ?`,
+      args: [id, userId]
+    });
+
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0] as any;
+    return {
+      ...row,
+      passed: Boolean(row.passed),
+      gate_override: row.gate_override === 1,
+      override_reason: row.override_reason || undefined
+    } as ValidationResult;
   }
 }
 

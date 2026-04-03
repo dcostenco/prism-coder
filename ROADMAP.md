@@ -154,6 +154,20 @@ With v7.1.0 shipped, Prism is a **production-hardened, scientifically-grounded, 
 **Problem:** Agents plan and execute but have no structured, programmatically enforced verification layer. Test assertions are afterthoughts, not first-class planning artifacts. Complex multi-database ETL, data migrations, and agentic pipelines require "stacking 9's" on accuracy — which demands front-loaded, machine-parseable validation at every layer.
 **Solution:** A planning-phase verification harness that forces the agent to emit programmatically verifiable test assertions *before* execution begins, then automatically validates them post-execution.
 
+#### ✅ v7.2 Spec-Freeze Acceptance Contract
+
+To prevent implementation drift, v7.2 freezes three artifacts and their responsibilities:
+
+1. `implementation_plan.md` — execution strategy (**how** to implement).
+2. `verification_harness.json` — machine-parseable assertions and scoring rubric (**how to prove correctness**).
+3. `validation_result` — immutable verification outcome record (**what actually passed/failed**).
+
+Contract rules:
+- `verification_harness.json` is generated before execution and hash-locked (`rubric_hash`) for the sprint.
+- Finalization gates evaluate `validation_result` against the frozen rubric, not regenerated criteria.
+- Router learning ingests raw verification signals (`pass_rate`, `critical_failures`, `coverage_score`, `rubric_hash`) and derives confidence adjustments downstream.
+- Verification data must be queryable/auditable in dedicated storage (avoid opaque ad-hoc blobs for primary records).
+
 | Feature | Detail |
 |---------|--------|
 | 📋 **Planning-Phase Test Generation** | New planning skill that requires the agent to emit machine-parseable test specifications (JSON test specs) during `implementation_plan.md` creation. Tests define expected outcomes, data invariants, and acceptance criteria *before* any code is written. |
@@ -181,6 +195,23 @@ With v7.1.0 shipped, Prism is a **production-hardened, scientifically-grounded, 
 | 📈 **Accuracy Stacking ("9's Dashboard")** | Real-time accuracy metrics across verification layers. Visual indicator showing current confidence level (e.g., "99.7% — 2.5σ") inspired by Six Sigma methodology. |
 
 **Dependency:** Requires v7.2.0 Verification Harness as the safety net. Without front-loaded testing, autonomous execution is unsafe.
+
+---
+### ⚔️ v7.4.0 — Adversarial Dev Harness (Anti-Sycophancy) `[Planned]`
+**Problem:** In autonomous coding loops, self-evaluation is structurally biased: the same reasoning policy that generates code often under-detects its own deep defects. Prompting alone cannot reliably remove this bias.
+**Solution:** Introduce a native generator/evaluator sprint architecture with isolated contexts, pre-committed scoring contracts, and evidence-bound review gates before promotion.
+
+| Feature | Detail |
+|---------|--------|
+| 🧭 **Contract-First Sprint Stage** | Add a `PLAN_CONTRACT` phase before `EXECUTE`. Generator and Evaluator agree on a machine-parseable rubric (criteria, weights, required checks, minimum passing score) before any code changes are applied. |
+| 🥊 **Dual-Agent Isolation** | Split implementation and critique into separate roles/contexts (and optional model separation). Evaluator is prohibited from approving without evidence and cannot reuse generator chain state. |
+| 📏 **Evidence-Bound Scoring** | Evaluator outputs structured findings with `severity`, `criterion_id`, `score(1-10)`, and evidence pointers (file path, diff hunk, test/log reference). Unsupported claims are rejected. |
+| 🚦 **Gate Policies** | New gate modes (`warn`, `block`, `abort`) enforce progression by contract score and critical-finding thresholds. Autonomous pipelines cannot finalize when blocking criteria fail. |
+| ⚖️ **Disagreement Escalation** | Optional second-pass evaluator for borderline/ambiguous outcomes. High disagreement triggers clarify/escalate workflow instead of silent acceptance. |
+| 🧪 **Sandbox-to-Promotion Flow** | Run generator output in isolated workspace/worktree; only promote to main pipeline state when evaluator + verification gates pass. |
+| 🧠 **Routing Feedback Integration** | Persist evaluator outcomes as structured experience events so task routing can learn where adversarial review materially improves quality. |
+
+**Dependency:** Extends v7.2 Verification Harness and integrates with v7.3 Dark Factory orchestration/fail-closed gates.
 
 ---
 ### 📱 Mind Palace Mobile PWA `[Backlog]`
@@ -215,4 +246,4 @@ With v7.1.0 shipped, Prism is a **production-hardened, scientifically-grounded, 
 | Prism CLI | Standalone CLI for backup, export, and health check without MCP |
 | Plugin System | Third-party tool registration via MCP tool composition |
 | **Supabase MemoryLinks** | Implement `MemoryLinks` (graph-based traversal) in Supabase to achieve full structural parity with SQLite backend |
-| **SDM Counter Soft Decay** | Evaluate implementing chronological "Soft Decay" for SDM counters if plasticity loss (catastrophic saturation) is observed in long-running agents |
+| **Safe Rollback Primitive (`session_rollback_state`)** | Standardize rollback with snapshot/worktree restoration for autonomous loops; avoid destructive reset-first behavior and require explicit promotion policies |

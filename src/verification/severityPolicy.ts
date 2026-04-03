@@ -20,7 +20,11 @@ function severityRank(s: SeverityLevel): number {
     case "warn":  return 0;
     case "gate":  return 1;
     case "abort": return 2;
-    default:      return 0;
+    default: {
+      // M4 fix: Exhaustive check — future SeverityLevel additions will cause a compile error
+      const _exhaustive: never = s;
+      return _exhaustive;
+    }
   }
 }
 
