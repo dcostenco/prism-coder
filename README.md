@@ -8,6 +8,8 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
+![Prism Mind Palace Demo](docs/mind-palace-demo.webp)
+
 **Your AI agent forgets everything between sessions. Prism fixes that.**
 
 One command. Persistent memory. Local-first by default. Optional cloud power-ups.
@@ -26,6 +28,7 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [Setup Guides](#-setup-guides)
 - [Universal Import](#-universal-import-bring-your-history)
 - [What Makes Prism Different](#-what-makes-prism-different)
+- [Data Privacy & Egress](#-data-privacy--egress)
 - [Use Cases](#-use-cases)
 - [What's New](#-whats-new)
 - [How Prism Compares](#-how-prism-compares)
@@ -33,7 +36,7 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [Environment Variables](#environment-variables)
 - [Architecture](#architecture)
 - [Scientific Foundation](#-scientific-foundation)
-- [Product Roadmap](#-product-roadmap)
+- [Milestones & Roadmap](#-milestones--roadmap)
 - [Troubleshooting FAQ](#-troubleshooting-faq)
 
 ---
@@ -46,12 +49,23 @@ Every time you start a new conversation with an AI coding assistant, it starts f
 
 > 📌 **Terminology:** Throughout this doc, **"Prism"** refers to the MCP server and storage engine. **"Mind Palace"** refers to the visual dashboard UI at `localhost:3000` — your window into the agent's brain. They work together; the dashboard is optional.
 
-**Starting in v7.0**, Prism doesn't just *store* memories — it **ranks them like a human brain.** The ACT-R activation model (from cognitive science) means memories that were accessed recently and frequently surface first, while stale context fades naturally. Combine that with candidate-scoped spreading activation and you get retrieval quality that no flat vector search can match.
+Prism has two pillars:
+
+1. **🧠 Persistent Memory** — Memories are ranked like a human brain: recently and frequently accessed context surfaces first, while stale context fades naturally. The result is retrieval quality that no flat vector search can match. *(See [Scientific Foundation](#-scientific-foundation) for the ACT-R math.)*
+
+2. **🏭 Autonomous Execution (Dark Factory)** — When you're ready, Prism can run coding tasks end-to-end with a fail-closed pipeline where an adversarial evaluator catches bugs the generator missed — before you ever see the PR. *(See [Dark Factory](#-dark-factory--adversarial-autonomous-pipelines).)*
 
 ---
 
 ## 🚀 Quick Start
 
+### Prerequisites
+
+- **Node.js v18+** (v20 LTS recommended; v23.x has [known `npx` quirk](#common-installation-pitfalls))
+- Any MCP-compatible client (Claude Desktop, Cursor, Windsurf, Cline, etc.)
+- No API keys required for core features (see [Capability Matrix](#capability-matrix))
+
+### Install
 
 Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`, etc.):
 
@@ -69,6 +83,8 @@ Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`,
 > ⚠️ **Windows / Restricted Shells:** If your MCP client complains that `npx` is not found, use the absolute path to your node binary (e.g. `C:\Program Files\nodejs\npx.cmd`).
 
 **That's it.** Restart your client. All tools are available. The **Mind Palace Dashboard** (the visual UI for your agent's brain) starts automatically at `http://localhost:3000`. You don't need to keep a tab open — the dashboard runs in the background and the MCP tools work with or without it.
+
+> 🔄 **Updating Prism:** `npx -y` caches the package locally. To force an update to the latest version, restart your MCP client — `npx -y` will fetch the newest release automatically. If you're stuck on a stale version, run `npx clear-npx-cache` (or `npm cache clean --force`) before restarting.
 
 <details>
 <summary>Port 3000 already in use? (Next.js / Vite / etc.)</summary>
@@ -108,6 +124,8 @@ Then open `http://localhost:3001` instead.
 | Autonomous Pipelines (Dark Factory) | ❌ | ✅ `GOOGLE_API_KEY` (or LLM override) |
 
 > 🔑 The core Mind Palace works **100% offline** with zero API keys. Cloud keys unlock intelligence features. See [Environment Variables](#environment-variables).
+
+> 💰 **API Cost Note:** `GOOGLE_API_KEY` (Gemini) has a generous free tier that covers most individual use. `BRAVE_API_KEY` offers 2,000 free searches/month. `FIRECRAWL_API_KEY` has a free plan with 500 credits. For typical solo development, expect **$0/month** on the free tiers. Only high-volume teams or heavy autonomous pipeline usage will incur meaningful costs.
 
 ---
 
@@ -321,6 +339,12 @@ Then add to your MCP config:
 > **❓ Seeing warnings about missing API keys on startup?**
 > That's expected and not an error. `BRAVE_API_KEY` / `GOOGLE_API_KEY` warnings are informational only — core session memory works with zero keys. See [Environment Variables](#environment-variables) for what each key unlocks.
 
+> 💡 **Do agents auto-load Prism?** Agents using Cursor, Windsurf, or other MCP clients will see the `session_load_context` tool automatically, but may not call it unprompted. Add this to your project's `.cursorrules` (or equivalent system prompt) to guarantee auto-load:
+> ```
+> At the start of every conversation, call session_load_context with project "my-project" before doing any work.
+> ```
+> Claude Code users can use the `.clauderules` auto-load hook shown in the [Setup Guides](#-setup-guides). Prism also has a **server-side fallback** (v5.2.1+) that auto-pushes context after 10 seconds if no load is detected.
+
 ---
 
 ## 📥 Universal Import — Bring Your History
@@ -369,6 +393,7 @@ Every save creates a versioned snapshot. Made a mistake? `memory_checkout` rever
 A gorgeous glassmorphism UI at `localhost:3000` that lets you see exactly what your agent is thinking:
 
 - **Current State & TODOs** — the exact context injected into the LLM's prompt
+- **Intent Health Gauges** — per-project 0–100 health score with staleness decay, TODO load, and decision signals
 - **Interactive Knowledge Graph** — force-directed neural graph with click-to-filter, node renaming, and surgical keyword deletion
 - **Deep Storage Manager** — preview and execute vector purge operations with dry-run safety
 - **Session Ledger** — full audit trail of every decision your agent has made
@@ -387,7 +412,7 @@ Powered by a pure TypeScript port of Google's TurboQuant (inspired by Google's I
 Multiple agents (dev, QA, PM) can work on the same project with **role-isolated memory**. Agents discover each other automatically, share context in real-time via Telepathy sync, and see a team roster during context loading. → [Multi-agent setup example](examples/multi-agent-hivemind/)
 
 ### 🚦 Task Router
-Prism can score coding tasks and recommend whether to keep execution on the host model or delegate to local Claw. This enables faster handling of small, local-safe edits while preserving host execution for non-delegable or higher-complexity work. In client startup/skill flows, use defensive delegation: route only coding tasks, call `session_task_route` only when available, delegate to `claw` only when executor tooling exists and task is non-destructive, and fallback to host when router/executor is unavailable. → [Task router real-life example](examples/router_real_life_test.ts)
+Prism can score coding tasks and recommend whether to keep execution on the host model or delegate to a **local Claw agent** (a lightweight sub-agent powered by Ollama/vLLM for fast, local-safe edits). This enables faster handling of small edits while preserving host execution for complex work. In client startup/skill flows, use defensive delegation: route only coding tasks, call `session_task_route` only when available, delegate to `claw` only when executor tooling exists and task is non-destructive, and fallback to host when router/executor is unavailable. → [Task router real-life example](examples/router_real_life_test.ts)
 
 ### 🖼️ Visual Memory
 Save UI screenshots, architecture diagrams, and bug states to a searchable vault. Images are auto-captioned by a VLM (Claude Vision / GPT-4V / Gemini) and become semantically searchable across sessions.
@@ -398,8 +423,33 @@ OpenTelemetry spans for every MCP tool call, LLM hop, and background worker. Rou
 ### 🌐 Autonomous Web Scholar
 Prism researches while you sleep. A background pipeline searches the web, scrapes articles, synthesizes findings via LLM, and injects results directly into your semantic memory — fully searchable on your next session. Brave Search → Firecrawl scrape → LLM synthesis → Prism ledger. Task-aware, Hivemind-integrated, and zero-config when API keys are missing (falls back to Yahoo + Readability).
 
-### 🔒 GDPR Compliant
-Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.zip` (Art. 20), API key redaction, per-project TTL retention, and audit trail. Enterprise-ready out of the box.
+### 🔒 Data Privacy & Egress
+
+**Where is my data stored?**
+
+All data lives under `~/.prism-mcp/` on your machine:
+
+| File | Contents |
+|------|----------|
+| `~/.prism-mcp/data.db` | All sessions, handoffs, embeddings, knowledge graph (SQLite + WAL) |
+| `~/.prism-mcp/prism-config.db` | Dashboard settings, system config, API keys |
+| `~/.prism-mcp/media/<project>/` | Visual memory vault (screenshots, HTML captures) |
+| `~/.prism-mcp/dashboard.port` | Ephemeral port lock file |
+| `~/.prism-mcp/sync.lock` | Sync coordination lock |
+
+**Hard reset:** To completely erase your agent's brain, stop Prism and delete the directory:
+```bash
+rm -rf ~/.prism-mcp
+```
+Prism will recreate the directory with empty databases on next startup.
+
+**What leaves your machine?**
+- **Local mode (default):** Nothing. Zero network calls. All data is on-disk SQLite.
+- **With `GOOGLE_API_KEY`:** Text snippets are sent to Gemini for embedding generation, summaries, and Morning Briefings. No session data is stored on Google's servers beyond the API call.
+- **With `BRAVE_API_KEY` / `FIRECRAWL_API_KEY`:** Web Scholar queries are sent to Brave/Firecrawl for search and scraping.
+- **With Supabase:** Session data syncs to your own Supabase instance (you control the Postgres database).
+
+**GDPR compliance:** Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.zip` (Art. 20), API key redaction in exports, per-project TTL retention policies, and immutable audit trail. Enterprise-ready out of the box.
 
 ### 🏭 Dark Factory — Adversarial Autonomous Pipelines
 When you trigger a Dark Factory pipeline, Prism doesn't just run your task — it fights itself to produce high-quality output. A `PLAN_CONTRACT` step locks a machine-parseable rubric before any code is written. After execution, an **Adversarial Evaluator** (in a fully isolated context) scores the output against the rubric. It cannot pass the Generator without providing exact file and line evidence for every failing criterion. Failed evaluations inject the critique directly into the Generator's retry prompt so it's never flying blind. The result: security issues, regressions, and lazy debug logs caught autonomously — before you ever see the PR. → [See it in action](examples/adversarial-eval-demo/README.md)
@@ -412,6 +462,7 @@ When you trigger a Dark Factory pipeline, Prism doesn't just run your task — i
 - **Multi-agent collaboration** — Dev, QA, and PM agents share real-time context without stepping on each other's memory.
 - **Consulting / multi-project** — Switch between client projects with progressive loading: `quick` (~50 tokens), `standard` (~200), or `deep` (~1000+).
   - **Autonomous execution (v7.4)** — Dark Factory pipeline: `plan → plan_contract → execute → evaluate → verify → finalize`. Generator and evaluator run in isolated roles — the evaluator cannot approve without evidence-bound findings scored against a pre-committed rubric.
+  - **Project health monitoring (v7.5)** — Intent Health Dashboard scores each project 0–100 based on staleness, TODO load, and decision quality — turning silent drift into an actionable signal.
 - **Team onboarding** — New team member's agent loads the full project history instantly.
 - **Behavior enforcement** — Agent corrections auto-graduate into permanent `.cursorrules` / `.clauderules` rules.
 - **Offline / air-gapped** — Full SQLite local mode + Ollama LLM adapter. Zero internet dependency.
@@ -543,18 +594,13 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
+> **Current release: v7.5.0**
 
-> **Current release: v7.4.0**
+- 🩺 **v7.5.0 — Intent Health Dashboard + Security Hardening:** Real-time 0–100 project health scoring (staleness × TODO load × decisions). 10 XSS injection vectors patched. Algorithm hardened with NaN guards and score ceiling.
+- ⚔️ **v7.4.0 — Adversarial Evaluation:** Split-brain anti-sycophancy pipeline. Generator and evaluator in isolated roles with evidence-bound findings.
+- 🏭 **v7.3.x — Dark Factory + Stability:** Fail-closed 3-gate execution pipeline. Dashboard stability and verification diagnostics.
 
-- ⚔️ **v7.4.0 — Adversarial Evaluation (Anti-Sycophancy):** The Dark Factory pipeline now separates generator and evaluator into isolated roles. `PLAN_CONTRACT` locks a machine-parseable rubric before any code runs. `EVALUATE` scores the output with evidence-bound findings (`file`, `line`, `description`). Failed evaluations retry with `plan_viable` routing — conservatively escalating to full PLAN re-planning on parse failures instead of burning revision budget.
-- 🔧 **v7.3.3 — Dashboard Stability Hotfix:** Fixed a multi-layer quote-escaping trap in the `abortPipeline` onclick handler that silently killed the dashboard IIFE and froze the project selector at "Loading projects..." forever. Fixed via `data-id` attribute pattern + ES5 lint guard (`npm run lint:dashboard`).
-- 🏭 **v7.3.1 — Dark Factory (Fail-Closed Execution):** The LLM can no longer touch the filesystem directly. Every autonomous `EXECUTE` step passes 3 gates — Parse → Type → Scope — before any side effect occurs. Scope violations terminate the entire pipeline.
-- 📊 **v7.3.2 — Verification Diagnostics v2:** `verify status --json` now emits per-layer `diff_counts` + `changed_keys`. JSON schema is contract-enforced in CI (`schema_version: 1`).
-- 🔭 **v7.2.0 — Verification Harness:** Spec-frozen contracts (`verification_harness.json` hash-locked before execution), multi-layer assertions across Data / Agent / Pipeline, and finalization gate policies (`warn` / `gate` / `abort`).
-- 🚦 **v7.1.0 — Task Router:** Heuristic + ML-experience routing delegates cloud vs. local model in under 2ms, cold-start safe, per-project experience-corrected.
-- 🧠 **v7.0.0 — ACT-R Activation Memory:** `B_i = ln(Σ t_j^{-d})` recency × frequency re-ranking. Stale memories fade naturally. Active context surfaces automatically.
-
-👉 **[Full release history → CHANGELOG.md](CHANGELOG.md)** · [ROADMAP →](ROADMAP.md)
+👉 **[Full release history → CHANGELOG.md](CHANGELOG.md)** · **[ROADMAP →](ROADMAP.md)**
 
 ---
 
@@ -793,6 +839,10 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 
 </details>
 
+### System Settings (Dashboard)
+Some configurations are stored dynamically in SQLite (`system_settings` table) and can be edited through the Dashboard UI at `http://localhost:3000`:
+- **`intent_health_stale_threshold_days`** (default: `30`): Number of days before a project is considered fully stale for Intent Health scoring.
+
 ---
 
 ## Architecture
@@ -888,6 +938,7 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 | **v7.3** | Dark Factory — 3-gate fail-closed EXECUTE pipeline (parse → type → scope) with structured JSON action contract | Industrial safety systems (defense-in-depth, fail-closed valves) | ✅ Shipped |
 | **v7.2** | Verification-first harness — spec-freeze contract, rubric hash lock, multi-layer assertions, CLI `verify` commands | Programmatic verification systems + adversarial validation loops | ✅ Shipped |
 | **v7.4** | Adversarial Evaluation — PLAN_CONTRACT + EVALUATE with isolated generator/evaluator roles, pre-committed rubrics, and evidence-bound findings | Anti-sycophancy research, adversarial ML evaluation frameworks | ✅ Shipped |
+| **v7.5** | Intent Health Dashboard — 3-signal scoring algorithm (staleness, TODO load, decisions), comprehensive XSS hardening (10 vectors), NaN/`Infinity` guards | Proactive monitoring, defense-in-depth security | ✅ Shipped |
 | **v7.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) | 🔭 Horizon |
 | **v8+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
 
@@ -895,34 +946,26 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 
 ---
 
-## 📦 Recent Milestones & Roadmap
+## 📦 Milestones & Roadmap
 
-> **[Full ROADMAP.md →](ROADMAP.md)**
+> **Current: v7.5.0** — Intent Health Dashboard + XSS Hardening ([CHANGELOG](CHANGELOG.md))
 
-### v6.2: The "Synthesize & Prune" Phase ✅
-Shipped in v6.2.0. Edge synthesis, graph pruning with SLO observability, temporal decay heatmaps, active recall prompt generation, and full dashboard metrics integration.
-
-### v6.5: Cognitive Architecture ✅
-Shipped. Full Superposed Memory (SDM) + Hyperdimensional Computing (HDC/VSA) cognitive routing pipeline. Compositional memory states via XOR binding, Hamming resolution, and policy-gated routing (direct / clarify / fallback). 705 tests passing.
-
-### v7.4: Adversarial Evaluation ✅
-Shipped. `PLAN_CONTRACT` + `EVALUATE` steps added to the Dark Factory pipeline. Generator and evaluator operate in isolated roles with pre-committed rubrics. Evidence-bound findings with `criterion_id`, `severity`, `file`, and `line` (number). Conservative `plan_viable=false` default on parse failure escalates to full PLAN re-plan. 78 new tests, 978 total.
-
-### v7.3: Dark Factory — Fail-Closed Execution ✅
-Shipped. Structured JSON action contract for autonomous `EXECUTE` steps. 3-gate validation pipeline (parse → type → scope) terminates pipelines on any violation before filesystem side effects. 67 edge-case tests covering adversarial LLM output, path traversal, and type coercion.
-
-### v7.1: Prism Task Router ✅
-Shipped. Deterministic task routing (`session_task_route`) with optional experience-based confidence adjustment for host vs. local Claw delegation.
-
-### v7.0: ACT-R Activation Memory ✅
-Shipped. Scientifically-grounded retrieval re-ranking via ACT-R base-level activation (`B_i = ln(Σ t_j^(-d))`), candidate-scoped spreading activation, parameterized sigmoid normalization, composite scoring, and zero-cold-start access log infrastructure. 49 dedicated unit tests, 705 total passing.
-
-### v7.2: Verification Harness ✅
-Shipped. Spec-frozen verification contract (`implementation_plan.md` + `verification_harness.json` + immutable `validation_result`), multi-layer machine checks (`data`, `agent`, `pipeline`), finalization gate policies (`warn` / `gate` / `abort`), and CLI `verify generate` / `verify status --json` with schema-versioned output.
+| Release | Headline |
+|---------|----------|
+| **v7.5** | Intent Health scoring + 10 XSS patches |
+| **v7.4** | Adversarial Evaluation (anti-sycophancy) |
+| **v7.3** | Dark Factory fail-closed execution |
+| **v7.2** | Verification Harness |
+| **v7.1** | Task Router |
+| **v7.0** | ACT-R Activation Memory |
+| **v6.5** | HDC Cognitive Routing |
+| **v6.2** | Synthesize & Prune |
 
 ### Future Tracks
-- **v7.x: Affect-Tagged Memory** — Recall prioritization improves by weighting memories with affective/contextual valence, making surfaced context more behaviorally useful.
-- **v8+: Zero-Search Retrieval** — Direct vector-addressed recall (“just ask the vector”) reduces retrieval indirection and moves Prism toward truly native associative memory.
+- **v7.x: Affect-Tagged Memory** — Recall prioritization improves by weighting memories with affective/contextual valence.
+- **v8+: Zero-Search Retrieval** — Direct vector-addressed recall reduces retrieval indirection.
+
+👉 **[Full ROADMAP.md →](ROADMAP.md)**
 
 
 ## ❓ Troubleshooting FAQ

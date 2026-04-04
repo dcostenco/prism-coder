@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.5.0] - 2026-04-04
+
+### Added
+- **Intent Health Dashboard** — Per-project 0–100 health scoring in the Mind Palace, powered by a 3-signal algorithm: staleness decay (50pts, linear over `intent_health_stale_threshold_days`), TODO overload (30pts, tiered at 4/7+ thresholds), and decision presence (20pts). Renders as a gauge card with actionable signals per project.
+- **`intent_health_stale_threshold_days` System Setting** — Configurable via Dashboard UI (default: 30 days). Controls when a project is considered fully stale.
+- **14 Intent Health Tests** — Exhaustive coverage: fresh/stale/empty contexts, NaN timestamps, NaN thresholds, custom thresholds, TODO boundaries, multi-session decisions, score ceiling, signal severity matrix, clock skew, and signal shape validation.
+
+### Changed
+- **`computeIntentHealth` NaN Guard** — Extended `staleThresholdDays <= 0` guard to `!Number.isFinite(staleThresholdDays) || staleThresholdDays <= 0`. Catches `NaN`, `Infinity`, and negative values (previously `NaN <= 0` evaluated to `false` in JS, bypassing the guard).
+- **Defensive Score Clamp** — `Math.min(100, Math.round(...))` ceiling on total score prevents future regressions from exceeding the 0–100 gauge range.
+
+### Fixed
+- **10 XSS Injection Vectors Patched** — Comprehensive `escapeHtml()` sweep across all dashboard innerHTML paths:
+  - Pipeline `objective` (stored user input via `session_start_pipeline`)
+  - Pipeline `project` name in factory tab
+  - Pipeline `current_step` name in factory tab
+  - Pipeline `error` message in factory tab
+  - Factory catch handler `err.message`
+  - Ledger `decisions` array members (`.join(', ')` → `.map(escapeHtml).join(', ')`)
+  - Project `<option>` text in selector dropdowns
+  - History timeline `h.version` badge
+  - Health card `data.score` (typeof number guard)
+  - CSS selector injection in `fetchNextHealth` (querySelector → safe array iteration)
+- **Division-by-zero** — `staleThresholdDays=0` no longer produces `Infinity` score cascade.
+
 ## [7.4.0] - 2026-04-03
 
 ### Added

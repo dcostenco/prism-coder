@@ -799,6 +799,19 @@ export async function sessionLoadContextHandler(args: unknown) {
   if (d.session_history?.length) {
     formattedContext += `\n📂 Session History (${d.session_history.length} entries):\n` + d.session_history.map((s: any) => `  [${s.session_date?.split("T")[0]}] ${s.summary}`).join("\n") + `\n`;
   }
+  if (d.recent_validations?.length) {
+    formattedContext += `\n🔬 Recent Validations:\n` + d.recent_validations.map((v: any) => {
+      const passStr = v.passed ? "✅ PASS" : "❌ FAIL";
+      const icon = v.gate_action ? (v.passed ? "🚀" : "🛑") : "ℹ️";
+      const dateStr = (v.run_at || "unknown").split("T")[0];
+      const rateStr = Math.round((Number(v.pass_rate) || 0) * 100);
+      let out = `  ${icon} [${dateStr}] ${passStr} (${rateStr}%)`;
+      if (v.critical_failures > 0) {
+        out += ` -> Critical Blockers: ${v.critical_failures}`;
+      }
+      return out;
+    }).join("\n") + `\n`;
+  }
 
   // ─── Role-Scoped Skill Injection ─────────────────────────────
   // If the active role has a skill document stored, append it so the

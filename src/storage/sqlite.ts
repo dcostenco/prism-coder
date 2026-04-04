@@ -1317,6 +1317,31 @@ export class SqliteStorage implements StorageBackend {
       }));
     }
 
+    // ─── v7.5.0: Validation Pulse (Standard & Deep) ─────────────
+    context.recent_validations = []; // Default empty
+    try {
+      const validationResult = await this.db.execute({
+        sql: `SELECT run_at, passed, pass_rate, gate_action, critical_failures
+              FROM verification_runs
+              WHERE project = ? AND user_id = ?
+              ORDER BY run_at DESC
+              LIMIT 3`,
+        args: [project, userId],
+      });
+
+      if (validationResult.rows.length > 0) {
+        context.recent_validations = validationResult.rows.map(r => ({
+          run_at: r.run_at,
+          passed: Boolean(r.passed),
+          pass_rate: r.pass_rate,
+          gate_action: r.gate_action,
+          critical_failures: Number(r.critical_failures) || 0,
+        }));
+      }
+    } catch (e) {
+      // Graceful degradation if verification_runs table hasn't been migrated yet
+    }
+
     if (level === "standard") {
       // Add recent ledger entries (role-scoped)
       const recentLedger = await this.db.execute({

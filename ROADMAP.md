@@ -7,6 +7,20 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v7.5.0 — Intent Health Dashboard + Security Hardening 🩺
+
+> **Problem:** Projects silently drift into staleness when agents stop working on them. The dashboard had no way to surface this — and had accumulated 10 unescaped innerHTML injection points across factory, ledger, and health rendering.
+> **Solution:** A real-time 3-signal health scoring algorithm + comprehensive XSS hardening sweep across the entire dashboard.
+
+| Feature | Detail |
+|---------|--------|
+| 🩺 **Intent Health Scoring** | Per-project 0–100 health score computed from 3 weighted signals: staleness decay (50pts, linear over configurable threshold), TODO overload (30pts, tiered by count), and decision presence (20pts). Rendered as a gauge card with actionable signals per project. |
+| 🛡️ **10 XSS Vectors Patched** | Comprehensive innerHTML sanitization sweep: project name dropdowns, pipeline objectives, ledger decisions, error messages, version badges, factory catch handler, and health card score. All user-facing strings now pass through `escapeHtml()`. |
+| 🧮 **Algorithm Hardening** | `Number.isFinite()` guard catches NaN thresholds that bypass `<= 0` checks. `Math.min(100, ...)` defensive clamp prevents future scoring regressions. Division-by-zero protection on `staleThresholdDays`. |
+| ⚙️ **Configurable Threshold** | `intent_health_stale_threshold_days` system setting (default: 30 days) editable from the Dashboard UI. |
+| 🧪 **14 Tests** | Exhaustive coverage: fresh/stale/empty contexts, NaN timestamps, NaN thresholds, custom thresholds, TODO boundaries, multi-session decisions, score ceiling, signal severity matrix, clock skew, and signal shape validation. |
+
+---
 ### ✅ v7.4.0 — Adversarial Evaluation (Anti-Sycophancy) ⚔️
 
 > **Problem:** In autonomous coding loops, self-evaluation is structurally biased — the same reasoning policy that generates code under-detects its own deep defects.
@@ -193,10 +207,12 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 </details>
 
-## 📊 The State of Prism (v7.4.0)
+## 📊 The State of Prism (v7.5.0)
 
-With v7.4.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised* and *without letting them grade their own homework*:
+With v7.5.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
 
+- **Health-Aware** — Intent Health Dashboard scores every project 0–100 across staleness, TODO load, and decision quality. Silent drift becomes an actionable signal before it becomes a crisis.
+- **Comprehensively Sanitized** — 10 XSS injection vectors patched across all dashboard rendering paths (factory, ledger, health, history, error handlers). Every user-facing string now passes through `escapeHtml()`.
 - **Anti-Sycophancy by Design** — The Adversarial Evaluation (PLAN_CONTRACT → EVALUATE) pipeline separates generator and evaluator into isolated roles with pre-committed rubrics. The evaluator cannot approve without evidence; the generator cannot skip the contract.
 - **Fail-Closed by Default** — Dark Factory 3-gate pipeline (Parse → Type → Scope) means the LLM never writes a byte to disk directly. Every action validated before any side effect.
 - **Conservatively Fail-Safe** — Parse failures default `plan_viable=false` — escalating to full PLAN re-planning instead of burning revision budget on broken LLM output.

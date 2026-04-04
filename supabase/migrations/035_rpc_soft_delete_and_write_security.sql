@@ -2,6 +2,12 @@
 BEGIN;
 
 -- -------------------------------------------------------------------
+-- Patch: Ensure deleted_reason exists before creating dependent RPCs
+-- -------------------------------------------------------------------
+ALTER TABLE public.session_ledger
+  ADD COLUMN IF NOT EXISTS deleted_reason TEXT DEFAULT NULL;
+
+-- -------------------------------------------------------------------
 -- Preconditions: memory_links uses composite PK (source_id,target_id,link_type)
 -- -------------------------------------------------------------------
 DO $$

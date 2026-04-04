@@ -626,6 +626,15 @@ export function renderDashboardHTML(version: string): string {
           <ul class="todo-list" id="todos"></ul>
         </div>
 
+        <!-- Intent Health (Feature A) -->
+        <div class="card" id="intentHealthCard" style="display: none;">
+          <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <div><span class="dot" style="background:var(--accent-purple)"></span> Intent Health</div>
+            <span style="font-size: 11px; color: var(--text-muted); cursor: help; border-bottom: 1px dotted var(--text-muted); letter-spacing: normal; text-transform: none;" title="Intent debt limits how AI agents can evolve the system (Storey / Fowler)">What is this?</span>
+          </div>
+          <div id="intentHealthCardContent"></div>
+        </div>
+
         <!-- Git Metadata -->
         <div class="card">
           <div class="card-title"><span class="dot" style="background:var(--accent-green)"></span> Git Metadata</div>
@@ -1466,15 +1475,15 @@ function loadPipelines() {
             html += '<span style="font-weight:600;color:var(--text-primary)">' + emoji + ' ' + p.status + '</span>';
             html += '<span style="font-size:0.7rem;font-family:var(--font-mono);color:var(--text-muted)">' + p.id.slice(0, 8) + '…</span>';
             html += '</div>';
-            html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.35rem">' + objective + '</div>';
+            html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.35rem">' + escapeHtml(objective) + '</div>';
             html += '<div style="display:flex;gap:1rem;font-size:0.72rem;color:var(--text-muted);flex-wrap:wrap">';
-            html += '<span>📁 ' + (p.project || '?') + '</span>';
+            html += '<span>📁 ' + escapeHtml(p.project || '?') + '</span>';
             html += '<span>🔄 ' + p.iteration + ' / ' + maxIter + '</span>';
-            html += '<span>📍 ' + (p.current_step || '?') + '</span>';
+            html += '<span>📍 ' + escapeHtml(p.current_step || '?') + '</span>';
             html += '<span>🕐 ' + new Date(p.updated_at).toLocaleString() + '</span>';
             html += '</div>';
             if (p.error) {
-                html += '<div style="font-size:0.72rem;color:var(--accent-rose);margin-top:0.35rem;padding:0.3rem 0.5rem;background:rgba(244,63,94,0.08);border-radius:4px">⚠ ' + p.error.slice(0, 200) + '</div>';
+                html += '<div style="font-size:0.72rem;color:var(--accent-rose);margin-top:0.35rem;padding:0.3rem 0.5rem;background:rgba(244,63,94,0.08);border-radius:4px">⚠ ' + escapeHtml(p.error.slice(0, 200)) + '</div>';
             }
             if (isActive) {
                 html += '<div style="margin-top:0.5rem"><button onclick="abortPipeline(this.dataset.id)" data-id="' + p.id + '" class="cleanup-btn" style="font-size:0.72rem">🛑 Abort Pipeline</button></div>';
@@ -1496,7 +1505,7 @@ function loadPipelines() {
         }
     })
         .catch(function (err) {
-        document.getElementById('factoryList').innerHTML = '<div style="color:var(--accent-rose);padding:1rem">Failed to load pipelines: ' + err.message + '</div>';
+        document.getElementById('factoryList').innerHTML = '<div style="color:var(--accent-rose);padding:1rem">Failed to load pipelines: ' + escapeHtml(err.message) + '</div>';
     });
 }
 function abortPipeline(id) {
@@ -1673,11 +1682,36 @@ function loadIdentityChip() {
                     select = document.getElementById('projectSelect');
                     if (data.projects && data.projects.length > 0) {
                         select.innerHTML = '<option value="">— Select a project —</option>' +
-                            data.projects.map(function (p) { return '<option value="' + p + '">' + p + '</option>'; }).join('');
+                            data.projects.map(function (p) { return '<option value="' + escapeHtml(p) + '">' + escapeHtml(p) + '</option>'; }).join('');
+                        
+                        // v7.5.0: Background fetch intent health to add global traffic-light dots
+                        // Fetch sequentially to prevent SQLite WAL saturation with N concurrent loadContext calls
+                        var pIndex = 0;
+                        function fetchNextHealth() {
+                            if (pIndex >= data.projects.length) return;
+                            var p = data.projects[pIndex++];
+                            fetch('/api/intent-health?project=' + encodeURIComponent(p))
+                                .then(function (res) { return res.json(); })
+                                .then(function (hData) {
+                                    if (hData && typeof hData.score === 'number') {
+                                        var icon = hData.score >= 80 ? "🟢" : (hData.score >= 50 ? "🟡" : "🔴");
+                                        var opt = null;
+                                        for (var oi = 0; oi < select.options.length; oi++) {
+                                            if (select.options[oi].value === p) { opt = select.options[oi]; break; }
+                                        }
+                                        if (opt) opt.textContent = icon + " " + p;
+                                    }
+                                    fetchNextHealth();
+                                }).catch(function () { fetchNextHealth(); });
+                        }
+                        if (data.projects && data.projects.length > 0) {
+                            fetchNextHealth();
+                        }
+
                         gp = document.getElementById('graphProjectFilter');
                         if (gp) {
                             gp.innerHTML = '<option value="">All Projects</option>' +
-                                data.projects.map(function (p) { return '<option value="' + p + '">' + p + '</option>'; }).join('');
+                                data.projects.map(function (p) { return '<option value="' + escapeHtml(p) + '">' + escapeHtml(p) + '</option>'; }).join('');
                         }
                         // Restore last selected project from localStorage
                         var lastProject = localStorage.getItem('prism_last_project');
@@ -1709,8 +1743,15 @@ function loadProject() {
             switch (_a.label) {
                 case 0:
                     project = document.getElementById('projectSelect').value;
-                    if (!project)
+                    if (!project) {
+                        var hc = document.getElementById('intentHealthCard');
+                        if (hc) hc.style.display = 'none';
+                        var welcomeEl = document.getElementById('welcome');
+                        var contentEl = document.getElementById('content');
+                        if (contentEl) contentEl.style.display = 'none';
+                        if (welcomeEl) welcomeEl.style.display = 'flex';
                         return [2 /*return*/];
+                    }
                     // Persist last selected project
                     try { localStorage.setItem('prism_last_project', project); } catch(e) {}
                     document.getElementById('welcome').style.display = 'none';
@@ -1768,7 +1809,7 @@ function loadProject() {
                             var snap = h.snapshot || {};
                             var summary = snap.last_summary || snap.summary || 'Snapshot';
                             return '<div class="timeline-item history">' +
-                                '<div class="meta"><span class="badge badge-purple">v' + h.version + '</span>' +
+                                '<div class="meta"><span class="badge badge-purple">v' + escapeHtml(h.version) + '</span>' +
                                 '<span>' + formatDate(h.created_at) + '</span></div>' +
                                 escapeHtml(summary) + '</div>';
                         }).join('');
@@ -1786,7 +1827,7 @@ function loadProject() {
                                 try {
                                     var parsed = typeof decisions === 'string' ? JSON.parse(decisions) : decisions;
                                     if (Array.isArray(parsed) && parsed.length > 0) {
-                                        extra = '<div style="margin-top:0.3rem;font-size:0.75rem;color:var(--accent-cyan)">Decisions: ' + parsed.join(', ') + '</div>';
+                                        extra = '<div style="margin-top:0.3rem;font-size:0.75rem;color:var(--accent-cyan)">Decisions: ' + parsed.map(function(d) { return escapeHtml(d); }).join(', ') + '</div>';
                                     }
                                 }
                                 catch (e) { }
@@ -1852,6 +1893,10 @@ function loadProject() {
                     document.getElementById('content').className = 'grid grid-main fade-in';
                     document.getElementById('content').style.display = 'grid';
                     projectLoaded = true; // Fix 3: mark project as loaded for tab-switch restore
+                    
+                    // Feature A: Run Intent Health Fetch
+                    fetchIntentHealth(project);
+                    
                     // v3.1: Analytics + Lifecycle Controls + Import
                     document.getElementById('analyticsCard').style.display = 'block';
                     document.getElementById('lifecycleCard').style.display = 'block';
@@ -2394,7 +2439,7 @@ function showToast(msg, isErr) {
 function escapeHtml(str) {
     if (!str)
         return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 function formatDate(isoStr) {
     if (!isoStr)
@@ -4059,6 +4104,67 @@ if ('serviceWorker' in navigator) {
             }
         });
     });
+}
+
+/* --- INTENT HEALTH COMPONENT (ES5 Safe) --- */
+
+function fetchIntentHealth(project) {
+    var container = document.getElementById('intentHealthCardContent');
+    var card = document.getElementById('intentHealthCard');
+    if (!container || !card) return;
+
+    card.style.display = 'block';
+    container.innerHTML = '<div style="color: #8b949e; padding: 16px;">Computing intent debt...</div>';
+
+    fetch('/api/intent-health?project=' + encodeURIComponent(project))
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (data.error) {
+                container.innerHTML = '<div style="color: #ff7b72; padding: 16px;">Error: ' + escapeHtml(data.error) + '</div>';
+                return;
+            }
+            renderIntentHealthCard(data);
+        })
+        .catch(function(err) {
+            container.innerHTML = '<div style="color: #ff7b72; padding: 16px;">Failed to load intent health.</div>';
+        });
+}
+
+function renderIntentHealthCard(data) {
+    var container = document.getElementById('intentHealthCardContent');
+    if (!container) return;
+
+    // Determine Gauge Color
+    var scoreColor = '#2ea043'; // Green
+    if (data.score < 50) {
+        scoreColor = '#ff7b72'; // Red
+    } else if (data.score < 80) {
+        scoreColor = '#d29922'; // Yellow
+    }
+
+    // Render Signals
+    var signalsHtml = '';
+    for (var i = 0; i < data.signals.length; i++) {
+        var sig = data.signals[i];
+        var icon = '🟢';
+        if (sig.severity === 'warn') icon = '🟡';
+        if (sig.severity === 'critical') icon = '🔴';
+        signalsHtml += '<div style="margin-bottom: 8px; font-size: 13px;">' + icon + ' ' + escapeHtml(sig.message) + '</div>';
+    }
+
+    // Render Layout
+    var html = '' +
+        '<div style="display: flex; gap: 24px; align-items: center; padding: 16px;">' +
+            '<div style="text-align: center; flex-shrink: 0; min-width: 80px;">' +
+                '<div style="font-size: 42px; font-weight: bold; color: ' + scoreColor + '; line-height: 1;">' + (typeof data.score === 'number' ? data.score : '—') + '</div>' +
+                '<div style="font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-top: 8px;">Health Score</div>' +
+            '</div>' +
+            '<div style="flex-grow: 1; border-left: 1px solid var(--border-glass); padding-left: 24px;">' +
+                signalsHtml +
+            '</div>' +
+        '</div>';
+
+    container.innerHTML = html;
 }
 
 </script>

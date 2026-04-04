@@ -246,6 +246,8 @@ describe("Handoff State (Role-Scoped)", () => {
     // Should return the global handoff summary, not QA
     expect(context).not.toBeNull();
     expect(context.last_summary).toBe("Refactored auth module to use middleware pattern");
+    expect(context.recent_validations).toBeDefined();
+    expect(Array.isArray(context.recent_validations)).toBe(true);
   });
 
   /**

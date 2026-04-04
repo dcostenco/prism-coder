@@ -231,7 +231,36 @@ export class SupabaseStorage implements StorageBackend {
       });
 
       const data = Array.isArray(result) ? result[0] : result;
-      return (data as ContextResult) ?? null;
+      const context = (data as ContextResult) ?? null;
+      if (!context) return null;
+
+      // ─── v7.5.0: Validation Pulse (Standard & Deep) ─────────────
+      if (level === "standard" || level === "deep") {
+        context.recent_validations = [];
+        try {
+          const valData = await supabaseGet("verification_runs", {
+            project: `eq.${project}`,
+            user_id: `eq.${userId}`,
+            select: "run_at,passed,pass_rate,gate_action,critical_failures",
+            order: "run_at.desc",
+            limit: "3"
+          });
+          const validations = Array.isArray(valData) ? valData : [];
+          if (validations.length > 0) {
+            context.recent_validations = validations.map((r: any) => ({
+              run_at: r.run_at,
+              passed: Boolean(r.passed),
+              pass_rate: r.pass_rate,
+              gate_action: r.gate_action,
+              critical_failures: Number(r.critical_failures) || 0,
+            }));
+          }
+        } catch (e) {
+          // Graceful degradation if table doesn't exist yet
+        }
+      }
+
+      return context;
     } catch (e) {
       debugLog("[SupabaseStorage] loadContext RPC failed: " + (e instanceof Error ? e.message : String(e)));
       return null as any;

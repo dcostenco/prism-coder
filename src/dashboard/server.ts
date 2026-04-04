@@ -25,7 +25,8 @@ import * as fs from "fs";
 import { getStorage } from "../storage/index.js";
 import { PRISM_USER_ID, SERVER_CONFIG } from "../config.js";
 import { renderDashboardHTML } from "./ui.js";
-import { getAllSettings, setSetting, getSetting } from "../storage/configStorage.js";
+import { computeIntentHealth } from "./intentHealth.js";
+import { getAllSettings, setSetting, getSetting, getSettingSync } from "../storage/configStorage.js";
 import { compactLedgerHandler } from "../tools/compactionHandler.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
 import { buildVaultDirectory } from "../utils/vaultExporter.js";
@@ -1138,6 +1139,44 @@ self.addEventListener('message', (e) => {
           "Cache-Control": "public, max-age=86400"
         });
         return res.end(Buffer.from(pngBase64, "base64"));
+      }
+
+      // ─── API: Intent Health (Feature A) ───
+      // GET /api/intent-health?project=xxx
+      if (url.pathname === "/api/intent-health" && req.method === "GET") {
+        const project = url.searchParams.get("project");
+        if (!project) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "project is required" }));
+        }
+
+        try {
+          const storage = await getStorageSafe();
+          if (!storage) {
+            res.writeHead(503, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "Storage initializing..." }));
+          }
+          // Load 'standard' context to get active_decisions and recent_sessions
+          // Note: API MUST use "standard" level (deep skips recent_sessions, which breaks staleness).
+          const ctx = await storage.loadContext(project, "standard", PRISM_USER_ID) as any;
+
+          if (!ctx) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "Project not found" }));
+          }
+
+          // 1. Fetch configurable threshold (default 30 days, avoiding 7-day panic)
+          const staleThresholdDays = parseInt(getSettingSync("intent_health_stale_threshold_days", "30"), 10) || 30;
+
+          const healthResult = computeIntentHealth(ctx, staleThresholdDays);
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify(healthResult));
+        } catch (err: any) {
+          console.error("[intent-health] Error computing intent health:", err);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Failed to compute intent health" }));
+        }
       }
 
       // ─── 404 ───
