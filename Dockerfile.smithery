@@ -1,32 +1,46 @@
+# Stage 1: Build
+FROM node:22-slim AS builder
+
+WORKDIR /app
+
+# Ensure we have all dependencies including devDependencies for tsc
+ENV NODE_ENV=development
+COPY package*.json ./
+RUN npm install
+
+# Copy source and build
+COPY . .
+RUN npm run build
+
+# Verify build output exists to prevent silent build failures
+RUN ls -la dist/server.js || exit 1
+
+# Stage 2: Production Run
 FROM node:22-slim
 
 WORKDIR /app
 
-# Install curl for the HEALTHCHECK
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Install supergateway globally
 RUN npm install -g supergateway
 
-# Copy package files and install dependencies
+# Copy package files and install PROD dependencies only
+ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm install
 
-# Copy source code and build
-COPY . .
-RUN npm run build
+# Copy compiled files from builder
+COPY --from=builder /app/dist ./dist
 
-# Create data directory for local SQLite storage
+# Create data directory for SQLite
 RUN mkdir -p /root/.prism-mcp
 
-# Expose the SSE port
 EXPOSE 8000
 
-# Health check for the platform
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD curl -f http://localhost:8000/healthz || exit 1
 
-# Run supergateway wrapping the local compiled server
 CMD ["supergateway", \
      "--stdio", "node dist/server.js", \
      "--port", "8000", \
