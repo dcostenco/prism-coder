@@ -23,21 +23,21 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 ## 📖 Table of Contents
 
 - [Why Prism?](#why-prism)
-- [Quick Start](#-quick-start)
-- [The Magic Moment](#-the-magic-moment)
-- [Setup Guides](#-setup-guides)
-- [Universal Import: Bring Your History](#-universal-import-bring-your-history)
-- [What Makes Prism Different](#-what-makes-prism-different)
-- [Data Privacy & Egress](#-data-privacy--egress)
-- [Use Cases](#-use-cases)
-- [What's New](#-whats-new)
-- [How Prism Compares](#-how-prism-compares)
-- [Tool Reference](#-tool-reference)
+- [Quick Start](#quick-start)
+- [The Magic Moment](#the-magic-moment)
+- [Setup Guides](#setup-guides)
+- [Universal Import: Bring Your History](#universal-import-bring-your-history)
+- [What Makes Prism Different](#what-makes-prism-different)
+- [Data Privacy & Egress](#data-privacy--egress)
+- [Use Cases](#use-cases)
+- [What's New](#whats-new)
+- [How Prism Compares](#how-prism-compares)
+- [Tool Reference](#tool-reference)
 - [Environment Variables](#environment-variables)
 - [Architecture](#architecture)
-- [Scientific Foundation](#-scientific-foundation)
-- [Milestones & Roadmap](#-milestones--roadmap)
-- [Troubleshooting FAQ](#-troubleshooting-faq)
+- [Scientific Foundation](#scientific-foundation)
+- [Milestones & Roadmap](#milestones--roadmap)
+- [Troubleshooting FAQ](#troubleshooting-faq)
 
 ---
 
@@ -83,6 +83,8 @@ Add to your MCP client config (`claude_desktop_config.json`, `.cursor/mcp.json`,
 > ⚠️ **Windows / Restricted Shells:** If your MCP client complains that `npx` is not found, use the absolute path to your node binary (e.g. `C:\Program Files\nodejs\npx.cmd`).
 
 **That's it.** Restart your client. All tools are available. The **Mind Palace Dashboard** (the visual UI for your agent's brain) starts automatically at `http://localhost:3000`. You don't need to keep a tab open — the dashboard runs in the background and the MCP tools work with or without it.
+
+> 🔮 **Pro Tip:** Once installed, open **`http://localhost:3000`** in your browser to view the Mind Palace Dashboard — a beautiful, real-time UI of your agent's brain. Explore the Knowledge Graph, Intent Health gauges, and Session Ledger.
 
 > 🔄 **Updating Prism:** `npx -y` caches the package locally. To force an update to the latest version, restart your MCP client — `npx -y` will fetch the newest release automatically. If you're stuck on a stale version, run `npx clear-npx-cache` (or `npm cache clean --force`) before restarting.
 
@@ -369,7 +371,7 @@ Prism can be deployed natively to cloud platforms like [Render](https://render.c
 > ```
 > At the start of every conversation, call session_load_context with project "my-project" before doing any work.
 > ```
-> Claude Code users can use the `.clauderules` auto-load hook shown in the [Setup Guides](#-setup-guides). Prism also has a **server-side fallback** (v5.2.1+) that auto-pushes context after 10 seconds if no load is detected.
+> Claude Code users can use the `.clauderules` auto-load hook shown in the [Setup Guides](#setup-guides). Prism also has a **server-side fallback** (v5.2.1+) that auto-pushes context after 10 seconds if no load is detected.
 
 ---
 
@@ -399,7 +401,7 @@ npx -y prism-mcp-server universal-import --format gemini --path ./gemini_history
 **Option 2 — Dashboard:** Open `localhost:3000`, navigate to the **Import** tab, select the format and file, and click Import. Supports dry-run preview.
 
 ### Why It's Safe to Re-Run
-* **OOM-Safe Streaming:** Processes massive log files line-by-line using `stream-json`.
+* **Memory-Safe Streaming:** Processes massive log files line-by-line using `stream-json` to prevent Out-of-Memory (OOM) crashes.
 * **Idempotent Dedup:** Content-hash prevents duplicate imports on re-run (`skipCount` reported).
 * **Chronological Integrity:** Uses timestamp fallbacks and `requestId` sorting to preserve your memory timeline.
 * **Smart Context Mapping:** Extracts `cwd`, `gitBranch`, and tool usage patterns into searchable metadata.
@@ -449,7 +451,12 @@ OpenTelemetry spans for every MCP tool call, LLM hop, and background worker. Rou
 ### 🌐 Autonomous Web Scholar
 Prism researches while you sleep. A background pipeline searches the web, scrapes articles, synthesizes findings via LLM, and injects results directly into your semantic memory — fully searchable on your next session. Brave Search → Firecrawl scrape → LLM synthesis → Prism ledger. Task-aware, Hivemind-integrated, and zero-config when API keys are missing (falls back to Yahoo + Readability).
 
-### 🔒 Data Privacy & Egress
+### 🏭 Dark Factory — Adversarial Autonomous Pipelines
+When you trigger a Dark Factory pipeline, Prism doesn't just run your task — it fights itself to produce high-quality output. A `PLAN_CONTRACT` step locks a machine-parseable rubric before any code is written. After execution, an **Adversarial Evaluator** (in a fully isolated context) scores the output against the rubric. It cannot pass the Generator without providing exact file and line evidence for every failing criterion. Failed evaluations inject the critique directly into the Generator's retry prompt so it's never flying blind. The result: security issues, regressions, and lazy debug logs caught autonomously — before you ever see the PR. → [See it in action](examples/adversarial-eval-demo/README.md)
+
+---
+
+## 🔒 Data Privacy & Egress
 
 **Where is my data stored?**
 
@@ -477,9 +484,6 @@ Prism will recreate the directory with empty databases on next startup.
 
 **GDPR compliance:** Soft/hard delete (Art. 17), full export in JSON, Markdown, or Obsidian vault `.zip` (Art. 20), API key redaction in exports, per-project TTL retention policies, and immutable audit trail. Enterprise-ready out of the box.
 
-### 🏭 Dark Factory — Adversarial Autonomous Pipelines
-When you trigger a Dark Factory pipeline, Prism doesn't just run your task — it fights itself to produce high-quality output. A `PLAN_CONTRACT` step locks a machine-parseable rubric before any code is written. After execution, an **Adversarial Evaluator** (in a fully isolated context) scores the output against the rubric. It cannot pass the Generator without providing exact file and line evidence for every failing criterion. Failed evaluations inject the critique directly into the Generator's retry prompt so it's never flying blind. The result: security issues, regressions, and lazy debug logs caught autonomously — before you ever see the PR. → [See it in action](examples/adversarial-eval-demo/README.md)
-
 ---
 
 ## 🎯 Use Cases
@@ -487,8 +491,8 @@ When you trigger a Dark Factory pipeline, Prism doesn't just run your task — i
 - **Long-running feature work** — Save state at end of day, restore full context next morning. No re-explaining.
 - **Multi-agent collaboration** — Dev, QA, and PM agents share real-time context without stepping on each other's memory.
 - **Consulting / multi-project** — Switch between client projects with progressive loading: `quick` (~50 tokens), `standard` (~200), or `deep` (~1000+).
-  - **Autonomous execution (v7.4)** — Dark Factory pipeline: `plan → plan_contract → execute → evaluate → verify → finalize`. Generator and evaluator run in isolated roles — the evaluator cannot approve without evidence-bound findings scored against a pre-committed rubric.
-  - **Project health monitoring (v7.5)** — Intent Health Dashboard scores each project 0–100 based on staleness, TODO load, and decision quality — turning silent drift into an actionable signal.
+- **Autonomous execution (v7.4)** — Dark Factory pipeline: `plan → plan_contract → execute → evaluate → verify → finalize`. Generator and evaluator run in isolated roles — the evaluator cannot approve without evidence-bound findings scored against a pre-committed rubric.
+- **Project health monitoring (v7.5)** — Intent Health Dashboard scores each project 0–100 based on staleness, TODO load, and decision quality — turning silent drift into an actionable signal.
 - **Team onboarding** — New team member's agent loads the full project history instantly.
 - **Behavior enforcement** — Agent corrections auto-graduate into permanent `.cursorrules` / `.clauderules` rules.
 - **Offline / air-gapped** — Full SQLite local mode + Ollama LLM adapter. Zero internet dependency.
@@ -508,8 +512,6 @@ Return a merged summary.
 ```
 
 Then continue a specific thread with a follow-up message to the selected agent, such as deeper refresh-token edge-case analysis.
-
----
 
 ---
 
@@ -925,7 +927,7 @@ Prism is a **stdio-based MCP server** that manages persistent agent memory. Here
 
 ### Auto-Load Architecture
 
-Each MCP client has its own mechanism for ensuring Prism context loads on session start. See the platform-specific [Setup Guides](#-setup-guides) above for detailed instructions:
+Each MCP client has its own mechanism for ensuring Prism context loads on session start. See the platform-specific [Setup Guides](#setup-guides) above for detailed instructions:
 
 - **Claude Code** — Lifecycle hooks (`SessionStart` / `Stop`)
 - **Gemini / Antigravity** — Three-layer architecture (User Rules + AGENTS.md + Startup Skill)
@@ -1013,13 +1015,13 @@ A: Run `npm run build && npm test`, then open the Mind Palace dashboard (`localh
 ### 💡 Known Limitations & Quirks
 
 - **LLM-dependent features require an API key.** Semantic search, Morning Briefings, auto-compaction, and VLM captioning need a `GOOGLE_API_KEY` (your Gemini API key) or equivalent provider key. Without one, Prism falls back to keyword-only search (FTS5).
-- **Auto-load is model- and client-dependent.** Session auto-loading relies on both the LLM following system prompt instructions *and* the MCP client completing tool registration before the model's first turn. Prism provides platform-specific [Setup Guides](#-setup-guides) and a server-side fallback (v5.2.1) that auto-pushes context after 10 seconds.
+- **Auto-load is model- and client-dependent.** Session auto-loading relies on both the LLM following system prompt instructions *and* the MCP client completing tool registration before the model's first turn. Prism provides platform-specific [Setup Guides](#setup-guides) and a server-side fallback (v5.2.1) that auto-pushes context after 10 seconds.
 - **MCP client race conditions.** Some MCP clients may not finish tool enumeration before the model generates its first response, causing transient `unknown_tool` errors. This is a client-side timing issue — Prism's server completes the MCP handshake in ~60ms. Workaround: the server-side auto-push fallback and the startup skill's retry logic.
 - **No real-time sync without Supabase.** Local SQLite mode is single-machine only. Multi-device or team sync requires a Supabase backend.
 - **Embedding quality varies by provider.** Gemini `text-embedding-004` and OpenAI `text-embedding-3-small` produce high-quality 768-dim vectors. Prism passes `dimensions: 768` via the Matryoshka API for OpenAI models (native output is 1536-dim; this truncation is lossless and outperforms ada-002 at full 1536 dims). Ollama embeddings (e.g., `nomic-embed-text`) are usable but may reduce retrieval accuracy.
 - **Dashboard is HTTP-only.** The Mind Palace dashboard at `localhost:3000` does not support HTTPS. For remote access, use a reverse proxy (nginx/Caddy) or SSH tunnel. Basic auth is available via `PRISM_DASHBOARD_USER` / `PRISM_DASHBOARD_PASS`.
 - **Long-lived clients can accumulate zombie processes.** MCP clients that run for extended periods (e.g., Claude CLI) may leave orphaned Prism server processes. The lifecycle manager detects true orphans (PPID=1) but allows coexistence for active parent processes. Use `PRISM_INSTANCE` to isolate instances across clients.
-- **Migration is one-way.** Universal History Migration imports sessions *into* Prism but does not export back to Claude/Gemini/OpenAI formats. Use `session_export_memory` for portable JSON/Markdown export, or the `vault` format for Obsidian/Logseq-compatible `.zip` archives.
+- **Migration is one-way.** Universal Import imports sessions *into* Prism but does not export back to Claude/Gemini/OpenAI formats. Use `session_export_memory` for portable JSON/Markdown export, or the `vault` format for Obsidian/Logseq-compatible `.zip` archives.
 - **Export ceiling at 10,000 ledger entries.** The `session_export_memory` tool and the dashboard export button cap vault/JSON exports at 10,000 entries per project as an OOM guard. Projects exceeding this limit should use per-project exports and time-based filtering to stay within the ceiling. This limit does not affect search or context loading.
 - **No Windows CI testing.** Prism is developed and tested on macOS/Linux. It should work on Windows via Node.js, but edge cases (file paths, PID locks) may surface.
 
