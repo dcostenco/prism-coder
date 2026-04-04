@@ -1,5 +1,5 @@
 /**
- * LLM Provider Factory — Split Provider Tests (v4.4 Close-Out)
+ * LLM Provider Factory — Split Provider Tests (v4.5 Voyage AI)
  *
  * Validates the factory's text_provider + embedding_provider composition logic
  * without making real API calls. Uses _resetLLMProvider() between tests.
@@ -8,6 +8,9 @@
  *   text_provider      → governs generateText()
  *   embedding_provider → governs generateEmbedding() ("auto" follows text_provider,
  *                        except anthropic→auto routes embeddings to Gemini)
+ *
+ * v4.5 Voyage AI:
+ *   embedding_provider=voyage → uses VoyageAdapter (Anthropic-recommended pairing)
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -15,6 +18,7 @@ import { _resetLLMProvider, getLLMProvider } from "../../src/utils/llm/factory.j
 import { GeminiAdapter } from "../../src/utils/llm/adapters/gemini.js";
 import { OpenAIAdapter } from "../../src/utils/llm/adapters/openai.js";
 import { AnthropicAdapter } from "../../src/utils/llm/adapters/anthropic.js";
+import { VoyageAdapter } from "../../src/utils/llm/adapters/voyage.js";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 // We mock getSettingSync so tests don't need a real SQLite DB.
@@ -48,8 +52,20 @@ vi.mock("../../src/utils/llm/adapters/anthropic.js", () => ({
   }),
 }));
 
+vi.mock("../../src/utils/llm/adapters/voyage.js", () => ({
+  VoyageAdapter: vi.fn(function (this: any) {
+    this.generateEmbedding = vi.fn();
+    // generateText intentionally throws in the real adapter;
+    // the mock omits it to test routing logic, not the error behavior.
+    this.generateText = vi.fn().mockRejectedValue(
+      new Error("Voyage AI does not support text generation")
+    );
+  }),
+}));
+
 import { getSettingSync } from "../../src/storage/configStorage.js";
 const mockGetSettingSync = vi.mocked(getSettingSync);
+const mockVoyageAdapter = vi.mocked(VoyageAdapter);
 
 // Helper: mock both text_provider and embedding_provider together
 function mockProviders(text: string, embedding = "auto", extras: Record<string, string> = {}) {
@@ -139,6 +155,48 @@ describe("LLM Provider Factory — Split Architecture", () => {
     expect(GeminiAdapter).toHaveBeenCalledOnce();  // text
     expect(OpenAIAdapter).toHaveBeenCalledOnce();  // embedding
     expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("Split provider: text=gemini, embedding=openai"));
+    infoSpy.mockRestore();
+  });
+
+  // ── Voyage AI embedding provider ─────────────────────────────────────────
+
+  it("Anthropic text + Voyage embeddings → AnthropicAdapter + VoyageAdapter", () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    mockProviders("anthropic", "voyage", {
+      anthropic_api_key: "sk-ant-test",
+      voyage_api_key: "pa-test",
+    });
+    getLLMProvider();
+    expect(AnthropicAdapter).toHaveBeenCalledOnce(); // text
+    expect(mockVoyageAdapter).toHaveBeenCalledOnce(); // embedding
+    expect(GeminiAdapter).not.toHaveBeenCalled();
+    expect(OpenAIAdapter).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Split provider: text=anthropic, embedding=voyage")
+    );
+    infoSpy.mockRestore();
+  });
+
+  it("Gemini text + Voyage embeddings → GeminiAdapter + VoyageAdapter", () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    mockProviders("gemini", "voyage", { voyage_api_key: "pa-test" });
+    getLLMProvider();
+    expect(GeminiAdapter).toHaveBeenCalledOnce();     // text
+    expect(mockVoyageAdapter).toHaveBeenCalledOnce(); // embedding
+    expect(OpenAIAdapter).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Split provider: text=gemini, embedding=voyage")
+    );
+    infoSpy.mockRestore();
+  });
+
+  it("Anthropic + auto auto-bridge message mentions Voyage as recommended option", () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    mockProviders("anthropic", "auto", { anthropic_api_key: "sk-ant-test" });
+    getLLMProvider();
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining("embedding_provider=voyage")
+    );
     infoSpy.mockRestore();
   });
 

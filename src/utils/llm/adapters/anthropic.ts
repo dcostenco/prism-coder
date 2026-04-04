@@ -107,8 +107,11 @@ export class AnthropicAdapter implements LLMProvider {
     throw new Error(
       "AnthropicAdapter does not support text embeddings. " +
       "Anthropic has no native embedding API. " +
-      "In the Mind Palace dashboard, set 'Embedding Provider' to Gemini or OpenAI/Ollama. " +
-      "When using Ollama locally, 'nomic-embed-text' is a free, high-quality option."
+      "Their official recommendation is Voyage AI (voyage-3, voyage-3-lite). " +
+      "In the Mind Palace dashboard, set 'Embedding Provider' to: " +
+      "'voyage' (Anthropic-recommended, set VOYAGE_API_KEY), " +
+      "'openai' (OpenAI cloud or local Ollama with nomic-embed-text), " +
+      "or 'gemini' (Google AI, set GOOGLE_API_KEY)."
     );
   }
 
