@@ -8,7 +8,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-![Prism Mind Palace Demo](docs/mind-palace-demo.webp)
+![Prism Mind Palace Dashboard](docs/mind-palace-dashboard.png)
 
 **Your AI agent forgets everything between sessions. Prism fixes that.**
 
@@ -403,7 +403,7 @@ A gorgeous glassmorphism UI at `localhost:3000` that lets you see exactly what y
 - **Morning Briefing** — AI-synthesized action plan after 4+ hours away
 - **Brain Health** — memory integrity scan with one-click auto-repair
 
-![Mind Palace Dashboard](docs/mind-palace-dashboard.png)
+
 
 ### 🧬 10× Memory Compression
 Powered by a pure TypeScript port of Google's TurboQuant (inspired by Google's ICLR research), Prism compresses 768-dim embeddings from **3,072 bytes → ~400 bytes** — enabling decades of session history on a standard laptop. No native modules. No vector database required.
