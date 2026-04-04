@@ -59,6 +59,9 @@ repomix-*.txt
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # Local debug/scratch scripts
 test-mcp.js
