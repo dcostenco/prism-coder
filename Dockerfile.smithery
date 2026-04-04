@@ -1,9 +1,20 @@
-FROM node:22-slim# test change
+FROM node:22-slim
 
 WORKDIR /app
 
-# Install prism-mcp-server and supergateway globally
-RUN npm install -g prism-mcp-server supergateway
+# Install curl for the HEALTHCHECK
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Install supergateway globally
+RUN npm install -g supergateway
+
+# Copy package files and install dependencies
+COPY package*.json ./
+RUN npm install
+
+# Copy source code and build
+COPY . .
+RUN npm run build
 
 # Create data directory for local SQLite storage
 RUN mkdir -p /root/.prism-mcp
@@ -15,9 +26,9 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD curl -f http://localhost:8000/healthz || exit 1
 
-# Run supergateway wrapping prism-mcp-server stdio as SSE
+# Run supergateway wrapping the local compiled server
 CMD ["supergateway", \
-     "--stdio", "prism-mcp-server", \
+     "--stdio", "node dist/server.js", \
      "--port", "8000", \
      "--healthEndpoint", "/healthz", \
      "--cors"]
