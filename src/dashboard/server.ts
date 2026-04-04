@@ -23,7 +23,7 @@ import * as os from "os";
 import * as fs from "fs";
 
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { createServer } from "../server.js";
+import { createServer, getAllPossibleTools } from "../server.js";
 import { getStorage } from "../storage/index.js";
 import { PRISM_USER_ID, SERVER_CONFIG } from "../config.js";
 import { renderDashboardHTML } from "./ui.js";
@@ -228,6 +228,104 @@ return false;}
       return res.end(JSON.stringify({ ok: true }));
     }
 
+    // ─── API: Smithery MCP Server Card (v7.4) ───
+    // Smithery explicitly requests this file to skip slow stdio scanning.
+    // MUST BE PLACED HERE (above Auth Gate) so it is a fully public manifest.
+    if (reqUrl.pathname === "/.well-known/mcp/server-card.json" && req.method === "GET") {
+      try {
+        const tools = getAllPossibleTools();
+
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600"
+        });
+
+        return res.end(JSON.stringify({
+          $schema: "https://smithery.ai/schema/server-card.json",
+          serverInfo: {
+            name: SERVER_CONFIG.name,
+            version: SERVER_CONFIG.version,
+          },
+          authentication: {
+            required: false
+          },
+          configSchema: {
+            type: "object",
+            required: [],
+            properties: {
+              braveApiKey: {
+                type: "string",
+                title: "Brave Search API Key",
+                description: "API key for Brave Search (powers web search and research tools). Get one at https://brave.com/search/api/"
+              },
+              googleApiKey: {
+                type: "string",
+                title: "Google AI API Key",
+                description: "API key for Google AI Studio / Gemini (powers synthesis, embeddings, paper analysis). Get one at https://aistudio.google.com/apikey"
+              },
+              storage: {
+                type: "string",
+                title: "Storage Backend",
+                description: "Storage backend: 'local' (SQLite, zero-config) or 'supabase' (PostgreSQL, multi-device)",
+                default: "local",
+                enum: ["local", "supabase"]
+              },
+              supabaseUrl: {
+                type: "string",
+                title: "Supabase URL",
+                description: "Your Supabase project URL (required if storage is 'supabase')"
+              },
+              supabaseServiceKey: {
+                type: "string",
+                title: "Supabase Service Key",
+                description: "Your Supabase service role key (required if storage is 'supabase')"
+              },
+              firecrawlApiKey: {
+                type: "string",
+                title: "Firecrawl API Key",
+                description: "Optional: API key for Firecrawl (enables Web Scholar pipeline). Get one at https://www.firecrawl.dev/"
+              },
+              braveAnswersApiKey: {
+                type: "string",
+                title: "Brave Answers API Key",
+                description: "Optional: Separate key for AI-grounded answers (brave_answers tool)"
+              },
+              prismEnableHivemind: {
+                type: "boolean",
+                title: "Enable Multi-Agent Hivemind",
+                description: "Set to true to enable multi-agent coordination tools.",
+                default: false
+              },
+              prismDarkFactoryEnabled: {
+                type: "boolean",
+                title: "Enable Dark Factory",
+                description: "Set to true to enable autonomous evaluation pipelines.",
+                default: false
+              },
+              prismTaskRouterEnabled: {
+                type: "boolean",
+                title: "Enable Task Router",
+                description: "Set to true to allow Prism to route tasks to local Ollama agents.",
+                default: false
+              }
+            }
+          },
+          tools: tools.map(t => ({
+            name: t.name,
+            description: t.description,
+            inputSchema: t.inputSchema
+          })),
+          prompts: [],
+          resources: []
+        }));
+      } catch (err: any) {
+        console.error("[Dashboard] Error generating server card:", err);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: err.message || "Failed to generate server card" }));
+      }
+    }
+
     // ─── v5.1: Auth gate — block unauthenticated requests ───
     if (AUTH_ENABLED && !isAuthenticated(req, authConfig)) {
       // For API calls, return 401 JSON
@@ -279,6 +377,7 @@ return false;}
         await transport.handlePostMessage(req, res);
         return;
       }
+
 
       // ─── Serve the Dashboard UI ───
       if (url.pathname === "/" || url.pathname === "/index.html") {

@@ -343,7 +343,19 @@ export function notifyResourceUpdate(project: string, server: Server) {
  *   - resources: memory://{project}/handoff — paperclip-attachable session state
  *                with subscribe support for live refresh
  */
-export function createServer() {
+export function getAllPossibleTools(): Tool[] {
+  return [
+    ...BASE_TOOLS,
+    ...buildSessionMemoryTools([]),
+    ...AGENT_REGISTRY_TOOLS,
+    SESSION_TASK_ROUTE_TOOL,
+    SESSION_START_PIPELINE_TOOL,
+    SESSION_CHECK_PIPELINE_STATUS_TOOL,
+    SESSION_ABORT_PIPELINE_TOOL
+  ];
+}
+
+export function getAvailableTools(): Tool[] {
   // ─── v4.1 FIX: Auto-Load via Dynamic Tool Descriptions ────────
   // Read auto-load projects EXCLUSIVELY from dashboard config
   // (available after initConfigStorage() in startServer).
@@ -364,22 +376,19 @@ export function createServer() {
     console.error(`[Prism] Auto-load projects (dashboard): ${autoloadList.join(', ')}`);
   }
 
-  // Build the dynamic tool list with auto-load instruction injected
   const SESSION_MEMORY_TOOLS = buildSessionMemoryTools(autoloadList);
 
-  // Combine: always list ALL tools so scanners (Glama, Smithery, MCP Registry)
-  // can enumerate the full capability set. Runtime guards in the CallTool handler
-  // still prevent execution without valid Supabase credentials.
-  const ALL_TOOLS: Tool[] = [
+  return [
     ...BASE_TOOLS,
     ...SESSION_MEMORY_TOOLS,
-    // v3.0: Agent Hivemind tools — only when PRISM_ENABLE_HIVEMIND=true
     ...(PRISM_ENABLE_HIVEMIND ? AGENT_REGISTRY_TOOLS : []),
-    // v7.1: Task Router tool — only when PRISM_TASK_ROUTER_ENABLED=true
     ...(getSettingSync("task_router_enabled", String(PRISM_TASK_ROUTER_ENABLED_ENV)) === "true" ? [SESSION_TASK_ROUTE_TOOL] : []),
-    // v7.3: Dark Factory pipeline tools — only when PRISM_DARK_FACTORY_ENABLED=true
     ...(PRISM_DARK_FACTORY_ENABLED ? [SESSION_START_PIPELINE_TOOL, SESSION_CHECK_PIPELINE_STATUS_TOOL, SESSION_ABORT_PIPELINE_TOOL] : []),
   ];
+}
+
+export function createServer() {
+  const ALL_TOOLS = getAvailableTools();
 
   const server = new Server(
     {
