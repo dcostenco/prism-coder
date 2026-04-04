@@ -26,7 +26,7 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [Quick Start](#-quick-start)
 - [The Magic Moment](#-the-magic-moment)
 - [Setup Guides](#-setup-guides)
-- [Universal Import](#-universal-import-bring-your-history)
+- [Universal Import: Bring Your History](#-universal-import-bring-your-history)
 - [What Makes Prism Different](#-what-makes-prism-different)
 - [Data Privacy & Egress](#-data-privacy--egress)
 - [Use Cases](#-use-cases)
@@ -347,7 +347,7 @@ Then add to your MCP config:
 
 ---
 
-## 📥 Universal Import — Bring Your History
+## 📥 Universal Import: Bring Your History
 
 Switching to Prism? Don't leave months of AI session history behind. Prism can **ingest historical sessions from Claude Code, Gemini, and OpenAI** and give your Mind Palace an instant head start — no manual re-entry required.
 
