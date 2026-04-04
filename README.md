@@ -479,6 +479,7 @@ Prism will recreate the directory with empty databases on next startup.
 **What leaves your machine?**
 - **Local mode (default):** Nothing. Zero network calls. All data is on-disk SQLite.
 - **With `GOOGLE_API_KEY`:** Text snippets are sent to Gemini for embedding generation, summaries, and Morning Briefings. No session data is stored on Google's servers beyond the API call.
+- **With `VOYAGE_API_KEY` / `OPENAI_API_KEY`:** Text snippets are sent to providers if selected as your embedding endpoints.
 - **With `BRAVE_API_KEY` / `FIRECRAWL_API_KEY`:** Web Scholar queries are sent to Brave/Firecrawl for search and scraping.
 - **With Supabase:** Session data syncs to your own Supabase instance (you control the Postgres database).
 
@@ -839,6 +840,8 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 | `PRISM_ENABLE_HIVEMIND` | No | `"true"` to enable multi-agent tools — restart required |
 | `PRISM_INSTANCE` | No | Instance name for multi-server PID isolation |
 | `GOOGLE_API_KEY` | No | Gemini — enables semantic search, Briefings, compaction |
+| `VOYAGE_API_KEY` | No | Voyage AI — optional premium embedding provider |
+| `OPENAI_API_KEY` | No | OpenAI — optional proxy model and embedding provider |
 | `BRAVE_ANSWERS_API_KEY` | No | Separate Brave Answers key |
 | `SUPABASE_URL` | If cloud | Supabase project URL |
 | `SUPABASE_KEY` | If cloud | Supabase anon/service key |
