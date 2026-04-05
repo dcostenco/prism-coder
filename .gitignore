@@ -33,6 +33,7 @@ gmail_snapshot.json
 secure/
 restore/
 memory/
+!src/memory/
 bcba/
 .agent/
 
