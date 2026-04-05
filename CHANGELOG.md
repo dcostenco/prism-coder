@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.8.2] - 2026-04-04
+
+### Fixed
+- **Docker / CI Build Failures** — Fixed an overly broad `.gitignore` rule that caused `src/memory/spreadingActivation.ts` to be excluded from version control, resulting in `TS2307` compiler errors during clean builds (like on Glama or Smithery).
+
 ## [7.8.0] - 2026-04-04 — Cognitive Architecture
 
 > **The biggest leap forward yet.** Prism moves beyond flat vector search into a true cognitive architecture inspired by human brain mechanics. Your agents don't just remember; they learn.
