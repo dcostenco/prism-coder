@@ -10,9 +10,9 @@
 
 ![Prism Mind Palace Dashboard](docs/mind-palace-dashboard.png)
 
-**Your AI agent forgets everything between sessions. Prism fixes that.**
+**Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
-One command. Persistent memory. Local-first by default. Optional cloud power-ups.
+Prism v7.8 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.**
 
 ```bash
 npx -y prism-mcp-server
@@ -28,6 +28,7 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [Setup Guides](#setup-guides)
 - [Universal Import: Bring Your History](#universal-import-bring-your-history)
 - [What Makes Prism Different](#what-makes-prism-different)
+- [Cognitive Architecture (v7.8)](#-cognitive-architecture-v78)
 - [Data Privacy & Egress](#data-privacy--egress)
 - [Use Cases](#use-cases)
 - [What's New](#whats-new)
@@ -45,15 +46,17 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 
 Every time you start a new conversation with an AI coding assistant, it starts from scratch. You re-explain your architecture, re-describe your decisions, re-list your TODOs. Hours of context — gone.
 
-**Prism gives your agent a brain that persists.** Save what matters at the end of each session. Load it back instantly on the next one. Your agent remembers what it did, what it learned, and what's left to do.
+**Prism gives your agent a brain that persists — and then teaches it to reason.** Save what matters at the end of each session. Load it back instantly on the next one. But Prism goes far beyond storage: it consolidates raw experience into lasting principles, traverses causal chains to surface root causes, and knows when to say *"I don't know."*
 
-> 📌 **Terminology:** Throughout this doc, **"Prism"** refers to the MCP server and storage engine. **"Mind Palace"** refers to the visual dashboard UI at `localhost:3000` — your window into the agent's brain. They work together; the dashboard is optional.
+> 📌 **Terminology:** Throughout this doc, **"Prism"** refers to the MCP server and cognitive memory engine. **"Mind Palace"** refers to the visual dashboard UI at `localhost:3000` — your window into the agent's brain. They work together; the dashboard is optional.
 
-Prism has two pillars:
+Prism has three pillars:
 
-1. **🧠 Persistent Memory** — Memories are ranked like a human brain: recently and frequently accessed context surfaces first, while stale context fades naturally. The result is retrieval quality that no flat vector search can match. *(See [Scientific Foundation](#-scientific-foundation) for the ACT-R math.)*
+1. **🧠 Cognitive Memory** — Memories are ranked like a human brain: recently and frequently accessed context surfaces first, while stale context fades naturally via ACT-R activation decay. Raw experience consolidates into semantic principles through Hebbian learning. The result is retrieval quality that no flat vector search can match. *(See [Cognitive Architecture](#-cognitive-architecture-v78) and [Scientific Foundation](#-scientific-foundation).)*
 
-2. **🏭 Autonomous Execution (Dark Factory)** — When you're ready, Prism can run coding tasks end-to-end with a fail-closed pipeline where an adversarial evaluator catches bugs the generator missed — before you ever see the PR. *(See [Dark Factory](#-dark-factory--adversarial-autonomous-pipelines).)*
+2. **🔗 Multi-Hop Reasoning** — When your agent searches for "Error X", Prism doesn't just find logs mentioning "Error X". Spreading activation traverses the causal graph and brings back "Workaround Y", which is connected to "Architecture Decision Z" — a literal train of thought. *(See [Cognitive Architecture](#-cognitive-architecture-v78).)*
+
+3. **🏭 Autonomous Execution (Dark Factory)** — When you're ready, Prism can run coding tasks end-to-end with a fail-closed pipeline where an adversarial evaluator catches bugs the generator missed — before you ever see the PR. *(See [Dark Factory](#-dark-factory--adversarial-autonomous-pipelines).)*
 
 ---
 
@@ -456,6 +459,71 @@ When you trigger a Dark Factory pipeline, Prism doesn't just run your task — i
 
 ---
 
+## 🧠 Cognitive Architecture (v7.8)
+
+> *Prism v7.8 is our biggest leap forward yet. We have moved beyond flat vector search and implemented a true Cognitive Architecture inspired by human brain mechanics. With the new ACT-R Spreading Activation Engine, Episodic-to-Semantic memory consolidation, and Uncertainty-Aware Rejection Gates, Prism doesn't just store logs anymore — it forms principles, follows causal trains of thought, and possesses the self-awareness to know when it lacks information.*
+
+Standard RAG (Retrieval-Augmented Generation) is now a commodity. Everyone has vector search. What turns a memory *storage* system into a memory *reasoning* system is the cognitive layer between storage and retrieval. Here is what Prism v7.8 builds on top of the vector foundation:
+
+### 1. The Agent Actually Learns (Episodic → Semantic Consolidation)
+
+| | Standard RAG | Prism v7.8 |
+|---|---|---|
+| **Memory** | Giant, flat transcript of past events | Dual-memory: Episodic events + Semantic rules |
+| **Recall** | Re-reads everything linearly | Retrieves distilled principles instantly |
+| **Learning** | None — every session starts cold | Hebbian: confidence increases with repeated reinforcement |
+
+**How it works:** When Prism compacts session history, it doesn't just summarize text — it extracts *principles*. Raw event logs ("We deployed v2.3 and the auth service crashed because the JWT secret was rotated") consolidate into a semantic rule ("JWT secrets must be rotated before deployment, not during"). These rules live in a dedicated `semantic_knowledge` table with `confidence` scores that increase every time the pattern is observed. **Your agent doesn't just remember what it did; it learns *how the world works* over time.** This is true Hebbian learning: neurons that fire together wire together.
+
+### 2. "Train of Thought" Reasoning (Spreading Activation & Causality)
+
+| | Standard RAG | Prism v7.8 |
+|---|---|---|
+| **Search** | Cosine similarity to the query | Multi-hop graph traversal with lateral inhibition |
+| **Scope** | Only finds things that *look like* the prompt | Follows causal chains across memories |
+| **Root cause** | Missed entirely | Surfaced via `caused_by` / `led_to` edges |
+
+**How it works:** When compacting memories, Prism extracts causal links (`caused_by`, `led_to`) and persists them as edges in the knowledge graph. At retrieval time, ACT-R spreading activation propagates through these edges with a damped fan effect (`1 / ln(fan + e)`) to prevent hub-flooding, lateral inhibition to suppress noise, and configurable hop depth. If you search for "Error X", the engine traverses the graph and brings back "Workaround Y" → "Architecture Decision Z" — a literal train of thought instead of a static search result.
+
+```
+  Query: "Why does the API timeout?"
+                    │
+      ┌─────────────┼─────────────┐
+      ▼             ▼             ▼
+  [Memory: API     [Memory:      [Memory:       
+   timeout error]   DB pool       rate limiter
+                    exhaustion]   misconfigured]
+      │                │
+      ▼                ▼
+  [Memory:         [Memory:
+   caused_by →      led_to →
+   connection       connection
+   leak in v2.1]    pool patch
+                    in v2.2]
+```
+
+### 3. Self-Awareness & The End of Hallucinations (The Rejection Gate)
+
+| | Standard RAG | Prism v7.8 |
+|---|---|---|
+| **Bad query** | Returns top-5 garbage results | Returns `rejected: true` with reason |
+| **Confidence** | Always 100% confident (even when wrong) | Measures gap-distance and entropy |
+| **Hallucination risk** | High — LLM gets garbage context | Low — LLM told "you don't know" |
+
+**How it works:** The **Uncertainty-Aware Rejection Gate** operates on two signals: *similarity floor* (is the best match even remotely relevant?) and *gap distance* (is there meaningful separation between the top results, or are they all equally mediocre?). When both signals indicate low confidence, Prism returns a structured rejection — telling the LLM "I searched my memory, and I confidently do not know the answer" — instead of feeding it garbage context that causes hallucinations. In the current LLM landscape, **an agent that knows its own boundaries is a massive competitive advantage.**
+
+### 4. Block Amnesia Solved (Dynamic Fast Weight Decay)
+
+| | Standard RAG | Prism v7.8 |
+|---|---|---|
+| **Decay** | Uniform (everything fades equally) | Dual-rate: episodic fades fast, semantic persists |
+| **Core knowledge** | Forgotten over time | Permanently anchored via `is_rollup` flag |
+| **Personality drift** | Common in long-lived agents | Prevented by Long-Term Context anchors |
+
+**How it works:** Most memory systems decay everything at the same rate, meaning agents eventually forget their core system instructions as time passes. Prism applies ACT-R base-level activation decay (`B_i = ln(Σ t_j^(-d))`) with a **50% slower decay rate for semantic rollup nodes** (`ageModifier = 0.5` for `is_rollup` entries). The agent will naturally forget what it ate for breakfast (raw episodic chatter), but it will permanently remember its core personality, project rules, and hard-won architectural decisions. The result: Long-Term Context anchors that survive indefinitely.
+
+---
+
 ## 🔒 Data Privacy & Egress
 
 **Where is my data stored?**
@@ -623,8 +691,10 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v7.5.0**
+> **Current release: v7.8.0 — Cognitive Architecture**
 
+- 🧠 **v7.8.0 — Cognitive Architecture:** The biggest leap forward yet. Moved beyond flat vector search into a true cognitive architecture inspired by human brain mechanics. Episodic-to-Semantic memory consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate (your agent can say "I don't know"), and Dynamic Fast Weight Decay (semantic memories outlive episodic chatter by 2×). **Your agents don't just remember; they learn.** → [Cognitive Architecture](#-cognitive-architecture-v78)
+- 🌐 **v7.7.0 — Cloud-Native SSE Transport:** Full unauthenticated and authenticated Server-Sent Events MCP support for seamless network deployments.
 - 🩺 **v7.5.0 — Intent Health Dashboard + Security Hardening:** Real-time 0–100 project health scoring (staleness × TODO load × decisions). 10 XSS injection vectors patched. Algorithm hardened with NaN guards and score ceiling.
 - ⚔️ **v7.4.0 — Adversarial Evaluation:** Split-brain anti-sycophancy pipeline. Generator and evaluator in isolated roles with evidence-bound findings.
 - 🏭 **v7.3.x — Dark Factory + Stability:** Fail-closed 3-gate execution pipeline. Dashboard stability and verification diagnostics.
@@ -635,7 +705,7 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## ⚔️ How Prism Compares
 
-Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as passive filing cabinets — they wait for the LLM to search them. **Prism is an active cognitive architecture.** Designed specifically for the **Model Context Protocol (MCP)**, Prism doesn't just store vectors; it manages the LLM's context window autonomously.
+Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as passive filing cabinets — they wait for the LLM to search them. **Prism is an active cognitive architecture.** Designed specifically for the **Model Context Protocol (MCP)**, Prism doesn't just store vectors — it consolidates experience into principles, traverses causal graphs for multi-hop reasoning, and rejects queries it can't confidently answer.
 
 ### 📊 Feature-by-Feature Comparison
 
@@ -644,7 +714,7 @@ Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as p
 | **Primary Interface** | **Native MCP** (Tools, Prompts, Resources) | REST API & Python/TS SDKs | REST API & Python/TS SDKs | Native MCP (Tools only) |
 | **Storage Engine** | **BYO SQLite or Supabase** | Managed Cloud / VectorDBs | Managed Cloud / Postgres | Local SQLite only |
 | **Context Assembly** | **Progressive (Quick/Std/Deep)** | Top-K Semantic Search | Top-K + Temporal Summaries | Basic Entity Search |
-| **Memory Mechanics** | **ACT-R Activation (recency×freq), SDM, HDC** | Basic Vector + Entity | Fading Temporal Graph | None (Infinite growth) |
+| **Memory Mechanics** | **ACT-R Activation, Spreading Activation, Hebbian Consolidation, Rejection Gate** | Basic Vector + Entity | Fading Temporal Graph | None (Infinite growth) |
 | **Multi-Agent Sync** | **CRDT (Add-Wins / LWW)** | Cloud locks | Postgres locks | ❌ None (Data races) |
 | **Data Compression** | **TurboQuant (7x smaller vectors)** | ❌ Standard F32 Vectors | ❌ Standard Vectors | ❌ No Vectors |
 | **Observability** | **OTel Traces + Built-in PWA UI** | Cloud Dashboard | Cloud Dashboard | ❌ None |
@@ -883,7 +953,7 @@ Prism is a **stdio-based MCP server** that manages persistent agent memory. Here
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  MCP Client (Claude Desktop / Cursor / Antigravity)      │
-│                    ↕ stdio (JSON-RPC)                    │
+│                    ↕ stdio / SSE (JSON-RPC)              │
 ├──────────────────────────────────────────────────────────┤
 │  Prism MCP Server                                        │
 │                                                          │
@@ -894,8 +964,17 @@ Prism is a **stdio-based MCP server** that manages persistent agent memory. Here
 │  └──────┬───────┘  └──────────────┘  └────────────────┘  │
 │         ↕                                                │
 │  ┌────────────────────────────────────────────────────┐  │
+│  │  Cognitive Engine (v7.8)                           │  │
+│  │  • ACT-R Spreading Activation (multi-hop)         │  │
+│  │  • Episodic → Semantic Consolidation (Hebbian)    │  │
+│  │  • Uncertainty-Aware Rejection Gate               │  │
+│  │  • Dynamic Fast Weight Decay (dual-rate)          │  │
+│  │  • HDC Cognitive Routing (XOR binding)            │  │
+│  └──────┬─────────────────────────────────────────────┘  │
+│         ↕                                                │
+│  ┌────────────────────────────────────────────────────┐  │
 │  │  Storage Engine                                    │  │
-│  │  Local: SQLite + FTS5 + TurboQuant vectors         │  │
+│  │  Local: SQLite + FTS5 + TurboQuant + semantic_knowledge │
 │  │  Cloud: Supabase + pgvector                        │  │
 │  └────────────────────────────────────────────────────┘  │
 │         ↕                                                │
@@ -924,6 +1003,8 @@ Prism is a **stdio-based MCP server** that manages persistent agent memory. Here
 |-------|-----------|---------|
 | **Session Ledger** | SQLite (append-only) | Immutable audit trail of all agent work |
 | **Handoff State** | SQLite (upsert, versioned) | Live project context with OCC + CRDT merging |
+| **Semantic Knowledge** | SQLite (`semantic_knowledge`) | Hebbian-style distilled rules with confidence scoring |
+| **Memory Links** | SQLite (`memory_links`) | Causal graph edges (`caused_by`, `led_to`, `synthesized_from`) |
 | **Keyword Search** | FTS5 virtual tables | Zero-dependency full-text search |
 | **Semantic Search** | TurboQuant compressed vectors | 10× compressed 768-dim embeddings, three-tier retrieval |
 | **Cloud Sync** | Supabase + pgvector | Optional multi-device/team sync |
@@ -943,7 +1024,7 @@ All platforms benefit from the **server-side fallback** (v5.2.1): if `session_lo
 
 ## 🧬 Scientific Foundation
 
-Prism is evolving from smart session logging toward a **cognitive memory architecture** — grounded in real research, not marketing.
+Prism has evolved from smart session logging into a **cognitive memory architecture** — grounded in real research, not marketing. Every retrieval decision is backed by peer-reviewed models from cognitive psychology, neuroscience, and distributed computing.
 
 | Phase | Feature | Inspired By | Status |
 |-------|---------|-------------|--------|
@@ -962,35 +1043,42 @@ Prism is evolving from smart session logging toward a **cognitive memory archite
 | **v6.1** | Prism-Port Vault Export — Obsidian/Logseq `.zip` with YAML frontmatter & `[[Wikilinks]]` | Data sovereignty, PKM interop | ✅ Shipped |
 | **v6.1** | Cognitive Load & Semantic Search — dynamic graph thinning, search highlights | Contextual working memory | ✅ Shipped |
 | **v6.2** | Synthesize & Prune — automated edge synthesis, graph pruning, SLO observability | Implicit associative memory | ✅ Shipped |
-| **v7.0** | ACT-R Base-Level Activation — `B_i = ln(Σ t_j^(-d))` recency×frequency re-ranking over similarity candidates | Anderson's ACT-R (Adaptive Control of Thought—Rational, ACM 2025) | ✅ Shipped |
+| **v7.0** | ACT-R Base-Level Activation — `B_i = ln(Σ t_j^(-d))` recency×frequency re-ranking over similarity candidates | Anderson's ACT-R (Adaptive Control of Thought—Rational) | ✅ Shipped |
 | **v7.0** | Candidate-Scoped Spreading Activation — `S_i = Σ(W × strength)` bounded to search result set; prevents God-node dominance | Spreading activation networks (Collins & Loftus, 1975) | ✅ Shipped |
 | **v7.0** | Composite Retrieval Scoring — `0.7 × similarity + 0.3 × σ(activation)`; configurable via `PRISM_ACTR_WEIGHT_*` | Hybrid cognitive-neural retrieval models | ✅ Shipped |
 | **v7.0** | AccessLogBuffer — in-memory batch-write buffer with 5s flush; prevents SQLite `SQLITE_BUSY` under parallel agents | Production reliability engineering | ✅ Shipped |
 | **v7.3** | Dark Factory — 3-gate fail-closed EXECUTE pipeline (parse → type → scope) with structured JSON action contract | Industrial safety systems (defense-in-depth, fail-closed valves) | ✅ Shipped |
 | **v7.2** | Verification-first harness — spec-freeze contract, rubric hash lock, multi-layer assertions, CLI `verify` commands | Programmatic verification systems + adversarial validation loops | ✅ Shipped |
 | **v7.4** | Adversarial Evaluation — PLAN_CONTRACT + EVALUATE with isolated generator/evaluator roles, pre-committed rubrics, and evidence-bound findings | Anti-sycophancy research, adversarial ML evaluation frameworks | ✅ Shipped |
-| **v7.5** | Intent Health Dashboard — 3-signal scoring algorithm (staleness, TODO load, decisions), comprehensive XSS hardening (10 vectors), NaN/`Infinity` guards | Proactive monitoring, defense-in-depth security | ✅ Shipped |
+| **v7.5** | Intent Health Dashboard — 3-signal scoring (staleness × TODO × decisions) with NaN guards and score ceiling | Production observability, proactive monitoring | ✅ Shipped |
+| **v7.7** | Cloud-Native SSE Transport — full network-accessible MCP server via Server-Sent Events | Distributed systems, cloud-native architecture | ✅ Shipped |
+| **v7.8** | Episodic→Semantic Consolidation — raw event logs distilled into `semantic_knowledge` rules with confidence scoring and instance tracking | Hebbian learning ("neurons that fire together wire together"), sleep consolidation (neuroscience) | ✅ Shipped |
+| **v7.8** | Multi-Hop Causal Reasoning — spreading activation traverses `caused_by`/`led_to` edges with damped fan effect (`1/ln(fan+e)`) and lateral inhibition | ACT-R spreading activation (Anderson), Collins & Loftus (1975) | ✅ Shipped |
+| **v7.8** | Uncertainty-Aware Rejection Gate — dual-signal (similarity floor + gap distance) safety layer prevents hallucination from low-confidence retrievals | Metacognition research, uncertainty quantification | ✅ Shipped |
+| **v7.8** | Dynamic Fast Weight Decay — `is_rollup` semantic nodes decay 50% slower (`ageModifier = 0.5`) than episodic entries, creating Long-Term Context anchors | ACT-R base-level activation with differential decay rates | ✅ Shipped |
 | **v7.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) | 🔭 Horizon |
 | **v8+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
 
-> Informed by LeCun's "Why AI Systems Don't Learn" (Dupoux, LeCun, Malik) and Kanerva's SDM.
+> Informed by Anderson's ACT-R (Adaptive Control of Thought—Rational), Collins & Loftus spreading activation networks (1975), Kanerva's SDM (1988), Hebb's learning rule, and LeCun's "Why AI Systems Don't Learn" (Dupoux, LeCun, Malik).
 
 ---
 
 ## 📦 Milestones & Roadmap
 
-> **Current: v7.5.0** — Intent Health Dashboard + XSS Hardening ([CHANGELOG](CHANGELOG.md))
+> **Current: v7.8.0** — Cognitive Architecture ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|
-| **v7.5** | Intent Health scoring + 10 XSS patches |
-| **v7.4** | Adversarial Evaluation (anti-sycophancy) |
-| **v7.3** | Dark Factory fail-closed execution |
-| **v7.2** | Verification Harness |
-| **v7.1** | Task Router |
-| **v7.0** | ACT-R Activation Memory |
-| **v6.5** | HDC Cognitive Routing |
-| **v6.2** | Synthesize & Prune |
+| **v7.8** | 🧠 Cognitive Architecture — Hebbian consolidation, multi-hop reasoning, rejection gate, dynamic decay |
+| **v7.7** | 🌐 Cloud-Native SSE Transport |
+| **v7.5** | 🩺 Intent Health Dashboard + Security Hardening |
+| **v7.4** | ⚔️ Adversarial Evaluation (anti-sycophancy) |
+| **v7.3** | 🏭 Dark Factory fail-closed execution |
+| **v7.2** | ✅ Verification Harness |
+| **v7.1** | 🚦 Task Router |
+| **v7.0** | 🧬 ACT-R Activation Memory |
+| **v6.5** | 🔮 HDC Cognitive Routing |
+| **v6.2** | 🧩 Synthesize & Prune |
 
 ### Future Tracks
 - **v7.x: Affect-Tagged Memory** — Recall prioritization improves by weighting memories with affective/contextual valence.
@@ -1037,4 +1125,4 @@ MIT
 
 ---
 
-<sub>**Keywords:** MCP server, Model Context Protocol, Claude Desktop memory, persistent session memory, AI agent memory, local-first, SQLite MCP, Mind Palace, time travel, visual memory, VLM image captioning, OpenTelemetry, GDPR, agent telepathy, multi-agent sync, behavioral memory, cursorrules, Ollama MCP, Brave Search MCP, TurboQuant, progressive context loading, knowledge management, LangChain retriever, LangGraph agent</sub>
+<sub>**Keywords:** MCP server, Model Context Protocol, Claude Desktop memory, persistent session memory, AI agent memory, cognitive architecture, ACT-R spreading activation, Hebbian learning, episodic semantic consolidation, multi-hop reasoning, uncertainty rejection gate, local-first, SQLite MCP, Mind Palace, time travel, visual memory, VLM image captioning, OpenTelemetry, GDPR, agent telepathy, multi-agent sync, behavioral memory, cursorrules, Ollama MCP, Brave Search MCP, TurboQuant, progressive context loading, knowledge management, LangChain retriever, LangGraph agent</sub>

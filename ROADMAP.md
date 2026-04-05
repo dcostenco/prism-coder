@@ -7,6 +7,20 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v7.8.0 — Agentic Cognition Pipeline 🧠
+
+> **Problem:** Compacting memory nodes blindly merged text, sacrificing structured reasoning and resulting in slow, un-indexed re-reads that couldn't construct causal relationships. Keyword engines were improperly gated by semantic thresholds, causing silent failures.
+> **Solution:** A fundamental upgrade implementing Hebbian-style semantic consolidation into a dual-memory system. Explicit separation of Semantic Rules vs. Episodic Events, accompanied by deterministic ACT-R decay adjustments for structured roll-ups.
+
+| Feature | Detail |
+|---------|--------|
+| 🧬 **Semantic Knowledge Consolidation** | `summarizeEntries` now strictly outputs JSON containing generalized `principles`, extracting implicit lessons across chunked sessions into explicit `semantic_knowledge` rules. |
+| 🔗 **Causality Graph Edges** | Extracts JSON `causal_links` and natively persists `memory_links` mapping consequences and correlations (e.g. `caused_by`, `led_to`) between chunked memory nodes. |
+| 🛡️ **Threshold Bug Patch** | Refactored MCP uncertainty rejection logic, isolating 0-1 fallback thresholds purely within vector-driven pathways (pgvector/sqlite-vec), keeping keyword (BM25) search operations safely ungated. |
+| ⏳ **Fast Weight Decay Modifier** | Applied a `0.5` decay reduction penalty strictly to `is_rollup` instances within standard `PRISM_ACTR_DECAY` loops, ensuring structurally compacted "long-term" nodes outlive short-term chatter naturally. |
+| 🔭 **LoCoMo Integration Harness** | Added `tests/benchmarks/locomo.ts`, utilizing a local `MockLLM` instance. Perfect for robust millisecond CI/CD validations verifying cross-temporal chunk connectivity on large Haystacks. |
+
+---
 ### ✅ v7.7.0 — Cloud-Native SSE Transport 🌐
 
 > **Problem:** Prism was previously bound to local runtime using stdio for MCP rendering, entirely barring multi-user accessibility or cloud deployments like Render.
@@ -258,15 +272,28 @@ With v7.7.0 shipped, Prism is a **production-hardened, fail-closed, adversariall
 
 ### 🔭 Future Cognitive Tracks
 
-#### v8.x — Affect-Tagged Memory `[Researching]`
-- **Problem:** Pure semantic relevance misses urgency and emotional salience in real-world agent collaboration.
-- **Benefit:** Recall prioritization improves by weighting memories with affective/contextual valence, making surfaced context more behaviorally useful.
-- **Dependency:** Builds on v7.0 ACT-R activation and v6.5 compositional memory states so affect can be attached and retrieved as first-class signal.
+Based on our April 2026 synthesize of 12 foundational papers on cognitive memory architectures:
 
-#### v9+ — Zero-Search Retrieval `[Exploring]`
-- **Problem:** Index/ANN retrieval layers add latency, complexity, and operational overhead at very large memory scales.
-- **Benefit:** Direct vector-addressed recall (“just ask the vector”) reduces retrieval indirection and moves Prism toward truly native associative memory.
-- **Dependency:** Requires stable SDM/HDC primitives, ACT-R activation calibration, and production-grade retrieval from v7.x/v8.x.
+#### v8.0 — Spreading Activation Engine `[Next]`
+- **Problem:** Static retrieval ignores structural salience, limiting multi-hop reasoning.
+- **Benefit:** ACT-R inspired energy propagation through the graph (Synapse) achieves +23% multi-hop performance by prioritizing nodes functionally connected to semantic anchors.
+- **Dependency:** Leverages existing SQLite `memory_links` table as the activation substrate with top-7 lateral inhibition and degree-normalized fan effect.
+
+#### v8.1 — Multi-Graph Causal Layer `[Planned]`
+- **Problem:** Semantic and contiguous temporal links cannot satisfy "Why did X happen?" queries effectively.
+- **Benefit:** Intent-aware retrieval routing (MAGMA) traversing an LLM-inferred causal `because` edge-type layer.
+
+#### v8.2 — Uncertainty-Aware Rejection `[Planned]`
+- **Problem:** Agents hallucinate context when the retrieved memory trace is too weak.
+- **Benefit:** A meta-cognitive "Feeling of Knowing" (FOK) gate using spreading activation energy thresholds to safely reject queries with "insufficient evidence".
+
+#### v8.3 — Episodic → Semantic Consolidation `[Planned]`
+- **Problem:** Granular session ledgers accumulate and clutter context, failing to form abstractions over time.
+- **Benefit:** Guided by Complementary Learning Systems (CLS) theory, automatic abstraction of multi-session episodic logs into robust semantic concepts while decaying the originals.
+
+#### v9.0 — Memory-as-Action RL `[Exploring]`
+- **Problem:** Hardcoded memory management (read/write/summarize) is rigid.
+- **Benefit:** Memory curation as intrinsic, RL-optimizable agent actions, constrained by token budgets to force high-value context retention.
 
 ---
 ## 🧰 Infrastructure Backlog

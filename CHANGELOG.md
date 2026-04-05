@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.8.0] - 2026-04-04 — Cognitive Architecture
+
+> **The biggest leap forward yet.** Prism moves beyond flat vector search into a true cognitive architecture inspired by human brain mechanics. Your agents don't just remember; they learn.
+
+### Added
+- **Episodic → Semantic Consolidation (Hebbian Learning)** — Compaction no longer blindly summarizes text. Prism now extracts *principles* from raw event logs and writes them to a dedicated `semantic_knowledge` table with `confidence` scores that increase every time a pattern is observed. True Hebbian learning: neurons that fire together wire together.
+- **Multi-Hop Causal Reasoning** — Compaction extracts causal links (`caused_by`, `led_to`) and persists them as `memory_links` graph edges. At retrieval time, ACT-R spreading activation propagates through these edges with damped fan effect (`1 / ln(fan + e)`), lateral inhibition, and configurable hop depth. Your agent follows trains of thought, not just keyword matches.
+- **Uncertainty-Aware Rejection Gate** — Dual-signal safety layer (similarity floor + gap distance) that tells the LLM "I searched my memory, and I confidently do not know the answer" instead of feeding it garbage context. Agents that know their own boundaries don't hallucinate.
+- **Dynamic Fast Weight Decay** — Semantic rollup nodes (`is_rollup`) decay 50% slower than episodic entries (`ageModifier = 0.5`), creating Long-Term Context anchors. The agent forgets raw chatter but permanently remembers core personality, project rules, and architectural decisions.
+- **LoCoMo Benchmark Harness** — New standalone integration suite (`tests/benchmarks/locomo.ts`) deterministically benchmarks Long-Context Memory retrieval against multi-hop compaction structures via local `MockLLM` frameworks.
+
+### Fixed
+- **Schema Alignment (P0)** — Corrected `semantic_knowledge` DDL to match DML: renamed `rule` → `description`, added `instances`, `related_entities`, and `updated_at` columns. Added migration stubs.
+- **Search SQL (P1)** — Updated Tier-1 (sqlite-vec) and Tier-2 (TurboQuant) search queries to include `is_rollup`, `importance`, and `last_accessed_at` for ACT-R decay consumption.
+- **userId Threading (P2)** — Threaded `userId` through the entire `upsertSemanticKnowledge` stack (Interface → SQLite → Supabase Stub → Compaction Handler) to satisfy `NOT NULL` constraints.
+- **Spreading Activation Performance (P1)** — Eliminated N+1 SQL round-trips by deriving fan-out counts locally from edge results. Added `LIMIT 200` to prevent memory pressure on high-degree nodes.
+- **Keyword Rejection Gate Isolation** — Properly scoped uncertainty rejection strictly for vector-mapped threshold logic, bypassing FTS5 keyword (BM25) paths to prevent silent search failures.
+
 ## [7.7.1] - 2026-04-04
 
 ### Added

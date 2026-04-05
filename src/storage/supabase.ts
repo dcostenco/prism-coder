@@ -1719,5 +1719,19 @@ export class SupabaseStorage implements StorageBackend {
       throw e;
     }
   }
+
+  // ─── v7.5: Semantic Consolidation ────────────────────────────────
+
+  async upsertSemanticKnowledge(data: {
+    project: string;
+    concept: string;
+    description: string;
+    related_entities?: string[];
+    userId?: string;
+  }): Promise<string> {
+    // For now we just implement graceful degradation/no-op on Supabase until the SQL is deployed.
+    debugLog(`[SupabaseStorage] upsertSemanticKnowledge is not fully implemented in Supabase yet. Skipping for ${data.concept}.`);
+    return crypto.randomUUID();
+  }
 }
 

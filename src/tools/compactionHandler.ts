@@ -32,36 +32,39 @@ export function isCompactLedgerArgs(
 
 // ─── LLM Summarization ────────────────────────────────────────
 
-async function summarizeEntries(entries: any[]): Promise<string> {
+async function summarizeEntries(entries: any[]): Promise<any> {
   const llm = getLLMProvider(); // throws if no API key configured
 
   const entriesText = entries.map((e, i) =>
-    `[${i + 1}] ${e.session_date || "unknown date"}: ${e.summary || "no summary"}\n` +
+    `[${i + 1}] ID: ${e.id || "N/A"} | Date: ${e.session_date || "unknown date"}: ${e.summary || "no summary"}\n` +
     (e.decisions?.length ? `  Decisions: ${e.decisions.join("; ")}\n` : "") +
     (e.files_changed?.length ? `  Files: ${e.files_changed.join(", ")}\n` : "")
   ).join("\n");
 
   const prompt = (
     `You are compressing a session history log for an AI agent's persistent memory.\n\n` +
-    `Analyze these ${entries.length} work sessions and produce THREE sections:\n\n` +
-    `1. SUMMARY (max 300 words): A concise paragraph preserving key decisions, ` +
-    `important file changes, error resolutions, and architecture changes. ` +
-    `Omit routine operations and intermediate debugging steps.\n\n` +
-    `2. PRINCIPLES (1-3 bullet points): Reusable lessons extracted from these sessions. ` +
-    `These should be actionable engineering insights the agent can apply to future work. ` +
-    `Format: "- [principle]"\n\n` +
-    `3. PATTERNS (1-3 bullet points): Recurring behaviors, tools, or workflows observed. ` +
-    `Format: "- [pattern]"\n\n` +
+    `Analyze these ${entries.length} work sessions and output a VALID JSON OBJECT matching this structure:\n` +
+    `{\n` +
+    `  "summary": "Concise paragraph preserving key decisions, important file changes, error resolutions, and architecture changes. Omit routine operations and intermediate debugging steps.",\n` +
+    `  "principles": [\n` +
+    `    { "concept": "Brief concept name", "description": "Reusable lesson extracted from sessions", "related_entities": ["tool", "tech"] }\n` +
+    `  ],\n` +
+    `  "causal_links": [\n` +
+    `    { "source_id": "Session ID that caused it", "target_id": "Session ID that was affected", "relation": "led_to" | "caused_by", "reason": "Explanation" }\n` +
+    `  ]\n` +
+    `}\n\n` +
     `Sessions to analyze:\n${entriesText}\n\n` +
-    `Output format (follow exactly):\n` +
-    `[summary paragraph]\n\n` +
-    `Principles:\n` +
-    `- ...\n\n` +
-    `Patterns:\n` +
-    `- ...`
+    `Respond ONLY with raw JSON.`
   ).substring(0, 30000);
 
-  return llm.generateText(prompt);
+  const response = await llm.generateText(prompt);
+  try {
+    const cleanJson = response.replace(/^```json\n?/, "").replace(/\n?```$/, "");
+    return JSON.parse(cleanJson);
+  } catch (err) {
+    debugLog(`[compact_ledger] Failed to parse JSON from LLM: ${err}`);
+    return { summary: response, principles: [], causal_links: [] };
+  }
 }
 
 // ─── Main Handler ─────────────────────────────────────────────
@@ -171,22 +174,36 @@ export async function compactLedgerHandler(args: unknown) {
       chunks.push(oldEntries.slice(i, i + COMPACTION_CHUNK_SIZE));
     }
 
-    let finalSummary: string;
+    let finalSummaryText: string;
+    let finalPrinciples: any[] = [];
+    let finalCausalLinks: any[] = [];
 
     if (chunks.length === 1) {
-      finalSummary = await summarizeEntries(chunks[0]);
+      const res = await summarizeEntries(chunks[0]);
+      finalSummaryText = typeof res === 'string' ? res : (res.summary || JSON.stringify(res));
+      finalPrinciples = res.principles || [];
+      finalCausalLinks = res.causal_links || [];
     } else {
       const chunkSummaries = await Promise.all(
         chunks.map(chunk => summarizeEntries(chunk))
       );
 
+      chunkSummaries.forEach(s => {
+        finalPrinciples.push(...(s.principles || []));
+        finalCausalLinks.push(...(s.causal_links || []));
+      });
+
       const metaEntries = chunkSummaries.map((s, i) => ({
+        id: `chunk-${i}`,
         session_date: `chunk ${i + 1}`,
-        summary: s,
+        summary: s.summary,
         decisions: [],
         files_changed: [],
       }));
-      finalSummary = await summarizeEntries(metaEntries);
+      const metaRes = await summarizeEntries(metaEntries);
+      finalSummaryText = typeof metaRes === 'string' ? metaRes : (metaRes.summary || JSON.stringify(metaRes));
+      finalPrinciples.push(...(metaRes.principles || []));
+      finalCausalLinks.push(...(metaRes.causal_links || []));
     }
 
     // Collect all unique keywords from rolled-up entries
@@ -203,7 +220,7 @@ export async function compactLedgerHandler(args: unknown) {
     const savedRollup: any = await storage.saveLedger({
       project: proj,
       user_id: PRISM_USER_ID,
-      summary: `[ROLLUP of ${oldEntries.length} sessions] ${finalSummary}`,
+      summary: `[ROLLUP of ${oldEntries.length} sessions] ${finalSummaryText}`,
       keywords: allKeywords,
       files_changed: allFiles,
       decisions: [`Rolled up ${oldEntries.length} sessions on ${new Date().toISOString()}`],
@@ -229,6 +246,46 @@ export async function compactLedgerHandler(args: unknown) {
           debugLog(`[compact_ledger] Failed to create spawned_from link for ${rollupId}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }));
+
+      // ── v7.5: Process semantic rules and causal links ──────────
+      for (const principle of finalPrinciples) {
+        if (!principle.concept || !principle.description) continue;
+        try {
+          const semanticId = await storage.upsertSemanticKnowledge({
+            project: proj,
+            concept: principle.concept,
+            description: principle.description,
+            related_entities: principle.related_entities || [],
+            userId: PRISM_USER_ID,
+          });
+          
+          await storage.createLink({
+            source_id: rollupId,
+            target_id: semanticId,
+            link_type: "related_to",
+            strength: 0.8,
+            metadata: JSON.stringify({ reason: "derived_principle" })
+          }, PRISM_USER_ID);
+        } catch (err) {
+          debugLog(`[compact_ledger] Failed to upsert semantic knowledge: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      for (const link of finalCausalLinks) {
+        if (!link.source_id || !link.target_id || !link.relation) continue;
+        if (link.source_id.startsWith("chunk-") || link.target_id.startsWith("chunk-")) continue;
+        try {
+          await storage.createLink({
+            source_id: link.source_id,
+            target_id: link.target_id,
+            link_type: link.relation,
+            strength: 0.9,
+            metadata: JSON.stringify({ reason: link.reason || "causal inference during compaction" })
+          }, PRISM_USER_ID);
+        } catch (err) {
+           debugLog(`[compact_ledger] Failed to create causal link: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
     }
 
     // Step 5: Archive old entries (soft-delete)

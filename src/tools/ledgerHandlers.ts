@@ -790,7 +790,7 @@ export async function sessionLoadContextHandler(args: unknown) {
     formattedContext += `\n⏳ Recent Sessions:\n` + d.recent_sessions.map((s: any) => {
       let impStr = "";
       if (typeof s.importance === 'number' && s.importance > 0) {
-        const eff = computeEffectiveImportance(s.importance, s.last_accessed_at, s.created_at);
+        const eff = computeEffectiveImportance(s.importance, s.last_accessed_at, s.created_at, Boolean(s.is_rollup));
         impStr = ` [Imp: ${eff}]`;
       }
       return `  [${s.session_date?.split("T")[0]}]${impStr} ${s.summary}`;

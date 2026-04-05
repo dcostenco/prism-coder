@@ -137,6 +137,16 @@ export interface SaveHandoffResult {
 export type ContextResult = Record<string, unknown> | null;
 
 /**
+ * Options for ACT-R Spreading Activation Engine (v8.0)
+ */
+export interface SpreadingActivationOptions {
+  enabled: boolean;
+  iterations?: number;       // T, depth of traversal (default: 3)
+  spreadFactor?: number;     // S, attenuation factor per hop (default: 0.8)
+  lateralInhibition?: number;// M, top nodes to keep during final evaluation (default: 7)
+}
+
+/**
  * Result of a knowledge search operation.
  */
 export interface KnowledgeSearchResult {
@@ -155,6 +165,13 @@ export interface SemanticSearchResult {
   session_date?: string;
   decisions?: string[];
   files_changed?: string[];
+  // v7.8: Fields needed by ACT-R decay and importance formatting
+  is_rollup?: boolean;
+  importance?: number;
+  last_accessed_at?: string | null;
+  // v8.0 activation scores returned
+  activationScore?: number;
+  hybridScore?: number;
 }
 
 // ─── v3.0: Agent Registry Types ──────────────────────────────
@@ -382,6 +399,7 @@ export interface StorageBackend {
     limit: number;
     userId: string;
     role?: string | null; // v3.0: filter by agent role
+    activation?: SpreadingActivationOptions; // v8.0 spreading activation
   }): Promise<KnowledgeSearchResult | null>;
 
   /**
@@ -395,6 +413,7 @@ export interface StorageBackend {
     similarityThreshold: number;
     userId: string;
     role?: string | null; // v3.0: filter by agent role
+    activation?: SpreadingActivationOptions; // v8.0 spreading activation
   }): Promise<SemanticSearchResult[]>;
 
   // ─── Compaction ────────────────────────────────────────────
@@ -857,6 +876,15 @@ export interface StorageBackend {
 
   /** Retrieve a specific ValidationResult by ID (H7: tenant-isolated) */
   getVerificationRun(id: string, userId: string): Promise<ValidationResult | null>;
+
+  // ─── v7.5: Semantic Consolidation ──────────────────────────────
+  upsertSemanticKnowledge(data: {
+    project: string;
+    concept: string;
+    description: string;
+    related_entities?: string[];
+    userId?: string;
+  }): Promise<string>;
 }
 
 // ─── v6.0: Memory Link Type ───────────────────────────────────

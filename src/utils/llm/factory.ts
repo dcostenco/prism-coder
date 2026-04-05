@@ -171,3 +171,7 @@ export function getLLMProvider(): LLMProvider {
 export function _resetLLMProvider(): void {
   providerInstance = null;
 }
+
+export function _setLLMProviderForTest(mock: LLMProvider): void {
+  providerInstance = mock;
+}

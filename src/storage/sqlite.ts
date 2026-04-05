@@ -42,6 +42,7 @@ import type {
   PipelineStatus,          // v7.3: Dark Factory Pipeline
   VerificationHarness,     // v7.2.0
   ValidationResult,        // v7.2.0
+  SpreadingActivationOptions, // v8.0: Spreading Activation
 } from "./interface.js";
 
 import { debugLog } from "../utils/logger.js";
@@ -598,6 +599,44 @@ export class SqliteStorage implements StorageBackend {
         vector BLOB NOT NULL
       )
     `);
+
+    // ─── Phase 4 Migration: Semantic Knowledge Table ──────────────
+    //
+    // REVIEWER NOTE: Created to separate timeless semantic facts from 
+    // chronological episodic ledger events, per Phase 4 consolidation.
+    await this.db.execute(`
+      CREATE TABLE IF NOT EXISTS semantic_knowledge (
+        id TEXT PRIMARY KEY,
+        project TEXT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT '',
+        concept TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        confidence REAL DEFAULT 0.5,
+        instances INTEGER DEFAULT 1,
+        related_entities TEXT DEFAULT '[]',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+
+    // v7.8 Migration: Rename legacy columns if upgrading from older schema
+    try {
+      await this.db.execute(`ALTER TABLE semantic_knowledge RENAME COLUMN rule TO description`);
+    } catch { /* column already renamed or doesn't exist */ }
+    try {
+      await this.db.execute(`ALTER TABLE semantic_knowledge ADD COLUMN instances INTEGER DEFAULT 1`);
+    } catch { /* column already exists */ }
+    try {
+      await this.db.execute(`ALTER TABLE semantic_knowledge ADD COLUMN related_entities TEXT DEFAULT '[]'`);
+    } catch { /* column already exists */ }
+    try {
+      await this.db.execute(`ALTER TABLE semantic_knowledge ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))`);
+    } catch { /* column already exists */ }
+    
+    await this.db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_semantic_project ON semantic_knowledge(project)`
+    );
+
 
     // v6.5 Migration: Add prng_version column if missing
     try {
@@ -1428,6 +1467,7 @@ export class SqliteStorage implements StorageBackend {
     limit: number;
     userId: string;
     role?: string | null;  // v3.0: optional role filter
+    activation?: SpreadingActivationOptions;
   }): Promise<KnowledgeSearchResult | null> {
     // Build FTS5 query from keywords + queryText (both contribute)
     // "stripe webhook auth" → '"stripe" OR "webhook" OR "auth"'
@@ -1497,6 +1537,23 @@ export class SqliteStorage implements StorageBackend {
         relevance: r.relevance,
       }));
 
+      if (params.activation?.enabled) {
+        // Normalise FTS5 ranks (more negative = better) into positive 0-1 similarity score approximation
+        const mappedAnchors = results.map(r => ({
+          id: r.id as string,
+          project: r.project as string,
+          summary: r.summary as string,
+          similarity: 1.0 / (1.0 + Math.abs((r.relevance as number) || 0)),
+          session_date: r.session_date as string | undefined,
+          decisions: r.decisions as string[] | undefined,
+          files_changed: r.files_changed as string[] | undefined,
+        }));
+        
+        const { applySpreadingActivation } = await import("../memory/spreadingActivation.js");
+        const activated = await applySpreadingActivation(this.db, mappedAnchors, params.activation, params.userId);
+        return { count: activated.length, results: activated };
+      }
+
       return { count: results.length, results };
     } catch (err) {
       // FTS5 query syntax error — fall back to LIKE search
@@ -1513,6 +1570,7 @@ export class SqliteStorage implements StorageBackend {
     limit: number;
     userId: string;
     role?: string | null;  // v6.0: role filter for Hivemind isolation
+    activation?: SpreadingActivationOptions;
   }): Promise<KnowledgeSearchResult | null> {
     const conditions: string[] = ["user_id = ?", "archived_at IS NULL", "deleted_at IS NULL"];
     const args: InValue[] = [params.userId];
@@ -1569,6 +1627,23 @@ export class SqliteStorage implements StorageBackend {
       last_accessed_at: r.last_accessed_at,
     }));
 
+    if (params.activation?.enabled) {
+      // Base similarity mapped as 1.0 for LIKE exact/partial matches
+      const mappedAnchors = results.map(r => ({
+        id: r.id as string,
+        project: r.project as string,
+        summary: r.summary as string,
+        similarity: 1.0,
+        session_date: r.session_date as string | undefined,
+        decisions: r.decisions as string[] | undefined,
+        files_changed: r.files_changed as string[] | undefined,
+      }));
+      
+      const { applySpreadingActivation } = await import("../memory/spreadingActivation.js");
+      const activated = await applySpreadingActivation(this.db, mappedAnchors, params.activation, params.userId);
+      return { count: activated.length, results: activated };
+    }
+
     return { count: results.length, results };
   }
 
@@ -1579,6 +1654,7 @@ export class SqliteStorage implements StorageBackend {
     similarityThreshold: number;
     userId: string;
     role?: string | null;  // v3.0: optional role filter
+    activation?: SpreadingActivationOptions; // v8.0 spreading activation
   }): Promise<SemanticSearchResult[]> {
     // ─── VECTOR SEARCH (cosine similarity via libSQL) ───
     // vector_distance_cos() returns distance (0 to 2).
@@ -1605,7 +1681,7 @@ export class SqliteStorage implements StorageBackend {
 
       const sql = `
         SELECT l.id, l.project, l.summary, l.decisions, l.files_changed,
-               l.session_date, l.created_at,
+               l.session_date, l.created_at, l.is_rollup, l.importance, l.last_accessed_at,
                (1 - vector_distance_cos(l.embedding, vector(?))) AS similarity
         FROM session_ledger l
         WHERE ${conditions.join(" AND ")}
@@ -1616,7 +1692,7 @@ export class SqliteStorage implements StorageBackend {
       const result = await this.db.execute({ sql, args });
 
       // Filter by similarity threshold and format results
-      return result.rows
+      const baseResults = result.rows
         .filter(r => (r.similarity as number) >= params.similarityThreshold)
         .map(r => ({
           id: r.id as string,
@@ -1626,7 +1702,17 @@ export class SqliteStorage implements StorageBackend {
           session_date: (r.session_date || r.created_at) as string,
           decisions: this.parseJsonColumn(r.decisions) as string[],
           files_changed: this.parseJsonColumn(r.files_changed) as string[],
+          is_rollup: Boolean(r.is_rollup),
+          importance: (r.importance as number) ?? 0,
+          last_accessed_at: (r.last_accessed_at as string) || null,
         }));
+
+      if (params.activation?.enabled) {
+        const { applySpreadingActivation } = await import("../memory/spreadingActivation.js");
+        return applySpreadingActivation(this.db, baseResults, params.activation, params.userId);
+      }
+
+      return baseResults;
     } catch (err) {
       // ─── TIER 2 FALLBACK: Asymmetric TurboQuant search in JS ───
       //
@@ -1684,7 +1770,8 @@ export class SqliteStorage implements StorageBackend {
 
         const fallbackSql = `
           SELECT id, project, summary, decisions, files_changed,
-                 session_date, created_at, embedding_compressed, embedding_turbo_radius
+                 session_date, created_at, is_rollup, importance, last_accessed_at,
+                 embedding_compressed, embedding_turbo_radius
           FROM session_ledger
           WHERE ${fallbackConditions.join(" AND ")}
         `;
@@ -1709,6 +1796,9 @@ export class SqliteStorage implements StorageBackend {
                 session_date: (row.session_date || row.created_at) as string,
                 decisions: this.parseJsonColumn(row.decisions) as string[],
                 files_changed: this.parseJsonColumn(row.files_changed) as string[],
+                is_rollup: Boolean(row.is_rollup),
+                importance: (row.importance as number) ?? 0,
+                last_accessed_at: (row.last_accessed_at as string) || null,
               });
             }
           } catch {
@@ -1718,11 +1808,19 @@ export class SqliteStorage implements StorageBackend {
 
         // Sort by similarity descending and limit
         scored.sort((a, b) => b.similarity - a.similarity);
+        
+        const baseResults = scored.slice(0, params.limit);
         debugLog(
           `[SqliteStorage] Tier-2 TurboQuant fallback: scored ${fallbackResult.rows.length} entries, ` +
           `${scored.length} above threshold`
         );
-        return scored.slice(0, params.limit);
+
+        if (params.activation?.enabled) {
+          const { applySpreadingActivation } = await import("../memory/spreadingActivation.js");
+          return applySpreadingActivation(this.db, baseResults, params.activation, params.userId);
+        }
+
+        return baseResults;
       } catch (fallbackErr) {
         // Both tiers failed — return empty
         console.error(
@@ -3553,6 +3651,50 @@ export class SqliteStorage implements StorageBackend {
       gate_override: row.gate_override === 1,
       override_reason: row.override_reason || undefined
     } as ValidationResult;
+  }
+
+  // ─── v7.5: Semantic Consolidation ────────────────────────────────
+  
+  async upsertSemanticKnowledge(data: {
+    project: string;
+    concept: string;
+    description: string;
+    related_entities?: string[];
+    userId?: string;
+  }): Promise<string> {
+    const existing = await this.db.execute({
+      sql: `SELECT id, instances, confidence FROM semantic_knowledge WHERE project = ? AND concept = ? LIMIT 1`,
+      args: [data.project, data.concept]
+    });
+
+    if (existing.rows.length > 0) {
+      const row = existing.rows[0] as any;
+      const newConfidence = Math.min(1.0, row.confidence + 0.1);
+      
+      await this.db.execute({
+        sql: `UPDATE semantic_knowledge SET instances = instances + 1, confidence = ?, updated_at = ? WHERE id = ?`,
+        args: [newConfidence, new Date().toISOString(), row.id]
+      });
+      return row.id;
+    } else {
+      const id = crypto.randomUUID();
+      await this.db.execute({
+        sql: `INSERT INTO semantic_knowledge (id, project, user_id, concept, description, confidence, instances, related_entities, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          id,
+          data.project,
+          data.userId || '',
+          data.concept,
+          data.description,
+          0.5,
+          1,
+          JSON.stringify(data.related_entities || []),
+          new Date().toISOString(),
+          new Date().toISOString()
+        ]
+      });
+      return id;
+    }
   }
 }
 

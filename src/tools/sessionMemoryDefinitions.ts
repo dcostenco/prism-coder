@@ -202,6 +202,16 @@ export const KNOWLEDGE_SEARCH_TOOL: Tool = {
         description: "If true, returns a separate MEMORY TRACE content block with search strategy, " +
           "latency breakdown, and scoring metadata for explainability. Default: false.",
       },
+      activation: {
+        type: "object",
+        description: "Configuration for ACT-R inspired Spreading Activation. Use this to find structurally related memories beyond direct semantic/keyword hits.",
+        properties: {
+          enabled: { type: "boolean", description: "Enable spreading activation (default: false)." },
+          iterations: { type: "integer", description: "Number of propagation loops (default: 3)." },
+          spreadFactor: { type: "number", description: "Decay multiplier per step (default: 0.8)." },
+          lateralInhibition: { type: "integer", description: "Maximum nodes returned (default: 7)." },
+        }
+      },
     },
     required: ["query"],
   },
@@ -370,6 +380,16 @@ export const SESSION_SEARCH_MEMORY_TOOL: Tool = {
           "before embedding generation, naturally biasing results toward contextually relevant memories. " +
           "Useful when searching within a specific project context. Default: false.",
       },
+      activation: {
+        type: "object",
+        description: "Configuration for ACT-R inspired Spreading Activation. Use this to find structurally related memories beyond direct semantic/keyword hits.",
+        properties: {
+          enabled: { type: "boolean", description: "Enable spreading activation (default: false)." },
+          iterations: { type: "integer", description: "Number of propagation loops (default: 3)." },
+          spreadFactor: { type: "number", description: "Decay multiplier per step (default: 0.8)." },
+          lateralInhibition: { type: "integer", description: "Maximum nodes returned (default: 7)." },
+        }
+      },
     },
     required: ["query"],
   },
@@ -479,6 +499,7 @@ export function isKnowledgeSearchArgs(
   if (a.category !== undefined && typeof a.category !== "string") return false;
   if (a.limit !== undefined && typeof a.limit !== "number") return false;
   if (a.enable_trace !== undefined && typeof a.enable_trace !== "boolean") return false;
+  if (a.activation !== undefined && typeof a.activation !== "object") return false;
   return true;
 }
 
@@ -557,6 +578,7 @@ export function isSessionSearchMemoryArgs(
   if (a.similarity_threshold !== undefined && typeof a.similarity_threshold !== "number") return false;
   if (a.enable_trace !== undefined && typeof a.enable_trace !== "boolean") return false;
   if (a.context_boost !== undefined && typeof a.context_boost !== "boolean") return false;
+  if (a.activation !== undefined && typeof a.activation !== "object") return false;
   return true;
 }
 

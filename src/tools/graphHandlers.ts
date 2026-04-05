@@ -118,7 +118,7 @@ export async function knowledgeSearchHandler(args: unknown) {
   }
 
   // Phase 1: destructure enable_trace (defaults to false for backward compat)
-  const { project, query, category, limit = 10, enable_trace = false } = args;
+  const { project, query, category, limit = 10, enable_trace = false, activation } = args as any;
 
   debugLog(`[knowledge_search] Searching: project=${project || "all"}, query="${query || ""}", category=${category || "any"}, limit=${limit}`);
 
@@ -137,6 +137,7 @@ export async function knowledgeSearchHandler(args: unknown) {
     queryText: query || null,
     limit: Math.min(limit, 50),
     userId: PRISM_USER_ID,
+    activation,
   });
   const storageMs = performance.now() - storageStart;
   const totalMs = performance.now() - totalStart;
@@ -176,6 +177,7 @@ export async function knowledgeSearchHandler(args: unknown) {
   }
 
   if (data.results && Array.isArray(data.results)) {
+
     const resultIds = data.results.map((r: any) => r.id).filter(Boolean);
     if (resultIds.length > 0) {
       recordMemoryAccess(resultIds);
@@ -184,7 +186,7 @@ export async function knowledgeSearchHandler(args: unknown) {
     // Mutate results to surface effective importance
     for (const r of data.results as any[]) {
       if (typeof r.importance === 'number' && r.importance > 0) {
-        r.effective_importance = computeEffectiveImportance(r.importance, r.last_accessed_at, r.created_at);
+        r.effective_importance = computeEffectiveImportance(r.importance, r.last_accessed_at, r.created_at, Boolean(r.is_rollup));
       }
     }
   }
@@ -377,7 +379,8 @@ export async function sessionSearchMemoryHandler(args: unknown) {
     enable_trace = false,
     // v5.2: Context-Weighted Retrieval — biases search toward active work context
     context_boost = false,
-  } = args;
+    activation,
+  } = args as any;
 
   debugLog(
     `[session_search_memory] Semantic search: query="${query}", ` +
@@ -472,6 +475,7 @@ export async function sessionSearchMemoryHandler(args: unknown) {
       limit: candidateLimit,
       similarityThreshold: similarity_threshold,
       userId: PRISM_USER_ID,
+      activation,
     });
     // Phase 1: Capture storage query latency and compute total
     const storageMs = performance.now() - storageStart;
@@ -555,7 +559,11 @@ export async function sessionSearchMemoryHandler(args: unknown) {
           const timestamps = accessTimestamps.length > 0
             ? accessTimestamps
             : [new Date(r.created_at || now)];
-          const Bi = baseLevelActivation(timestamps, now, PRISM_ACTR_DECAY);
+            
+          // Rollups represent consolidated semantic knowledge over many sessions.
+          // They should decay 50% slower than raw episodic chatter to retain long-term context.
+          const decayRate = r.is_rollup ? PRISM_ACTR_DECAY * 0.5 : PRISM_ACTR_DECAY;
+          const Bi = baseLevelActivation(timestamps, now, decayRate);
 
           // S_i: Candidate-scoped spreading activation
           const outboundLinks = linksMap.get(id) || [];
@@ -600,6 +608,32 @@ export async function sessionSearchMemoryHandler(args: unknown) {
     // so we only log access for results actually delivered to the LLM.
     results.splice(limit);
 
+    if (results.length > 0) {
+      const topScore = PRISM_ACTR_ENABLED ? (results[0] as any)._actr_composite : results[0].similarity;
+      const secondScore = results.length > 1 ? (PRISM_ACTR_ENABLED ? (results[1] as any)._actr_composite : results[1].similarity) : 0;
+      const gapDistance = (topScore || 0) - (secondScore || 0);
+
+      const fallbackThreshold = PRISM_HDC_POLICY_FALLBACK_THRESHOLD || 0.85;
+      const clarifyThreshold = PRISM_HDC_POLICY_CLARIFY_THRESHOLD || 0.95;
+      const gapThreshold = clarifyThreshold - fallbackThreshold;
+
+      if ((topScore || 0) < fallbackThreshold || (results.length > 1 && gapDistance < gapThreshold)) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              results: [],
+              meta: {
+                rejected: true,
+                reason: `Uncertainty Rejection: topScore (${(topScore || 0).toFixed(3)}) < ${fallbackThreshold} OR gapDistance (${gapDistance.toFixed(3)}) < ${gapThreshold.toFixed(3)}.`
+              }
+            }, null, 2)
+          }],
+          isError: false
+        };
+      }
+    }
+
     // Fire-and-forget: record access events for the final delivered results
     // v7.0: Writes to both access_log buffer AND legacy last_accessed_at
     const finalIds = results.map((r: any) => r.id).filter(Boolean);
@@ -616,7 +650,7 @@ export async function sessionSearchMemoryHandler(args: unknown) {
 
       // Dynamic importance decay (uses ACT-R internally when enabled)
       const baseImportance = r.importance ?? 0;
-      const effectiveImportance = computeEffectiveImportance(baseImportance, r.last_accessed_at, r.created_at);
+      const effectiveImportance = computeEffectiveImportance(baseImportance, r.last_accessed_at, r.created_at, Boolean(r.is_rollup));
 
       const importanceStr = baseImportance > 0
         ? `  Importance: ${effectiveImportance}${effectiveImportance !== baseImportance ? ` (base: ${baseImportance}, decayed)` : ""}\n`

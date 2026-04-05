@@ -59,7 +59,8 @@ import {
 export function computeEffectiveImportance(
     baseImportance: number,
     lastAccessedStr: string | null | undefined,
-    createdAtStr: string
+    createdAtStr: string,
+    isRollup: boolean = false
 ): number {
     if (baseImportance <= 0) return baseImportance;
 
@@ -81,10 +82,11 @@ export function computeEffectiveImportance(
     // Use a single-timestamp proxy: treat last_accessed_at as one access event.
     // This gives a simplified B_i = ln(t^(-d)) = -d × ln(t)
     // The full multi-timestamp B_i runs in graphHandlers.ts search pipeline.
+    const decayRate = isRollup ? PRISM_ACTR_DECAY * 0.5 : PRISM_ACTR_DECAY;
     const Bi = baseLevelActivation(
         [referenceDate],
         now,
-        PRISM_ACTR_DECAY
+        decayRate
     );
 
     // Normalize to (0, 1) via parameterized sigmoid
