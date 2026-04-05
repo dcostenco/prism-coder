@@ -691,7 +691,7 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v7.8.0 — Cognitive Architecture**
+> **Current release: v7.8.2 — Cognitive Architecture**
 
 - 🧠 **v7.8.0 — Cognitive Architecture:** The biggest leap forward yet. Moved beyond flat vector search into a true cognitive architecture inspired by human brain mechanics. Episodic-to-Semantic memory consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate (your agent can say "I don't know"), and Dynamic Fast Weight Decay (semantic memories outlive episodic chatter by 2×). **Your agents don't just remember; they learn.** → [Cognitive Architecture](#-cognitive-architecture-v78)
 - 🌐 **v7.7.0 — Cloud-Native SSE Transport:** Full unauthenticated and authenticated Server-Sent Events MCP support for seamless network deployments.
@@ -1065,7 +1065,7 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 
 ## 📦 Milestones & Roadmap
 
-> **Current: v7.8.0** — Cognitive Architecture ([CHANGELOG](CHANGELOG.md))
+> **Current: v7.8.2** — Cognitive Architecture ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|
