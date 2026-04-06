@@ -23,5 +23,5 @@ ALTER TABLE public.semantic_knowledge ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "semantic_knowledge_user_isolation" ON public.semantic_knowledge
   FOR ALL
-  USING (true)
-  WITH CHECK (true);
+  USING (auth.uid()::text = user_id)
+  WITH CHECK (auth.uid()::text = user_id);

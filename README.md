@@ -691,9 +691,9 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v7.8.2 — Cognitive Architecture**
+> **Current release: v7.8.7 — Cognitive Architecture**
 
-- 🧠 **v7.8.0 — Cognitive Architecture:** The biggest leap forward yet. Moved beyond flat vector search into a true cognitive architecture inspired by human brain mechanics. Episodic-to-Semantic memory consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate (your agent can say "I don't know"), and Dynamic Fast Weight Decay (semantic memories outlive episodic chatter by 2×). **Your agents don't just remember; they learn.** → [Cognitive Architecture](#-cognitive-architecture-v78)
+- 🧠 **v7.8.x — Cognitive Architecture:** The biggest leap forward yet. Moved beyond flat vector search into a true cognitive architecture inspired by human brain mechanics. Episodic-to-Semantic memory consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate (your agent can say "I don't know"), and Dynamic Fast Weight Decay (semantic memories outlive episodic chatter by 2×). Validated by **LoCoMo-Plus benchmark** (arXiv 2602.10715) with Precision@K and MRR metrics. **Your agents don't just remember; they learn.** → [Cognitive Architecture](#-cognitive-architecture-v78)
 - 🌐 **v7.7.0 — Cloud-Native SSE Transport:** Full unauthenticated and authenticated Server-Sent Events MCP support for seamless network deployments.
 - 🩺 **v7.5.0 — Intent Health Dashboard + Security Hardening:** Real-time 0–100 project health scoring (staleness × TODO load × decisions). 10 XSS injection vectors patched. Algorithm hardened with NaN guards and score ceiling.
 - ⚔️ **v7.4.0 — Adversarial Evaluation:** Split-brain anti-sycophancy pipeline. Generator and evaluator in isolated roles with evidence-bound findings.
@@ -968,6 +968,7 @@ Prism is a **stdio-based MCP server** that manages persistent agent memory. Here
 │  │  • ACT-R Spreading Activation (multi-hop)         │  │
 │  │  • Episodic → Semantic Consolidation (Hebbian)    │  │
 │  │  • Uncertainty-Aware Rejection Gate               │  │
+│  │  • LoCoMo-Plus Benchmark Validation               │  │
 │  │  • Dynamic Fast Weight Decay (dual-rate)          │  │
 │  │  • HDC Cognitive Routing (XOR binding)            │  │
 │  └──────┬─────────────────────────────────────────────┘  │
@@ -1056,16 +1057,18 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 | **v7.8** | Multi-Hop Causal Reasoning — spreading activation traverses `caused_by`/`led_to` edges with damped fan effect (`1/ln(fan+e)`) and lateral inhibition | ACT-R spreading activation (Anderson), Collins & Loftus (1975) | ✅ Shipped |
 | **v7.8** | Uncertainty-Aware Rejection Gate — dual-signal (similarity floor + gap distance) safety layer prevents hallucination from low-confidence retrievals | Metacognition research, uncertainty quantification | ✅ Shipped |
 | **v7.8** | Dynamic Fast Weight Decay — `is_rollup` semantic nodes decay 50% slower (`ageModifier = 0.5`) than episodic entries, creating Long-Term Context anchors | ACT-R base-level activation with differential decay rates | ✅ Shipped |
+| **v7.8** | LoCoMo Benchmark Harness — deterministic integration suite (`tests/benchmarks/locomo.ts`, 20 assertions) benchmarking multi-hop compaction structures via `MockLLM` | Long-Context Memory evaluation (cognitive benchmarking) | ✅ Shipped |
+| **v7.8** | LoCoMo-Plus Benchmark — 16-assertion suite (`tests/benchmarks/locomo-plus.ts`) adapted from arXiv 2602.10715 validating cue–trigger semantic disconnect bridging via graph traversal and Hebbian consolidation; reports Precision@1/3/5/10 and MRR | LoCoMo-Plus (Li et al., ARR 2026), cue–trigger disconnect research | ✅ Shipped |
 | **v7.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) | 🔭 Horizon |
 | **v8+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
 
-> Informed by Anderson's ACT-R (Adaptive Control of Thought—Rational), Collins & Loftus spreading activation networks (1975), Kanerva's SDM (1988), Hebb's learning rule, and LeCun's "Why AI Systems Don't Learn" (Dupoux, LeCun, Malik).
+> Informed by Anderson's ACT-R (Adaptive Control of Thought—Rational), Collins & Loftus spreading activation networks (1975), Kanerva's SDM (1988), Hebb's learning rule, Li et al. LoCoMo-Plus (ARR 2026), and LeCun's "Why AI Systems Don't Learn" (Dupoux, LeCun, Malik).
 
 ---
 
 ## 📦 Milestones & Roadmap
 
-> **Current: v7.8.2** — Cognitive Architecture ([CHANGELOG](CHANGELOG.md))
+> **Current: v7.8.7** — Cognitive Architecture ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|

@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.8.7] - 2026-04-06
+
+### Added
+- **LoCoMo-Plus Benchmark** — New cognitive benchmark suite (`tests/benchmarks/locomo-plus.ts`, 16/16 assertions) adapted from arXiv 2602.10715 (Li et al., ARR 2026). Validates Prism's ability to bridge the **cue–trigger semantic disconnect** — where causally related memories are semantically distant — using graph traversal and Hebbian consolidation. Reports real Precision@1/3/5/10 and MRR metrics across a 30-entry pool (10 cues + 20 fillers).
+
+### Fixed
+- **Benchmark Embedding Cache** — Eliminated redundant embedding computation across LoCoMo-Plus stages. Pre-computed embeddings are now cached via `Map<string, number[]>` and reused between Stage 2 (raw retrieval) and Stage 5 (metrics), cutting total embedding calls by ~60%.
+- **Tautological Assertions** — Replaced `assert(true, ...)` stubs in Hebbian consolidation tests with actual storage verification (try/catch + counter), ensuring `upsertSemanticKnowledge` failures are caught rather than silently passing.
+- **Dead `precisionAtK` Function** — The previous implementation created zero-vectors and called `cosineSimilarity` on them (returning NaN), with a `hits` counter that was never incremented (always returned 0). Replaced with a working implementation that filters cached `cueRanks` at each K threshold.
+- **Incomplete Ranking Pool** — Stage 2 ranking only compared triggers against fillers + the target cue (21 entries), excluding the other 9 cues as distractors. Now ranks against the full 29-entry pool (20 fillers + 9 other cues) for accurate difficulty measurement.
+- **Dead Import** — Removed unused `sessionSearchMemoryHandler` import from locomo-plus.ts.
+- **Hardcoded Metric** — Replaced `String(2).padStart(5)` with dynamic `principlesStored` counter in metrics box.
+
 ## [7.8.6] - 2026-04-06
 
 ### Fixed
