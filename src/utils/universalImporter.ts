@@ -157,7 +157,7 @@ export async function universalImporter(options: ImportOptions) {
     if (sniffed) {
       adapter = adapters.find((a) => a.id === sniffed);
       if (adapter) {
-        console.error(`🔍 Auto-detected format: ${sniffed} (via content sniffing)`);
+        console.log(`🔍 Auto-detected format: ${sniffed} (via content sniffing)`);
       }
     }
   }
@@ -166,8 +166,8 @@ export async function universalImporter(options: ImportOptions) {
     throw new Error(`Could not determine adapter for file: ${filePathArg}. Use --format to specify.`);
   }
 
-  console.error(`🚀 Starting migration from ${adapter.id} to Prism...`);
-  if (dryRun) console.error("⚠️ DRY RUN MODE - storage writes disabled.");
+  console.log(`🚀 Starting migration from ${adapter.id} to Prism...`);
+  if (dryRun) console.log("⚠️ DRY RUN MODE - storage writes disabled.");
 
   // ── Storage + Concurrency ──────────────────────────────────────
   const storage = await getStorage();
@@ -207,7 +207,7 @@ export async function universalImporter(options: ImportOptions) {
 
     if (verbose) {
       const turnCount = turns.length;
-      console.error(`📦 Conversation #${conversationCount}: ${turnCount} turns (${sessionDate}) → ${conversationId}`);
+      console.log(`📦 Conversation #${conversationCount}: ${turnCount} turns (${sessionDate}) → ${conversationId}`);
     }
 
     if (dryRun) {
@@ -229,7 +229,7 @@ export async function universalImporter(options: ImportOptions) {
       if ((existing as any[]).length > 0) {
         skipCount += turns.length;
         if (verbose) {
-          console.error(`⏭️  Skipping duplicate: ${conversationId}`);
+          console.log(`⏭️  Skipping duplicate: ${conversationId}`);
         }
         return;
       }
@@ -277,11 +277,11 @@ export async function universalImporter(options: ImportOptions) {
     // Flush the last conversation (no trailing time gap to trigger it)
     await flushConversation();
 
-    console.error("\n✅ Migration complete!");
-    console.error(`   Conversations: ${conversationCount}`);
-    console.error(`   Turns processed: ${successCount}`);
-    if (skipCount > 0) console.error(`   Skipped (dup): ${skipCount}`);
-    if (failCount > 0) console.error(`   Failed:         ${failCount}`);
+    console.log("\n✅ Migration complete!");
+    console.log(`   Conversations: ${conversationCount}`);
+    console.log(`   Turns processed: ${successCount}`);
+    if (skipCount > 0) console.log(`   Skipped (dup): ${skipCount}`);
+    if (failCount > 0) console.log(`   Failed:         ${failCount}`);
 
     return { successCount, failCount, skipCount, conversationCount };
   } catch (err) {
@@ -309,7 +309,7 @@ async function runCLI() {
   const verbose = args.includes("--verbose") || args.includes("-v");
 
   if (!filePathArg) {
-    console.error(`
+    console.log(`
 Prism Universal History Importer
 Usage: node universalImporter.js <file> [options]
 

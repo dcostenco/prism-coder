@@ -120,14 +120,14 @@ export function isStrictVerificationEnv(): boolean {
 /** Render a VerifyStatusResult as human-readable console output */
 function renderVerifyStatus(result: VerifyStatusResult, jsonMode: boolean): void {
   if (jsonMode) {
-    process.stderr.write(JSON.stringify(result, null, 2) + '\n');
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     return;
   }
 
-  console.error(`\n🔍 Checking verification status for project: ${result.project}...`);
+  console.log(`\n🔍 Checking verification status for project: ${result.project}...`);
 
   if (result.no_runs) {
-    console.error('⚠️  No previous verification runs found.');
+    console.log('⚠️  No previous verification runs found.');
     return;
   }
 
@@ -136,12 +136,12 @@ function renderVerifyStatus(result: VerifyStatusResult, jsonMode: boolean): void
     ? `[OVERRIDDEN${r.override_reason ? `: ${r.override_reason}` : ''}] `
     : '';
   const passText = r.passed ? 'YES' : 'NO';
-  console.error(`✅ Last Run: ${r.run_at} | Passed: ${overrideBadge}${passText}`);
-  console.error(`   Pass Rate: ${(r.pass_rate * 100).toFixed(1)}% | Critical Failures: ${r.critical_failures}`);
-  console.error(`   Coverage Score: ${(r.coverage_score * 100).toFixed(1)}% | Gate Action: ${r.gate_action}`);
+  console.log(`✅ Last Run: ${r.run_at} | Passed: ${overrideBadge}${passText}`);
+  console.log(`   Pass Rate: ${(r.pass_rate * 100).toFixed(1)}% | Critical Failures: ${r.critical_failures}`);
+  console.log(`   Coverage Score: ${(r.coverage_score * 100).toFixed(1)}% | Gate Action: ${r.gate_action}`);
 
   if (result.harness_missing) {
-    console.error('\nℹ️  No local verification_harness.json found to check against.');
+    console.log('\nℹ️  No local verification_harness.json found to check against.');
     return;
   }
 
@@ -151,7 +151,7 @@ function renderVerifyStatus(result: VerifyStatusResult, jsonMode: boolean): void
   }
 
   if (result.synchronized) {
-    console.error('\n✨ Harness is synchronized.');
+    console.log('\n✨ Harness is synchronized.');
     return;
   }
 
@@ -176,28 +176,28 @@ function renderVerifyStatus(result: VerifyStatusResult, jsonMode: boolean): void
 
   // Render Diff if available
   if (d.diff_counts) {
-    console.error(`\n   Diff Summary: +${d.diff_counts.added} added, ~${d.diff_counts.modified} modified, -${d.diff_counts.removed} removed`);
+    console.log(`\n   Diff Summary: +${d.diff_counts.added} added, ~${d.diff_counts.modified} modified, -${d.diff_counts.removed} removed`);
   }
   if (d.diff) {
-    console.error('\n   Changes Detected:');
-    for (const add of d.diff.added) console.error(`   + ${add.id}: ${add.description}`);
+    console.log('\n   Changes Detected:');
+    for (const add of d.diff.added) console.log(`   + ${add.id}: ${add.description}`);
     for (const mod of d.diff.modified) {
       const keys = (mod as ModifiedTestAssertion).changed_keys;
       const keySuffix = keys?.length ? ` [${keys.join(', ')}]` : '';
-      console.error(`   ~ ${mod.id}: ${mod.description}${keySuffix}`);
+      console.log(`   ~ ${mod.id}: ${mod.description}${keySuffix}`);
     }
-    for (const rem of d.diff.removed) console.error(`   - ${rem.id}: ${rem.description}`);
+    for (const rem of d.diff.removed) console.log(`   - ${rem.id}: ${rem.description}`);
   }
 }
 
 /** Render a GenerateHarnessResult as human-readable console output */
 function renderGenerateHarness(result: GenerateHarnessResult, jsonMode: boolean): void {
   if (jsonMode) {
-    process.stderr.write(JSON.stringify(result, null, 2) + '\n');
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     return;
   }
 
-  console.error(`\n🛠  Generating/Refreshing harness for project: ${result.project}...`);
+  console.log(`\n🛠  Generating/Refreshing harness for project: ${result.project}...`);
 
   if (result.file_missing) {
     console.error(`❌ Failed to read ${DEFAULT_HARNESS_PATH}. Does the file exist?`);
@@ -213,9 +213,9 @@ function renderGenerateHarness(result: GenerateHarnessResult, jsonMode: boolean)
     return;
   }
   if (result.success) {
-    console.error('✅ Harness registered successfully.');
-    console.error(`   Hash: ${result.rubric_hash?.slice(0, 12)}...`);
-    console.error(`   Tests: ${result.test_count} assertions.`);
+    console.log('✅ Harness registered successfully.');
+    console.log(`   Hash: ${result.rubric_hash?.slice(0, 12)}...`);
+    console.log(`   Tests: ${result.test_count} assertions.`);
   }
 }
 
