@@ -197,33 +197,39 @@ export async function backfillEmbeddingsHandler(args: unknown) {
         const { entry } = validEntries[i]!;
         const embedding = embeddings[i]!;
 
-        const patchData: Record<string, unknown> = {
-          embedding: JSON.stringify(embedding),
-        };
-
         try {
-          const { getDefaultCompressor, serialize } = await import("../utils/turboquant.js");
-          const compressor = getDefaultCompressor();
-          const compressed = compressor.compress(embedding);
-          const buf = serialize(compressed);
+          const patchData: Record<string, unknown> = {
+            embedding: JSON.stringify(embedding),
+          };
 
-          patchData.embedding_compressed = buf.toString("base64");
-          patchData.embedding_format = `turbo${compressor.bits}`;
-          patchData.embedding_turbo_radius = compressed.radius;
-        } catch (turboErr: any) {
-          debugLog(`[backfill] TurboQuant compression failed for ${entry.id} (non-fatal): ${turboErr.message}`);
+          try {
+            const { getDefaultCompressor, serialize } = await import("../utils/turboquant.js");
+            const compressor = getDefaultCompressor();
+            const compressed = compressor.compress(embedding);
+            const buf = serialize(compressed);
+
+            patchData.embedding_compressed = buf.toString("base64");
+            patchData.embedding_format = `turbo${compressor.bits}`;
+            patchData.embedding_turbo_radius = compressed.radius;
+          } catch (turboErr: any) {
+            debugLog(`[backfill] TurboQuant compression failed for ${entry.id} (non-fatal): ${turboErr.message}`);
+          }
+
+          await storage.patchLedger(entry.id, patchData);
+
+          repaired++;
+          debugLog(`[backfill] ✅ Repaired ${entry.id} (${entry.project})`);
+        } catch (entryErr) {
+          failed++;
+          lastError = entryErr instanceof Error ? entryErr.message : String(entryErr);
+          console.error(`[backfill] ❌ Failed ${entry.id}: ${lastError}`);
         }
-
-        await storage.patchLedger(entry.id, patchData);
-
-        repaired++;
-        debugLog(`[backfill] ✅ Repaired ${entry.id} (${entry.project})`);
       }
     } catch (err) {
-      // If batch fails or sequential throws, we assume everything in the batch failed.
+      // Embedding API call itself failed — entire batch is lost.
       failed += validEntries.length;
       lastError = err instanceof Error ? err.message : String(err);
-      console.error(`[backfill] ❌ Failed batch of ${validEntries.length}: ${lastError}`);
+      console.error(`[backfill] ❌ Embedding API failed for batch of ${validEntries.length}: ${lastError}`);
     }
   }
 

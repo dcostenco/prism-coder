@@ -132,6 +132,11 @@ export function getLLMProvider(): LLMProvider {
       generateEmbedding: embedAdapter.generateEmbedding.bind(embedAdapter),
     };
 
+    // Wire batch embeddings if the embed adapter supports it (e.g. VoyageAdapter).
+    if (embedAdapter.generateEmbeddings) {
+      composed.generateEmbeddings = embedAdapter.generateEmbeddings.bind(embedAdapter);
+    }
+
     // Pass VLM support through from the text adapter if it exists.
     // generateImageDescription is a text-generation concern (it calls the
     // text/vision model, not the embedding model). The text adapter owns it.
@@ -161,6 +166,9 @@ export function getLLMProvider(): LLMProvider {
       generateText:      fallback.generateText.bind(fallback),
       generateEmbedding: fallback.generateEmbedding.bind(fallback),
     };
+    if (typeof (fallback as any).generateEmbeddings === 'function') {
+      fallbackComposed.generateEmbeddings = (fallback as any).generateEmbeddings.bind(fallback);
+    }
     if (fallback.generateImageDescription) {
       fallbackComposed.generateImageDescription = fallback.generateImageDescription.bind(fallback);
     }

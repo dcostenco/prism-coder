@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.8.6] - 2026-04-06
+
+### Fixed
+- **Batch Embeddings Dead Code** — The factory's composed provider object never wired `generateEmbeddings()` from the embed adapter, making the entire Voyage batch embedding path unreachable. The backfill handler always fell back to sequential single-text calls. Now correctly passes the method through when the adapter supports it.
+- **Backfill Error Resilience** — If the Voyage API batch call succeeded but a single `patchLedger()` DB write failed, the entire batch was marked as failed and all paid embeddings were discarded. Now each entry is persisted independently with its own error handling.
+
 ## [7.8.4] - 2026-04-06
 
 ### Fixed
