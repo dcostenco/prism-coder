@@ -113,40 +113,58 @@ export class VoyageAdapter implements LLMProvider {
 
   // ─── Embedding Generation ────────────────────────────────────────────────
 
-  async generateEmbedding(text: string): Promise<number[]> {
-    if (!text || !text.trim()) {
-      throw new Error("[VoyageAdapter] generateEmbedding called with empty text");
-    }
+  async generateEmbeddings(texts: string[]): Promise<number[][]> {
+    if (!texts || texts.length === 0) return [];
 
     // Truncate to character limit (consistent with other adapters)
-    const truncated =
+    const truncatedTexts = texts.map(text =>
       text.length > MAX_EMBEDDING_CHARS
         ? text.slice(0, MAX_EMBEDDING_CHARS).replace(/\s+\S*$/, "")
-        : text;
+        : text
+    );
 
     const model = getSettingSync("voyage_model", DEFAULT_MODEL);
 
-    debugLog(`[VoyageAdapter] generateEmbedding — model=${model}, chars=${truncated.length}`);
+    debugLog(`[VoyageAdapter] generateEmbeddings batch — model=${model}, count=${texts.length}`);
 
     const requestBody = {
-      input: [truncated],
+      input: truncatedTexts,
       model,
       // We do NOT send output_dimension here because Voyage's API explicitly
       // restricts it to [256, 512, 1024, 2048] for MRL models. We will
       // manually slice the 1024-dim result down to 768 client-side.
     };
 
-    const response = await fetch(`${VOYAGE_API_BASE}/embeddings`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
+    let response: Response | null = null;
+    let retries = 0;
+    const maxRetries = 4;
+    const baseDelayMs = 15000; // 15 seconds base delay
 
-    if (!response.ok) {
+    while (true) {
+      response = await fetch(`${VOYAGE_API_BASE}/embeddings`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.ok) {
+        break;
+      }
+
       const errorText = await response.text().catch(() => "unknown error");
+      
+      if (response.status === 429 && retries < maxRetries) {
+        // Simple backoff: baseDelayMs * (retries + 1) -> 15s, 30s, 45s, 60s
+        const delay = baseDelayMs * (retries + 1);
+        retries++;
+        debugLog(`[VoyageAdapter] Rate limited (429). Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries}): ${errorText.substring(0, 50)}...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+
       throw new Error(
         `[VoyageAdapter] API request failed — status=${response.status}: ${errorText}`
       );
@@ -154,32 +172,45 @@ export class VoyageAdapter implements LLMProvider {
 
     const data = (await response.json()) as VoyageEmbeddingResponse;
 
-    let embedding = data?.data?.[0]?.embedding;
+    const embeddings = data?.data?.map(d => d.embedding) || [];
 
-    if (!Array.isArray(embedding)) {
-      throw new Error("[VoyageAdapter] Unexpected response format — no embedding array found");
+    if (embeddings.length !== texts.length) {
+      throw new Error(`[VoyageAdapter] Unexpected response length — expected ${texts.length}, got ${embeddings.length}`);
     }
 
-    // Client-side MRL Truncation: 
-    // Voyage models returning 1024 dims can be safely sliced to 768 since they 
-    // are trained with Matryoshka Representation Learning.
-    if (embedding.length > EMBEDDING_DIMS) {
-      embedding = embedding.slice(0, EMBEDDING_DIMS);
-    }
+    const processedEmbeddings = embeddings.map(emb => {
+      let embedding = emb;
+      
+      // Client-side MRL Truncation: 
+      // Voyage models returning 1024 dims can be safely sliced to 768 since they 
+      // are trained with Matryoshka Representation Learning.
+      if (embedding.length > EMBEDDING_DIMS) {
+        embedding = embedding.slice(0, EMBEDDING_DIMS);
+      }
 
-    // Dimension guard: Prism's DB schema requires exactly 768 dims.
-    if (embedding.length !== EMBEDDING_DIMS) {
-      throw new Error(
-        `[VoyageAdapter] Embedding dimension mismatch: expected ${EMBEDDING_DIMS}, ` +
-        `got ${embedding.length}. Make sure you are using a model that returns at least 768 dims.`
-      );
-    }
+      // Dimension guard: Prism's DB schema requires exactly 768 dims.
+      if (embedding.length !== EMBEDDING_DIMS) {
+        throw new Error(
+          `[VoyageAdapter] Embedding dimension mismatch: expected ${EMBEDDING_DIMS}, ` +
+          `got ${embedding.length}. Make sure you are using a model that returns at least 768 dims.`
+        );
+      }
+      return embedding;
+    });
 
     debugLog(
-      `[VoyageAdapter] Embedding generated — dims=${embedding.length}, ` +
+      `[VoyageAdapter] Batch embeddings generated — count=${processedEmbeddings.length}, ` +
       `tokens_used=${data.usage?.total_tokens ?? "unknown"}`
     );
 
-    return embedding;
+    return processedEmbeddings;
+  }
+
+  async generateEmbedding(text: string): Promise<number[]> {
+    if (!text || !text.trim()) {
+      throw new Error("[VoyageAdapter] generateEmbedding called with empty text");
+    }
+    const results = await this.generateEmbeddings([text]);
+    return results[0];
   }
 }

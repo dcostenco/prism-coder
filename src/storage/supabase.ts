@@ -1729,9 +1729,47 @@ export class SupabaseStorage implements StorageBackend {
     related_entities?: string[];
     userId?: string;
   }): Promise<string> {
-    // For now we just implement graceful degradation/no-op on Supabase until the SQL is deployed.
-    debugLog(`[SupabaseStorage] upsertSemanticKnowledge is not fully implemented in Supabase yet. Skipping for ${data.concept}.`);
-    return crypto.randomUUID();
+    const userId = data.userId || PRISM_USER_ID;
+    
+    // Check if concept already exists
+    const existing = await supabaseGet("semantic_knowledge", {
+      project: `eq.${data.project}`,
+      concept: `eq.${data.concept}`,
+      select: "id,instances,confidence",
+      limit: "1"
+    });
+
+    const rows = Array.isArray(existing) ? existing : [];
+
+    if (rows.length > 0) {
+      const row = rows[0] as any;
+      const newConfidence = Math.min(1.0, (row.confidence || 0) + 0.1);
+      const newInstances = (row.instances || 0) + 1;
+      
+      await supabasePatch("semantic_knowledge", {
+        instances: newInstances,
+        confidence: newConfidence,
+        updated_at: new Date().toISOString()
+      }, {
+        id: `eq.${row.id}`
+      });
+      return row.id;
+    } else {
+      const id = crypto.randomUUID();
+      await supabasePost("semantic_knowledge", {
+        id,
+        project: data.project,
+        user_id: userId,
+        concept: data.concept,
+        description: data.description,
+        confidence: 0.5,
+        instances: 1,
+        related_entities: data.related_entities ? JSON.stringify(data.related_entities) : "[]",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+      return id;
+    }
   }
 }
 

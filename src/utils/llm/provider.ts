@@ -64,6 +64,14 @@ export interface LLMProvider {
   generateEmbedding(text: string): Promise<number[]>;
 
   /**
+   * OPTIONAL — Generate multiple embedding vectors in a single API call (batching).
+   * Adapters that support this (e.g. Voyage) implement this method.
+   *
+   * @param texts Array of raw text to embed.
+   */
+  generateEmbeddings?(texts: string[]): Promise<number[][]>;
+
+  /**
    * OPTIONAL — Generate a rich natural-language description of an image.
    * Implemented by vision-capable adapters (Gemini, OpenAI gpt-4o+, Anthropic).
    * Text-only adapters omit this method entirely.

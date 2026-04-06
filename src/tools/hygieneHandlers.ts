@@ -157,52 +157,73 @@ export async function backfillEmbeddingsHandler(args: unknown) {
     };
   }
 
-  // Generate embeddings for each entry
   let repaired = 0;
   let failed = 0;
+  let lastError: string | undefined = undefined;
 
-  for (const entry of entries) {
-    try {
-      const e = entry as any;
-      const textToEmbed = [
-        e.summary || "",
-        ...(e.decisions || []),
-      ].filter(Boolean).join(" | ");
-
-      if (!textToEmbed.trim()) {
-        debugLog(`[backfill] Skipping entry ${e.id}: no text content`);
-        failed++;
-        continue;
-      }
-
-      const embedding = await getLLMProvider().generateEmbedding(textToEmbed);
-
-      // Build atomic patch — float32 + TurboQuant in ONE DB update
-      const patchData: Record<string, unknown> = {
-        embedding: JSON.stringify(embedding),
-      };
-
-      // TurboQuant: compress alongside repair (non-fatal)
-      try {
-        const { getDefaultCompressor, serialize } = await import("../utils/turboquant.js");
-        const compressor = getDefaultCompressor();
-        const compressed = compressor.compress(embedding);
-        const buf = serialize(compressed);
-
-        patchData.embedding_compressed = buf.toString("base64");
-        patchData.embedding_format = `turbo${compressor.bits}`;
-        patchData.embedding_turbo_radius = compressed.radius;
-      } catch (turboErr: any) {
-        debugLog(`[backfill] TurboQuant compression failed for ${e.id} (non-fatal): ${turboErr.message}`);
-      }
-
-      await storage.patchLedger(e.id, patchData);
-
-      repaired++;
-      debugLog(`[backfill] ✅ Repaired ${e.id} (${e.project})`);
-    } catch (err) {
+  const validEntries = entries.map(e => {
+    const entry = e as any;
+    const textToEmbed = [
+      entry.summary || "",
+      ...(entry.decisions || []),
+    ].filter(Boolean).join(" | ");
+    return { entry, textToEmbed };
+  }).filter(x => {
+    if (!x.textToEmbed.trim()) {
+      debugLog(`[backfill] Skipping entry ${x.entry.id}: no text content`);
       failed++;
-      console.error(`[backfill] ❌ Failed ${(entry as any).id}: ${err instanceof Error ? err.message : err}`);
+      return false;
+    }
+    return true;
+  });
+
+  if (validEntries.length > 0) {
+    const provider = getLLMProvider();
+
+    try {
+      let embeddings: number[][];
+      if (provider.generateEmbeddings) {
+        // Use batch API
+        embeddings = await provider.generateEmbeddings(validEntries.map(x => x.textToEmbed));
+      } else {
+        // Fallback to sequential if batching is not supported by the adapter
+        embeddings = [];
+        for (const { textToEmbed } of validEntries) {
+          embeddings.push(await provider.generateEmbedding(textToEmbed));
+        }
+      }
+
+      for (let i = 0; i < validEntries.length; i++) {
+        const { entry } = validEntries[i]!;
+        const embedding = embeddings[i]!;
+
+        const patchData: Record<string, unknown> = {
+          embedding: JSON.stringify(embedding),
+        };
+
+        try {
+          const { getDefaultCompressor, serialize } = await import("../utils/turboquant.js");
+          const compressor = getDefaultCompressor();
+          const compressed = compressor.compress(embedding);
+          const buf = serialize(compressed);
+
+          patchData.embedding_compressed = buf.toString("base64");
+          patchData.embedding_format = `turbo${compressor.bits}`;
+          patchData.embedding_turbo_radius = compressed.radius;
+        } catch (turboErr: any) {
+          debugLog(`[backfill] TurboQuant compression failed for ${entry.id} (non-fatal): ${turboErr.message}`);
+        }
+
+        await storage.patchLedger(entry.id, patchData);
+
+        repaired++;
+        debugLog(`[backfill] ✅ Repaired ${entry.id} (${entry.project})`);
+      }
+    } catch (err) {
+      // If batch fails or sequential throws, we assume everything in the batch failed.
+      failed += validEntries.length;
+      lastError = err instanceof Error ? err.message : String(err);
+      console.error(`[backfill] ❌ Failed batch of ${validEntries.length}: ${lastError}`);
     }
   }
 
@@ -218,7 +239,7 @@ export async function backfillEmbeddingsHandler(args: unknown) {
           : `All entries now have embeddings for semantic search.`),
     }],
     isError: false,
-    _stats: { repaired, failed, last_id: (entries[entries.length - 1] as any)?.id },
+    _stats: { repaired, failed, error: lastError, last_id: (entries[entries.length - 1] as any)?.id },
   } as any;
 }
 

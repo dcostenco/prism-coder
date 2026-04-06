@@ -105,7 +105,7 @@ describe("VoyageAdapter", () => {
 
     const body = JSON.parse(opts.body);
     expect(body.model).toBe("voyage-3");
-    expect(body.output_dimension).toBe(768);
+    expect(body.output_dimension).toBeUndefined();
     expect(body.input).toEqual(["test session context"]);
   });
 
@@ -120,13 +120,13 @@ describe("VoyageAdapter", () => {
     );
   });
 
-  it("throws dimension mismatch for unexpected 1024-dim response", async () => {
-    const wrongDims = Array.from({ length: 1024 }, () => 0.1);
-    mockFetch.mockResolvedValueOnce(makeVoyageResponse(wrongDims));
+  it("truncates 1024-dim response to 768 (client-side MRL)", async () => {
+    const bigDims = Array.from({ length: 1024 }, (_, i) => Math.sin(i * 0.01));
+    mockFetch.mockResolvedValueOnce(makeVoyageResponse(bigDims));
 
-    await expect(adapter.generateEmbedding("test")).rejects.toThrow(
-      "expected 768"
-    );
+    const result = await adapter.generateEmbedding("test");
+    expect(result).toHaveLength(768);
+    expect(result).toEqual(bigDims.slice(0, 768));
   });
 
   // ── Empty/invalid input ──────────────────────────────────────────────────
@@ -166,16 +166,25 @@ describe("VoyageAdapter", () => {
     );
   });
 
-  it("throws on HTTP 429 (rate limit)", async () => {
-    mockFetch.mockResolvedValueOnce({
+  it("throws on HTTP 429 (rate limit) after max retries", async () => {
+    vi.useFakeTimers();
+    mockFetch.mockResolvedValue({
       ok: false,
       status: 429,
       text: async () => "Rate limit exceeded",
     });
 
-    await expect(adapter.generateEmbedding("test")).rejects.toThrow(
-      "status=429"
-    );
+    let caughtError: any = null;
+    const promise = adapter.generateEmbedding("test").catch(e => { caughtError = e; });
+    
+    // Fast-forward through all retries
+    await vi.runAllTimersAsync();
+    await promise;
+    
+    expect(caughtError).toBeDefined();
+    expect(caughtError.message).toMatch(/status=429/);
+
+    vi.useRealTimers();
   });
 
   it("throws on malformed response (no embedding array)", async () => {
@@ -185,7 +194,7 @@ describe("VoyageAdapter", () => {
     });
 
     await expect(adapter.generateEmbedding("test")).rejects.toThrow(
-      "no embedding array"
+      "Unexpected response length"
     );
   });
 

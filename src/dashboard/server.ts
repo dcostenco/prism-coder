@@ -471,6 +471,7 @@ return false;}
               let cursorId: string | undefined = undefined;
               let iterations = 0;
               const MAX_ITERATIONS = 100; // safety cap: 100 × 50 = 5000 entries max
+              let lastBackfillError: string | undefined = undefined;
               
               while (hasMore && iterations < MAX_ITERATIONS) {
                 iterations++;
@@ -479,6 +480,7 @@ return false;}
                 if (bStats) {
                   repairedCount += bStats.repaired;
                   failedCount += bStats.failed;
+                  if (bStats.error) lastBackfillError = bStats.error;
                   if (bStats.last_id) cursorId = bStats.last_id;
                   else hasMore = false;
                   if ((bStats.repaired + bStats.failed) < 50) hasMore = false;
@@ -487,7 +489,10 @@ return false;}
                 }
               }
               cleanupMessages.push(`Repaired ${repairedCount} embeddings`);
-              if (failedCount > 0) cleanupMessages.push(`Failed to repair ${failedCount} embeddings`);
+              if (failedCount > 0) {
+                 const errMsg = lastBackfillError ? ` (${lastBackfillError})` : '';
+                 cleanupMessages.push(`Failed to repair ${failedCount} embeddings${errMsg}`);
+              }
             } catch (err) {
               console.error("[Dashboard] Failed to backfill embeddings:", err);
               cleanupMessages.push("Embedding backfill failed");

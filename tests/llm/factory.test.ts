@@ -120,7 +120,7 @@ describe("LLM Provider Factory — Split Architecture", () => {
   // ── Anthropic split (auto-bridge) ─────────────────────────────────────────
 
   it("Anthropic + auto → AnthropicAdapter for text, GeminiAdapter for embeddings", () => {
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockProviders("anthropic", "auto", { anthropic_api_key: "sk-ant-test" });
     getLLMProvider();
     expect(AnthropicAdapter).toHaveBeenCalledOnce(); // text
@@ -134,7 +134,7 @@ describe("LLM Provider Factory — Split Architecture", () => {
   // ── Explicit split provider ───────────────────────────────────────────────
 
   it("Anthropic text + OpenAI embeddings → AnthropicAdapter + OpenAIAdapter", () => {
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockProviders("anthropic", "openai", {
       anthropic_api_key: "sk-ant-test",
       openai_base_url: "http://localhost:11434/v1", // Ollama
@@ -149,7 +149,7 @@ describe("LLM Provider Factory — Split Architecture", () => {
   });
 
   it("Gemini text + explicit OpenAI embeddings → split adapter", () => {
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockProviders("gemini", "openai", { openai_base_url: "http://localhost:11434/v1" });
     getLLMProvider();
     expect(GeminiAdapter).toHaveBeenCalledOnce();  // text
@@ -161,7 +161,7 @@ describe("LLM Provider Factory — Split Architecture", () => {
   // ── Voyage AI embedding provider ─────────────────────────────────────────
 
   it("Anthropic text + Voyage embeddings → AnthropicAdapter + VoyageAdapter", () => {
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockProviders("anthropic", "voyage", {
       anthropic_api_key: "sk-ant-test",
       voyage_api_key: "pa-test",
@@ -178,7 +178,7 @@ describe("LLM Provider Factory — Split Architecture", () => {
   });
 
   it("Gemini text + Voyage embeddings → GeminiAdapter + VoyageAdapter", () => {
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockProviders("gemini", "voyage", { voyage_api_key: "pa-test" });
     getLLMProvider();
     expect(GeminiAdapter).toHaveBeenCalledOnce();     // text
@@ -191,7 +191,7 @@ describe("LLM Provider Factory — Split Architecture", () => {
   });
 
   it("Anthropic + auto auto-bridge message mentions Voyage as recommended option", () => {
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockProviders("anthropic", "auto", { anthropic_api_key: "sk-ant-test" });
     getLLMProvider();
     expect(infoSpy).toHaveBeenCalledWith(

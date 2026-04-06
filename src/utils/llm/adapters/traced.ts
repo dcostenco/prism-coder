@@ -48,6 +48,11 @@ import { getTracer } from "../../telemetry.js";
 
 export class TracingLLMProvider implements LLMProvider {
   /**
+   * Optional batch embeddings generation support.
+   */
+  generateEmbeddings?: LLMProvider["generateEmbeddings"];
+
+  /**
    * The optional VLM method is declared here as a typed property so TypeScript
    * knows about it. It is assigned (or left undefined) in the constructor body
    * based on whether the inner adapter supports it.
@@ -65,6 +70,37 @@ export class TracingLLMProvider implements LLMProvider {
     private readonly inner: LLMProvider,
     private readonly providerName: string,
   ) {
+    // ── Batch Embeddings: conditional own-property assignment ───────────────
+    if (inner.generateEmbeddings) {
+      const innerEmbeds = inner.generateEmbeddings.bind(inner);
+      const providerName = this.providerName;
+
+      this.generateEmbeddings = async (texts: string[]): Promise<number[][]> => {
+        const span = getTracer().startSpan("llm.generate_embeddings_batch", {
+          attributes: {
+            "llm.provider": providerName,
+            "llm.batch_size": texts.length,
+          },
+        });
+
+        return context.with(trace.setSpan(context.active(), span), async () => {
+          try {
+            const result = await innerEmbeds(texts);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return result;
+          } catch (err) {
+            span.recordException(err instanceof Error ? err : new Error(String(err)));
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: err instanceof Error ? err.message : String(err),
+            });
+            throw err;
+          } finally {
+            span.end();
+          }
+        });
+      };
+    }
     // ── VLM method: conditional own-property assignment ──────────────────
     // REVIEWER NOTE: TypeScript class methods always appear on the prototype,
     // which means `if (llm.generateImageDescription)` would always be truthy
