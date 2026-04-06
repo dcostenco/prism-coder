@@ -107,16 +107,16 @@ export function getLLMProvider(): LLMProvider {
       // Anthropic has no embedding API — auto-bridge to Gemini.
       // For all other text providers, use the same provider for embeddings.
       embedType = textType === "anthropic" ? "gemini" : textType;
-    }
 
-    if (textType === "anthropic") {
-      console.info(
-        "[LLMFactory] text_provider=anthropic with embedding_provider=auto: " +
-        "routing embeddings to GeminiAdapter (Anthropic has no native embedding API). " +
-        "For the Anthropic-recommended pairing, set embedding_provider=voyage in the dashboard " +
-        "(voyage-3 supports 768-dim output via MRL). " +
-        "Alternatively, set embedding_provider=openai to use Ollama/OpenAI."
-      );
+      if (textType === "anthropic") {
+        console.error(
+          "[LLMFactory] text_provider=anthropic with embedding_provider=auto: " +
+          "routing embeddings to GeminiAdapter (Anthropic has no native embedding API). " +
+          "For the Anthropic-recommended pairing, set embedding_provider=voyage in the dashboard " +
+          "(voyage-code-3 supports 768-dim output via MRL). " +
+          "Alternatively, set embedding_provider=openai to use Ollama/OpenAI."
+        );
+      }
     }
   }
 
@@ -145,7 +145,7 @@ export function getLLMProvider(): LLMProvider {
     providerInstance = new TracingLLMProvider(composed, textType);
 
     if (textType !== embedType) {
-      console.info(
+      console.error(
         `[LLMFactory] Split provider: text=${textType}, embedding=${embedType}`
       );
     }

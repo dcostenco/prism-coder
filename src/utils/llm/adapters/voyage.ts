@@ -16,7 +16,7 @@
  *   Prism's SQLite (sqlite-vec) and Supabase (pgvector) schemas define
  *   embedding columns as EXACTLY 768 dimensions.
  *
- *   Voyage solution: voyage-3 and voyage-3-lite output 1024 dims by default,
+ *   Voyage solution: voyage-code-3 and voyage-3 output 1024 dims by default,
  *   but both support the `output_dimension` parameter (Matryoshka Representation
  *   Learning), enabling truncation to 768 while preserving quality.
  *   voyage-3-lite at 768 dims is the fastest and most cost-efficient option.
@@ -29,11 +29,11 @@
  *
  *   NOTE: voyage-3-lite natively outputs 512 dims; it does NOT support
  *   output_dimension truncation to 768. Use voyage-3 for dimension parity.
- *   Default is voyage-3 for this reason.
+ *   Default is voyage-code-3 (optimised for code-heavy sessions).
  *
  * CONFIG KEYS (Prism dashboard "AI Providers" tab OR environment variables):
  *   voyage_api_key     — Required. Voyage AI API key (pa-...)
- *   voyage_model       — Embedding model (default: voyage-3)
+ *   voyage_model       — Embedding model (default: voyage-code-3)
  *
  * USAGE WITH ANTHROPIC TEXT PROVIDER:
  *   Set text_provider=anthropic, embedding_provider=voyage in the dashboard.
