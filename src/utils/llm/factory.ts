@@ -99,9 +99,15 @@ export function getLLMProvider(): LLMProvider {
   let embedType = getSettingSync("embedding_provider", "auto");
 
   if (embedType === "auto") {
-    // Anthropic has no embedding API — auto-bridge to Gemini.
-    // For all other text providers, use the same provider for embeddings.
-    embedType = textType === "anthropic" ? "gemini" : textType;
+    if (process.env.VOYAGE_API_KEY) {
+      // If Voyage is available, use it as the default embedding provider
+      // since voyage-code-3 strongly outperforms general embeddings on code contexts.
+      embedType = "voyage";
+    } else {
+      // Anthropic has no embedding API — auto-bridge to Gemini.
+      // For all other text providers, use the same provider for embeddings.
+      embedType = textType === "anthropic" ? "gemini" : textType;
+    }
 
     if (textType === "anthropic") {
       console.info(

@@ -58,9 +58,9 @@ const EMBEDDING_DIMS = 768;
 // 8000 chars ≈ 1500-2000 tokens for typical session summaries.
 const MAX_EMBEDDING_CHARS = 8000;
 
-// Default model: voyage-3 (supports output_dimension=768 via MRL)
-// voyage-3-lite is NOT recommended as its native 512 dims < 768.
-const DEFAULT_MODEL = "voyage-3";
+// Default model: voyage-code-3 (supports output_dimension=768 via client-side MRL truncation)
+// Extremely optimized for code bases, ide workspaces, and technical queries.
+const DEFAULT_MODEL = "voyage-code-3";
 
 const VOYAGE_API_BASE = "https://api.voyageai.com/v1";
 
@@ -131,11 +131,9 @@ export class VoyageAdapter implements LLMProvider {
     const requestBody = {
       input: [truncated],
       model,
-      // Request exactly 768 dims via Matryoshka truncation.
-      // Supported by voyage-3, voyage-3-large, voyage-code-3.
-      // voyage-3-lite (native 512 dims) will ignore this and return 512,
-      // which will be caught by the dimension guard below.
-      output_dimension: EMBEDDING_DIMS,
+      // We do NOT send output_dimension here because Voyage's API explicitly
+      // restricts it to [256, 512, 1024, 2048] for MRL models. We will
+      // manually slice the 1024-dim result down to 768 client-side.
     };
 
     const response = await fetch(`${VOYAGE_API_BASE}/embeddings`, {
@@ -156,20 +154,24 @@ export class VoyageAdapter implements LLMProvider {
 
     const data = (await response.json()) as VoyageEmbeddingResponse;
 
-    const embedding = data?.data?.[0]?.embedding;
+    let embedding = data?.data?.[0]?.embedding;
 
     if (!Array.isArray(embedding)) {
       throw new Error("[VoyageAdapter] Unexpected response format — no embedding array found");
     }
 
+    // Client-side MRL Truncation: 
+    // Voyage models returning 1024 dims can be safely sliced to 768 since they 
+    // are trained with Matryoshka Representation Learning.
+    if (embedding.length > EMBEDDING_DIMS) {
+      embedding = embedding.slice(0, EMBEDDING_DIMS);
+    }
+
     // Dimension guard: Prism's DB schema requires exactly 768 dims.
-    // This catches voyage-3-lite (512) or future API changes silently early.
     if (embedding.length !== EMBEDDING_DIMS) {
       throw new Error(
         `[VoyageAdapter] Embedding dimension mismatch: expected ${EMBEDDING_DIMS}, ` +
-        `got ${embedding.length}. ` +
-        `Use voyage-3 (not voyage-3-lite) to get 768-dim output via MRL truncation. ` +
-        `Change voyage_model in the Mind Palace dashboard.`
+        `got ${embedding.length}. Make sure you are using a model that returns at least 768 dims.`
       );
     }
 
