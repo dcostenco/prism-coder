@@ -8,7 +8,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-![Prism Mind Palace Dashboard](docs/mind-palace-dashboard.png)
+![Prism Mind Palace Dashboard — v9.0.4](docs/mind-palace-dashboard.png)
 
 **Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
@@ -782,7 +782,7 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## What's New
 
-> **Current release: v9.0.0 — Autonomous Cognitive OS**
+> **Current release: v9.0.4 — Autonomous Cognitive OS**
 
 - 🧠 **v9.0.0 — Autonomous Cognitive OS:** Affect-Tagged Memory (valence engine — emotional salience boosts retrieval), Token-Economic Cognitive Budget (UBI + cost-per-save incentivizes novel memories), Surprisal Gate (vector-based novelty scoring). Full SQLite + Supabase parity with auto-migration 42. Hybrid scoring: `0.65 × similarity + 0.25 × activation + 0.10 × |valence|`. All features opt-out via env. **Post-review hardening:** 8 architectural fixes including delta-based concurrent budget writes, energy-weighted valence propagation, and anti-exploit budget decoupling. Graceful degradation: budget exhaustion warns but never blocks.
 - ⚡ **v8.0.0 — Synapse Engine:** Pure, storage-agnostic multi-hop graph propagation engine replaces the legacy SQL-coupled spreading activation. O(T × M) bounded ACT-R energy propagation with dampened fan effect, asymmetric bidirectional flow, cyclic loop prevention, and sigmoid normalization. Full integration into both SQLite and Supabase backends. 5 new config knobs. Battle-hardened with NaN guards, config clamping, non-fatal enrichment, and 16 passing tests. **Memory search now follows the causal graph, not just keywords.** → [Synapse Engine](#synapse-engine-v80)

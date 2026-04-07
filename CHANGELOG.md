@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.0.4] - 2026-04-07 — Stability & CI Hardening
+
+### Fixed
+- **Cross-Platform Temp Path** — `imageCaptioner.test.ts` now uses `os.tmpdir()` instead of hardcoded `/tmp` for cross-platform CI compatibility (macOS, Linux, Windows).
+
+### Documentation
+- **Dashboard Screenshot** — Updated `docs/mind-palace-dashboard.png` to reflect v9.0 UI (active project title, cognitive budget bar).
+
+### Engineering
+- 1151 tests across 51 suites, all passing, zero regressions
+- TypeScript strict mode: zero errors
+
+---
+
 ## [9.0.0] - 2026-04-07 — Autonomous Cognitive OS
 
 ### 🧠 Affect-Tagged Memory (Valence Engine)
