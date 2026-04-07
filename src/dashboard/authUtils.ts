@@ -4,6 +4,7 @@
 
 import { randomBytes } from "crypto";
 import type * as http from "http";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 // ─────────────────────────────────────────────────────────────────
 // TYPES
@@ -63,6 +64,20 @@ export function generateToken(): string {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// JWKS SETUP
+// ─────────────────────────────────────────────────────────────────
+
+let jwksCache: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+export function initJWKS(uri: string) {
+  try {
+    jwksCache = createRemoteJWKSet(new URL(uri));
+  } catch (err) {
+    console.error(`Failed to initialize JWKS from ${uri}:`, err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // AUTHENTICATION CHECK
 // ─────────────────────────────────────────────────────────────────
 
@@ -77,11 +92,27 @@ export function generateToken(): string {
  * Side effect: expired session tokens are lazily cleaned up when
  * encountered, preventing unbounded memory growth.
  */
-export function isAuthenticated(
+export async function isAuthenticated(
   req: http.IncomingMessage,
   config: AuthConfig,
-): boolean {
+): Promise<boolean> {
   if (!config.authEnabled) return true;
+
+  // Check Bearer Token (JWKS)
+  const authHeader = req.headers.authorization || "";
+  if (authHeader.startsWith("Bearer ") && jwksCache) {
+    try {
+      const token = authHeader.slice(7);
+      const { payload } = await jwtVerify(token, jwksCache);
+      // Attach agent_id to the request for traceability if needed downstream
+      (req as any).agent_id = payload.agent_id || payload.sub;
+      return true;
+    } catch (err) {
+      // Verification failed — let it fall through or return false
+      // console.error("JWT verification failed:", err);
+      return false;
+    }
+  }
 
   // Check session cookie first
   const cookies = req.headers.cookie || "";
@@ -95,7 +126,6 @@ export function isAuthenticated(
   }
 
   // Check Basic Auth header
-  const authHeader = req.headers.authorization || "";
   if (authHeader.startsWith("Basic ")) {
     try {
       const decoded = Buffer.from(authHeader.slice(6), "base64").toString("utf-8");

@@ -39,6 +39,7 @@ import {
   generateToken,
   isAuthenticated,
   createRateLimiter,
+  initJWKS,
   type AuthConfig,
 } from "./authUtils.js";
 
@@ -88,7 +89,15 @@ export async function startDashboardServer(): Promise<void> {
    */
   const AUTH_USER = process.env.PRISM_DASHBOARD_USER || "";
   const AUTH_PASS = process.env.PRISM_DASHBOARD_PASS || "";
-  const AUTH_ENABLED = AUTH_USER.length > 0 && AUTH_PASS.length > 0;
+  const AUTH_JWKS_URI = process.env.PRISM_JWKS_URI || process.env.AUTH_JWKS_URI || "";
+  
+  // Auth is enabled if basic auth is configured OR if JWKS is configured
+  const AUTH_ENABLED = (AUTH_USER.length > 0 && AUTH_PASS.length > 0) || AUTH_JWKS_URI.length > 0;
+  
+  if (AUTH_JWKS_URI) {
+    initJWKS(AUTH_JWKS_URI);
+  }
+
   const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
   const activeSessions = new Map<string, number>(); // token → expiry timestamp
 
@@ -326,10 +335,11 @@ return false;}
       }
     }
 
-    // ─── v5.1: Auth gate — block unauthenticated requests ───
-    if (AUTH_ENABLED && !isAuthenticated(req, authConfig)) {
-      // For API calls, return 401 JSON
-      if (reqUrl.pathname.startsWith("/api/") || reqUrl.pathname === "/sse" || reqUrl.pathname === "/messages") {
+    // ─── AUTHENTICATION GATE ───
+    // Basic Auth & Session & JWKS
+    if (AUTH_ENABLED && !(await isAuthenticated(req, authConfig))) {
+      // If it's an API request, return 401 JSON
+      if (reqUrl.pathname.startsWith('/api/') || reqUrl.pathname === "/sse" || reqUrl.pathname === "/messages") {
         res.writeHead(401, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ error: "Authentication required" }));
       }
