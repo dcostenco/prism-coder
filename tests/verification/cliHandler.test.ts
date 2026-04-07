@@ -83,12 +83,21 @@ function realHash(): string {
 // ─── computeVerifyStatus — pure result shape ──────────────────────────────────
 
 describe('computeVerifyStatus', () => {
+  beforeEach(() => {
+    delete process.env.CI;
+    delete process.env.GITHUB_ACTIONS;
+    delete process.env.GITLAB_CI;
+    delete process.env.PRISM_STRICT_VERIFICATION;
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     // Reset process.exitCode after each test
     process.exitCode = 0;
     // Restore env vars touched by tests
     delete process.env.CI;
+    delete process.env.GITHUB_ACTIONS;
+    delete process.env.GITLAB_CI;
     delete process.env.PRISM_STRICT_VERIFICATION;
   });
 
@@ -373,12 +382,19 @@ describe('handleVerifyStatus', () => {
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     warnSpy  = vi.spyOn(console, 'warn').mockImplementation(() => {});
     stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    delete process.env.CI;
+    delete process.env.GITHUB_ACTIONS;
+    delete process.env.GITLAB_CI;
+    delete process.env.PRISM_STRICT_VERIFICATION;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     process.exitCode = 0;
     delete process.env.CI;
+    delete process.env.GITHUB_ACTIONS;
+    delete process.env.GITLAB_CI;
     delete process.env.PRISM_STRICT_VERIFICATION;
   });
 

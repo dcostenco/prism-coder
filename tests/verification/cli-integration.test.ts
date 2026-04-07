@@ -12,7 +12,7 @@ describe('CLI Integration — Operator Contract & JSON Modes', () => {
   const cliPath = path.resolve(__dirname, '../../src/cli.ts');
   const dbPath = './prism-local.db';
   const harnessPath = './verification_harness.json';
-  const execOpts = { env: { ...process.env, CI: '', GITHUB_ACTIONS: '', GITLAB_CI: '', PRISM_STRICT_VERIFICATION: '' } }; // Default to local env
+  const execOpts = { env: { ...process.env, CI: '', GITHUB_ACTIONS: '', GITLAB_CI: '', PRISM_STRICT_VERIFICATION: '', NODE_OPTIONS: '--no-warnings', BRAVE_API_KEY: 'dummy', GOOGLE_API_KEY: 'dummy', BRAVE_ANSWERS_API_KEY: 'dummy' } }; // Default to local env
 
   beforeAll(async () => {
     // Ensure clean state
