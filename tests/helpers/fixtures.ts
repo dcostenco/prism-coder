@@ -87,8 +87,13 @@ export async function createTestDb(testName: string) {
      * Cleanup: removes the temp directory.
      * Call in afterAll() or afterEach() to prevent disk leaks.
      */
-    cleanup: () => {
-      try { (storage as any).close?.(); } catch { /* non-fatal */ }
+    cleanup: async () => {
+      try {
+        if (storage && typeof storage.close === "function") {
+          await storage.close();
+        }
+      } catch { /* non-fatal */ }
+      
       try {
         if (existsSync(uniqueDir)) {
           rmSync(uniqueDir, { recursive: true, force: true });

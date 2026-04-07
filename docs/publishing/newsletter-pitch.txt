@@ -1,0 +1,19 @@
+Subject: Open Source MCP Memory System Hits 92.3% on LongMemEval (GraphRAG without graph DBs)
+
+Hi [Newsletter Editor Name],
+
+I wanted to share a new open-source project we recently released that might be of interest to the [Newsletter Name] readers.
+
+We recently launched v9.0 of Prism, an open-source Autonomous Cognitive OS for AI agents built for the Model Context Protocol (MCP). It provides long-term, persistent memory for agents running on Claude Desktop, Cursor, and Windsurf.
+
+We just published our benchmark results running Prism against the ICLR 2025 LongMemEval framework, where it achieved **92.3% R@5**. 
+
+Instead of standard vector RAG, the system mathematically forces the LLM to learn compression through a "Token-Economic Cognitive Budget". When saving memories, boilerplate is penalized (2x token cost) and novel insights are rewarded (0.5x cost), drastically reducing downstream LLM prompt costs. We also map causal edges combining FTS5 + local vector search with ACT-R spreading activation, achieving GraphRAG capabilities entirely on top of local SQLite.
+
+The GitHub repo is MIT licensed and growing quickly:
+https://github.com/dcostenco/prism-mcp
+
+Happy to answer any questions or provide a deeper technical dive!
+
+Best,
+[Your Name/Team]
