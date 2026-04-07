@@ -211,6 +211,7 @@ describe("Team API (Storage Layer)", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("Graph Step 3B/4 Contracts", () => {
+
   /**
    * Tests that synthesizeEdgesCore returns the expected metrics shape
    * when run against real SQLite storage with seeded entries.
