@@ -107,6 +107,8 @@ export async function startDashboardServer(): Promise<void> {
     authUser: AUTH_USER,
     authPass: AUTH_PASS,
     activeSessions,
+    jwtAudience: process.env.PRISM_JWT_AUDIENCE || undefined,
+    jwtIssuer: process.env.PRISM_JWT_ISSUER || undefined,
   };
 
   // v6.5.1: Rate limiter for login endpoint — 5 attempts per 60 seconds per IP
@@ -162,7 +164,17 @@ return false;}
   }
 
   if (AUTH_ENABLED) {
-    console.error(`[Dashboard] 🔒 Auth enabled for user "${AUTH_USER}"`);
+    if (AUTH_USER) {
+      console.error(`[Dashboard] 🔒 Basic auth enabled for user "${AUTH_USER}"`);
+    }
+    if (AUTH_JWKS_URI) {
+      console.error(`[Dashboard] 🔑 JWKS auth enabled: ${AUTH_JWKS_URI}`);
+      if (process.env.PRISM_JWT_AUDIENCE) {
+        console.error(`[Dashboard]    Audience: ${process.env.PRISM_JWT_AUDIENCE}`);
+      } else {
+        console.error(`[Dashboard] ⚠️  No PRISM_JWT_AUDIENCE set — any valid JWT from this JWKS will be accepted.`);
+      }
+    }
     // Security advisory: HTTP Basic Auth transmits credentials in cleartext.
     // When auth is enabled for remote access, HTTPS (reverse proxy) is strongly recommended.
     console.error(
@@ -257,7 +269,7 @@ return false;}
             version: SERVER_CONFIG.version,
           },
           authentication: {
-            required: false
+            required: AUTH_ENABLED
           },
           configSchema: {
             type: "object",

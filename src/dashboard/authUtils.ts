@@ -4,7 +4,7 @@
 
 import { randomBytes } from "crypto";
 import type * as http from "http";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createRemoteJWKSet, jwtVerify, type JWTVerifyOptions } from "jose";
 
 // ─────────────────────────────────────────────────────────────────
 // TYPES
@@ -16,6 +16,18 @@ export interface AuthConfig {
   authUser: string;
   authPass: string;
   activeSessions: Map<string, number>; // token → expiry timestamp
+  /** Optional JWT audience for JWKS verification (prevents cross-service token confusion) */
+  jwtAudience?: string;
+  /** Optional JWT issuer for JWKS verification */
+  jwtIssuer?: string;
+}
+
+/**
+ * Extended request type — attaches agent identity after successful JWT verification.
+ * Downstream handlers can read `req.agent_id` for audit logging / traceability.
+ */
+export interface PrismAuthenticatedRequest extends http.IncomingMessage {
+  agent_id?: string;
 }
 
 /** Rate limiter options */
@@ -72,9 +84,23 @@ let jwksCache: ReturnType<typeof createRemoteJWKSet> | null = null;
 export function initJWKS(uri: string) {
   try {
     jwksCache = createRemoteJWKSet(new URL(uri));
+    console.error(`[Auth] 🔑 JWKS remote key set initialized: ${uri}`);
   } catch (err) {
-    console.error(`Failed to initialize JWKS from ${uri}:`, err);
+    console.error(`[Auth] ❌ Failed to initialize JWKS from ${uri}:`, err);
   }
+}
+
+/**
+ * Reset JWKS cache — for testing only.
+ * @internal
+ */
+export function _resetJWKS(cache: ReturnType<typeof createRemoteJWKSet> | null = null) {
+  jwksCache = cache;
+}
+
+/** Expose JWKS cache state for testing. @internal */
+export function _getJWKSCache() {
+  return jwksCache;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -84,13 +110,16 @@ export function initJWKS(uri: string) {
 /**
  * Check if a request is authenticated against the provided config.
  *
- * Returns true if:
- *   1. Auth is disabled (authEnabled === false) → pass-through
- *   2. Request has a valid, non-expired session cookie
- *   3. Request has valid Basic Auth credentials
+ * Authentication is checked in priority order:
+ *   1. Auth disabled (authEnabled === false) → pass-through
+ *   2. Bearer JWT token verified against JWKS remote key set
+ *   3. Valid, non-expired session cookie
+ *   4. Valid Basic Auth credentials
  *
- * Side effect: expired session tokens are lazily cleaned up when
- * encountered, preventing unbounded memory growth.
+ * Side effects:
+ *   - Expired session tokens are lazily cleaned up when encountered
+ *   - On successful JWT verification, `req.agent_id` is set for
+ *     downstream traceability (audit logging, access control)
  */
 export async function isAuthenticated(
   req: http.IncomingMessage,
@@ -103,13 +132,20 @@ export async function isAuthenticated(
   if (authHeader.startsWith("Bearer ") && jwksCache) {
     try {
       const token = authHeader.slice(7);
-      const { payload } = await jwtVerify(token, jwksCache);
-      // Attach agent_id to the request for traceability if needed downstream
-      (req as any).agent_id = payload.agent_id || payload.sub;
+      const verifyOpts: JWTVerifyOptions = {
+        clockTolerance: 30, // 30s clock skew tolerance
+      };
+      if (config.jwtAudience) verifyOpts.audience = config.jwtAudience;
+      if (config.jwtIssuer) verifyOpts.issuer = config.jwtIssuer;
+
+      const { payload } = await jwtVerify(token, jwksCache, verifyOpts);
+      // Attach agent_id to the request for downstream traceability
+      (req as PrismAuthenticatedRequest).agent_id =
+        (payload as Record<string, unknown>).agent_id as string || payload.sub;
       return true;
     } catch (err) {
-      // Verification failed — let it fall through or return false
-      // console.error("JWT verification failed:", err);
+      const code = (err as { code?: string }).code || "UNKNOWN";
+      console.error(`[Auth] JWT verification failed (${code}):`, (err as Error).message);
       return false;
     }
   }
