@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [8.0.2] - 2026-04-07 — Security & Stability Hardening
+
+### Security
+- **SQL Injection Defense-in-Depth (CRIT-1)** — Added `/^[a-z_]+$/` regex validation as a second gate on `updateAgentStatus` field name interpolation, alongside the existing allowlist. Prevents injection even if new allowlist entries are added without review.
+- **LIKE Wildcard Escaping (MED-3)** — User-supplied keywords in `searchKnowledgeFallback` now escape `%` and `_` wildcards via `ESCAPE '\'` clauses. Previously, a search for `"100%_done"` matched unintended rows.
+- **macOS Path Scope Escape (EDGE-2)** — `SafetyController.isPathWithinScope()` now normalizes paths to lowercase on `darwin` and `win32` platforms. Fixes case-insensitive filesystem bypass where `/App/Workspace` ≠ `/app/workspace` allowed scope escapes.
+- **Tenant-Scoped Link Decay (MED-6)** — `decayLinks()` now accepts optional `userId` to scope decay to the calling user's link entries via `source_id IN (SELECT id FROM session_ledger WHERE user_id = ?)`. Prevents cross-tenant graph decay in shared-database deployments.
+
+### Performance
+- **Tier-2 TurboQuant LIMIT (HIGH-1)** — Added `LIMIT 5000` to the Tier-2 TurboQuant fallback query. Previously loaded all matching rows into JS heap for in-memory cosine scoring, risking heap exhaustion on large datasets (50K+ entries).
+
+### Fixed
+- **SDM Memory Aliasing (HIGH-2)** — `importState()` now uses `slice()` instead of `subarray()` to create independent copies of each counter row. `subarray()` creates aliased views that silently corrupt if the source buffer is GC'd or detached.
+- **SDM Mode Persistence (EDGE-3)** — Added `mode` parameter to `importState()` and `getMode()` accessor. The engine's mode lock (`semantic` vs `hdc`) is now restorable on deserialization, preventing cross-talk between HDC and semantic writes.
+- **HDC Dictionary Version Decoupling (EDGE-5)** — Introduced separate `HDC_DICTIONARY_VERSION` constant. `saveHdcConcept` previously used `SDM_ADDRESS_VERSION` (PRNG algorithm version), creating false coupling — a PRNG change would needlessly invalidate the concept dictionary.
+- **Verification Harness File Size Guard (MED-5)** — Added `statSync()` check before reading `verification_harness.json`, capping at 1MB. Prevents heap exhaustion from malformed LLM-generated files during the Dark Factory VERIFY step.
+
+### Interface
+- `StorageBackend.decayLinks()` signature updated to accept optional `userId` (backward-compatible).
+- `SparseDistributedMemory.importState()` signature updated to accept optional `mode` parameter.
+- New export: `HDC_DICTIONARY_VERSION` from `sdmEngine.ts`.
+
+### Engineering
+- 1052 tests across 48 suites, all passing, zero regressions
+- TypeScript strict mode: zero errors
+- 6 files changed across 4 modules (storage, SDM, Dark Factory safety, Dark Factory runner)
+
 ## [8.0.1] - 2026-04-07
 
 ### Bug Fixes

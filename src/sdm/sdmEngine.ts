@@ -8,6 +8,13 @@ export const D_ADDR_UINT32 = PRISM_DEFAULT_CONFIG.d / 32;
 // Bump this whenever the PRNG algorithm changes, to invalidate stale persisted state.
 export const SDM_ADDRESS_VERSION = 2;
 
+// EDGE-5 FIX: Separate version constant for the HDC concept dictionary.
+// SDM_ADDRESS_VERSION tracks the PRNG algorithm for hard-location addresses.
+// HDC_DICTIONARY_VERSION tracks the binary encoding format for concept vectors.
+// Using the same constant creates false coupling — a PRNG change doesn't
+// invalidate the concept dictionary, and vice versa.
+export const HDC_DICTIONARY_VERSION = 1;
+
 // The hard threshold boundary applied to counters during HDC writes
 // to retain memory plasticity over long periods.
 const COUNTER_CLIP = 20;
@@ -285,17 +292,36 @@ export class SparseDistributedMemory {
     return state;
   }
 
+  /** Returns the current mode lock of this engine instance. */
+  public getMode(): 'uninitialized' | 'semantic' | 'hdc' {
+    return this._mode;
+  }
+
   /**
    * Import a previously serialized 1D Float32Array matrix back into
    * the 2D counters array.
+   *
+   * IMPORTANT: Uses slice() (not subarray()) to create independent copies
+   * of each counter row. subarray() creates aliased views over the same
+   * ArrayBuffer — if the source buffer is GC'd or detached, all counters
+   * would silently point to invalid memory.
+   *
+   * @param state - 1D Float32Array of length SDM_M * D
+   * @param mode  - The mode this state was exported from. If provided,
+   *                locks the engine to this mode to prevent HDC/semantic
+   *                cross-talk on deserialization. (Default: preserve current)
    */
-  public importState(state: Float32Array) {
+  public importState(state: Float32Array, mode?: 'semantic' | 'hdc') {
     if (state.length !== SDM_M * PRISM_DEFAULT_CONFIG.d) {
       throw new Error(`Invalid SDM state size: expected ${SDM_M * PRISM_DEFAULT_CONFIG.d}, got ${state.length}`);
     }
     for (let i = 0; i < SDM_M; i++) {
-      // Subarray creates a fast view over the underlying buffer
-      this.counters[i] = state.subarray(i * PRISM_DEFAULT_CONFIG.d, (i + 1) * PRISM_DEFAULT_CONFIG.d);
+      // slice() creates an independent copy — safe against source buffer detachment
+      this.counters[i] = state.slice(i * PRISM_DEFAULT_CONFIG.d, (i + 1) * PRISM_DEFAULT_CONFIG.d);
+    }
+    // Restore the mode lock if persisted alongside the counter state
+    if (mode) {
+      this._mode = mode;
     }
   }
 }
