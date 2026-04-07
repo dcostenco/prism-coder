@@ -29,6 +29,7 @@ import {
   PRISM_SYNAPSE_SPREAD_FACTOR,
   PRISM_SYNAPSE_LATERAL_INHIBITION,
   PRISM_SYNAPSE_SOFT_CAP,
+  PRISM_VALENCE_ENABLED,
 } from "../config.js";
 import { getSetting as cfgGet, setSetting as cfgSet, getAllSettings as cfgGetAll } from "./configStorage.js";
 
@@ -149,7 +150,8 @@ export class SqliteStorage implements StorageBackend {
         rollup_count INTEGER DEFAULT 0,
         archived_at TEXT DEFAULT NULL,
         session_date TEXT DEFAULT NULL,
-        created_at TEXT DEFAULT (datetime('now'))
+        created_at TEXT DEFAULT (datetime('now')),
+        valence REAL DEFAULT NULL
       );
 
       -- ─── Session Handoffs (live project state, OCC-controlled) ───
@@ -164,6 +166,7 @@ export class SqliteStorage implements StorageBackend {
         key_context TEXT DEFAULT NULL,
         active_branch TEXT DEFAULT NULL,
         version INTEGER NOT NULL DEFAULT 1,
+        cognitive_budget REAL DEFAULT NULL,
         metadata TEXT DEFAULT '{}',
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
@@ -826,6 +829,41 @@ export class SqliteStorage implements StorageBackend {
       // Non-fatal: some older libSQL versions may not support all integrity_check modes.
       debugLog(`[SqliteStorage] v6.1: integrity_check skipped (${(e as Error).message})`);
     }
+
+    // ─── v9.0 Migration: Affect-Tagged Memory (Valence) ───────────
+    //
+    // Adds a REAL valence column to session_ledger for affect-tagged memory.
+    // Valence is auto-derived from event_type at save time.
+    // Uses Affective Salience: |valence| boosts retrieval, sign drives UX warnings.
+    // For fresh DBs, valence is already in the CREATE TABLE. This ALTER TABLE
+    // is purely for existing production databases upgrading from v8.x → v9.0.
+    try {
+      await this.db.execute(
+        `ALTER TABLE session_ledger ADD COLUMN valence REAL DEFAULT NULL`
+      );
+      debugLog("[SqliteStorage] v9.0 migration: added valence column");
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
+
+    // Partial index for valence-aware queries (schema parity with Supabase)
+    await this.db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_ledger_valence ON session_ledger(valence) WHERE valence IS NOT NULL`
+    );
+
+    // ─── v9.0 Migration: Persistent Cognitive Budget ──────────────
+    //
+    // Budget belongs to the PROJECT (stored in session_handoffs), not
+    // the ephemeral session, to prevent the "Reset Exploit" where an
+    // agent escapes budget exhaustion by simply starting a new session.
+    try {
+      await this.db.execute(
+        `ALTER TABLE session_handoffs ADD COLUMN cognitive_budget REAL DEFAULT NULL`
+      );
+      debugLog("[SqliteStorage] v9.0 migration: added cognitive_budget column");
+    } catch (e: any) {
+      if (!e.message?.includes("duplicate column name")) throw e;
+    }
   }
 
   // ─── PostgREST Filter Parser ───────────────────────────────
@@ -994,10 +1032,10 @@ export class SqliteStorage implements StorageBackend {
       sql: `INSERT INTO session_ledger
         (id, project, conversation_id, user_id, role, summary, todos, files_changed,
          decisions, keywords, is_rollup, rollup_count, title, agent_name,
-         event_type, confidence_score, importance,
+         event_type, confidence_score, importance, valence,
          embedding_compressed, embedding_format, embedding_turbo_radius,
          created_at, session_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         id,
         entry.project,
@@ -1016,6 +1054,7 @@ export class SqliteStorage implements StorageBackend {
         entry.event_type || "session",   // v4.0: default to 'session'
         entry.confidence_score ?? null,   // v4.0: nullable
         entry.importance || 0,            // v4.0: default to 0
+        entry.valence ?? null,            // v9.0: affect-tagged memory
         entry.embedding_compressed || null,        // v5.0: TurboQuant
         entry.embedding_format || null,            // v5.0: turbo3/turbo4/float32
         entry.embedding_turbo_radius ?? null,      // v5.0: original vector magnitude
@@ -1051,7 +1090,7 @@ export class SqliteStorage implements StorageBackend {
       'embedding', 'embedding_compressed', 'embedding_format', 'embedding_turbo_radius',
       'archived_at', 'deleted_at', 'deleted_reason', 'is_rollup', 'rollup_count',
       'importance', 'last_accessed_at', 'keywords', 'todos', 'files_changed', 'decisions',
-      'summary', 'confidence_score', 'event_type', 'role',
+      'summary', 'confidence_score', 'event_type', 'role', 'valence',
     ]);
 
     const sets: string[] = [];
@@ -1081,6 +1120,19 @@ export class SqliteStorage implements StorageBackend {
     await this.db.execute({
       sql: `UPDATE session_ledger SET ${sets.join(", ")} WHERE id = ?`,
       args,
+    });
+  }
+
+  // ─── v9.0: Atomic delta-based budget persistence ────────────────
+  // Uses COALESCE + delta to prevent concurrency race conditions:
+  //   Agent A loads budget=2000, spends 100 → delta=-100
+  //   Agent B loads budget=2000, spends 50  → delta=-50
+  // With absolute writes: Agent B overwrites Agent A's spend (budget=1950)
+  // With delta: Both apply correctly → budget=2000 + (-100) + (-50) = 1850
+  async patchHandoffBudgetDelta(project: string, userId: string, budgetDelta: number): Promise<void> {
+    await this.db.execute({
+      sql: `UPDATE session_handoffs SET cognitive_budget = MAX(0, COALESCE(cognitive_budget, 2000) + ?) WHERE project = ? AND user_id = ?`,
+      args: [budgetDelta, project, userId],
     });
   }
 
@@ -1691,6 +1743,7 @@ export class SqliteStorage implements StorageBackend {
       const sql = `
         SELECT l.id, l.project, l.summary, l.decisions, l.files_changed,
                l.session_date, l.created_at, l.is_rollup, l.importance, l.last_accessed_at,
+               l.valence,
                (1 - vector_distance_cos(l.embedding, vector(?))) AS similarity
         FROM session_ledger l
         WHERE ${conditions.join(" AND ")}
@@ -1714,6 +1767,7 @@ export class SqliteStorage implements StorageBackend {
           is_rollup: Boolean(r.is_rollup),
           importance: (r.importance as number) ?? 0,
           last_accessed_at: (r.last_accessed_at as string) || null,
+          valence: (r.valence as number) ?? null,  // v9.0: affect-tagged memory
         }));
 
       if (params.activation?.enabled) {
@@ -1859,7 +1913,7 @@ export class SqliteStorage implements StorageBackend {
       const anchorMap = new Map<string, number>();
       for (const a of anchors) anchorMap.set(a.id, a.similarity ?? 1.0);
 
-      const { results, telemetry } = await propagateActivation(
+      const { results, telemetry, flowWeights } = await propagateActivation(
         anchorMap,
         async (nodeIds) => this.getLinksForNodes(nodeIds, userId),
         {
@@ -1881,7 +1935,7 @@ export class SqliteStorage implements StorageBackend {
       if (missingIds.length > 0) {
         const placeholders = missingIds.map(() => '?').join(',');
         const missingQuery = `
-          SELECT id, project, summary, session_date, decisions, files_changed, keywords, is_rollup, importance, last_accessed_at
+          SELECT id, project, summary, session_date, decisions, files_changed, keywords, is_rollup, importance, last_accessed_at, valence
           FROM session_ledger
           WHERE id IN (${placeholders}) AND deleted_at IS NULL AND user_id = ?
         `;
@@ -1899,9 +1953,46 @@ export class SqliteStorage implements StorageBackend {
             importance: Number(row.importance) || 0,
             last_accessed_at: (row.last_accessed_at as string) || null,
             similarity: 0.0,
+            valence: (row.valence as number) ?? null,
           });
         }
       }
+
+      // ── v9.0: Valence Propagation ────────────────────────────────
+      // After activation propagation, compute propagated valence for
+      // discovered nodes using energy-weighted averaging from source flows.
+      let propagatedValenceMap: Map<string, number> | null = null;
+      if (PRISM_VALENCE_ENABLED) {
+        try {
+          const { propagateValence } = await import("../memory/valenceEngine.js");
+          
+          // Build valence lookup from all known nodes
+          const valenceLookup = new Map<string, number>();
+          for (const [id, node] of fullNodeMap) {
+            if (node.valence != null) valenceLookup.set(id, node.valence);
+          }
+          
+          // For missing valence values, bulk-fetch from DB
+          const missingValenceIds = finalIds.filter(id => !valenceLookup.has(id));
+          if (missingValenceIds.length > 0) {
+            const vPlaceholders = missingValenceIds.map(() => '?').join(',');
+            const vQuery = `SELECT id, valence FROM session_ledger WHERE id IN (${vPlaceholders}) AND valence IS NOT NULL`;
+            const vRes = await this.db.execute({ sql: vQuery, args: missingValenceIds });
+            for (const row of vRes.rows) {
+              valenceLookup.set(row.id as string, row.valence as number);
+            }
+          }
+          
+          propagatedValenceMap = propagateValence(results, valenceLookup, flowWeights);
+          debugLog(`[SqliteStorage] v9.0 valence propagation: ${propagatedValenceMap.size} nodes processed`);
+        } catch (valErr) {
+          debugLog(`[SqliteStorage] v9.0 valence propagation failed (non-fatal): ${valErr instanceof Error ? valErr.message : String(valErr)}`);
+        }
+      }
+
+      const { computeHybridScoreWithValence } = PRISM_VALENCE_ENABLED
+        ? await import("../memory/valenceEngine.js")
+        : { computeHybridScoreWithValence: null };
 
       const finalResults: SemanticSearchResult[] = [];
       
@@ -1912,9 +2003,22 @@ export class SqliteStorage implements StorageBackend {
           node.activationScore = normEnergy;
           node.rawActivationEnergy = r.activationEnergy;
           node.isDiscovered = r.isDiscovered;
+
+          // v9.0: Attach propagated valence (overrides raw for discovered nodes)
+          if (propagatedValenceMap?.has(r.id)) {
+            node.valence = propagatedValenceMap.get(r.id)!;
+          }
           
-          // Hybrid blend: 70% original match relevance, 30% structural energy
-          node.hybridScore = (node.similarity * 0.7) + (normEnergy * 0.3); 
+          // v9.0: Hybrid blend with valence salience:
+          //   0.65 × similarity + 0.25 × activation + 0.10 × |valence|
+          // Falls back to 70/30 if valence is disabled.
+          if (computeHybridScoreWithValence) {
+            node.hybridScore = computeHybridScoreWithValence(
+              node.similarity, normEnergy, node.valence ?? null
+            );
+          } else {
+            node.hybridScore = (node.similarity * 0.7) + (normEnergy * 0.3);
+          }
           
           finalResults.push(node);
         }

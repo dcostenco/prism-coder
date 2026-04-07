@@ -12,7 +12,7 @@
 
 **Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
-Prism v8.0 is a true **Cognitive Architecture** inspired by human brain mechanics. The new **Synapse Engine** replaces flat vector search with pure multi-hop graph propagation — your agent now follows causal trains of thought across memory, forms principles from experience, and knows when it lacks information. **Your agents don't just remember; they think.**
+Prism v9.0 is the **Autonomous Cognitive OS** for AI agents. Built on a true cognitive architecture inspired by human brain mechanics, Prism gives agents affect-tagged memory, token-economic cost awareness, and multi-hop graph reasoning — your agent now follows causal trains of thought across memory, forms principles from experience, economizes what it stores, and knows when it lacks information. **Your agents don't just remember; they think.**
 
 ```bash
 npx -y prism-mcp-server
@@ -28,6 +28,7 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [Setup Guides](#setup-guides)
 - [Universal Import: Bring Your History](#universal-import-bring-your-history)
 - [What Makes Prism Different](#what-makes-prism-different)
+- [Autonomous Cognitive OS (v9.0)](#-autonomous-cognitive-os-v90)
 - [Synapse Engine (v8.0)](#synapse-engine-v80)
 - [Cognitive Architecture (v7.8)](#cognitive-architecture-v78)
 - [Data Privacy & Egress](#data-privacy--egress)
@@ -39,6 +40,7 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [Architecture](#architecture)
 - [Scientific Foundation](#scientific-foundation)
 - [Milestones & Roadmap](#milestones--roadmap)
+- [Enterprise & Commercial Support](#enterprise--commercial-support)
 - [Troubleshooting FAQ](#troubleshooting-faq)
 
 ---
@@ -415,6 +417,12 @@ npx -y prism-mcp-server universal-import --format gemini --path ./gemini_history
 ## What Makes Prism Different
 
 
+### 💰 Token-Economic Memory & Surprisal Gates (v9.0)
+Standard agents dump repetitive garbage into vector databases until they bankrupt your API budget and choke their own context windows. Prism introduces a **Persistent Cognitive Budget** with Universal Basic Income (UBI). Before saving, Prism calculates the semantic novelty (Surprisal) of the thought. Redundant boilerplate is penalized with a 2× cost multiplier; novel insights are rewarded. The agent is mathematically forced to learn compression.
+
+### 🎭 Affect-Tagged Emotional Routing (v9.0)
+Standard RAG retrieves documents based on similarity, not success rate. Prism tags experience events with **Valence** (-1.0 to +1.0). Highly emotional memories (catastrophic failures or massive successes) receive an affective salience boost during retrieval. If an agent heads down an architectural path that previously caused outages, Prism injects a preemptive `⚠️ Historical Friction` warning, giving your AI a "gut feeling" about bad code.
+
 ### 🧠 Your Agent Learns From Mistakes
 When you correct your agent, Prism tracks it. Corrections accumulate **importance** over time. High-importance lessons auto-surface as warnings in future sessions — and can even sync to your `.cursorrules` file for permanent enforcement. Your agent literally gets smarter the more you use it.
 
@@ -457,6 +465,41 @@ Prism researches while you sleep. A background pipeline searches the web, scrape
 
 ### Dark Factory — Adversarial Autonomous Pipelines
 When you trigger a Dark Factory pipeline, Prism doesn't just run your task — it fights itself to produce high-quality output. A `PLAN_CONTRACT` step locks a machine-parseable rubric before any code is written. After execution, an **Adversarial Evaluator** (in a fully isolated context) scores the output against the rubric. It cannot pass the Generator without providing exact file and line evidence for every failing criterion. Failed evaluations inject the critique directly into the Generator's retry prompt so it's never flying blind. The result: security issues, regressions, and lazy debug logs caught autonomously — before you ever see the PR. → [See it in action](examples/adversarial-eval-demo/README.md)
+
+---
+
+## 🤖 Autonomous Cognitive OS (v9.0)
+
+> *Memory isn't just about storing data; it's about economics and emotion. v9.0 transforms Prism from a passive memory database into a living Cognitive Operating System that forces agents to learn compression and develop intuition.*
+
+Most AI agents have an infinite memory budget. They dump massive, repetitive logs into vector databases until the context window chokes. Prism v9.0 fixes this by introducing **Token-Economic Reinforcement Learning** and **Affect-Tagged Memory**.
+
+### 1. Memory-as-an-Economy (The Surprisal Gate)
+Prism gives your project a strict **Cognitive Budget** (e.g., 2,000 tokens). Every time the agent saves a memory, it costs tokens. 
+
+But not all memories are priced equally:
+*   Prism intercepts the save and runs a **Vector-Based Surprisal** calculation against recent memories. 
+*   **High Surprisal (Novel thought):** Costs 0.5× tokens. The agent is rewarded for new insights.
+*   **Low Surprisal (Boilerplate):** Costs 2.0× tokens. The agent is penalized for repeating itself.
+*   **Universal Basic Income (UBI):** The budget recovers passively over time (+100 tokens/hour) or when the agent successfully completes autonomous evaluations. 
+
+**The Result:** You don't need to prompt the agent to "be concise." The physics of the system force the LLM to learn data compression to avoid bankruptcy.
+
+### 2. Affect-Tagged Memory (Giving AI a "Gut Feeling")
+Vector math measures *semantic similarity*, not *sentiment*. If an agent searches for "Authentication Architecture," standard RAG will return two past approaches—it doesn't know that Approach A caused a 3-day production outage, while Approach B worked perfectly.
+
+*   **Affective Salience:** Prism automatically tags experience events with a `valence` score (-1.0 for failure, +1.0 for success).
+*   **Emotional Retrieval:** At retrieval time, the absolute magnitude (`|valence|`) significantly boosts the memory's ranking score. Extreme failures and extreme successes surface to the top.
+*   **UX Warnings:** If the retrieved memories are historically negative, Prism intercepts the prompt injection: `⚠️ Caution: This topic is strongly correlated with historical failures. Review past decisions before proceeding.`
+
+### The Paradigm Shift
+
+| Feature | Standard RAG / Agents | Prism v9.0 |
+| :--- | :--- | :--- |
+| **Storage Limit** | Infinite (bloats context) | Bounded Token Economy |
+| **Data Quality** | Saves repetitive boilerplate | Surprisal Gate penalizes redundancy |
+| **Sentiment** | Treats all data as neutral facts | Affect-Tagged (Warns agent of past trauma) |
+| **Recovery** | Manual deletion | Universal Basic Income (UBI) over time |
 
 ---
 
@@ -739,8 +782,9 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## What's New
 
-> **Current release: v8.0.0 — Synapse Engine**
+> **Current release: v9.0.0 — Autonomous Cognitive OS**
 
+- 🧠 **v9.0.0 — Autonomous Cognitive OS:** Affect-Tagged Memory (valence engine — emotional salience boosts retrieval), Token-Economic Cognitive Budget (UBI + cost-per-save incentivizes novel memories), Surprisal Gate (vector-based novelty scoring). Full SQLite + Supabase parity with auto-migration 42. Hybrid scoring: `0.65 × similarity + 0.25 × activation + 0.10 × |valence|`. All features opt-out via env. **Post-review hardening:** 8 architectural fixes including delta-based concurrent budget writes, energy-weighted valence propagation, and anti-exploit budget decoupling. Graceful degradation: budget exhaustion warns but never blocks.
 - ⚡ **v8.0.0 — Synapse Engine:** Pure, storage-agnostic multi-hop graph propagation engine replaces the legacy SQL-coupled spreading activation. O(T × M) bounded ACT-R energy propagation with dampened fan effect, asymmetric bidirectional flow, cyclic loop prevention, and sigmoid normalization. Full integration into both SQLite and Supabase backends. 5 new config knobs. Battle-hardened with NaN guards, config clamping, non-fatal enrichment, and 16 passing tests. **Memory search now follows the causal graph, not just keywords.** → [Synapse Engine](#synapse-engine-v80)
 - 🧠 **v7.8.x — Cognitive Architecture:** Episodic-to-Semantic consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate, and Dynamic Fast Weight Decay. Validated by **LoCoMo-Plus benchmark**. → [Cognitive Architecture](#cognitive-architecture-v78)
 - 🌐 **v7.7.0 — Cloud-Native SSE Transport:** Full unauthenticated and authenticated Server-Sent Events MCP support for seamless network deployments.
@@ -1113,8 +1157,10 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 | **v7.8** | Dynamic Fast Weight Decay — `is_rollup` semantic nodes decay 50% slower (`ageModifier = 0.5`) than episodic entries, creating Long-Term Context anchors | ACT-R base-level activation with differential decay rates | ✅ Shipped |
 | **v7.8** | LoCoMo Benchmark Harness — deterministic integration suite (`tests/benchmarks/locomo.ts`, 20 assertions) benchmarking multi-hop compaction structures via `MockLLM` | Long-Context Memory evaluation (cognitive benchmarking) | ✅ Shipped |
 | **v7.8** | LoCoMo-Plus Benchmark — 16-assertion suite (`tests/benchmarks/locomo-plus.ts`) adapted from arXiv 2602.10715 validating cue–trigger semantic disconnect bridging via graph traversal and Hebbian consolidation; reports Precision@1/3/5/10 and MRR | LoCoMo-Plus (Li et al., ARR 2026), cue–trigger disconnect research | ✅ Shipped |
-| **v7.x** | Affect-Tagged Memory — sentiment shapes what gets recalled | Affect-modulated retrieval (neuroscience) | 🔭 Horizon |
-| **v8+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
+| **v9.0** | Affect-Tagged Memory — valence-weighted retrieval; emotional salience boosts recall | Affect-modulated retrieval (neuroscience), Somatic marker hypothesis (Damasio) | ✅ Shipped |
+| **v9.0** | Token-Economic Cognitive Budget — UBI + cost-per-save token economy | Behavioral economics, bounded rationality (Simon) | ✅ Shipped |
+| **v9.0** | Surprisal Gate — novelty-based cost multiplier (high surprisal = cheap storage) | Bayesian surprise, predictive coding (Friston) | ✅ Shipped |
+| **v10+** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations | 🔭 Horizon |
 
 > Informed by Anderson's ACT-R (Adaptive Control of Thought—Rational), Collins & Loftus spreading activation networks (1975), Kanerva's SDM (1988), Hebb's learning rule, Li et al. LoCoMo-Plus (ARR 2026), and LeCun's "Why AI Systems Don't Learn" (Dupoux, LeCun, Malik).
 
@@ -1122,10 +1168,11 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 
 ## Milestones & Roadmap
 
-> **Current: v8.0.0** — Synapse Engine ([CHANGELOG](CHANGELOG.md))
+> **Current: v9.0.0** — Autonomous Cognitive OS ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|
+| **v9.0** | 🧠 Autonomous Cognitive OS — Affect-Tagged Memory (valence engine), Token-Economic Cognitive Budget, Surprisal Gate |
 | **v8.0** | ⚡ Synapse Engine — Pure multi-hop GraphRAG propagation, storage-agnostic, NaN-hardened, `[🌐 Synapse]` discovery tags |
 | **v7.8** | 🧠 Cognitive Architecture — Hebbian consolidation, multi-hop reasoning, rejection gate, dynamic decay |
 | **v7.7** | 🌐 Cloud-Native SSE Transport |
@@ -1139,8 +1186,9 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 | **v6.2** | 🧩 Synthesize & Prune |
 
 ### Future Tracks
-- **v7.x: Affect-Tagged Memory** — Recall prioritization improves by weighting memories with affective/contextual valence.
-- **v8+: Zero-Search Retrieval** — Direct vector-addressed recall reduces retrieval indirection.
+- **v9.1: Predictive Push Memory** — Proactive context injection before the agent even asks — anticipating what it will need next.
+- **v9.4: Counterfactual Memory Branches** — "What if" reasoning over alternative decision paths.
+- **v10+: Zero-Search Retrieval** — Direct vector-addressed recall via Holographic Reduced Representations.
 
 👉 **[Full ROADMAP.md →](ROADMAP.md)**
 
@@ -1177,10 +1225,33 @@ A: Run `npm run build && npm test`, then open the Mind Palace dashboard (`localh
 
 ---
 
+## Enterprise & Commercial Support
+
+Prism is the **cognitive infrastructure layer** for production AI agent deployments. If your organization is building agent-powered products, we offer:
+
+### 🏢 Enterprise Integration
+- **Dedicated integration engineering** — Custom deployment into your existing agent stack (LangChain, LlamaIndex, CrewAI, AutoGen, custom MCP pipelines)
+- **On-premises deployment** — Air-gapped installations with full SQLite local mode, zero cloud dependency
+- **SSO & RBAC** — Enterprise authentication and role-based access control for multi-team Hivemind deployments
+- **SLA-backed support** — Priority issue resolution, architecture review, and upgrade planning
+
+### 🔬 Research & Institutional Partnerships
+- **Academic collaborations** — Prism's cognitive architecture is grounded in peer-reviewed research (ACT-R, Hebbian learning, SDM, HDC). We partner with research labs working on agent memory, cognitive modeling, and neurosymbolic AI.
+- **Grant-funded integrations** — We work with institutions applying for NSF, DARPA, or EU Horizon grants that require production-grade agent memory infrastructure.
+
+### 📬 Contact
+- **Enterprise inquiries:** [enterprise@prism-mcp.dev](mailto:enterprise@prism-mcp.dev)
+- **Partnership proposals:** [partnerships@prism-mcp.dev](mailto:partnerships@prism-mcp.dev)
+- **GitHub Issues:** [github.com/dcostenco/prism-mcp/issues](https://github.com/dcostenco/prism-mcp/issues) (community support)
+
+> 💡 **Open Source commitment:** Prism MCP remains MIT-licensed and free for individual developers, startups, and research teams. Enterprise services fund continued open-source development.
+
+---
+
 ## License
 
 MIT
 
 ---
 
-<sub>**Keywords:** MCP server, Model Context Protocol, Claude Desktop memory, persistent session memory, AI agent memory, cognitive architecture, ACT-R spreading activation, Hebbian learning, episodic semantic consolidation, multi-hop reasoning, uncertainty rejection gate, local-first, SQLite MCP, Mind Palace, time travel, visual memory, VLM image captioning, OpenTelemetry, GDPR, agent telepathy, multi-agent sync, behavioral memory, cursorrules, Ollama MCP, Brave Search MCP, TurboQuant, progressive context loading, knowledge management, LangChain retriever, LangGraph agent</sub>
+<sub>**Keywords:** MCP server, Model Context Protocol, Claude Desktop memory, persistent session memory, AI agent memory, cognitive architecture, ACT-R spreading activation, Hebbian learning, episodic semantic consolidation, multi-hop reasoning, uncertainty rejection gate, local-first, SQLite MCP, Mind Palace, time travel, visual memory, VLM image captioning, OpenTelemetry, GDPR, agent telepathy, multi-agent sync, behavioral memory, cursorrules, Ollama MCP, Brave Search MCP, TurboQuant, progressive context loading, knowledge management, LangChain retriever, LangGraph agent, enterprise AI agent infrastructure, autonomous cognitive OS, affect-tagged memory, valence engine, cognitive budget, surprisal gate</sub>

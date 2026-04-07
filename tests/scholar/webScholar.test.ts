@@ -42,10 +42,12 @@ const { mockConfig, mockStorage, mockFetch } = vi.hoisted(() => {
   const mockConfig = {
     BRAVE_API_KEY: "test-brave-key",
     FIRECRAWL_API_KEY: "test-firecrawl-key",
+    TAVILY_API_KEY: "",
     PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN: 3,
     PRISM_USER_ID: "default",
     PRISM_SCHOLAR_TOPICS: ["ai", "agents", "mcp", "authentication"],
     PRISM_ENABLE_HIVEMIND: false,
+    PRISM_ENABLE_HIVEMIND_ENV: false,
   };
 
   const mockStorage = {
@@ -69,6 +71,16 @@ const { mockConfig, mockStorage, mockFetch } = vi.hoisted(() => {
 });
 
 vi.mock("../../src/config.js", () => mockConfig);
+
+// Mock configStorage — getSettingSync drives the Hivemind feature check at runtime.
+// When hivemind_enabled isn't found in the cache, it falls back to the _ENV value.
+// We drive it via mockConfig.PRISM_ENABLE_HIVEMIND so tests can toggle it.
+vi.mock("../../src/storage/configStorage.js", () => ({
+  getSettingSync: vi.fn().mockImplementation((key: string, defaultValue = "") => {
+    if (key === "hivemind_enabled") return String(mockConfig.PRISM_ENABLE_HIVEMIND);
+    return defaultValue;
+  }),
+}));
 
 vi.mock("../../src/storage/index.js", () => ({
   getStorage: vi.fn().mockResolvedValue(mockStorage),
@@ -102,6 +114,16 @@ vi.mock("../../src/utils/telemetry.js", () => ({
 
 vi.mock("../../src/utils/logger.js", () => ({
   debugLog: vi.fn(),
+}));
+
+vi.mock("../../src/scholar/freeSearch.js", () => ({
+  searchYahooFree: vi.fn().mockResolvedValue([]),
+  scrapeArticleLocal: vi.fn().mockResolvedValue({ title: "", content: "" }),
+}));
+
+vi.mock("../../src/utils/tavilyApi.js", () => ({
+  performTavilySearch: vi.fn().mockResolvedValue([]),
+  performTavilyExtract: vi.fn().mockResolvedValue([]),
 }));
 
 // Stub global fetch for Firecrawl

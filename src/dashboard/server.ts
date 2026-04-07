@@ -21,6 +21,9 @@ import * as http from "http";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
+import * as pg from "pg";
+import { fileURLToPath } from "url";
+import { dirname, resolve } from "path";
 
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { createServer, getAllPossibleTools } from "../server.js";
@@ -44,6 +47,14 @@ import {
 
 
 const PORT = parseInt(process.env.PRISM_DASHBOARD_PORT || "3000", 10);
+
+/**
+ * v9.2: SSE stream registry for migration progress.
+ * Key = progressKey (timestamp string from the client).
+ * Value = the ServerResponse that is kept open as an SSE stream.
+ * Entries are deleted when the stream ends or the client disconnects.
+ */
+const migrationProgressStreams = new Map<string, http.ServerResponse>();
 
 /** Read HTTP request body as string (Buffer-based to avoid GC thrash on large imports) */
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -596,6 +607,12 @@ return false;}
         try {
           const { getAllSettings } = await import("../storage/configStorage.js");
           const settings = await getAllSettings();
+
+          // Since v3.0, the DB is the exclusive source of truth for dashboard UI state.
+          // Values from process.env are seeded into the DB on first startup via
+          // migrateEnvToConfigStorage(), but we no longer override DB settings here.
+          // This ensures that dashboard changes safely persist across restarts even
+          // if legacy .env values remain.
           res.writeHead(200, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ settings }));
         } catch {
@@ -603,6 +620,7 @@ return false;}
           return res.end(JSON.stringify({ settings: {} }));
         }
       }
+
 
       // ─── API: Settings — POST (v3.0 Dashboard Settings) ───
       if (url.pathname === "/api/settings" && req.method === "POST") {
@@ -623,6 +641,121 @@ return false;}
         }
 
       }
+
+      // ─── API: Migration Progress SSE Stream (v9.2) ───────────
+      // Client subscribes with GET /api/migration/progress?key=<progressKey>
+      // Server pushes { step, total, label, pct?, done?, error? } events.
+      // The stream is closed server-side once setup-supabase completes.
+      if (url.pathname === "/api/migration/progress" && req.method === "GET") {
+        const key = url.searchParams.get("key") || "";
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        res.write("retry: 1000\n\n"); // 1s reconnect delay
+
+        // Register the response so setup-supabase can push events
+        migrationProgressStreams.set(key, res);
+
+        req.on("close", () => {
+          migrationProgressStreams.delete(key);
+        });
+        return; // keep connection open — do NOT call res.end() here
+      }
+
+      // ─── API: Supabase Initial Setup (v9.1) ─────────────────
+      if (url.pathname === "/api/setup-supabase" && req.method === "POST") {
+        // Hoist progressKey so the catch block can reference it for SSE error reporting
+        let progressKey: string | undefined;
+        try {
+          const body = await readBody(req);
+          const parsed = JSON.parse(body);
+          const { url: supaUrl, serviceKey, dbPassword } = parsed;
+          progressKey = parsed.progressKey as string | undefined;
+
+          if (!supaUrl || !serviceKey || !dbPassword) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "Missing url, serviceKey, or dbPassword" }));
+          }
+
+          // Helper: push SSE progress event to the subscribed client
+          function emitProgress(step: number, total: number, label: string, extra: Record<string, unknown> = {}) {
+            const stream = migrationProgressStreams.get(progressKey || "");
+            if (!stream) return;
+            const pct = Math.round((step / total) * 100);
+            const payload = JSON.stringify({ step, total, label, pct, ...extra });
+            stream.write(`data: ${payload}\n\n`);
+          }
+
+          const TOTAL_STEPS = 6;
+          emitProgress(1, TOTAL_STEPS, "Connecting to Supabase database…");
+
+          // 1. Build DB connection string
+          const parsedUrl = new URL(supaUrl);
+          const host = parsedUrl.host; // e.g. pjddaprqhwqxtcpdmprk.supabase.co
+          const projectRef = host.split(".")[0];
+          const dbHost = `db.${projectRef}.supabase.co`;
+          const connectionString = `postgresql://postgres:${encodeURIComponent(dbPassword)}@${dbHost}:5432/postgres`;
+
+          emitProgress(2, TOTAL_STEPS, "Authenticating…");
+          // 2. Connect via pg
+          const client = new pg.Client({ connectionString });
+          await client.connect();
+
+          try {
+            emitProgress(3, TOTAL_STEPS, "Applying migration schema (027)…");
+            // 3. Inject auto-migration infrastructure
+            const currentDir = dirname(fileURLToPath(import.meta.url));
+            const sqlPath = resolve(currentDir, "../../supabase/migrations/027_auto_migration_infra.sql");
+            const sql = fs.readFileSync(sqlPath, "utf-8");
+            await client.query(sql);
+
+            emitProgress(4, TOTAL_STEPS, "Applying v9.0 schema columns…");
+            // 4. Also safely inject v9.0 columns just in case the backend tries to write them right away
+            await client.query(`
+              ALTER TABLE session_ledger ADD COLUMN IF NOT EXISTS valence REAL DEFAULT NULL;
+              CREATE INDEX IF NOT EXISTS idx_ledger_valence ON session_ledger(valence) WHERE valence IS NOT NULL;
+              ALTER TABLE session_handoffs ADD COLUMN IF NOT EXISTS cognitive_budget REAL DEFAULT NULL;
+            `);
+
+          } finally {
+            await client.end();
+          }
+
+          emitProgress(5, TOTAL_STEPS, "Persisting credentials…");
+          // 5. Persist values using configStorage
+          const { setSetting } = await import("../storage/configStorage.js");
+          await setSetting("PRISM_STORAGE", "supabase");
+          await setSetting("SUPABASE_URL", supaUrl);
+          await setSetting("SUPABASE_KEY", serviceKey);
+          await setSetting("SUPABASE_SERVICE_ROLE_KEY", serviceKey);
+
+          emitProgress(6, TOTAL_STEPS, "Complete!", { done: true });
+
+          // Close the SSE stream
+          const sseStream = migrationProgressStreams.get(progressKey || "");
+          if (sseStream) { sseStream.end(); migrationProgressStreams.delete(progressKey || ""); }
+
+          // 6. Return success
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ ok: true, message: "Supabase successfully configured! Please restart Prism." }));
+
+        } catch (err: any) {
+          console.error("[Dashboard] Supabase Setup error:", err);
+          // Emit error event to the progress stream (progressKey is captured from the outer scope)
+          const errStream = migrationProgressStreams.get(progressKey || "");
+          if (errStream) {
+            errStream.write(`data: ${JSON.stringify({ error: true, label: err.message || "Setup failed", done: false })}\n\n`);
+            errStream.end();
+            migrationProgressStreams.delete(progressKey || "");
+          }
+          res.writeHead(500, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: err.message || "Failed to setup Supabase" }));
+        }
+      }
+
 
       // ─── API: Memory Analytics (v3.1) ────────────────────
       if (url.pathname === "/api/analytics" && req.method === "GET") {

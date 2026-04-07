@@ -16,9 +16,11 @@ vi.mock("../../src/utils/supabaseApi.js", () => ({
 
 vi.mock("../../src/storage/configStorage.js", () => ({
   getSetting: vi.fn(async () => null),
+  getSettingSync: vi.fn(() => "false"),  // stub for config.ts PRISM_ENABLE_HIVEMIND
   setSetting: vi.fn(async () => {}),
   getAllSettings: vi.fn(async () => ({})),
 }));
+
 
 vi.mock("../../src/storage/supabaseMigrations.js", () => ({
   runAutoMigrations: vi.fn(async () => {}),

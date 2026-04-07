@@ -38,9 +38,21 @@ import { mergeHandoff, dbToHandoffSchema, sanitizeForMerge } from "../utils/crdt
 // containing: strategy, scores, latency breakdown (embedding/storage/total), and metadata.
 // See src/utils/tracing.ts for full type definitions and design decisions.
 import { createMemoryTrace, traceToContentBlock } from "../utils/tracing.js";
-import { GOOGLE_API_KEY, PRISM_USER_ID, PRISM_AUTO_CAPTURE, PRISM_CAPTURE_PORTS } from "../config.js";
+import {
+  GOOGLE_API_KEY, PRISM_USER_ID, PRISM_AUTO_CAPTURE, PRISM_CAPTURE_PORTS,
+  PRISM_VALENCE_ENABLED, PRISM_VALENCE_WARNING_THRESHOLD,
+  PRISM_COGNITIVE_BUDGET_ENABLED,
+} from "../config.js";
 import { captureLocalEnvironment } from "../utils/autoCapture.js";
 import { fireCaptionAsync } from "../utils/imageCaptioner.js";
+
+// ─── v9.0: Affect-Tagged Memory + Token-Economic RL ──────────
+import { deriveValence } from "../memory/valenceEngine.js";
+import {
+  estimateTokens, spendBudget, applyEarnings, formatBudgetDiagnostics,
+  DEFAULT_BUDGET_SIZE,
+} from "../memory/cognitiveBudget.js";
+import { computeVectorSurprisal } from "../memory/surprisalGate.js";
 import {
   isSessionSaveLedgerArgs,
   isSessionSaveHandoffArgs,
@@ -126,6 +138,84 @@ export async function sessionSaveLedgerHandler(args: unknown) {
   const keywords = toKeywordArray(combinedText);
   debugLog(`[session_save_ledger] Extracted ${keywords.length} keywords: ${keywords.slice(0, 5).join(", ")}...`);
 
+  // ── v9.0: Auto-derive valence from event_type ──────────────────
+  // Valence is a [-1, +1] real representing the affective charge of a memory.
+  // It's auto-derived at create-time from the event_type field so the agent
+  // doesn't need to manually classify emotional context.
+  let valence: number | null = null;
+  let valenceWarning = "";
+  if (PRISM_VALENCE_ENABLED) {
+    const eventType = (args as any).event_type || "session";
+    valence = deriveValence(eventType);
+    if (valence !== null && valence < PRISM_VALENCE_WARNING_THRESHOLD) {
+      valenceWarning = `\n\n⚠️ **Negative Valence (${valence.toFixed(2)}):** This entry is tagged as a negative experience. ` +
+        `It will be prioritized in future retrievals to prevent repeating past mistakes.`;
+    }
+    debugLog(`[session_save_ledger] v9.0 valence derived: ${valence} (event_type=${eventType})`);
+  }
+
+  // ── v9.0: Token-Economic Budget ────────────────────────────────
+  // Charge the project's cognitive budget for this write operation.
+  // Budget exhaustion triggers warnings but NEVER blocks writes (graceful degradation).
+  let budgetDiagnostics = "";
+  let queryEmbedding: number[] | null = null;
+  if (PRISM_COGNITIVE_BUDGET_ENABLED) {
+    try {
+      // Load current budget from the project's handoff state
+      const handoff = await storage.loadContext(project, "quick", PRISM_USER_ID);
+      const currentBudget = (handoff as any)?.cognitive_budget ?? DEFAULT_BUDGET_SIZE;
+
+      // Apply UBI earnings before spending.
+      // NOTE: event_type is intentionally NOT passed to applyEarnings().
+      // The "infinite money glitch" — LLMs self-declare event_type: "success"
+      // to mint free tokens. Budget bonuses should only come from the
+      // Dark Factory adversarial evaluator. Valence derivation still uses
+      // event_type correctly for affect tagging.
+      const lastCreated = (handoff as any)?.updated_at ?? null;
+      const earnings = applyEarnings(currentBudget, lastCreated, undefined);
+
+      // v9.0: Compute real surprisal via vector similarity search.
+      // Uses the existing embedding pipeline — generates the embedding
+      // early so we can reuse it for the post-save embedding patch.
+      let surprisal = 0.5; // Fallback: neutral surprisal
+      if (GOOGLE_API_KEY) {
+        try {
+          const embeddingText = [summary, ...(decisions || [])].join("\n");
+          queryEmbedding = await getLLMProvider().generateEmbedding(embeddingText);
+          const surprisalResult = await computeVectorSurprisal(
+            storage.searchMemory.bind(storage),
+            JSON.stringify(queryEmbedding),
+            project,
+            PRISM_USER_ID,
+          );
+          surprisal = surprisalResult.surprisal;
+          debugLog(`[session_save_ledger] v9.0 surprisal: ${surprisal.toFixed(3)} (${surprisalResult.isBoilerplate ? 'boilerplate' : surprisalResult.isNovel ? 'novel' : 'standard'})`);
+        } catch (surprErr) {
+          debugLog(`[session_save_ledger] Surprisal computation failed (using 0.5 fallback): ${surprErr instanceof Error ? surprErr.message : String(surprErr)}`);
+        }
+      }
+
+      const rawTokenCost = estimateTokens(summary);
+      const result = spendBudget(earnings.newBalance, rawTokenCost, surprisal);
+
+      // Format diagnostics for MCP response
+      budgetDiagnostics = "\n\n" + formatBudgetDiagnostics(result, DEFAULT_BUDGET_SIZE, earnings.ubiEarned, earnings.bonusEarned);
+
+      // v9.0: Persist budget using delta-based update to prevent concurrency race.
+      // If Agent A and Agent B both load budget=2000 concurrently, absolute writes
+      // cause Agent A's spend to be overwritten by Agent B's stale value.
+      // Delta update: UPDATE SET cognitive_budget = COALESCE(cognitive_budget, 2000) + delta
+      const budgetDelta = (earnings.ubiEarned + earnings.bonusEarned) - result.spent;
+      storage.patchHandoffBudgetDelta(project, PRISM_USER_ID, budgetDelta).catch((err: Error) => {
+        debugLog(`[session_save_ledger] Budget persist failed (non-fatal): ${err.message}`);
+      });
+
+      debugLog(`[session_save_ledger] v9.0 budget: cost=${result.spent}, balance=${result.remaining}, delta=${budgetDelta}`);
+    } catch (budgetErr) {
+      debugLog(`[session_save_ledger] Budget tracking failed (non-fatal): ${budgetErr instanceof Error ? budgetErr.message : String(budgetErr)}`);
+    }
+  }
+
   // Save via storage backend
   const effectiveRole = role || await getSetting("default_role", "global");
   const result = await storage.saveLedger({
@@ -138,16 +228,22 @@ export async function sessionSaveLedgerHandler(args: unknown) {
     decisions: decisions || [],
     keywords,
     role: effectiveRole,  // v3.0: Hivemind role scoping (dashboard fallback)
+    valence,              // v9.0: Affect-tagged memory
   });
 
   // ─── Fire-and-forget embedding generation ───
   if (GOOGLE_API_KEY && result) {
-    const embeddingText = [summary, ...(decisions || [])].join("\n");
     const savedEntry = Array.isArray(result) ? result[0] : result;
     const entryId = (savedEntry as any)?.id;
 
     if (entryId) {
-      getLLMProvider().generateEmbedding(embeddingText)
+      // If embedding was already generated during surprisal computation, reuse it.
+      // Otherwise, generate it now (fire-and-forget).
+      const embeddingPromise = queryEmbedding
+        ? Promise.resolve(queryEmbedding)
+        : getLLMProvider().generateEmbedding([summary, ...(decisions || [])].join("\n"));
+
+      embeddingPromise
         .then(async (embedding) => {
           // Build atomic patch — float32 + TurboQuant in ONE DB update
           const patchData: Record<string, unknown> = {
@@ -252,7 +348,10 @@ export async function sessionSaveLedgerHandler(args: unknown) {
         (files_changed?.length ? `Files changed: ${files_changed.length}\n` : "") +
         (decisions?.length ? `Decisions: ${decisions.length}\n` : "") +
         (GOOGLE_API_KEY ? `📊 Embedding generation queued for semantic search.\n` : "") +
+        (valence !== null ? `🎭 Valence: ${valence.toFixed(2)}\n` : "") +
         repoPathWarning +
+        valenceWarning +
+        budgetDiagnostics +
         `\nRaw response: ${JSON.stringify(result)}`,
     }],
     isError: false,
@@ -868,8 +967,37 @@ export async function sessionLoadContextHandler(args: unknown) {
     }
   }
 
+  // ─── v9.0: Cognitive Budget Diagnostics ──────────────────────
+  // Show the agent its current token-economic budget status at session start.
+  // This gives real-time feedback on spending capacity and health.
+  let budgetDiagBlock = "";
+  if (PRISM_COGNITIVE_BUDGET_ENABLED && level !== "quick") {
+    try {
+      const currentBudget = (d as any).cognitive_budget ?? DEFAULT_BUDGET_SIZE;
+      const budgetSize = DEFAULT_BUDGET_SIZE;
+      const ratio = Math.max(0, Math.min(1, currentBudget / budgetSize));
+      const barLength = 20;
+      const fillLength = Math.round(ratio * barLength);
+      const bar = '█'.repeat(Math.max(0, fillLength)) + '░'.repeat(Math.max(0, barLength - fillLength));
+
+      let healthLabel: string;
+      if (ratio > 0.6) healthLabel = "🟢 Healthy";
+      else if (ratio > 0.3) healthLabel = "🟡 Moderate";
+      else if (ratio > 0.1) healthLabel = "🟠 Low";
+      else healthLabel = "🔴 Critical";
+
+      budgetDiagBlock = `\n\n[💰 COGNITIVE BUDGET]\n` +
+        `${bar} ${currentBudget}/${budgetSize} tokens — ${healthLabel}\n` +
+        `Budget replenishes via UBI (+5 tokens/hour) and event bonuses (success: +20, learning: +10).`;
+
+      debugLog(`[session_load_context] v9.0 budget diagnostics: ${currentBudget}/${budgetSize} (${(ratio * 100).toFixed(0)}%)`);
+    } catch (budgetErr) {
+      debugLog(`[session_load_context] Budget diagnostics failed (non-fatal): ${budgetErr instanceof Error ? budgetErr.message : String(budgetErr)}`);
+    }
+  }
+
   // Build the response object before v4.0 augmentations
-  let responseText = `📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${driftReport}${briefingBlock}${sdmRecallBlock}${greetingBlock}${visualMemoryBlock}${skillBlock}${versionNote}`;
+  let responseText = `📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${driftReport}${briefingBlock}${sdmRecallBlock}${greetingBlock}${visualMemoryBlock}${skillBlock}${budgetDiagBlock}${versionNote}`;
 
   // ─── v4.0: Behavioral Warnings Injection ───────────────────
   // If loadContext returned behavioral_warnings, add them to the
@@ -1300,6 +1428,15 @@ export async function sessionSaveExperienceHandler(args: unknown) {
 
   const effectiveRole = role || await getSetting("default_role", "global");
 
+  // v9.0: Experience events are the PRIMARY source of valence.
+  // A failure event without valence = -0.8 is invisible to affective routing.
+  // This was Bug #7 — the feature was wired in sessionSaveLedgerHandler but
+  // missing in the handler that matters most for typed events.
+  const valence = PRISM_VALENCE_ENABLED ? deriveValence(event_type, outcome) : null;
+  if (valence !== null) {
+    debugLog(`[session_save_experience] v9.0 valence derived: ${valence} (event_type=${event_type})`);
+  }
+
   const result = await storage.saveLedger({
     project,
     conversation_id: "experience-event",
@@ -1317,6 +1454,7 @@ export async function sessionSaveExperienceHandler(args: unknown) {
     confidence_score: typeof confidence_score === "number" ? confidence_score : undefined,
     // Corrections start with importance 1 to jumpstart visibility
     importance: event_type === "correction" ? 1 : 0,
+    valence,  // v9.0: Affect-tagged memory — derived from event_type
   });
 
   // Fire-and-forget embedding generation

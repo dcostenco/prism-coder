@@ -10,13 +10,18 @@
 import { PRISM_STORAGE } from "../config.js";
 import { debugLog } from "../utils/logger.js";
 import type { SyncBus } from "./index.js";
+import { getSetting } from "../storage/configStorage.js";
 
 let _bus: SyncBus | null = null;
 
 export async function getSyncBus(): Promise<SyncBus> {
   if (_bus) return _bus;
 
-  if (PRISM_STORAGE === "local") {
+  // DB-first, then env, then config.ts default (same priority as storage/index.ts)
+  const dbStorage = await getSetting("PRISM_STORAGE", "");
+  const resolvedStorage = dbStorage || process.env.PRISM_STORAGE || PRISM_STORAGE;
+
+  if (resolvedStorage === "local") {
     const { SqliteSyncBus } = await import("./sqliteSync.js");
     _bus = new SqliteSyncBus();
   } else {

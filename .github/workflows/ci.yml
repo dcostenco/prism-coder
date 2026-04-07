@@ -1,36 +1,38 @@
-name: CLI Integration
+name: CI
+
 on:
   push:
-    branches: [ main, master, release-** ]
+    branches: [ bcba, main, master, release-** ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ bcba, main, master ]
 
 jobs:
-  cli-integration:
+  build-and-test:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: [20.x, 22.x]
       fail-fast: false
-      
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
-          
+
       - name: Install Dependencies
         run: npm ci
 
       - name: Build TypeScript
         run: npm run build
-        
+
+      - name: Run Full Test Suite
+        run: npm test
+
       - name: Process-Level CLI Tests
-        # Specifically runs the OS-level integration tests to ensure
-        # drift policies and JSON exit codes are honored physically
         run: npx vitest run tests/verification/cli-integration.test.ts

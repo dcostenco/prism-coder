@@ -76,9 +76,11 @@ vi.mock("../../src/config.js", () => ({
 // configStorage referenced by SupabaseStorage constructor
 vi.mock("../../src/storage/configStorage.js", () => ({
   getSetting: vi.fn().mockResolvedValue(null),
+  getSettingSync: vi.fn(() => "false"),
   setSetting: vi.fn().mockResolvedValue(undefined),
   getAllSettings: vi.fn().mockResolvedValue({}),
 }));
+
 
 // supabaseMigrations — runAutoMigrations should be a no-op in tests
 vi.mock("../../src/storage/supabaseMigrations.js", () => ({

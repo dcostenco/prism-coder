@@ -105,6 +105,11 @@ import { HdcStateMachine } from "../sdm/stateMachine.js";
 import { ConceptDictionary } from "../sdm/conceptDictionary.js";
 import { PolicyGateway } from "../sdm/policyGateway.js";
 import { getSdmEngine } from "../sdm/sdmEngine.js";
+// v9.0: Affect-Tagged Memory — valence-aware retrieval
+import {
+  formatValenceTag, valenceSalience, shouldWarnNegativeValence, generateValenceWarning,
+} from "../memory/valenceEngine.js";
+import { PRISM_VALENCE_ENABLED, PRISM_VALENCE_WARNING_THRESHOLD } from "../config.js";
 import {
   PRISM_HDC_ENABLED,
   PRISM_HDC_EXPLAINABILITY_ENABLED,
@@ -592,7 +597,12 @@ export async function sessionSearchMemoryHandler(args: unknown) {
       // v8.0: Tag nodes discovered via Synapse multi-hop traversal
       const synapseTag = r.isDiscovered ? " [🌐 Synapse]" : "";
 
-      return `[${i + 1}] ${simScore} similar${synapseTag} — ${r.session_date || "unknown date"}\n` +
+      // v9.0: Valence tag — affect-tagged memory indicator
+      const valTag = PRISM_VALENCE_ENABLED && r.valence != null
+        ? ` ${formatValenceTag(r.valence)}`
+        : "";
+
+      return `[${i + 1}] ${simScore} similar${synapseTag}${valTag} — ${r.session_date || "unknown date"}\n` +
         `  Project: ${r.project}\n` +
         `  Summary: ${r.summary}\n` +
         importanceStr +
@@ -601,10 +611,26 @@ export async function sessionSearchMemoryHandler(args: unknown) {
         (r.files_changed?.length ? `  Files: ${r.files_changed.join(", ")}\n` : "");
     }).join("\n");
 
+    // v9.0: Valence Warning — inject contextual warning when top results
+    // have historically negative affect (failures, corrections).
+    let valenceWarning = "";
+    if (PRISM_VALENCE_ENABLED && results.length > 0) {
+      const valenceValues = results
+        .map((r: any) => r.valence as number | null | undefined)
+        .filter((v): v is number => v != null && Number.isFinite(v));
+      if (valenceValues.length > 0) {
+        const avgValence = valenceValues.reduce((a, b) => a + b, 0) / valenceValues.length;
+        const warning = generateValenceWarning(avgValence);
+        if (warning) {
+          valenceWarning = `\n\n${warning}`;
+        }
+      }
+    }
+
     // Phase 1: content[0] = human-readable results (unchanged from pre-Phase 1)
     const contentBlocks: Array<{ type: string; text: string }> = [{
       type: "text",
-      text: `🧠 Found ${results.length} semantically similar sessions:\n\n${formatted}`,
+      text: `🧠 Found ${results.length} semantically similar sessions:\n\n${formatted}${valenceWarning}`,
     }];
 
     // Phase 1: content[1] = machine-readable MemoryTrace (only when enable_trace=true)

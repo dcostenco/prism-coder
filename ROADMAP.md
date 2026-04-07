@@ -298,9 +298,11 @@ With v8.0.3 shipped, Prism is a **production-hardened, fail-closed, adversariall
 
 ---
 
-### v9.0 — Autonomous Cognitive OS `[Architecture Phase]`
+### v9.0 — Autonomous Cognitive OS `[Partially Shipped]`
 
 > **Thesis:** With v8.0 (Synapse Engine) shipped, Prism has solved **Retrieval** (GraphRAG + ACT-R) and **Execution Safety** (Dark Factory). The remaining bottleneck is no longer *how* memory is stored or retrieved, but **when and why the agent interacts with it.** v9.0 transitions Prism from a brilliant memory tool into the operating system that *drives* the agents.
+>
+> **Shipped in v9.0.0:** 9.2 (Token-Economic RL / Cognitive Budget) and 9.3 (Affect-Tagged Memory / Valence Engine). Both are production-ready with full feature gates.
 
 #### 🔮 9.1 — Predictive Push Memory (Streaming Context) `[Design]`
 
@@ -325,7 +327,7 @@ With v8.0.3 shipped, Prism is a **production-hardened, fail-closed, adversariall
 
 ---
 
-#### 💰 9.2 — Memory-as-an-Economy (Token-Economic RL) `[Design]`
+#### 💰 9.2 — Memory-as-an-Economy (Token-Economic RL) `[✅ Shipped in v9.0.0]`
 
 > **Force agents to learn compression through physics, not prompts.**
 
@@ -348,7 +350,7 @@ With v8.0.3 shipped, Prism is a **production-hardened, fail-closed, adversariall
 
 ---
 
-#### 🎭 9.3 — Affect-Tagged Memory (Valence & Emotional Routing) `[Research]`
+#### 🎭 9.3 — Affect-Tagged Memory (Valence & Emotional Routing) `[✅ Shipped in v9.0.0]`
 
 > **Give agents a "gut feeling" about bad code paths.**
 

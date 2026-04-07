@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.0.0] - 2026-04-07 — Autonomous Cognitive OS
+
+### 🧠 Affect-Tagged Memory (Valence Engine)
+- **Automatic Valence Derivation** — Every memory entry gets a "gut feeling" score from -1.0 (trauma/failure) to +1.0 (success/confidence), auto-derived from `event_type` at save time. No manual classification needed.
+- **Affective Salience Retrieval** — Uses absolute magnitude `|valence|` to boost retrieval salience for highly emotional memories (both positive AND negative). Prevents the Valence Retrieval Paradox where failure memories are deprioritized and agents repeat mistakes.
+- **Valence Emoji Tags** — Search results display valence indicators: 🔴 (strong negative ≤-0.5), 🟠 (negative ≤-0.2), 🟡 (neutral), 🔵 (positive ≥0.2), 🟢 (strong positive ≥0.5).
+- **Contextual Valence Warnings** — When top search results have historically negative affect, agents receive warnings like "⚠️ This topic is strongly correlated with historical failures."
+- **Valence Propagation** — Discovered nodes in the Synapse graph inherit valence via energy-weighted averaging from source flows, with fan-dampening and strict [-1, +1] clamping.
+
+### 💰 Token-Economic Cognitive Budget
+- **Strict Token Economy** — Every memory write operation costs tokens, with cost multiplied by a surprisal-derived factor: boilerplate (2×), standard (1×), novel (0.5×). This incentivizes storing novel information over redundant entries.
+- **UBI Earnings** — Budget replenishes at +100 tokens/hour passively, plus event bonuses: success (+200), learning (+100). Budget cannot exceed the initial cap (default: 2000).
+- **Budget Diagnostics in Context** — `session_load_context` now shows a visual budget bar with health status (🟢 Healthy → 🔴 Critical) so agents understand their spending capacity at session start.
+- **Persistent Budget** — Budget state is persisted in `session_handoffs.cognitive_budget` via lightweight `patchHandoffBudget` method, surviving across sessions.
+- **Graceful Degradation** — Budget exhaustion triggers warnings but NEVER blocks writes. Zero-balance entries still save with a warning annotation.
+
+### 🧬 Hybrid Scoring with Valence
+- **Three-Component Formula** — Synapse hybrid scores now use `0.65 × similarity + 0.25 × activation + 0.10 × |valence|`, replacing the simpler `0.70 × similarity + 0.30 × activation` blend. Falls back to the legacy formula when valence is disabled.
+- **computeHybridScoreWithValence()** — New pure function in `valenceEngine.ts` with configurable weights and safe clamping.
+
+### Engineering
+- All existing tests pass (zero regressions)
+- All v9.0 modules are pure functions with zero I/O (valenceEngine, cognitiveBudget, surprisalGate)
+- Feature-gated via `PRISM_VALENCE_ENABLED` and `PRISM_COGNITIVE_BUDGET_ENABLED` (both default `true`)
+- Graceful fallback on every failure path — zero hard crashes
+
+### Post-Review Hardening (8 fixes — architectural code review)
+
+#### Critical
+- **Valence Propagation No-Op** — `propagateValence()` was called with 2 args; signature requires 3 (`flowWeights`). Instrumented `synapseEngine.ts` to track energy `flowWeights` during propagation and wired to both storage backends.
+- **Experience Events Missing Valence** — `sessionSaveExperienceHandler` never called `deriveValence()`. Experience events (`failure`, `correction`, `success`) are the primary source of typed events, yet they stored NULL valence. Now derives and passes valence to `saveLedger()`.
+- **UBI "Death by 1000 Saves"** — `Math.floor()` on fractional UBI destroyed tokens on frequent saves: `floor(0.25 * 100) = 0`. Removed — `cognitive_budget` is REAL, fractional values are native. Display rounds at the format layer using `Math.round()`.
+
+#### High
+- **"Infinite Money Glitch"** — LLMs self-declaring `event_type: "success"` could mint free budget tokens. Decoupled budget bonuses from user-reported `event_type`; bonuses reserved for adversarial evaluation.
+- **Surprisal Gate Disconnected** — Hardcoded `surprisal = 0.5` was the only value ever used. Wired `computeVectorSurprisal()` with early embedding generation for real-time novelty scoring; `0.5` is now a fail-safe fallback only.
+- **Concurrency Race in Budget Writes** — Two agents loading the same budget, then writing absolute values, caused overwrites. Implemented delta-based updates: `COALESCE(cognitive_budget, 2000) + delta` in both SQLite and Supabase.
+
+#### Medium
+- **Missing SQLite Valence Index** — `idx_ledger_valence` was in the Supabase migration but absent from SQLite. Added `CREATE INDEX IF NOT EXISTS` in SQLite init.
+- **Missing Supabase `patch_budget_delta` RPC** — Code called `supabaseRpc("patch_budget_delta")` but migration 042 never created the function. Added `CREATE OR REPLACE FUNCTION` with `SECURITY DEFINER`.
+
+
 ## [8.0.3] - 2026-04-07 — Performance & Edge-Case Hardening
 
 ### Performance

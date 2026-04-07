@@ -69,14 +69,14 @@ import {
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 import {
-  SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID, PRISM_ENABLE_HIVEMIND,
+  SERVER_CONFIG, SESSION_MEMORY_ENABLED, PRISM_USER_ID, PRISM_ENABLE_HIVEMIND_ENV,
   WATCHDOG_INTERVAL_MS, WATCHDOG_STALE_MIN, WATCHDOG_FROZEN_MIN,
   WATCHDOG_OFFLINE_MIN, WATCHDOG_LOOP_THRESHOLD,
   PRISM_SCHEDULER_ENABLED, PRISM_SCHEDULER_INTERVAL_MS,
   PRISM_SCHOLAR_ENABLED,
   PRISM_HDC_ENABLED,
   PRISM_TASK_ROUTER_ENABLED_ENV,
-  PRISM_DARK_FACTORY_ENABLED,
+  PRISM_DARK_FACTORY_ENABLED_ENV,
 } from "./config.js";
 import { startWatchdog, drainAlerts } from "./hivemindWatchdog.js";
 import { startScheduler, startScholarScheduler } from "./backgroundScheduler.js";
@@ -93,7 +93,7 @@ import { acquireLock, registerShutdownHandlers } from "./lifecycle.js";
 // error wrapper. Now uses getStorage() which routes through the
 // correct backend (Supabase or SQLite) with proper error handling.
 import { getStorage } from "./storage/index.js";
-import { getSettingSync, initConfigStorage } from "./storage/configStorage.js";
+import { getSettingSync, initConfigStorage, setSetting } from "./storage/configStorage.js";
 import { getTracer, initTelemetry } from "./utils/telemetry.js";
 import { context as otelContext, trace, SpanStatusCode } from "@opentelemetry/api";
 
@@ -381,9 +381,9 @@ export function getAvailableTools(): Tool[] {
   return [
     ...BASE_TOOLS,
     ...SESSION_MEMORY_TOOLS,
-    ...(PRISM_ENABLE_HIVEMIND ? AGENT_REGISTRY_TOOLS : []),
+    ...(getSettingSync("hivemind_enabled", String(PRISM_ENABLE_HIVEMIND_ENV)) === "true" ? AGENT_REGISTRY_TOOLS : []),
     ...(getSettingSync("task_router_enabled", String(PRISM_TASK_ROUTER_ENABLED_ENV)) === "true" ? [SESSION_TASK_ROUTE_TOOL] : []),
-    ...(PRISM_DARK_FACTORY_ENABLED ? [SESSION_START_PIPELINE_TOOL, SESSION_CHECK_PIPELINE_STATUS_TOOL, SESSION_ABORT_PIPELINE_TOOL] : []),
+    ...(getSettingSync("dark_factory_enabled", String(PRISM_DARK_FACTORY_ENABLED_ENV)) === "true" ? [SESSION_START_PIPELINE_TOOL, SESSION_CHECK_PIPELINE_STATUS_TOOL, SESSION_ABORT_PIPELINE_TOOL] : []),
   ];
 }
 
@@ -915,17 +915,17 @@ export function createServer() {
 
           case "agent_register":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
-            if (!PRISM_ENABLE_HIVEMIND) throw new Error("Hivemind not enabled. Set PRISM_ENABLE_HIVEMIND=true.");
+            if (getSettingSync("hivemind_enabled", String(PRISM_ENABLE_HIVEMIND_ENV)) !== "true") throw new Error("Hivemind not enabled. Enable it in the dashboard or set PRISM_ENABLE_HIVEMIND=true.");
             result = await agentRegisterHandler(args); break;
 
           case "agent_heartbeat":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
-            if (!PRISM_ENABLE_HIVEMIND) throw new Error("Hivemind not enabled. Set PRISM_ENABLE_HIVEMIND=true.");
+            if (getSettingSync("hivemind_enabled", String(PRISM_ENABLE_HIVEMIND_ENV)) !== "true") throw new Error("Hivemind not enabled. Enable it in the dashboard or set PRISM_ENABLE_HIVEMIND=true.");
             result = await agentHeartbeatHandler(args); break;
 
           case "agent_list_team":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
-            if (!PRISM_ENABLE_HIVEMIND) throw new Error("Hivemind not enabled. Set PRISM_ENABLE_HIVEMIND=true.");
+            if (getSettingSync("hivemind_enabled", String(PRISM_ENABLE_HIVEMIND_ENV)) !== "true") throw new Error("Hivemind not enabled. Enable it in the dashboard or set PRISM_ENABLE_HIVEMIND=true.");
             result = await agentListTeamHandler(args); break;
 
           // ─── v7.1: Task Router ───
@@ -939,17 +939,17 @@ export function createServer() {
 
           case "session_start_pipeline":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
-            if (!PRISM_DARK_FACTORY_ENABLED) throw new Error("Dark Factory not enabled. Set PRISM_DARK_FACTORY_ENABLED=true.");
+            if (getSettingSync("dark_factory_enabled", String(PRISM_DARK_FACTORY_ENABLED_ENV)) !== "true") throw new Error("Dark Factory not enabled. Enable it in the dashboard or set PRISM_DARK_FACTORY_ENABLED=true.");
             result = await sessionStartPipelineHandler(args); break;
 
           case "session_check_pipeline_status":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
-            if (!PRISM_DARK_FACTORY_ENABLED) throw new Error("Dark Factory not enabled. Set PRISM_DARK_FACTORY_ENABLED=true.");
+            if (getSettingSync("dark_factory_enabled", String(PRISM_DARK_FACTORY_ENABLED_ENV)) !== "true") throw new Error("Dark Factory not enabled. Enable it in the dashboard or set PRISM_DARK_FACTORY_ENABLED=true.");
             result = await sessionCheckPipelineStatusHandler(args); break;
 
           case "session_abort_pipeline":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
-            if (!PRISM_DARK_FACTORY_ENABLED) throw new Error("Dark Factory not enabled. Set PRISM_DARK_FACTORY_ENABLED=true.");
+            if (getSettingSync("dark_factory_enabled", String(PRISM_DARK_FACTORY_ENABLED_ENV)) !== "true") throw new Error("Dark Factory not enabled. Enable it in the dashboard or set PRISM_DARK_FACTORY_ENABLED=true.");
             result = await sessionAbortPipelineHandler(args); break;
 
           default:
@@ -965,7 +965,7 @@ export function createServer() {
         // CRITICAL: Append alerts DIRECTLY to tool response content
         // so the LLM actually reads them. sendLoggingMessage goes to
         // debug logs which the LLM never sees.
-        if (PRISM_ENABLE_HIVEMIND && result && !result.isError) {
+        if (getSettingSync("hivemind_enabled", String(PRISM_ENABLE_HIVEMIND_ENV)) === "true" && result && !result.isError) {
           const project = (args as Record<string, unknown>)?.project;
           if (typeof project === "string") {
             const alerts = drainAlerts(project);
@@ -1101,7 +1101,43 @@ export function createSandboxServer() {
  * is standard for MCP — it reads JSON-RPC from stdin and writes
  * responses to stdout. Log messages go to stderr.
  */
+/**
+ * v9.2: One-time env-to-configStorage migration.
+ *
+ * Seeds prism-config.db with values from env vars using "setIfAbsent" semantics:
+ * - If the key already has a value in configStorage (e.g., set via the dashboard),
+ *   it is NEVER overwritten.
+ * - If the key has no value yet AND the env var is set, we seed the db with the
+ *   env-var value so the dashboard UI correctly reflects the existing configuration.
+ *
+ * This is idempotent — safe to call on every startup. After the first run it becomes
+ * a no-op since all keys will already have values in configStorage.
+ *
+ * Covers: feature flags (Hivemind, Task Router, Dark Factory) and Supabase credentials.
+ */
+async function migrateEnvToConfigStorage(): Promise<void> {
+  const migrations: Array<{ dbKey: string; envValue: string | undefined }> = [
+    // Feature flags
+    { dbKey: "hivemind_enabled",    envValue: process.env.PRISM_ENABLE_HIVEMIND    ? (process.env.PRISM_ENABLE_HIVEMIND === "true" ? "true" : "false")    : undefined },
+    { dbKey: "task_router_enabled", envValue: process.env.PRISM_TASK_ROUTER_ENABLED ? (process.env.PRISM_TASK_ROUTER_ENABLED === "true" ? "true" : "false") : undefined },
+    { dbKey: "dark_factory_enabled",envValue: process.env.PRISM_DARK_FACTORY_ENABLED ? (process.env.PRISM_DARK_FACTORY_ENABLED === "true" ? "true" : "false") : undefined },
+    // Supabase credentials — only migrate if present and non-empty
+    { dbKey: "SUPABASE_URL",        envValue: process.env.SUPABASE_URL  || undefined },
+    { dbKey: "SUPABASE_KEY",        envValue: process.env.SUPABASE_KEY  || undefined },
+    { dbKey: "PRISM_STORAGE",       envValue: process.env.PRISM_STORAGE || undefined },
+  ];
+
+  for (const { dbKey, envValue } of migrations) {
+    if (!envValue) continue; // env var not set — nothing to migrate
+    const existing = getSettingSync(dbKey, "");
+    if (existing !== "") continue; // already has a value — never overwrite
+    await setSetting(dbKey, envValue);
+    console.error(`[Prism] Migrated env var → configStorage: ${dbKey} = ${dbKey.toLowerCase().includes("key") ? "***" : envValue}`);
+  }
+}
+
 export async function startServer() {
+
   // MUST BE FIRST: Kill any zombie processes and acquire the singleton PID lock
   // before touching SQLite. This prevents lock contention on prism-config.db.
   acquireLock();
@@ -1111,6 +1147,14 @@ export async function startServer() {
   // during the Initialize handshake — zero extra latency for resource reads.
   // initConfigStorage() is local SQLite only (~5ms), safe to await.
   await initConfigStorage();
+
+  // v9.2: One-time env-to-configStorage migration.
+  // For users who previously set feature flags/Supabase credentials via env
+  // vars, seed configStorage with those values IF the key doesn't exist yet.
+  // This is "setIfAbsent" logic — it never overwrites a dashboard-set value.
+  // After this runs, the dashboard toggles reflect the actual runtime state.
+  await migrateEnvToConfigStorage();
+
 
   // v4.6.0: Initialize OTel AFTER the settings cache is warm so that
   // initTelemetry() can read otel_enabled/otel_endpoint from getSettingSync()
@@ -1287,7 +1331,7 @@ export async function startServer() {
   // Start the server-side health monitor after storage is warm.
   // Runs every WATCHDOG_INTERVAL_MS (default 60s) to detect
   // frozen agents, infinite loops, and task overruns.
-  if (PRISM_ENABLE_HIVEMIND && SESSION_MEMORY_ENABLED) {
+  if (getSettingSync("hivemind_enabled", String(PRISM_ENABLE_HIVEMIND_ENV)) === "true" && SESSION_MEMORY_ENABLED) {
     storageReady?.then(() => {
       startWatchdog({
         intervalMs: WATCHDOG_INTERVAL_MS,
@@ -1330,7 +1374,7 @@ export async function startServer() {
   // Autonomous pipeline orchestration engine. Picks up RUNNING
   // pipelines and advances them through PLAN → EXECUTE → VERIFY
   // cycles. Non-blocking — uses setInterval to yield between ticks.
-  if (PRISM_DARK_FACTORY_ENABLED && SESSION_MEMORY_ENABLED) {
+  if (getSettingSync("dark_factory_enabled", String(PRISM_DARK_FACTORY_ENABLED_ENV)) === "true" && SESSION_MEMORY_ENABLED) {
     storageReady?.then(() => {
       startDarkFactoryRunner();
     }).catch(err => {

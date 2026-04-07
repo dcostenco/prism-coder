@@ -785,6 +785,36 @@ export const MIGRATIONS: Migration[] = [
         CHECK (status IN ('PENDING', 'RUNNING', 'PAUSED', 'ABORTED', 'COMPLETED', 'FAILED'));
     `
   },
+  {
+    // ─── v9.0: Affect-Tagged Memory + Token-Economic Budget ──────────
+    //
+    // Two new columns:
+    //   1. session_ledger.valence — REAL [-1.0, +1.0], nullable
+    //      Stores the affective "gut feeling" score for each memory entry.
+    //      Derived deterministically from event_type at write time.
+    //      Legacy entries remain NULL (neutral).
+    //
+    //   2. session_handoffs.cognitive_budget — REAL, nullable
+    //      Persists the agent's current token-economic budget balance
+    //      across sessions. Initialized on first spend; NULL before first use.
+    //
+    // Both are idempotent (ADD COLUMN IF NOT EXISTS) and non-breaking
+    // (nullable with no NOT NULL constraint). Existing data is untouched.
+    version: 42,
+    name: "v9_affect_tagged_memory_and_cognitive_budget",
+    sql: `
+      -- v9.0: Affect-Tagged Memory — valence column on session_ledger
+      ALTER TABLE session_ledger ADD COLUMN IF NOT EXISTS valence REAL DEFAULT NULL;
+
+      -- Partial index for valence-aware retrieval (non-null valence entries)
+      CREATE INDEX IF NOT EXISTS idx_ledger_valence
+        ON session_ledger(valence)
+        WHERE valence IS NOT NULL;
+
+      -- v9.0: Token-Economic Cognitive Budget — budget column on session_handoffs
+      ALTER TABLE session_handoffs ADD COLUMN IF NOT EXISTS cognitive_budget REAL DEFAULT NULL;
+    `,
+  },
 
 ];
 

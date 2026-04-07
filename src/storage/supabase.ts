@@ -51,6 +51,7 @@ import {
   PRISM_SYNAPSE_SPREAD_FACTOR,
   PRISM_SYNAPSE_LATERAL_INHIBITION,
   PRISM_SYNAPSE_SOFT_CAP,
+  PRISM_VALENCE_ENABLED,
 } from "../config.js";
 import { getSetting as cfgGet, setSetting as cfgSet, getAllSettings as cfgGetAll } from "./configStorage.js";
 import { runAutoMigrations } from "./supabaseMigrations.js";
@@ -104,6 +105,8 @@ export class SupabaseStorage implements StorageBackend {
       ...(entry.embedding_compressed !== undefined && { embedding_compressed: entry.embedding_compressed }),
       ...(entry.embedding_format !== undefined && { embedding_format: entry.embedding_format }),
       ...(entry.embedding_turbo_radius !== undefined && { embedding_turbo_radius: entry.embedding_turbo_radius }),
+      // v9.0: Affect-Tagged Memory
+      ...(entry.valence !== undefined && entry.valence !== null && { valence: entry.valence }),
     };
 
     return supabasePost("session_ledger", record);
@@ -111,6 +114,39 @@ export class SupabaseStorage implements StorageBackend {
 
   async patchLedger(id: string, data: Record<string, unknown>): Promise<void> {
     await supabasePatch("session_ledger", data, { id: `eq.${id}` });
+  }
+
+  // v9.0: Atomic delta-based budget persistence
+  // Supabase REST PATCH can't do arithmetic, so we use an RPC function.
+  // Falls back to read-modify-write if the RPC doesn't exist.
+  async patchHandoffBudgetDelta(project: string, userId: string, budgetDelta: number): Promise<void> {
+    try {
+      // Preferred: atomic delta via SQL RPC
+      await supabaseRpc("patch_budget_delta", {
+        p_project: project,
+        p_user_id: userId,
+        p_delta: budgetDelta,
+      });
+    } catch (rpcErr) {
+      // Fallback: read-modify-write (non-atomic, acceptable for Supabase)
+      debugLog(`[SupabaseStorage] patch_budget_delta RPC unavailable, using fallback: ${rpcErr instanceof Error ? rpcErr.message : String(rpcErr)}`);
+      try {
+        const data = await supabaseGet("session_handoffs", {
+          project: `eq.${project}`,
+          user_id: `eq.${userId}`,
+          select: "cognitive_budget",
+          limit: "1",
+        });
+        const rows = Array.isArray(data) ? data : [];
+        const currentBudget = rows.length > 0 ? (rows[0] as any).cognitive_budget ?? 2000 : 2000;
+        await supabasePatch("session_handoffs", { cognitive_budget: Math.max(0, currentBudget + budgetDelta) }, {
+          project: `eq.${project}`,
+          user_id: `eq.${userId}`,
+        });
+      } catch (fallbackErr) {
+        debugLog(`[SupabaseStorage] Budget delta fallback also failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`);
+      }
+    }
   }
 
   async getLedgerEntries(params: Record<string, any>): Promise<unknown[]> {
@@ -460,7 +496,7 @@ export class SupabaseStorage implements StorageBackend {
       const anchorMap = new Map<string, number>();
       for (const a of anchors) anchorMap.set(a.id, a.similarity ?? 1.0);
 
-      const { results, telemetry } = await propagateActivation(
+      const { results, telemetry, flowWeights } = await propagateActivation(
         anchorMap,
         async (nodeIds) => this.getLinksForNodes(nodeIds, userId),
         {
@@ -487,7 +523,7 @@ export class SupabaseStorage implements StorageBackend {
             id: `in.(${missingIds.join(",")})`,
             user_id: `eq.${userId}`,
             deleted_at: "is.null",
-            select: "id,project,summary,session_date,decisions,files_changed,is_rollup,importance,last_accessed_at",
+            select: "id,project,summary,session_date,decisions,files_changed,is_rollup,importance,last_accessed_at,valence",
           }) as Record<string, unknown>[];
 
           for (const row of (Array.isArray(rows) ? rows : [])) {
@@ -501,6 +537,7 @@ export class SupabaseStorage implements StorageBackend {
               is_rollup: Boolean(row.is_rollup),
               importance: Number(row.importance) || 0,
               last_accessed_at: (row.last_accessed_at as string) || null,
+              valence: row.valence != null ? Number(row.valence) : undefined,
               similarity: 0.0,
             });
           }
@@ -508,6 +545,33 @@ export class SupabaseStorage implements StorageBackend {
           debugLog(`[SupabaseStorage] applySynapse: failed to fetch missing nodes: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
+
+      // ─── v9.0: Valence Propagation for discovered nodes ──────────
+      // Mirrors the SQLite implementation: batch propagateValence() call
+      // over the full results array with a valence lookup map.
+      let propagatedValenceMap: Map<string, number> | null = null;
+      if (PRISM_VALENCE_ENABLED) {
+        try {
+          const { propagateValence } = await import("../memory/valenceEngine.js");
+          // Build valence lookup from all known nodes
+          const valenceLookup = new Map<string, number>();
+          for (const [id, node] of fullNodeMap) {
+            if (node.valence != null && Number.isFinite(node.valence)) {
+              valenceLookup.set(id, node.valence);
+            }
+          }
+
+          propagatedValenceMap = propagateValence(results, valenceLookup, flowWeights);
+          debugLog(`[SupabaseStorage] v9.0 valence propagation: ${propagatedValenceMap.size} nodes processed`);
+        } catch (valErr) {
+          debugLog(`[SupabaseStorage] applySynapse: valence propagation failed (non-fatal): ${valErr instanceof Error ? valErr.message : String(valErr)}`);
+        }
+      }
+
+      // Import hybrid scoring if valence is enabled
+      const { computeHybridScoreWithValence } = PRISM_VALENCE_ENABLED
+        ? await import("../memory/valenceEngine.js")
+        : { computeHybridScoreWithValence: null };
 
       // Compute hybrid scores and build final result set
       const finalResults: SemanticSearchResult[] = [];
@@ -520,8 +584,14 @@ export class SupabaseStorage implements StorageBackend {
           node.rawActivationEnergy = r.activationEnergy;
           node.isDiscovered = r.isDiscovered;
 
-          // Hybrid blend: 70% original match relevance, 30% structural energy
-          node.hybridScore = (node.similarity * 0.7) + (normEnergy * 0.3);
+          // v9.0: Three-component hybrid blend with valence salience
+          const nodeValence = propagatedValenceMap?.get(r.id) ?? node.valence;
+          if (computeHybridScoreWithValence && nodeValence != null && Number.isFinite(nodeValence)) {
+            node.valence = nodeValence;
+            node.hybridScore = computeHybridScoreWithValence(node.similarity, normEnergy, nodeValence);
+          } else {
+            node.hybridScore = (node.similarity * 0.7) + (normEnergy * 0.3);
+          }
 
           finalResults.push(node);
         }
