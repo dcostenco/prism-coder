@@ -28,6 +28,7 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [Setup Guides](#setup-guides)
 - [Universal Import: Bring Your History](#universal-import-bring-your-history)
 - [What Makes Prism Different](#what-makes-prism-different)
+- [Autonomous Cognitive OS (v9.0)](#-autonomous-cognitive-os-v90)
 - [Synapse Engine (v8.0)](#synapse-engine-v80)
 - [Cognitive Architecture (v7.8)](#cognitive-architecture-v78)
 - [Data Privacy & Egress](#data-privacy--egress)
@@ -416,6 +417,12 @@ npx -y prism-mcp-server universal-import --format gemini --path ./gemini_history
 ## What Makes Prism Different
 
 
+### 💰 Token-Economic Memory & Surprisal Gates (v9.0)
+Standard agents dump repetitive garbage into vector databases until they bankrupt your API budget and choke their own context windows. Prism introduces a **Persistent Cognitive Budget** with Universal Basic Income (UBI). Before saving, Prism calculates the semantic novelty (Surprisal) of the thought. Redundant boilerplate is penalized with a 2× cost multiplier; novel insights are rewarded. The agent is mathematically forced to learn compression.
+
+### 🎭 Affect-Tagged Emotional Routing (v9.0)
+Standard RAG retrieves documents based on similarity, not success rate. Prism tags experience events with **Valence** (-1.0 to +1.0). Highly emotional memories (catastrophic failures or massive successes) receive an affective salience boost during retrieval. If an agent heads down an architectural path that previously caused outages, Prism injects a preemptive `⚠️ Historical Friction` warning, giving your AI a "gut feeling" about bad code.
+
 ### 🧠 Your Agent Learns From Mistakes
 When you correct your agent, Prism tracks it. Corrections accumulate **importance** over time. High-importance lessons auto-surface as warnings in future sessions — and can even sync to your `.cursorrules` file for permanent enforcement. Your agent literally gets smarter the more you use it.
 
@@ -458,6 +465,41 @@ Prism researches while you sleep. A background pipeline searches the web, scrape
 
 ### Dark Factory — Adversarial Autonomous Pipelines
 When you trigger a Dark Factory pipeline, Prism doesn't just run your task — it fights itself to produce high-quality output. A `PLAN_CONTRACT` step locks a machine-parseable rubric before any code is written. After execution, an **Adversarial Evaluator** (in a fully isolated context) scores the output against the rubric. It cannot pass the Generator without providing exact file and line evidence for every failing criterion. Failed evaluations inject the critique directly into the Generator's retry prompt so it's never flying blind. The result: security issues, regressions, and lazy debug logs caught autonomously — before you ever see the PR. → [See it in action](examples/adversarial-eval-demo/README.md)
+
+---
+
+## 🤖 Autonomous Cognitive OS (v9.0)
+
+> *Memory isn't just about storing data; it's about economics and emotion. v9.0 transforms Prism from a passive memory database into a living Cognitive Operating System that forces agents to learn compression and develop intuition.*
+
+Most AI agents have an infinite memory budget. They dump massive, repetitive logs into vector databases until the context window chokes. Prism v9.0 fixes this by introducing **Token-Economic Reinforcement Learning** and **Affect-Tagged Memory**.
+
+### 1. Memory-as-an-Economy (The Surprisal Gate)
+Prism gives your project a strict **Cognitive Budget** (e.g., 2,000 tokens). Every time the agent saves a memory, it costs tokens. 
+
+But not all memories are priced equally:
+*   Prism intercepts the save and runs a **Vector-Based Surprisal** calculation against recent memories. 
+*   **High Surprisal (Novel thought):** Costs 0.5× tokens. The agent is rewarded for new insights.
+*   **Low Surprisal (Boilerplate):** Costs 2.0× tokens. The agent is penalized for repeating itself.
+*   **Universal Basic Income (UBI):** The budget recovers passively over time (+100 tokens/hour) or when the agent successfully completes autonomous evaluations. 
+
+**The Result:** You don't need to prompt the agent to "be concise." The physics of the system force the LLM to learn data compression to avoid bankruptcy.
+
+### 2. Affect-Tagged Memory (Giving AI a "Gut Feeling")
+Vector math measures *semantic similarity*, not *sentiment*. If an agent searches for "Authentication Architecture," standard RAG will return two past approaches—it doesn't know that Approach A caused a 3-day production outage, while Approach B worked perfectly.
+
+*   **Affective Salience:** Prism automatically tags experience events with a `valence` score (-1.0 for failure, +1.0 for success).
+*   **Emotional Retrieval:** At retrieval time, the absolute magnitude (`|valence|`) significantly boosts the memory's ranking score. Extreme failures and extreme successes surface to the top.
+*   **UX Warnings:** If the retrieved memories are historically negative, Prism intercepts the prompt injection: `⚠️ Caution: This topic is strongly correlated with historical failures. Review past decisions before proceeding.`
+
+### The Paradigm Shift
+
+| Feature | Standard RAG / Agents | Prism v9.0 |
+| :--- | :--- | :--- |
+| **Storage Limit** | Infinite (bloats context) | Bounded Token Economy |
+| **Data Quality** | Saves repetitive boilerplate | Surprisal Gate penalizes redundancy |
+| **Sentiment** | Treats all data as neutral facts | Affect-Tagged (Warns agent of past trauma) |
+| **Recovery** | Manual deletion | Universal Basic Income (UBI) over time |
 
 ---
 

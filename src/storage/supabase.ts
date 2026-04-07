@@ -139,7 +139,7 @@ export class SupabaseStorage implements StorageBackend {
         });
         const rows = Array.isArray(data) ? data : [];
         const currentBudget = rows.length > 0 ? (rows[0] as any).cognitive_budget ?? 2000 : 2000;
-        await supabasePatch("session_handoffs", { cognitive_budget: currentBudget + budgetDelta }, {
+        await supabasePatch("session_handoffs", { cognitive_budget: Math.max(0, currentBudget + budgetDelta) }, {
           project: `eq.${project}`,
           user_id: `eq.${userId}`,
         });

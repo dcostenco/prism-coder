@@ -1131,7 +1131,7 @@ export class SqliteStorage implements StorageBackend {
   // With delta: Both apply correctly → budget=2000 + (-100) + (-50) = 1850
   async patchHandoffBudgetDelta(project: string, userId: string, budgetDelta: number): Promise<void> {
     await this.db.execute({
-      sql: `UPDATE session_handoffs SET cognitive_budget = COALESCE(cognitive_budget, 2000) + ? WHERE project = ? AND user_id = ?`,
+      sql: `UPDATE session_handoffs SET cognitive_budget = MAX(0, COALESCE(cognitive_budget, 2000) + ?) WHERE project = ? AND user_id = ?`,
       args: [budgetDelta, project, userId],
     });
   }

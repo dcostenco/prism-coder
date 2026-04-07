@@ -42,7 +42,7 @@ CREATE OR REPLACE FUNCTION patch_budget_delta(
 ) RETURNS VOID AS $$
 BEGIN
   UPDATE session_handoffs
-  SET cognitive_budget = COALESCE(cognitive_budget, 2000) + p_delta
+  SET cognitive_budget = GREATEST(0, COALESCE(cognitive_budget, 2000) + p_delta)
   WHERE project = p_project AND user_id = p_user_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
