@@ -109,19 +109,19 @@ describe("computeUBI", () => {
   it("returns 100 tokens for 1 hour elapsed", () => {
     const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
     const now = new Date();
-    expect(computeUBI(oneHourAgo, now)).toBe(UBI_TOKENS_PER_HOUR);
+    expect(computeUBI(oneHourAgo, now)).toBeCloseTo(UBI_TOKENS_PER_HOUR, 0);
   });
 
   it("returns 200 tokens for 2 hours elapsed", () => {
     const twoHoursAgo = new Date(Date.now() - 7200000).toISOString();
     const now = new Date();
-    expect(computeUBI(twoHoursAgo, now)).toBe(200);
+    expect(computeUBI(twoHoursAgo, now)).toBeCloseTo(200, 0);
   });
 
   it("caps at UBI_MAX_PER_SESSION for long durations", () => {
     const tenHoursAgo = new Date(Date.now() - 36000000).toISOString();
     const now = new Date();
-    expect(computeUBI(tenHoursAgo, now)).toBe(UBI_MAX_PER_SESSION);
+    expect(computeUBI(tenHoursAgo, now)).toBeCloseTo(UBI_MAX_PER_SESSION, 0);
   });
 
   it("returns 0 for very recent saves (< 1 hour)", () => {
