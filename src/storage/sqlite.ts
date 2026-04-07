@@ -1590,11 +1590,15 @@ export class SqliteStorage implements StorageBackend {
       args.push(params.role);
     }
 
+    // Escape LIKE wildcards (% and _) in user input to prevent pattern injection.
+    // Without this, a search for "100%_done" would match unintended rows.
+    const escapeLike = (s: string) => s.replace(/[%_]/g, '\\$&');
+
     // Add LIKE conditions for each keyword
     for (const kw of params.keywords) {
       if (kw.length > 2) {
-        conditions.push("(summary LIKE ? OR keywords LIKE ? OR decisions LIKE ?)");
-        const pattern = `%${kw}%`;
+        conditions.push("(summary LIKE ? ESCAPE '\\' OR keywords LIKE ? ESCAPE '\\' OR decisions LIKE ? ESCAPE '\\')");
+        const pattern = `%${escapeLike(kw)}%`;
         args.push(pattern, pattern, pattern);
       }
     }
@@ -1602,8 +1606,8 @@ export class SqliteStorage implements StorageBackend {
     // BUG FIX: queryText was previously ignored — if keywords were empty,
     // zero search filters were added, returning unfiltered top-N results.
     if (params.queryText) {
-      conditions.push("(summary LIKE ? OR keywords LIKE ? OR decisions LIKE ?)");
-      const pattern = `%${params.queryText}%`;
+      conditions.push("(summary LIKE ? ESCAPE '\\' OR keywords LIKE ? ESCAPE '\\' OR decisions LIKE ? ESCAPE '\\')");
+      const pattern = `%${escapeLike(params.queryText)}%`;
       args.push(pattern, pattern, pattern);
     }
 
@@ -1772,12 +1776,16 @@ export class SqliteStorage implements StorageBackend {
           fallbackArgs.push(params.role);
         }
 
+        // PERF: LIMIT 5000 prevents unbounded heap usage on large datasets.
+        // Tier-2 scores all rows JS-side, so we cap to a safe ceiling.
+        const TIER2_MAX_CANDIDATES = 5000;
         const fallbackSql = `
           SELECT id, project, summary, decisions, files_changed,
                  session_date, created_at, is_rollup, importance, last_accessed_at,
                  embedding_compressed, embedding_turbo_radius
           FROM session_ledger
           WHERE ${fallbackConditions.join(" AND ")}
+          LIMIT ${TIER2_MAX_CANDIDATES}
         `;
 
         const fallbackResult = await this.db.execute({ sql: fallbackSql, args: fallbackArgs });
@@ -2408,13 +2416,16 @@ export class SqliteStorage implements StorageBackend {
     const args: InValue[] = [status];
 
     // Allow watchdog to set arbitrary safe fields (e.g., loop_count reset)
+    // SECURITY: Hardcoded allowlist + regex validation prevents SQL injection
+    // even if new keys are added without review.
     const ALLOWED_FIELDS = new Set([
       "loop_count", "task_start_time", "expected_duration_minutes",
       "task_hash", "current_task",
     ]);
+    const SAFE_COLUMN_RE = /^[a-z_]+$/;
     if (additionalFields) {
       for (const [key, val] of Object.entries(additionalFields)) {
-        if (ALLOWED_FIELDS.has(key)) {
+        if (ALLOWED_FIELDS.has(key) && SAFE_COLUMN_RE.test(key)) {
           setClauses.push(`${key} = ?`);
           args.push(val as InValue);
         }
@@ -2902,7 +2913,7 @@ export class SqliteStorage implements StorageBackend {
     // The vector is a Uint32Array. We need its underlying buffer for SQLite.
     // Wrap in Uint8Array to satisfy @libsql/client InValue typing which rejects SharedArrayBuffer
     const buffer = new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength);
-    const { SDM_ADDRESS_VERSION } = await import('../sdm/sdmEngine.js');
+    const { HDC_DICTIONARY_VERSION } = await import('../sdm/sdmEngine.js');
     
     await this.db.execute({
       sql: `INSERT INTO hdc_dictionary (concept_name, vector, prng_version) 
@@ -2910,10 +2921,10 @@ export class SqliteStorage implements StorageBackend {
             ON CONFLICT(concept_name) DO UPDATE SET 
               vector = excluded.vector,
               prng_version = excluded.prng_version`,
-      args: [concept, buffer, SDM_ADDRESS_VERSION],
+      args: [concept, buffer, HDC_DICTIONARY_VERSION],
     });
     
-    debugLog(`[SqliteStorage] Persisted HDC orthogonal concept v${SDM_ADDRESS_VERSION} to dictionary: ${concept}`);
+    debugLog(`[SqliteStorage] Persisted HDC concept v${HDC_DICTIONARY_VERSION} to dictionary: ${concept}`);
   }
 
   // ─── v6.1: Storage Hygiene ────────────────────────────────────────────
@@ -3198,11 +3209,29 @@ export class SqliteStorage implements StorageBackend {
     });
   }
 
-  async decayLinks(olderThanDays: number): Promise<number> {
+  async decayLinks(olderThanDays: number, userId?: string): Promise<number> {
     // Reduce strength by -0.05 for non-structural associative links not traversed in N days.
     // Floor at 0.0 (enforced by CHECK constraint) — links at 0.0 are
     // effectively dead but preserved for provenance audit.
     // We only decay related_to heuristical links, not factual structural links.
+    //
+    // TENANT ISOLATION: When userId is provided, scope decay to links
+    // owned by this user's ledger entries (prevents cross-tenant decay
+    // in shared-database deployments).
+    if (userId) {
+      const result = await this.db.execute({
+        sql: `UPDATE memory_links
+              SET strength = MAX(strength - 0.05, 0.0)
+              WHERE last_traversed_at < datetime('now', ?)
+                AND link_type IN ('related_to')
+                AND source_id IN (
+                  SELECT id FROM session_ledger WHERE user_id = ?
+                )`,
+        args: [`-${olderThanDays} days`, userId],
+      });
+      return result.rowsAffected;
+    }
+    // Fallback: unscoped decay (backward-compatible for single-tenant)
     const result = await this.db.execute({
       sql: `UPDATE memory_links
             SET strength = MAX(strength - 0.05, 0.0)

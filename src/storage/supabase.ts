@@ -1224,20 +1224,20 @@ export class SupabaseStorage implements StorageBackend {
 
   async saveHdcConcept(concept: string, vector: Uint32Array): Promise<void> {
     const base64Vector = this.uint32ToBase64(vector);
-    const { SDM_ADDRESS_VERSION } = await import('../sdm/sdmEngine.js');
+    const { HDC_DICTIONARY_VERSION } = await import('../sdm/sdmEngine.js');
 
     await supabasePost(
       "hdc_dictionary",
       {
         concept_name: concept,
         vector: base64Vector,
-        prng_version: SDM_ADDRESS_VERSION,
+        prng_version: HDC_DICTIONARY_VERSION,
       },
       { on_conflict: "concept_name" },
       { Prefer: "return=minimal,resolution=merge-duplicates" },
     );
 
-    debugLog(`[SupabaseStorage] Persisted HDC concept v${SDM_ADDRESS_VERSION} to dictionary: ${concept}`);
+    debugLog(`[SupabaseStorage] Persisted HDC concept v${HDC_DICTIONARY_VERSION} to dictionary: ${concept}`);
   }
 
   // ─── v6.1: Storage Hygiene ────────────────────────────────────
@@ -1434,7 +1434,7 @@ export class SupabaseStorage implements StorageBackend {
     }
   }
 
-  async decayLinks(olderThanDays: number): Promise<number> {
+  async decayLinks(olderThanDays: number, _userId?: string): Promise<number> {
     try {
       const affected = await supabaseRpc("prism_decay_links", {
         p_older_than_days: olderThanDays
