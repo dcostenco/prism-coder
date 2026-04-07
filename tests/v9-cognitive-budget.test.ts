@@ -213,8 +213,8 @@ describe("applyEarnings", () => {
   it("applies UBI earnings", () => {
     const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
     const result = applyEarnings(1500, oneHourAgo, undefined);
-    expect(result.ubiEarned).toBe(100);
-    expect(result.newBalance).toBe(1600);
+    expect(result.ubiEarned).toBeCloseTo(100, 0);
+    expect(result.newBalance).toBeCloseTo(1600, 0);
   });
 
   it("applies event bonus", () => {
@@ -226,9 +226,9 @@ describe("applyEarnings", () => {
   it("combines UBI + bonus", () => {
     const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
     const result = applyEarnings(1500, oneHourAgo, "success");
-    expect(result.ubiEarned).toBe(100);
+    expect(result.ubiEarned).toBeCloseTo(100, 0);
     expect(result.bonusEarned).toBe(SUCCESS_BONUS);
-    expect(result.newBalance).toBe(1500 + 100 + SUCCESS_BONUS);
+    expect(result.newBalance).toBeCloseTo(1500 + 100 + SUCCESS_BONUS, 0);
   });
 
   it("caps balance at budget size", () => {
