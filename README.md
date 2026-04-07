@@ -725,13 +725,13 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v7.8.2 — Cognitive Architecture**
+> **Current release: v9.0.5 — JWKS Auth Security Hardening**
 
-- 🧠 **v7.8.0 — Cognitive Architecture:** The biggest leap forward yet. Moved beyond flat vector search into a true cognitive architecture inspired by human brain mechanics. Episodic-to-Semantic memory consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate (your agent can say "I don't know"), and Dynamic Fast Weight Decay (semantic memories outlive episodic chatter by 2×). **Your agents don't just remember; they learn.** → [Cognitive Architecture](#-cognitive-architecture-v78)
-- 🌐 **v7.7.0 — Cloud-Native SSE Transport:** Full unauthenticated and authenticated Server-Sent Events MCP support for seamless network deployments.
-- 🩺 **v7.5.0 — Intent Health Dashboard + Security Hardening:** Real-time 0–100 project health scoring (staleness × TODO load × decisions). 10 XSS injection vectors patched. Algorithm hardened with NaN guards and score ceiling.
-- ⚔️ **v7.4.0 — Adversarial Evaluation:** Split-brain anti-sycophancy pipeline. Generator and evaluator in isolated roles with evidence-bound findings.
-- 🏭 **v7.3.x — Dark Factory + Stability:** Fail-closed 3-gate execution pipeline. Dashboard stability and verification diagnostics.
+- 🔒 **v9.0.5 — JWKS Auth Security Hardening:** JWT audience/issuer claim validation (`PRISM_JWT_AUDIENCE`, `PRISM_JWT_ISSUER`), structured error logging for JWT failures, typed `PrismAuthenticatedRequest` interface, 11 new JWKS unit tests, Smithery server card fix. Vendor-neutral — tested with Auth0, AgentLair, Keycloak, and custom JWKS endpoints.
+- 🧠 **v9.0.0 — Autonomous Cognitive OS:** Token-Economic Reinforcement Learning (Surprisal Gate + Cognitive Budget), Affect-Tagged Memory (valence-scored retrieval), and Episodic→Semantic Consolidation. Your agents learn compression and develop intuition. → [Cognitive OS](#-autonomous-cognitive-os-v90)
+- 🧠 **v7.8.0 — Cognitive Architecture:** Episodic-to-Semantic memory consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate, and Dynamic Fast Weight Decay. → [Cognitive Architecture](#-cognitive-architecture-v78)
+- 🌐 **v7.7.0 — Cloud-Native SSE Transport:** Full Server-Sent Events MCP support for seamless network deployments.
+- ⚔️ **v7.4.0 — Adversarial Evaluation:** Split-brain anti-sycophancy pipeline with evidence-bound findings.
 
 👉 **[Full release history → CHANGELOG.md](CHANGELOG.md)** · **[ROADMAP →](ROADMAP.md)**
 
@@ -971,6 +971,9 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 | `PRISM_ACTR_WEIGHT_ACTIVATION` | No | Composite score ACT-R activation weight (default: `0.3`) |
 | `PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS` | No | Days before access logs are pruned by background scheduler (default: `90`) |
 | `PRISM_DARK_FACTORY_ENABLED` | No | `"true"` to enable Dark Factory autonomous pipeline tools (`session_start_pipeline`, `session_check_pipeline_status`, `session_abort_pipeline`) |
+| `PRISM_JWKS_URI` | No | JWKS endpoint URL for vendor-neutral JWT auth (e.g., `https://your-tenant.auth0.com/.well-known/jwks.json`) |
+| `PRISM_JWT_AUDIENCE` | No | Expected JWT `aud` claim — prevents cross-service token confusion |
+| `PRISM_JWT_ISSUER` | No | Expected JWT `iss` claim — validates token origin |
 
 </details>
 
@@ -1099,10 +1102,12 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 
 ## 📦 Milestones & Roadmap
 
-> **Current: v7.8.2** — Cognitive Architecture ([CHANGELOG](CHANGELOG.md))
+> **Current: v9.0.5** — JWKS Auth Security Hardening ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|
+| **v9.0.5** | 🔒 JWKS Auth Security Hardening — audience/issuer validation, JWT failure logging, typed agent identity |
+| **v9.0** | 🧠 Autonomous Cognitive OS — Surprisal Gate, Cognitive Budget, Affect-Tagged Memory |
 | **v7.8** | 🧠 Cognitive Architecture — Hebbian consolidation, multi-hop reasoning, rejection gate, dynamic decay |
 | **v7.7** | 🌐 Cloud-Native SSE Transport |
 | **v7.5** | 🩺 Intent Health Dashboard + Security Hardening |
@@ -1145,7 +1150,7 @@ A: Run `npm run build && npm test`, then open the Mind Palace dashboard (`localh
 - **MCP client race conditions.** Some MCP clients may not finish tool enumeration before the model generates its first response, causing transient `unknown_tool` errors. This is a client-side timing issue — Prism's server completes the MCP handshake in ~60ms. Workaround: the server-side auto-push fallback and the startup skill's retry logic.
 - **No real-time sync without Supabase.** Local SQLite mode is single-machine only. Multi-device or team sync requires a Supabase backend.
 - **Embedding quality varies by provider.** Gemini `text-embedding-004` and OpenAI `text-embedding-3-small` produce high-quality 768-dim vectors. Prism passes `dimensions: 768` via the Matryoshka API for OpenAI models (native output is 1536-dim; this truncation is lossless and outperforms ada-002 at full 1536 dims). Ollama embeddings (e.g., `nomic-embed-text`) are usable but may reduce retrieval accuracy.
-- **Dashboard is HTTP-only.** The Mind Palace dashboard at `localhost:3000` does not support HTTPS. For remote access, use a reverse proxy (nginx/Caddy) or SSH tunnel. Basic auth is available via `PRISM_DASHBOARD_USER` / `PRISM_DASHBOARD_PASS`.
+- **Dashboard is HTTP-only.** The Mind Palace dashboard at `localhost:3000` does not support HTTPS. For remote access, use a reverse proxy (nginx/Caddy) or SSH tunnel. Basic auth is available via `PRISM_DASHBOARD_USER` / `PRISM_DASHBOARD_PASS`. JWKS JWT auth is available via `PRISM_JWKS_URI` for agent-native authentication (works with Auth0, AgentLair, Keycloak, Cognito, or any standard JWKS endpoint).
 - **Long-lived clients can accumulate zombie processes.** MCP clients that run for extended periods (e.g., Claude CLI) may leave orphaned Prism server processes. The lifecycle manager detects true orphans (PPID=1) but allows coexistence for active parent processes. Use `PRISM_INSTANCE` to isolate instances across clients.
 - **Migration is one-way.** Universal Import ingests sessions *into* Prism but does not export back to Claude/Gemini/OpenAI formats. Use `session_export_memory` for portable JSON/Markdown export, or the `vault` format for Obsidian/Logseq-compatible `.zip` archives.
 - **Export ceiling at 10,000 ledger entries.** The `session_export_memory` tool and the dashboard export button cap vault/JSON exports at 10,000 entries per project as an OOM guard. Projects exceeding this limit should use per-project exports and time-based filtering to stay within the ceiling. This limit does not affect search or context loading.

@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.0.5] - 2026-04-07 — JWKS Auth Security Hardening
+
+### Security
+- **JWT Audience & Issuer Validation** — `jwtVerify()` now accepts `PRISM_JWT_AUDIENCE` and `PRISM_JWT_ISSUER` environment variables to validate `aud` and `iss` claims. Prevents cross-service token confusion attacks where a valid JWT from an unrelated service could authenticate against the dashboard.
+- **Clock Tolerance** — Added 30-second clock skew tolerance to JWT verification, preventing false rejections from minor time drift between servers.
+- **JWT Failure Logging** — Verification failures now emit structured error codes (`ERR_JWT_EXPIRED`, `ERR_JWT_CLAIM_VALIDATION_FAILED`, `ERR_JWS_INVALID`) to stderr. Previously silenced — essential for debugging in multi-agent deployments.
+- **Server Card Fix** — `authentication.required` in the Smithery manifest (`/.well-known/mcp/server-card.json`) now reflects actual auth state instead of hardcoded `false`.
+
+### Added
+- **`PrismAuthenticatedRequest` Interface** — Typed `req.agent_id` mutation replaces `(req as any)`. Downstream handlers can now safely read agent identity for audit logging.
+- **11 JWKS Unit Tests** — Full coverage for the Bearer JWT path using `jose`'s `generateKeyPair` + `SignJWT` (zero network, local key pairs):
+  - Valid JWT accepted
+  - Expired JWT rejected
+  - Wrong audience rejected / correct audience accepted
+  - Wrong issuer rejected / correct issuer accepted
+  - JWKS cache null → fallthrough to cookie/basic
+  - Invalid Bearer token string rejected
+  - `agent_id` extracted from `payload.agent_id` (priority) and `payload.sub` (fallback)
+- **JWKS Testing Hooks** — `_resetJWKS()` and `_getJWKSCache()` exports for test injection.
+- **`.env.example` Documentation** — Added `PRISM_JWKS_URI`, `PRISM_JWT_AUDIENCE`, `PRISM_JWT_ISSUER` with usage examples.
+
+### Changed
+- **Startup Logging** — Distinguishes JWKS vs Basic Auth modes separately. Warns when no `PRISM_JWT_AUDIENCE` is configured (any valid JWT from the JWKS endpoint will be accepted).
+- **JSDoc** — Updated `isAuthenticated` documentation to reflect the full 4-step auth priority chain: Auth disabled → Bearer JWT → Session cookie → Basic Auth.
+
 ## [7.8.2] - 2026-04-04
 
 ### Fixed
