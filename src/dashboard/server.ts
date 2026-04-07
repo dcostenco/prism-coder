@@ -41,6 +41,7 @@ import {
   createRateLimiter,
   initJWKS,
   type AuthConfig,
+  type PrismAuthenticatedRequest,
 } from "./authUtils.js";
 
 
@@ -358,6 +359,16 @@ return false;}
       // For page requests, show login page
       res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
       return res.end(renderLoginPage());
+    }
+
+    // ─── AUDIT LOGGING (JWKS / AgentLair) ───
+    const authReq = req as PrismAuthenticatedRequest;
+    // Log successful agent access (identified via JWKS JWT)
+    if (authReq.agent_id && reqUrl.pathname !== "/api/scheduler") {
+      let auditLog = `[Dashboard] 🚦 Access: ${req.method} ${reqUrl.pathname} by agent ${authReq.agent_id}`;
+      if (authReq.al_name) auditLog += ` (${authReq.al_name})`;
+      if (authReq.al_audit_url) auditLog += ` - Audit: ${authReq.al_audit_url}`;
+      console.error(auditLog);
     }
 
     try {

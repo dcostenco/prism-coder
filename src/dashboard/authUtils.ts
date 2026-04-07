@@ -28,6 +28,8 @@ export interface AuthConfig {
  */
 export interface PrismAuthenticatedRequest extends http.IncomingMessage {
   agent_id?: string;
+  al_name?: string;
+  al_audit_url?: string;
 }
 
 /** Rate limiter options */
@@ -139,9 +141,13 @@ export async function isAuthenticated(
       if (config.jwtIssuer) verifyOpts.issuer = config.jwtIssuer;
 
       const { payload } = await jwtVerify(token, jwksCache, verifyOpts);
-      // Attach agent_id to the request for downstream traceability
-      (req as PrismAuthenticatedRequest).agent_id =
-        (payload as Record<string, unknown>).agent_id as string || payload.sub;
+      const payloadDict = payload as Record<string, unknown>;
+      // Attach agent_id and AgentLair audit metadata to the request for downstream traceability
+      const authReq = req as PrismAuthenticatedRequest;
+      authReq.agent_id =
+        payloadDict.agent_id as string || payload.sub;
+      authReq.al_name = payloadDict.al_name as string;
+      authReq.al_audit_url = payloadDict.al_audit_url as string;
       return true;
     } catch (err) {
       const code = (err as { code?: string }).code || "UNKNOWN";
