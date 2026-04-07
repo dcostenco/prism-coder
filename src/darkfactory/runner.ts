@@ -681,6 +681,13 @@ async function runnerTick(): Promise<void> {
       const harnessPath = path.join(path.resolve(spec.workingDirectory), 'verification_harness.json');
       if (fs.existsSync(harnessPath)) {
         try {
+          // MED-5 FIX: Guard against LLM-generated files that are malformed or
+          // excessively large. Cap at 1MB to prevent heap exhaustion.
+          const MAX_HARNESS_SIZE = 1_000_000;
+          const stat = fs.statSync(harnessPath);
+          if (stat.size > MAX_HARNESS_SIZE) {
+            throw new Error(`Verification harness too large (${stat.size} bytes, max ${MAX_HARNESS_SIZE}). Possible corrupt LLM output.`);
+          }
           const rawHarness = fs.readFileSync(harnessPath, 'utf8');
           const harnessData = JSON.parse(rawHarness);
 

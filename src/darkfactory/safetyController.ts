@@ -52,8 +52,17 @@ export class SafetyController {
     if (!spec.workingDirectory) return true;
     
     // Resolve symlinks and protect against ../ escapes.
-    const resolvedTarget = path.resolve(targetPath);
-    const resolvedWorkspace = path.resolve(spec.workingDirectory);
+    let resolvedTarget = path.resolve(targetPath);
+    let resolvedWorkspace = path.resolve(spec.workingDirectory);
+    
+    // EDGE-2 FIX: macOS (HFS+/APFS) and Windows (NTFS) use case-insensitive
+    // filesystems by default. Without case normalization, "/App/Workspace"
+    // and "/app/workspace" are treated as different paths — allowing a scope
+    // escape via case mismatch.
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      resolvedTarget = resolvedTarget.toLowerCase();
+      resolvedWorkspace = resolvedWorkspace.toLowerCase();
+    }
     
     // Path Traversal Guard: A naive startsWith() check is vulnerable to
     // prefix collisions — e.g. /app/workspace-hacked passes startsWith('/app/workspace').

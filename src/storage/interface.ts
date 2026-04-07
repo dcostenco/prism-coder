@@ -726,7 +726,7 @@ export interface StorageBackend {
    * Called by the sleep-cycle consolidation scheduler.
    * @returns Number of links decayed
    */
-  decayLinks(olderThanDays: number): Promise<number>;
+  decayLinks(olderThanDays: number, userId?: string): Promise<number>;
 
   /**
    * Summarize weak-link soft-pruning impact for a project without deleting links.
