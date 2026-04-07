@@ -233,9 +233,9 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 </details>
 
-## 📊 The State of Prism (v7.7.0)
+## 📊 The State of Prism (v7.8.0)
 
-With v7.7.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
+With v7.8.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
 
 - **Cloud-Native RPC** — Server-Sent Events integration unlocks complete deployment portability across Smithery, Render, or any remote host over standard HTTP ports.
 - **Health-Aware** — Intent Health Dashboard scores every project 0–100 across staleness, TODO load, and decision quality. Silent drift becomes an actionable signal before it becomes a crisis.
@@ -251,6 +251,7 @@ With v7.7.0 shipped, Prism is a **production-hardened, fail-closed, adversariall
 - **Observable** — SLO dashboard: synthesis success rate, net link growth, prune ratio, sweep latency, cognitive route distribution, pipeline gate pass/fail. Warning badges fire proactively.
 - **Diagnostically Rich** — `verify status --json` emits `diff_counts` + `changed_keys` per layer. JSON contract is CI-enforced and schema-versioned.
 - **Zero Cold-Start** — Universal Migration imports years of Claude/Gemini/ChatGPT history on day one. New memories are access-seeded immediately.
+- **Air-Gapped Capable** — OllamaAdapter enables fully local, zero-cost embeddings via `nomic-embed-text` (768-dim native). No API key, no network, no cost. Auto-detected when `OLLAMA_HOST` is set.
 - **Scale** — TurboQuant 10× compression + Deep Storage Purge + SQLite VACUUM. Decades of session history on a laptop.
 - **Safe** — Full type-guard matrix across all 30+ MCP tools. Path traversal, poison pill payloads, null-byte injection — all blocked at the gate layer before any execution.
 - **Convergent** — CRDT OR-Map handoff merging. Multiple agents, zero conflicts.
@@ -300,11 +301,12 @@ Based on our April 2026 synthesize of 12 foundational papers on cognitive memory
 
 > 🤝 **Want to contribute?** These items are great entry points for new contributors. Most are self-contained and don't require deep knowledge of the cognitive pipeline. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for guidelines.
 
-| Feature | Notes |
-|---------|-------|
-| **Supabase `summarizeWeakLinks` N+1 Removal** | Migration 036 ships the RPC; remove the sequential REST fallback once 036 is confirmed deployed across all tenants |
-| Supabase RPC Soft-Delete Filtering | Server-side GDPR filtering at the RPC layer |
-| Prism CLI | Standalone CLI for backup, export, and health check without MCP |
-| Plugin System | Third-party tool registration via MCP tool composition |
-| **Supabase MemoryLinks** | Implement `MemoryLinks` (graph-based traversal) in Supabase to achieve full structural parity with SQLite backend |
-| **Safe Rollback Primitive (`session_rollback_state`)** | Standardize rollback with snapshot/worktree restoration for autonomous loops; avoid destructive reset-first behavior and require explicit promotion policies |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| ✅ **Ollama Local Embeddings** | **Shipped (v7.8.8)** | `OllamaAdapter` + `nomic-embed-text` (768-dim native). Auto-detected via `OLLAMA_HOST` env var. Zero-cost, air-gapped capable. |
+| **Supabase `summarizeWeakLinks` N+1 Removal** | Backlog | Migration 036 ships the RPC; remove the sequential REST fallback once 036 is confirmed deployed across all tenants |
+| Supabase RPC Soft-Delete Filtering | Backlog | Server-side GDPR filtering at the RPC layer |
+| Prism CLI | Backlog | Standalone CLI for backup, export, and health check without MCP |
+| Plugin System | Backlog | Third-party tool registration via MCP tool composition |
+| **Supabase MemoryLinks** | Backlog | Implement `MemoryLinks` (graph-based traversal) in Supabase to achieve full structural parity with SQLite backend |
+| **Safe Rollback Primitive (`session_rollback_state`)** | Backlog | Standardize rollback with snapshot/worktree restoration for autonomous loops; avoid destructive reset-first behavior and require explicit promotion policies |

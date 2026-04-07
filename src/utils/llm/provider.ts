@@ -16,6 +16,8 @@
  *   - gemini.ts    → Google Gemini (default; all methods including VLM)
  *   - openai.ts    → OpenAI Cloud + Ollama + LM Studio + vLLM
  *   - anthropic.ts → Anthropic Claude (VLM supported; embeddings unsupported)
+ *   - voyage.ts    → Voyage AI (embeddings only; Anthropic-recommended pairing)
+ *   - ollama.ts    → Ollama native /api/embed (embeddings only; fully local, zero-cost)
  *
  * FACTORY RESOLUTION:
  *   Never instantiate adapters directly. Always call:

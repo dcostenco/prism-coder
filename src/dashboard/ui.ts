@@ -1254,7 +1254,9 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
               onchange="onEmbeddingProviderChange(this.value)">
               <option value="auto">🔄 Auto (same as Text Provider)</option>
               <option value="gemini">🔵 Gemini</option>
-              <option value="openai">🟢 OpenAI / Ollama</option>
+              <option value="openai">🟢 OpenAI</option>
+              <option value="voyage">🔮 Voyage AI</option>
+              <option value="ollama">🟠 Ollama (Local)</option>
             </select>
           </div>
 
@@ -1262,7 +1264,7 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
           <div id="anthropic-embed-warning" style="display:none;margin-top:0.5rem;padding:0.5rem 0.75rem;background:rgba(251,146,60,0.1);border:1px solid rgba(251,146,60,0.3);border-radius:6px;font-size:0.78rem;color:#fb923c;line-height:1.5">
             ⚠️ <strong>Anthropic has no native embedding API.</strong>
             Auto mode will route embeddings to <strong>Gemini</strong>.
-            Set Embedding Provider to <strong>OpenAI / Ollama</strong> to use a local model (e.g. <code>nomic-embed-text</code>).
+            Set Embedding Provider to <strong>Ollama (Local)</strong> for free local embeddings, or <strong>Voyage AI</strong> for the Anthropic-recommended cloud pairing.
           </div>
 
           <!-- OpenAI embedding model field (shown when embedding_provider = openai) -->
@@ -1270,7 +1272,7 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
             <div class="setting-row">
               <div>
                 <div class="setting-label">Embedding Model</div>
-                <div class="setting-desc">Must output 768 dims. Ollama: nomic-embed-text · OpenAI: text-embedding-3-small</div>
+                <div class="setting-desc">Must output 768 dims. Default: text-embedding-3-small</div>
               </div>
               <input type="text" id="input-openai-embedding-model"
                 placeholder="text-embedding-3-small"
@@ -1280,9 +1282,61 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
             </div>
           </div>
 
+          <!-- Voyage AI embedding fields (shown when embedding_provider = voyage) -->
+          <div id="embed-fields-voyage" style="display:none">
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">Voyage API Key</div>
+                <div class="setting-desc">Get one free at <a href="https://dash.voyageai.com" target="_blank" style="color:var(--accent)">dash.voyageai.com</a></div>
+              </div>
+              <input type="password" id="input-voyage-api-key"
+                placeholder="pa-…"
+                style="padding: 0.2rem 0.5rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); width: 180px;"
+                onchange="saveBootSetting('VOYAGE_API_KEY', this.value)"
+                oninput="clearTimeout(this._pv); var self=this; this._pv=setTimeout(function(){saveBootSetting('VOYAGE_API_KEY',self.value)},800)" />
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">Voyage Model</div>
+                <div class="setting-desc">voyage-code-3 (code) · voyage-3 (general). Both MRL → 768 dims.</div>
+              </div>
+              <input type="text" id="input-voyage-model"
+                placeholder="voyage-code-3"
+                style="padding: 0.2rem 0.5rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); width: 160px;"
+                onchange="saveBootSetting('voyage_model', this.value)"
+                oninput="clearTimeout(this._pvm); var self=this; this._pvm=setTimeout(function(){saveBootSetting('voyage_model',self.value)},800)" />
+            </div>
+          </div>
+
+          <!-- Ollama embedding fields (shown when embedding_provider = ollama) -->
+          <div id="embed-fields-ollama" style="display:none">
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">Ollama Base URL</div>
+                <div class="setting-desc">Where Ollama is running locally</div>
+              </div>
+              <input type="text" id="input-ollama-base-url"
+                placeholder="http://localhost:11434"
+                style="padding: 0.2rem 0.5rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); width: 220px;"
+                onchange="saveBootSetting('ollama_base_url', this.value)"
+                oninput="clearTimeout(this._pou); var self=this; this._pou=setTimeout(function(){saveBootSetting('ollama_base_url',self.value)},800)" />
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">Embedding Model</div>
+                <div class="setting-desc">Must output 768 dims. <code>nomic-embed-text</code> recommended.</div>
+              </div>
+              <input type="text" id="input-ollama-model"
+                placeholder="nomic-embed-text"
+                style="padding: 0.2rem 0.5rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); width: 180px;"
+                onchange="saveBootSetting('ollama_model', this.value)"
+                oninput="clearTimeout(this._pom); var self=this; this._pom=setTimeout(function(){saveBootSetting('ollama_model',self.value)},800)" />
+            </div>
+          </div>
+
           <div style="margin-top:1rem;padding:0.6rem 0.8rem;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:6px;font-size:0.78rem;color:var(--text-secondary);line-height:1.5">
-            💡 <strong>Cost-optimized setup:</strong> Text Provider → <code>Anthropic</code>, Embedding Provider → <code>OpenAI / Ollama</code>.<br>
-            Use Claude 3.5 Sonnet for reasoning &amp; <code>nomic-embed-text</code> (free, local) for embeddings.
+            💡 <strong>Zero-cost setup:</strong> Text Provider → <code>Anthropic</code>, Embedding Provider → <code>Ollama (Local)</code>.<br>
+            Use Claude for reasoning &amp; <code>nomic-embed-text</code> (free, local, 768-dim native) for embeddings.
           </div>
 
           <span class="setting-saved" id="savedToastProviders">Saved ✓</span>
@@ -3136,8 +3190,10 @@ function onTextProviderChange(value) {
 // Called when the EMBEDDING provider dropdown changes.
 function onEmbeddingProviderChange(value) {
     var textVal = document.getElementById('select-text-provider').value;
-    // Show the OpenAI embedding model field only when embedding=openai
+    // Show provider-specific fields based on the selected embedding provider
     document.getElementById('embed-fields-openai').style.display = value === 'openai' ? '' : 'none';
+    document.getElementById('embed-fields-voyage').style.display = value === 'voyage' ? '' : 'none';
+    document.getElementById('embed-fields-ollama').style.display = value === 'ollama' ? '' : 'none';
     refreshAnthropicWarning(textVal, value);
     saveBootSetting('embedding_provider', value);
 }
@@ -3175,7 +3231,17 @@ function loadAiProviderSettings() {
                     if (embedSel)
                         embedSel.value = embedProvider;
                     document.getElementById('embed-fields-openai').style.display = embedProvider === 'openai' ? '' : 'none';
+                    document.getElementById('embed-fields-voyage').style.display = embedProvider === 'voyage' ? '' : 'none';
+                    document.getElementById('embed-fields-ollama').style.display = embedProvider === 'ollama' ? '' : 'none';
                     refreshAnthropicWarning(textProvider, embedProvider);
+                    var vKey = document.getElementById('input-voyage-api-key');
+                    if (vKey) vKey.placeholder = s.VOYAGE_API_KEY ? '(key saved — paste to update)' : 'pa-…';
+                    var vMod = document.getElementById('input-voyage-model');
+                    if (vMod && s.voyage_model) vMod.value = s.voyage_model;
+                    var olUrl = document.getElementById('input-ollama-base-url');
+                    if (olUrl && s.ollama_base_url) olUrl.value = s.ollama_base_url;
+                    var olMod = document.getElementById('input-ollama-model');
+                    if (olMod && s.ollama_model) olMod.value = s.ollama_model;
                     gKey = document.getElementById('input-google-api-key');
                     if (gKey)
                         gKey.placeholder = s.GOOGLE_API_KEY ? '(key saved — paste to update)' : 'AIza…';

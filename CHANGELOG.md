@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.8.8] - 2026-04-06
+
+### Added
+- **Ollama Embedding Adapter** — New `OllamaAdapter` (`src/utils/llm/adapters/ollama.ts`) for fully local, zero-cost text embeddings via Ollama's native `/api/embed` batch endpoint. Default model: `nomic-embed-text` (768 dims natively — zero truncation needed).
+  - Batch embedding support via `/api/embed` (Ollama ≥ 0.3.0).
+  - Dimension validation: hard-throws on mismatched dims, soft-truncates if model returns > 768.
+  - Word-safe truncation at 8000 chars (consistent with Voyage/OpenAI adapters).
+  - Configurable via dashboard: `ollama_base_url`, `ollama_model`.
+- **Factory Auto-Routing for Ollama** — `embedding_provider=auto` now detects `OLLAMA_HOST` or `OLLAMA_BASE_URL` env vars as a second-priority signal (after `VOYAGE_API_KEY`). When set, auto routes to `OllamaAdapter` without explicit `embedding_provider=ollama`.
+
+### Changed
+- **LLM Factory v4.6** — Updated factory version, added `"ollama"` to the `embedding_provider` enum, updated example configurations in header docs.
+
 ## [7.8.7] - 2026-04-06
 
 ### Added

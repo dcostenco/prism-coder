@@ -1,5 +1,5 @@
 /**
- * LLM Provider Factory (v4.5 — Voyage AI Embedding Support)
+ * LLM Provider Factory (v4.6 — Ollama Local Embedding Support)
  * ─────────────────────────────────────────────────────────────────────────────
  * PURPOSE:
  *   Single point of resolution for the active LLMProvider.
@@ -11,7 +11,7 @@
  *   Two independent settings control text and embedding routing:
  *
  *   text_provider      — "gemini" (default) | "openai" | "anthropic"
- *   embedding_provider — "auto" (default)   | "gemini" | "openai" | "voyage"
+ *   embedding_provider — "auto" (default)   | "gemini" | "openai" | "voyage" | "ollama"
  *
  *   When embedding_provider = "auto":
  *     * If text_provider is gemini or openai → use same provider for embeddings
@@ -24,8 +24,10 @@
  *   text_provider=openai,    embedding_provider=auto   → OpenAI+OpenAI
  *   text_provider=anthropic, embedding_provider=auto   → Claude+Gemini (auto-bridge)
  *   text_provider=anthropic, embedding_provider=voyage → Claude+Voyage (Anthropic-recommended)
- *   text_provider=anthropic, embedding_provider=openai → Claude+Ollama (cost-optimized)
+ *   text_provider=anthropic, embedding_provider=openai → Claude+OpenAI cloud embeddings
+ *   text_provider=anthropic, embedding_provider=ollama → Claude+Ollama (fully local, zero-cost)
  *   text_provider=gemini,    embedding_provider=voyage → Gemini+Voyage (mixed)
+ *   text_provider=gemini,    embedding_provider=ollama → Gemini+Ollama (hybrid cloud/local)
  *
  * SINGLETON + GRACEFUL DEGRADATION:
  *   Same as before — instance cached per process, errors fall back to Gemini.
@@ -46,6 +48,7 @@ import { GeminiAdapter } from "./adapters/gemini.js";
 import { OpenAIAdapter } from "./adapters/openai.js";
 import { AnthropicAdapter } from "./adapters/anthropic.js";
 import { VoyageAdapter } from "./adapters/voyage.js";
+import { OllamaAdapter } from "./adapters/ollama.js";
 import { TracingLLMProvider } from "./adapters/traced.js";
 
 // Module-level singleton — one composed provider per MCP server process.
@@ -68,10 +71,12 @@ function buildEmbeddingAdapter(type: string): LLMProvider {
   // Note: "anthropic" is intentionally absent from this switch.
   // Anthropic has no embedding API, so it can never be an embedding provider.
   // The factory resolves "auto" away from "anthropic" before calling this.
-  // For Anthropic text users, "voyage" is the Anthropic-recommended pairing.
+  // For Anthropic text users, "voyage" is the recommended pairing;
+  // "ollama" is the fully local zero-cost alternative.
   switch (type) {
     case "openai": return new OpenAIAdapter();
     case "voyage": return new VoyageAdapter();
+    case "ollama": return new OllamaAdapter();
     case "gemini":
     default:       return new GeminiAdapter();
   }
@@ -100,9 +105,13 @@ export function getLLMProvider(): LLMProvider {
 
   if (embedType === "auto") {
     if (process.env.VOYAGE_API_KEY) {
-      // If Voyage is available, use it as the default embedding provider
-      // since voyage-code-3 strongly outperforms general embeddings on code contexts.
+      // Voyage takes first priority when available — voyage-code-3 strongly
+      // outperforms general embeddings on code contexts.
       embedType = "voyage";
+    } else if (process.env.OLLAMA_HOST || process.env.OLLAMA_BASE_URL) {
+      // Ollama is second priority: fully local, zero-cost, zero-latency.
+      // Activated when OLLAMA_HOST or OLLAMA_BASE_URL env var is set.
+      embedType = "ollama";
     } else {
       // Anthropic has no embedding API — auto-bridge to Gemini.
       // For all other text providers, use the same provider for embeddings.
@@ -112,9 +121,9 @@ export function getLLMProvider(): LLMProvider {
         console.error(
           "[LLMFactory] text_provider=anthropic with embedding_provider=auto: " +
           "routing embeddings to GeminiAdapter (Anthropic has no native embedding API). " +
-          "For the Anthropic-recommended pairing, set embedding_provider=voyage in the dashboard " +
-          "(voyage-code-3 supports 768-dim output via MRL). " +
-          "Alternatively, set embedding_provider=openai to use Ollama/OpenAI."
+          "For the Anthropic-recommended pairing, set embedding_provider=voyage in the dashboard. " +
+          "For a fully local, zero-cost option, set embedding_provider=ollama " +
+          "(requires 'ollama pull nomic-embed-text')."
         );
       }
     }
