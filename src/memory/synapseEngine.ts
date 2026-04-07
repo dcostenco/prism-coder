@@ -223,11 +223,19 @@ export async function propagateActivation(
 
     totalEdgesTraversed += edges.length;
 
-    // Compute out-degree per active source node (for fan effect)
+    // Compute out-degree per active source node (for forward fan effect)
     const outDegree = new Map<string, number>();
     for (const edge of edges) {
       if (activeNodes.has(edge.source_id)) {
         outDegree.set(edge.source_id, (outDegree.get(edge.source_id) || 0) + 1);
+      }
+    }
+
+    // Compute in-degree per active target node (for backward fan effect)
+    const inDegree = new Map<string, number>();
+    for (const edge of edges) {
+      if (activeNodes.has(edge.target_id)) {
+        inDegree.set(edge.target_id, (inDegree.get(edge.target_id) || 0) + 1);
       }
     }
 
@@ -262,7 +270,11 @@ export async function propagateActivation(
       if (activeNodes.has(edge.target_id) && !visitedEdges.has(reverseEdgeKey)) {
         visitedEdges.add(reverseEdgeKey);
         const targetEnergy = activeNodes.get(edge.target_id)!;
-        const flow = (cfg.spreadFactor * 0.5) * (strength * targetEnergy);
+        // Dampened fan effect for backward flow: prevents hub nodes with many
+        // inbound edges from blasting energy to all sources equally.
+        const inDegreeCount = inDegree.get(edge.target_id) || 1;
+        const dampedFanBack = Math.log(inDegreeCount + Math.E);
+        const flow = (cfg.spreadFactor * 0.5) * (strength * targetEnergy / dampedFanBack);
 
         nextNodes.set(edge.source_id, (nextNodes.get(edge.source_id) || 0) + flow);
 

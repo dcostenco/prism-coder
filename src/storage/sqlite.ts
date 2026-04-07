@@ -207,7 +207,7 @@ export class SqliteStorage implements StorageBackend {
         VALUES ('delete', old.rowid, old.project, old.summary, old.decisions, old.keywords);
       END;
 
-      CREATE TRIGGER IF NOT EXISTS ledger_fts_update AFTER UPDATE ON session_ledger BEGIN
+      CREATE TRIGGER IF NOT EXISTS ledger_fts_update AFTER UPDATE OF project, summary, decisions, keywords ON session_ledger BEGIN
         INSERT INTO ledger_fts(ledger_fts, rowid, project, summary, decisions, keywords)
         VALUES ('delete', old.rowid, old.project, old.summary, old.decisions, old.keywords);
         INSERT INTO ledger_fts(rowid, project, summary, decisions, keywords)
@@ -3322,7 +3322,7 @@ export class SqliteStorage implements StorageBackend {
         WITH input_kw(kw) AS (VALUES ${placeholders})
         SELECT sl.id, COUNT(DISTINCT ik.kw) AS shared_count
         FROM session_ledger sl,
-             json_each(sl.keywords) AS je,
+             json_each(COALESCE(sl.keywords, '[]')) AS je,
              input_kw ik
         WHERE sl.user_id = ?
           AND sl.project = ?

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [8.0.3] - 2026-04-07 — Performance & Edge-Case Hardening
+
+### Performance
+- **FTS5 Trigger Scoping** — The `ledger_fts_update` trigger now fires only on `UPDATE OF project, summary, decisions, keywords`. Previously, any column update (including `last_accessed_at` bumps from ACT-R access logging) triggered a full FTS5 delete+reinsert cycle — causing 40 unnecessary disk writes per 20-result search.
+
+### Fixed
+- **Synapse Backward Flow Energy Explosion** — Backward propagation in the Synapse Engine now applies fan-dampening (`1/ln(inDegree + e)`) symmetrically with forward flow. Previously, a hub node with thousands of inbound edges would blast undampened energy to all source nodes, saturating `softCap` with irrelevant noise and violating energy conservation.
+- **`json_each(NULL)` Crash Guard** — `findKeywordOverlapEntries` now wraps the `keywords` column in `COALESCE(sl.keywords, '[]')` before passing to `json_each()`. Legacy rows with `keywords = NULL` (instead of `'[]'`) previously threw a hard SQL error, aborting the entire query.
+
+### Engineering
+- 1052 tests across 48 suites, all passing, zero regressions
+- Updated Synapse backward flow test to validate dampened energy calculation
+- TypeScript strict mode: zero errors
+
 ## [8.0.2] - 2026-04-07 — Security & Stability Hardening
 
 ### Security
