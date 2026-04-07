@@ -856,6 +856,8 @@ We evaluate Prism on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) 
 | single-session-user | 87.5% | 56/64 |
 
 > **Methodology:** Hybrid retrieval (FTS5 + vector cosine similarity) using `nomic-embed-text` embeddings via Ollama. Each question's ~40-50 haystack sessions are ingested into a fresh libSQL database, then top-5 sessions are retrieved for the query. Abstention questions (30) excluded from retrieval metrics per LongMemEval convention. Full harness: [`benchmarks/longmemeval/`](benchmarks/longmemeval/).
+>
+> 🏆 **Published Results:** Read our official implementation sharing submission to the [LongMemEval repository (#31)](https://github.com/xiaowu0162/LongMemEval/issues/31).
 
 ### 🤝 Where the Giants Currently Win (Honest Trade-offs)
 
