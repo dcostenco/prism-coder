@@ -8,7 +8,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-![Prism Mind Palace Dashboard](docs/mind-palace-dashboard.png)
+![Synapse Engine Dashboard](docs/synapse-engine-dashboard.png)
 
 **Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
