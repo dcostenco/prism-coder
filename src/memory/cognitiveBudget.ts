@@ -288,8 +288,8 @@ export function formatBudgetDiagnostics(
   // Earnings line (if any)
   if (ubiEarned > 0 || bonusEarned > 0) {
     const earningParts: string[] = [];
-    if (ubiEarned > 0) earningParts.push(`+${ubiEarned} UBI`);
-    if (bonusEarned > 0) earningParts.push(`+${bonusEarned} bonus`);
+    if (ubiEarned > 0) earningParts.push(`+${Math.round(ubiEarned)} UBI`);
+    if (bonusEarned > 0) earningParts.push(`+${Math.round(bonusEarned)} bonus`);
     parts.push(`📈 Earned: ${earningParts.join(', ')}`);
   }
 

@@ -29,3 +29,20 @@ CREATE INDEX IF NOT EXISTS idx_ledger_valence
 
 -- v9.0: Token-Economic Cognitive Budget — budget persistence
 ALTER TABLE session_handoffs ADD COLUMN IF NOT EXISTS cognitive_budget REAL DEFAULT NULL;
+
+-- v9.0: Atomic delta-based budget update RPC
+-- Used by SupabaseStorage.patchHandoffBudgetDelta() for concurrency-safe
+-- budget adjustments. Supabase REST PATCH can't do arithmetic, so this
+-- RPC performs the COALESCE + delta in a single SQL statement.
+-- Falls back to read-modify-write if this RPC is missing.
+CREATE OR REPLACE FUNCTION patch_budget_delta(
+  p_project TEXT,
+  p_user_id TEXT,
+  p_delta FLOAT8
+) RETURNS VOID AS $$
+BEGIN
+  UPDATE session_handoffs
+  SET cognitive_budget = COALESCE(cognitive_budget, 2000) + p_delta
+  WHERE project = p_project AND user_id = p_user_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

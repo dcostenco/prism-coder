@@ -1428,6 +1428,15 @@ export async function sessionSaveExperienceHandler(args: unknown) {
 
   const effectiveRole = role || await getSetting("default_role", "global");
 
+  // v9.0: Experience events are the PRIMARY source of valence.
+  // A failure event without valence = -0.8 is invisible to affective routing.
+  // This was Bug #7 — the feature was wired in sessionSaveLedgerHandler but
+  // missing in the handler that matters most for typed events.
+  const valence = PRISM_VALENCE_ENABLED ? deriveValence(event_type, outcome) : null;
+  if (valence !== null) {
+    debugLog(`[session_save_experience] v9.0 valence derived: ${valence} (event_type=${event_type})`);
+  }
+
   const result = await storage.saveLedger({
     project,
     conversation_id: "experience-event",
@@ -1445,6 +1454,7 @@ export async function sessionSaveExperienceHandler(args: unknown) {
     confidence_score: typeof confidence_score === "number" ? confidence_score : undefined,
     // Corrections start with importance 1 to jumpstart visibility
     importance: event_type === "correction" ? 1 : 0,
+    valence,  // v9.0: Affect-tagged memory — derived from event_type
   });
 
   // Fire-and-forget embedding generation
