@@ -169,7 +169,7 @@ export async function propagateActivation(
   anchors: Map<string, number>,
   linkFetcher: LinkFetcher,
   config: Partial<SynapseConfig> = {},
-): Promise<{ results: SynapseResult[]; telemetry: SynapseTelemetry }> {
+): Promise<{ results: SynapseResult[]; telemetry: SynapseTelemetry; flowWeights: Map<string, Array<{ sourceId: string; weight: number }>> }> {
   const startMs = performance.now();
   const cfg: SynapseConfig = { ...DEFAULT_SYNAPSE_CONFIG, ...config };
 
@@ -188,6 +188,11 @@ export async function propagateActivation(
   const hopDistance = new Map<string, number>();
   // Track visited edges to prevent cyclic re-traversal
   const visitedEdges = new Set<string>();
+  // v9.0: Track energy flow weights for valence propagation
+  // Maps targetId → Array<{ sourceId, weight }> representing which nodes
+  // contributed energy and how much. Used by propagateValence() to compute
+  // energy-weighted average valence for discovered nodes.
+  const flowWeights = new Map<string, Array<{ sourceId: string; weight: number }>>();
   // Total edges traversed for telemetry
   let totalEdgesTraversed = 0;
 
@@ -203,6 +208,7 @@ export async function propagateActivation(
     return {
       results,
       telemetry: buildTelemetry(results, anchors, 0, 0, startMs),
+      flowWeights: new Map(),
     };
   }
 
@@ -257,6 +263,10 @@ export async function propagateActivation(
 
         nextNodes.set(edge.target_id, (nextNodes.get(edge.target_id) || 0) + flow);
 
+        // v9.0: Record flow for valence propagation
+        if (!flowWeights.has(edge.target_id)) flowWeights.set(edge.target_id, []);
+        flowWeights.get(edge.target_id)!.push({ sourceId: edge.source_id, weight: flow });
+
         // Track hop distance (minimum)
         const sourceHops = hopDistance.get(edge.source_id) ?? 0;
         const currentTargetHops = hopDistance.get(edge.target_id);
@@ -278,6 +288,10 @@ export async function propagateActivation(
 
         nextNodes.set(edge.source_id, (nextNodes.get(edge.source_id) || 0) + flow);
 
+        // v9.0: Record backward flow for valence propagation
+        if (!flowWeights.has(edge.source_id)) flowWeights.set(edge.source_id, []);
+        flowWeights.get(edge.source_id)!.push({ sourceId: edge.target_id, weight: flow });
+
         // Track hop distance for backward discoveries
         const targetHops = hopDistance.get(edge.target_id) ?? 0;
         const currentSourceHops = hopDistance.get(edge.source_id);
@@ -298,6 +312,7 @@ export async function propagateActivation(
   return {
     results,
     telemetry: buildTelemetry(results, anchors, cfg.iterations, totalEdgesTraversed, startMs),
+    flowWeights,
   };
 }
 

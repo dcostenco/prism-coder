@@ -1,6 +1,6 @@
 {
   "name": "prism-mcp-server",
-  "version": "8.0.3",
+  "version": "9.0.0",
   "mcpName": "io.github.dcostenco/prism-mcp",
   "description": "The Mind Palace for AI Agents — a true Cognitive Architecture with Hebbian learning (episodic→semantic consolidation), ACT-R spreading activation (multi-hop causal reasoning), uncertainty-aware rejection gates (agents that know when they don't know), adversarial evaluation (anti-sycophancy), fail-closed Dark Factory pipelines, persistent memory (SQLite/Supabase), multi-agent Hivemind, time travel & visual dashboard. Zero-config local mode.",
   "module": "index.ts",
@@ -93,6 +93,7 @@
     "@types/bun": "latest",
     "@types/jsdom": "^28.0.1",
     "@types/mozilla-readability": "^0.2.1",
+    "@types/pg": "^8.20.0",
     "@types/turndown": "^5.0.6",
     "tsx": "^4.19.3",
     "vitest": "^4.1.1"
@@ -121,6 +122,7 @@
     "jsdom": "^29.0.1",
     "openai": "^6.32.0",
     "p-limit": "^7.3.0",
+    "pg": "^8.20.0",
     "quickjs-emscripten": "^0.32.0",
     "stream-json": "^2.0.0",
     "turndown": "^7.2.2",

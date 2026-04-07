@@ -5,8 +5,9 @@ import {
   PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN,
   PRISM_USER_ID,
   PRISM_SCHOLAR_TOPICS,
-  PRISM_ENABLE_HIVEMIND
+  PRISM_ENABLE_HIVEMIND_ENV
 } from "../config.js";
+import { getSettingSync } from "../storage/configStorage.js";
 import { getStorage } from "../storage/index.js";
 import { debugLog } from "../utils/logger.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
@@ -34,7 +35,7 @@ const SCHOLAR_ROLE = "scholar";
  * Gracefully no-ops when Hivemind is disabled.
  */
 async function hivemindRegister(topic: string): Promise<void> {
-  if (!PRISM_ENABLE_HIVEMIND) return;
+  if (getSettingSync("hivemind_enabled", String(PRISM_ENABLE_HIVEMIND_ENV)) !== "true") return;
   try {
     const storage = await getStorage();
     await storage.registerAgent({
@@ -52,7 +53,7 @@ async function hivemindRegister(topic: string): Promise<void> {
 }
 
 async function hivemindHeartbeat(task: string): Promise<void> {
-  if (!PRISM_ENABLE_HIVEMIND) return;
+  if (getSettingSync("hivemind_enabled", String(PRISM_ENABLE_HIVEMIND_ENV)) !== "true") return;
   try {
     const storage = await getStorage();
     await storage.heartbeatAgent(SCHOLAR_PROJECT, PRISM_USER_ID, SCHOLAR_ROLE, task);
@@ -60,7 +61,7 @@ async function hivemindHeartbeat(task: string): Promise<void> {
 }
 
 async function hivemindIdle(): Promise<void> {
-  if (!PRISM_ENABLE_HIVEMIND) return;
+  if (getSettingSync("hivemind_enabled", String(PRISM_ENABLE_HIVEMIND_ENV)) !== "true") return;
   try {
     const storage = await getStorage();
     await storage.updateAgentStatus(SCHOLAR_PROJECT, PRISM_USER_ID, SCHOLAR_ROLE, "idle");
@@ -74,7 +75,7 @@ async function hivemindIdle(): Promise<void> {
  * the Scholar's state change and generate alerts for active agents.
  */
 async function hivemindBroadcast(topic: string, articleCount: number): Promise<void> {
-  if (!PRISM_ENABLE_HIVEMIND) return;
+  if (getSettingSync("hivemind_enabled", String(PRISM_ENABLE_HIVEMIND_ENV)) !== "true") return;
   try {
     const storage = await getStorage();
     // Update Scholar's current_task so the Watchdog and Dashboard show the result
@@ -106,7 +107,7 @@ async function selectTopic(): Promise<string> {
   // Default: random pick
   const randomPick = topics[Math.floor(Math.random() * topics.length)];
 
-  if (!PRISM_ENABLE_HIVEMIND) return randomPick;
+  if (getSettingSync("hivemind_enabled", String(PRISM_ENABLE_HIVEMIND_ENV)) !== "true") return randomPick;
 
   try {
     const storage = await getStorage();

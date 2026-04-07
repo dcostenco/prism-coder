@@ -81,6 +81,12 @@ export interface LedgerEntry {
   confidence_score?: number; // 1-100 — agent's confidence in the outcome
   importance?: number;       // 0+ — upvote-driven importance scoring (for insight graduation)
 
+  // ─── v9.0: Affect-Tagged Memory ─────────────────────────────────
+  // Valence score derived from event_type at save time.
+  // Uses Affective Salience: |valence| boosts retrieval (magnitude = salience),
+  // while sign (±) drives UX warnings (negative = historical friction).
+  valence?: number | null;   // -1.0 (failure/trauma) to +1.0 (success/confidence)
+
   // ─── Phase 2: GDPR Soft Delete ───────────────────────────────
   // When deleted_at is set, the entry is "tombstoned" — hidden from
   // all search queries but still physically present for audit trails.
@@ -117,6 +123,12 @@ export interface HandoffEntry {
 
   // OCC
   version?: number;
+
+  // ─── v9.0: Token-Economic RL ──────────────────────────────────
+  // Persistent cognitive budget: belongs to the PROJECT, not the session.
+  // Prevents the "Reset Exploit" (close/reopen to get free tokens).
+  // Revenue via UBI (+100 tokens/hour) + success/learning bonuses.
+  cognitive_budget?: number | null;  // null = default (2000); 0+ = current balance
 
   // Metadata (extensible for git drift, screenshots, etc.)
   metadata?: Record<string, unknown>;
@@ -176,6 +188,8 @@ export interface SemanticSearchResult {
   /** True when the node was discovered via Synapse multi-hop traversal,
    *  not present in the original semantic/keyword anchors. */
   isDiscovered?: boolean;
+  // v9.0: Affect-Tagged Memory — valence for display/routing
+  valence?: number | null;
 }
 
 // ─── v3.0: Agent Registry Types ──────────────────────────────
@@ -311,6 +325,17 @@ export interface StorageBackend {
    * @param data - The fields to update (e.g., { embedding: "..." })
    */
   patchLedger(id: string, data: Record<string, unknown>): Promise<void>;
+
+  /**
+   * v9.0: Atomically adjust the cognitive_budget by a delta amount.
+   * Lightweight alternative to full saveHandoff — doesn't trigger OCC/CRDT/snapshots.
+   * Uses delta-based update to prevent concurrency race conditions:
+   *   UPDATE SET cognitive_budget = COALESCE(cognitive_budget, 2000) + delta
+   * @param project - Project identifier
+   * @param userId - User ID
+   * @param budgetDelta - Amount to add (positive) or subtract (negative) from the current budget
+   */
+  patchHandoffBudgetDelta(project: string, userId: string, budgetDelta: number): Promise<void>;
 
   /**
    * Read ledger entries matching filter criteria.

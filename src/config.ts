@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getSettingSync } from "./storage/configStorage.js";
 
 /**
  * Configuration & Environment Variables
@@ -91,8 +92,11 @@ export const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
 // Set PRISM_STORAGE=local to use SQLite (once implemented).
 // Set PRISM_STORAGE=supabase to use Supabase REST API (default).
 
+// NOTE: This constant captures the env-var snapshot at import time.
+// The actual storage backend decision is made in storage/index.ts,
+// which consults prism-config.db first, then process.env, then defaults to "local".
 export const PRISM_STORAGE: "local" | "supabase" =
-  (process.env.PRISM_STORAGE as "local" | "supabase") || "supabase";
+  (process.env.PRISM_STORAGE as "local" | "supabase") || "local";
 // Logged at debug level — see debug() at bottom of file
 
 // ─── Optional: Supabase (Session Memory Module) ───────────────
@@ -162,9 +166,23 @@ export const PRISM_DEBUG_LOGGING = process.env.PRISM_DEBUG_LOGGING === "true";
 // The role parameter on existing tools (session_save_ledger, etc.)
 // is always available regardless of this flag — adding a parameter
 // doesn't increase tool count.
-// Set PRISM_ENABLE_HIVEMIND=true to unlock the Agent Registry tools.
+//
+// SOURCE OF TRUTH: The Mind Palace dashboard (Settings → Hivemind Mode)
+// persists this flag to prism-config.db via getSettingSync() at call time.
+//
+// ⚠️ IMPORTANT: This _ENV constant captures ONLY the env-var fallback.
+// config.ts is evaluated at ESM import time, BEFORE initConfigStorage()
+// populates the settings cache. Use getSettingSync("hivemind_enabled",
+// String(PRISM_ENABLE_HIVEMIND_ENV)) at each call site for the live value.
+export const PRISM_ENABLE_HIVEMIND_ENV = process.env.PRISM_ENABLE_HIVEMIND === "true";
 
-export const PRISM_ENABLE_HIVEMIND = process.env.PRISM_ENABLE_HIVEMIND === "true";
+// ─── v3.0: Task Router Feature Flag ──────────────────────────
+// Routes tasks to the local Claw agent when enabled.
+// SOURCE OF TRUTH: dashboard (Settings → Task Router) → prism-config.db.
+// Same _ENV pattern: use getSettingSync() at call sites.
+// REMOVED: PRISM_TASK_ROUTER_ENABLED used to call getSettingSync() at import time,
+// which always returned the fallback due to the ESM race condition (settingsCache=null).
+// Use PRISM_TASK_ROUTER_ENABLED_ENV (line ~368) and getSettingSync() at call sites instead.
 
 // ─── v4.1: Auto-Load Projects ────────────────────────────────
 // Auto-load is configured exclusively via the Mind Palace dashboard
@@ -382,8 +400,10 @@ export const PRISM_VERIFICATION_DEFAULT_SEVERITY =
 // Autonomous pipeline runner: PLAN → EXECUTE → VERIFY → iterate.
 // Opt-in because it executes LLM calls in the background.
 
-/** Master switch for the Dark Factory background runner. */
-export const PRISM_DARK_FACTORY_ENABLED =
+/** Master switch for the Dark Factory background runner.
+ *  ⚠️ ENV-only fallback. Use getSettingSync("dark_factory_enabled",
+ *  String(PRISM_DARK_FACTORY_ENABLED_ENV)) at call sites. */
+export const PRISM_DARK_FACTORY_ENABLED_ENV =
   process.env.PRISM_DARK_FACTORY_ENABLED === "true"; // Opt-in
 
 /** Poll interval for the runner loop (ms). Default: 30s. */
@@ -424,4 +444,39 @@ export const PRISM_SYNAPSE_LATERAL_INHIBITION = parseInt(
 export const PRISM_SYNAPSE_SOFT_CAP = parseInt(
   process.env.PRISM_SYNAPSE_SOFT_CAP || "20", 10
 );
+
+// ─── v9.0: Affect-Tagged Memory (Valence Engine) ─────────────
+// Derives emotional valence from experience events and uses
+// Affective Salience (|valence| boosts retrieval) for ranking.
+
+/** Master switch for affect-tagged memory. (Default: true) */
+export const PRISM_VALENCE_ENABLED =
+  (process.env.PRISM_VALENCE_ENABLED ?? "true") !== "false";
+
+/** Weight of |valence| in hybrid scoring formula. (Default: 0.1) */
+export const PRISM_VALENCE_WEIGHT = parseFloat(
+  process.env.PRISM_VALENCE_WEIGHT || "0.1"
+);
+
+/** Average valence below this threshold triggers a UX warning. (Default: -0.3) */
+export const PRISM_VALENCE_WARNING_THRESHOLD = parseFloat(
+  process.env.PRISM_VALENCE_WARNING_THRESHOLD || "-0.3"
+);
+
+// ─── v9.0: Token-Economic RL (Cognitive Budget) ──────────────
+// Implements a strict token economy for agent memory operations.
+// Budget is persistent (stored in session_handoffs.cognitive_budget).
+
+/** Master switch for the cognitive budget system. (Default: true) */
+export const PRISM_COGNITIVE_BUDGET_ENABLED =
+  (process.env.PRISM_COGNITIVE_BUDGET_ENABLED ?? "true") !== "false";
+
+/** Initial budget size per project in tokens. (Default: 2000) */
+export const PRISM_COGNITIVE_BUDGET_SIZE = parseInt(
+  process.env.PRISM_COGNITIVE_BUDGET_SIZE || "2000", 10
+);
+
+/** Master switch for the surprisal gate. (Default: true) */
+export const PRISM_SURPRISAL_GATE_ENABLED =
+  (process.env.PRISM_SURPRISAL_GATE_ENABLED ?? "true") !== "false";
 

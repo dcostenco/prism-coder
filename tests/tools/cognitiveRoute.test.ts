@@ -170,8 +170,10 @@ vi.mock("../../src/utils/tracing.js", () => ({
 }));
 vi.mock("../../src/storage/configStorage.js", () => ({
   getSetting: vi.fn(async () => null),
+  getSettingSync: vi.fn(() => "false"),
   getAllSettings: vi.fn(async () => ({})),
 }));
+
 vi.mock("../../src/utils/crdtMerge.js", () => ({
   mergeHandoff: vi.fn(),
   dbToHandoffSchema: vi.fn(),

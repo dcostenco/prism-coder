@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.0.0] - 2026-04-07 — Autonomous Cognitive OS
+
+### 🧠 Affect-Tagged Memory (Valence Engine)
+- **Automatic Valence Derivation** — Every memory entry gets a "gut feeling" score from -1.0 (trauma/failure) to +1.0 (success/confidence), auto-derived from `event_type` at save time. No manual classification needed.
+- **Affective Salience Retrieval** — Uses absolute magnitude `|valence|` to boost retrieval salience for highly emotional memories (both positive AND negative). Prevents the Valence Retrieval Paradox where failure memories are deprioritized and agents repeat mistakes.
+- **Valence Emoji Tags** — Search results display valence indicators: 🔴 (strong negative ≤-0.5), 🟠 (negative ≤-0.2), 🟡 (neutral), 🔵 (positive ≥0.2), 🟢 (strong positive ≥0.5).
+- **Contextual Valence Warnings** — When top search results have historically negative affect, agents receive warnings like "⚠️ This topic is strongly correlated with historical failures."
+- **Valence Propagation** — Discovered nodes in the Synapse graph inherit valence via energy-weighted averaging from source flows, with fan-dampening and strict [-1, +1] clamping.
+
+### 💰 Token-Economic Cognitive Budget
+- **Strict Token Economy** — Every memory write operation costs tokens, with cost multiplied by a surprisal-derived factor: boilerplate (2×), standard (1×), novel (0.5×). This incentivizes storing novel information over redundant entries.
+- **UBI Earnings** — Budget replenishes at +100 tokens/hour passively, plus event bonuses: success (+200), learning (+100). Budget cannot exceed the initial cap (default: 2000).
+- **Budget Diagnostics in Context** — `session_load_context` now shows a visual budget bar with health status (🟢 Healthy → 🔴 Critical) so agents understand their spending capacity at session start.
+- **Persistent Budget** — Budget state is persisted in `session_handoffs.cognitive_budget` via lightweight `patchHandoffBudget` method, surviving across sessions.
+- **Graceful Degradation** — Budget exhaustion triggers warnings but NEVER blocks writes. Zero-balance entries still save with a warning annotation.
+
+### 🧬 Hybrid Scoring with Valence
+- **Three-Component Formula** — Synapse hybrid scores now use `0.65 × similarity + 0.25 × activation + 0.10 × |valence|`, replacing the simpler `0.70 × similarity + 0.30 × activation` blend. Falls back to the legacy formula when valence is disabled.
+- **computeHybridScoreWithValence()** — New pure function in `valenceEngine.ts` with configurable weights and safe clamping.
+
+### Engineering
+- All existing tests pass (zero regressions)
+- All v9.0 modules are pure functions with zero I/O (valenceEngine, cognitiveBudget, surprisalGate)
+- Feature-gated via `PRISM_VALENCE_ENABLED` and `PRISM_COGNITIVE_BUDGET_ENABLED` (both default `true`)
+- Graceful fallback on every failure path — zero hard crashes
+
 ## [8.0.3] - 2026-04-07 — Performance & Edge-Case Hardening
 
 ### Performance

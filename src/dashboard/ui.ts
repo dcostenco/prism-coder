@@ -1049,10 +1049,68 @@ export function renderDashboardHTML(version: string): string {
             <div class="setting-label">Storage Backend</div>
             <div class="setting-desc">Switch between SQLite and Supabase</div>
           </div>
-          <select id="storageBackendSelect" onchange="window.saveBootSetting('PRISM_STORAGE', this.value)" style="padding: 0.2rem 0.4rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); cursor: pointer;">
+          <select id="storageBackendSelect" onchange="onStorageProviderChange(this.value)" style="padding: 0.2rem 0.4rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); cursor: pointer;">
             <option value="local">SQLite</option>
             <option value="supabase">Supabase</option>
           </select>
+        </div>
+
+        <!-- Supabase fields -->
+        <div id="provider-fields-supabase" style="display:none; padding: 1rem; background: rgba(139,92,246,0.05); border-radius: var(--radius-sm); border: 1px solid var(--border-glass); margin-top: 0.5rem;">
+          <div class="setting-section" style="margin-top:0">Supabase Connection Setup</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom: 1rem; line-height: 1.5;">
+            Configure your Supabase backend. This will run the migration schema to set up tables automatically before saving credentials.
+          </div>
+          
+          <div class="setting-row" style="border:none; padding:0.25rem 0">
+            <div>
+              <div class="setting-label">Supabase URL</div>
+            </div>
+            <input type="text" id="input-supabase-url"
+              placeholder="https://xyz.supabase.co"
+              style="padding: 0.3rem 0.5rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); width: 220px;" />
+          </div>
+          <div class="setting-row" style="border:none; padding:0.25rem 0">
+            <div>
+              <div class="setting-label">Service Role Key</div>
+            </div>
+            <input type="password" id="input-supabase-key"
+              placeholder="eyJh..."
+              style="padding: 0.3rem 0.5rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); width: 220px;" />
+          </div>
+          <div class="setting-row" style="border:none; padding:0.25rem 0">
+            <div>
+              <div class="setting-label">Database Password</div>
+              <div class="setting-desc">Needed once to bootstrap tables. Never saved.</div>
+            </div>
+            <input type="password" id="input-supabase-dbpass"
+              placeholder="••••••••"
+              style="padding: 0.3rem 0.5rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); width: 220px;" />
+          </div>
+
+          <div style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+            <button onclick="setupSupabase()" id="btn-setup-supabase" style="background: var(--accent-purple); color: white; border: none; padding: 0.5rem 1rem; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">
+              Set Up &amp; Migrate
+            </button>
+            <span id="setup-supabase-status" style="font-size: 0.8rem; font-weight: 500;"></span>
+          </div>
+
+          <!-- Migration progress bar (hidden until setup starts) -->
+          <div id="migration-progress-wrap" style="display:none; margin-top: 0.75rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.35rem;">
+              <span id="migration-step-label" style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">Initializing…</span>
+              <span id="migration-pct-label" style="font-size:0.75rem; color:var(--accent-purple); font-weight:700;">0%</span>
+            </div>
+            <div style="height:6px; border-radius:99px; background:var(--bg-hover); overflow:hidden;">
+              <div id="migration-progress-bar"
+                style="height:100%; width:0%; border-radius:99px;
+                       background: linear-gradient(90deg, #7c3aed, #a78bfa);
+                       transition: width 0.4s cubic-bezier(0.4,0,0.2,1);"></div>
+            </div>
+            <!-- Step dots -->
+            <div id="migration-step-dots" style="display:flex; gap:0.35rem; margin-top:0.5rem; flex-wrap:wrap;"></div>
+          </div>
+
         </div>
 
         <div class="setting-row" style="align-items:flex-start">
@@ -3197,6 +3255,146 @@ function onEmbeddingProviderChange(value) {
     refreshAnthropicWarning(textVal, value);
     saveBootSetting('embedding_provider', value);
 }
+
+function onStorageProviderChange(value) {
+    var supFields = document.getElementById('provider-fields-supabase');
+    if (supFields) supFields.style.display = value === 'supabase' ? '' : 'none';
+    
+    // Only auto-save if switching to local. Supabase is saved via the migrate button.
+    if (value === 'local') {
+        saveBootSetting('PRISM_STORAGE', value);
+    }
+}
+
+function setupSupabase() {
+    var url = document.getElementById('input-supabase-url').value.trim();
+    var serviceKey = document.getElementById('input-supabase-key').value.trim();
+    var dbPassword = document.getElementById('input-supabase-dbpass').value.trim();
+    var statusEl = document.getElementById('setup-supabase-status');
+    var btn = document.getElementById('btn-setup-supabase');
+
+    if (!url || !serviceKey || !dbPassword) {
+        statusEl.innerText = "All fields required.";
+        statusEl.style.color = "var(--accent-rose)";
+        return;
+    }
+    if (url.indexOf('https://') !== 0) {
+        statusEl.innerText = "URL must start with https://";
+        statusEl.style.color = "var(--accent-rose)";
+        return;
+    }
+    if (serviceKey.indexOf('eyJ') !== 0) {
+        statusEl.innerText = "Service key appears invalid. Expected JWT.";
+        statusEl.style.color = "var(--accent-rose)";
+        return;
+    }
+
+    // Reset UI state
+    statusEl.innerText = "Connecting & Migrating…";
+    statusEl.style.color = "var(--text-muted)";
+    btn.disabled = true;
+    btn.style.opacity = "0.5";
+
+    // Show progress bar
+    var progressWrap = document.getElementById('migration-progress-wrap');
+    var progressBar = document.getElementById('migration-progress-bar');
+    var stepLabel  = document.getElementById('migration-step-label');
+    var pctLabel   = document.getElementById('migration-pct-label');
+    var stepDots   = document.getElementById('migration-step-dots');
+    progressWrap.style.display = '';
+    progressBar.style.width = '0%';
+    stepDots.innerHTML = '';
+
+    // Helper: update bar
+    function setProgress(pct, label, ok) {
+        progressBar.style.width = pct + '%';
+        if (ok === false) progressBar.style.background = 'linear-gradient(90deg,#dc2626,#f87171)';
+        stepLabel.innerText = label;
+        pctLabel.innerText = Math.round(pct) + '%';
+    }
+
+    // Helper: add step dot
+    function addDot(label, state) {
+        var dot = document.createElement('span');
+        var colors = { pending: 'var(--text-muted)', ok: 'var(--accent-green)', err: 'var(--accent-rose)' };
+        var icons  = { pending: '○', ok: '✓', err: '×' };
+        dot.title = label;
+        dot.style.cssText = 'display:inline-flex;align-items:center;gap:2px;font-size:0.7rem;color:' + colors[state] + ';font-weight:600;';
+        dot.innerText = icons[state] + ' ' + label;
+        stepDots.appendChild(dot);
+    }
+
+    setProgress(5, 'Connecting to Supabase…');
+
+    // Subscribe to server-sent progress events for this session
+    var evtKey = Date.now().toString();
+    var sse = new EventSource('/api/migration/progress?key=' + evtKey);
+    var sseTimeout = setTimeout(function() {
+        if (sse) { sse.close(); sse = null; }
+    }, 120000); // 2-min safety timeout
+
+    if (sse) {
+        sse.onmessage = function(e) {
+            try {
+                var msg = JSON.parse(e.data);
+                // msg: { step, total, label, pct?, done?, error? }
+                var pct = msg.pct !== undefined ? msg.pct : Math.round((msg.step / msg.total) * 100);
+                if (msg.error) {
+                    setProgress(pct, '⚠ ' + msg.label, false);
+                    addDot(msg.label, 'err');
+                } else if (msg.done) {
+                    setProgress(100, '✓ All migrations applied');
+                    addDot('Done', 'ok');
+                    if (sse) { sse.close(); sse = null; }
+                    clearTimeout(sseTimeout);
+                } else {
+                    setProgress(pct, msg.label);
+                    if (msg.step > 1) addDot(msg.prevLabel || msg.label, 'ok');
+                }
+            } catch(_) {}
+        };
+        sse.onerror = function() {
+            // SSE closed server-side after completion — normal
+            if (sse) { sse.close(); sse = null; }
+            clearTimeout(sseTimeout);
+        };
+    }
+
+    fetch('/api/setup-supabase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url, serviceKey: serviceKey, dbPassword: dbPassword, progressKey: evtKey })
+    })
+    .then(function(res) {
+        return res.json().then(function(data) {
+            if (res.ok && data.ok) {
+                setProgress(100, '✓ All done!');
+                statusEl.innerText = "✓ Configured. Restart Prism.";
+                statusEl.style.color = "var(--accent-green)";
+                setTimeout(function() {
+                    alert("Supabase configured!\\n\\nRestart Prism MCP server for changes to take effect.");
+                }, 300);
+            } else {
+                var errMsg = data.error || "Setup failed.";
+                setProgress(progressBar ? parseFloat(progressBar.style.width) : 0, '⚠ ' + errMsg, false);
+                statusEl.innerText = errMsg;
+                statusEl.style.color = "var(--accent-rose)";
+            }
+        });
+    })
+    .catch(function() {
+        setProgress(0, 'Network error', false);
+        statusEl.innerText = "Network error.";
+        statusEl.style.color = "var(--accent-rose)";
+    })
+    .finally(function() {
+        btn.disabled = false;
+        btn.style.opacity = "1";
+        if (sse) { sse.close(); sse = null; }
+        clearTimeout(sseTimeout);
+    });
+}
+
 // Shows/hides the Anthropic+auto warning.
 // Warning appears when: text=anthropic AND embedding=auto (auto-bridges to Gemini).
 function refreshAnthropicWarning(textVal, embedVal) {
@@ -3439,6 +3637,14 @@ function loadSettings() {
                     // Storage Backend
                     if (s.PRISM_STORAGE) {
                         document.getElementById('storageBackendSelect').value = s.PRISM_STORAGE;
+                        var supFields = document.getElementById('provider-fields-supabase');
+                        if (supFields) supFields.style.display = s.PRISM_STORAGE === 'supabase' ? '' : 'none';
+                    }
+                    if (s.SUPABASE_URL) {
+                        document.getElementById('input-supabase-url').value = s.SUPABASE_URL;
+                    }
+                    if (s.SUPABASE_SERVICE_KEY) {
+                        document.getElementById('input-supabase-key').placeholder = '(key saved — paste to update)';
                     }
                     // Agent Identity
                     if (s.default_role)
