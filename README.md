@@ -20,7 +20,7 @@ npx -y prism-mcp-server
 
 Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gemini · Antigravity** — **any MCP client.**
 
-## 📖 Table of Contents
+## Table of Contents
 
 - [Why Prism?](#why-prism)
 - [Quick Start](#quick-start)
@@ -28,8 +28,8 @@ Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gem
 - [Setup Guides](#setup-guides)
 - [Universal Import: Bring Your History](#universal-import-bring-your-history)
 - [What Makes Prism Different](#what-makes-prism-different)
-- [Synapse Engine (v8.0)](#-synapse-engine-v80)
-- [Cognitive Architecture (v7.8)](#-cognitive-architecture-v78)
+- [Synapse Engine (v8.0)](#synapse-engine-v80)
+- [Cognitive Architecture (v7.8)](#cognitive-architecture-v78)
 - [Data Privacy & Egress](#data-privacy--egress)
 - [Use Cases](#use-cases)
 - [What's New](#whats-new)
@@ -53,15 +53,15 @@ Every time you start a new conversation with an AI coding assistant, it starts f
 
 Prism has three pillars:
 
-1. **🧠 Cognitive Memory** — Memories are ranked like a human brain: recently and frequently accessed context surfaces first, while stale context fades naturally via ACT-R activation decay. Raw experience consolidates into semantic principles through Hebbian learning. The result is retrieval quality that no flat vector search can match. *(See [Cognitive Architecture](#-cognitive-architecture-v78) and [Scientific Foundation](#-scientific-foundation).)*
+1. **🧠 Cognitive Memory** — Memories are ranked like a human brain: recently and frequently accessed context surfaces first, while stale context fades naturally via ACT-R activation decay. Raw experience consolidates into semantic principles through Hebbian learning. The result is retrieval quality that no flat vector search can match. *(See [Cognitive Architecture](#cognitive-architecture-v78) and [Scientific Foundation](#scientific-foundation).)*
 
-2. **⚡ Synapse Engine (GraphRAG)** — When your agent searches for "Error X", the Synapse Engine doesn't just find logs mentioning "Error X". Multi-hop energy propagation traverses the causal graph — dampened by fan effect, bounded by lateral inhibition — and surfaces "Workaround Y" connected to "Architecture Decision Z". Nodes discovered exclusively via graph traversal are tagged `[🌐 Synapse]` so you can *see* the engine working. *(See [Synapse Engine](#-synapse-engine-v80).)*
+2. **⚡ Synapse Engine (GraphRAG)** — When your agent searches for "Error X", the Synapse Engine doesn't just find logs mentioning "Error X". Multi-hop energy propagation traverses the causal graph — dampened by fan effect, bounded by lateral inhibition — and surfaces "Workaround Y" connected to "Architecture Decision Z". Nodes discovered exclusively via graph traversal are tagged `[🌐 Synapse]` so you can *see* the engine working. *(See [Synapse Engine](#synapse-engine-v80).)*
 
-3. **🏭 Autonomous Execution (Dark Factory)** — When you're ready, Prism can run coding tasks end-to-end with a fail-closed pipeline where an adversarial evaluator catches bugs the generator missed — before you ever see the PR. *(See [Dark Factory](#-dark-factory--adversarial-autonomous-pipelines).)*
+3. **🏭 Autonomous Execution (Dark Factory)** — When you're ready, Prism can run coding tasks end-to-end with a fail-closed pipeline where an adversarial evaluator catches bugs the generator missed — before you ever see the PR. *(See [Dark Factory](#dark-factory--adversarial-autonomous-pipelines).)*
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -135,7 +135,7 @@ Then open `http://localhost:3001` instead.
 
 ---
 
-## ✨ The Magic Moment
+## The Magic Moment
 
 > **Session 1** (Monday evening):
 > ```
@@ -156,7 +156,7 @@ Then open `http://localhost:3001` instead.
 
 ---
 
-## 📖 Setup Guides
+## Setup Guides
 
 <details>
 <summary><strong>Claude Desktop</strong></summary>
@@ -379,7 +379,7 @@ Prism can be deployed natively to cloud platforms like [Render](https://render.c
 
 ---
 
-## 📥 Universal Import: Bring Your History
+## Universal Import: Bring Your History
 
 Switching to Prism? Don't leave months of AI session history behind. Prism can **ingest historical sessions from Claude Code, Gemini, and OpenAI** and give your Mind Palace an instant head start — no manual re-entry required.
 
@@ -412,7 +412,7 @@ npx -y prism-mcp-server universal-import --format gemini --path ./gemini_history
 
 ---
 
-## ✨ What Makes Prism Different
+## What Makes Prism Different
 
 
 ### 🧠 Your Agent Learns From Mistakes
@@ -455,12 +455,12 @@ OpenTelemetry spans for every MCP tool call, LLM hop, and background worker. Rou
 ### 🌐 Autonomous Web Scholar
 Prism researches while you sleep. A background pipeline searches the web, scrapes articles, synthesizes findings via LLM, and injects results directly into your semantic memory — fully searchable on your next session. Brave Search → Firecrawl scrape → LLM synthesis → Prism ledger. Task-aware, Hivemind-integrated, and zero-config when API keys are missing (falls back to Yahoo + Readability).
 
-### 🏭 Dark Factory — Adversarial Autonomous Pipelines
+### Dark Factory — Adversarial Autonomous Pipelines
 When you trigger a Dark Factory pipeline, Prism doesn't just run your task — it fights itself to produce high-quality output. A `PLAN_CONTRACT` step locks a machine-parseable rubric before any code is written. After execution, an **Adversarial Evaluator** (in a fully isolated context) scores the output against the rubric. It cannot pass the Generator without providing exact file and line evidence for every failing criterion. Failed evaluations inject the critique directly into the Generator's retry prompt so it's never flying blind. The result: security issues, regressions, and lazy debug logs caught autonomously — before you ever see the PR. → [See it in action](examples/adversarial-eval-demo/README.md)
 
 ---
 
-## ⚡ Synapse Engine (v8.0)
+## Synapse Engine (v8.0)
 
 > *Standard RAG retrieves documents. GraphRAG traverses relationships. The Synapse Engine does both — a pure, storage-agnostic multi-hop propagation engine that turns your agent's memory into an associative reasoning network.*
 
@@ -507,7 +507,7 @@ The Synapse Engine (v8.0) replaces the legacy SQL-coupled spreading activation w
 
 ---
 
-## 🧠 Cognitive Architecture (v7.8)
+## Cognitive Architecture (v7.8)
 
 > *Prism v7.8 is our biggest leap forward yet. We have moved beyond flat vector search and implemented a true Cognitive Architecture inspired by human brain mechanics. With the new ACT-R Spreading Activation Engine, Episodic-to-Semantic memory consolidation, and Uncertainty-Aware Rejection Gates, Prism doesn't just store logs anymore — it forms principles, follows causal trains of thought, and possesses the self-awareness to know when it lacks information.*
 
@@ -572,7 +572,7 @@ Standard RAG (Retrieval-Augmented Generation) is now a commodity. Everyone has v
 
 ---
 
-## 🔒 Data Privacy & Egress
+## Data Privacy & Egress
 
 **Where is my data stored?**
 
@@ -603,7 +603,7 @@ Prism will recreate the directory with empty databases on next startup.
 
 ---
 
-## 🎯 Use Cases
+## Use Cases
 
 - **Long-running feature work** — Save state at end of day, restore full context next morning. No re-explaining.
 - **Multi-agent collaboration** — Dev, QA, and PM agents share real-time context without stepping on each other's memory.
@@ -632,7 +632,7 @@ Then continue a specific thread with a follow-up message to the selected agent, 
 
 ---
 
-## ⚔️ Adversarial Evaluation in Action
+## Adversarial Evaluation in Action
 
 > **Split-Brain Anti-Sycophancy** — the signature feature of v7.4.0.
 
@@ -737,12 +737,12 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ---
 
-## 🆕 What's New
+## What's New
 
 > **Current release: v8.0.0 — Synapse Engine**
 
 - ⚡ **v8.0.0 — Synapse Engine:** Pure, storage-agnostic multi-hop graph propagation engine replaces the legacy SQL-coupled spreading activation. O(T × M) bounded ACT-R energy propagation with dampened fan effect, asymmetric bidirectional flow, cyclic loop prevention, and sigmoid normalization. Full integration into both SQLite and Supabase backends. 5 new config knobs. Battle-hardened with NaN guards, config clamping, non-fatal enrichment, and 16 passing tests. **Memory search now follows the causal graph, not just keywords.** → [Synapse Engine](#synapse-engine-v80)
-- 🧠 **v7.8.x — Cognitive Architecture:** Episodic-to-Semantic consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate, and Dynamic Fast Weight Decay. Validated by **LoCoMo-Plus benchmark**. → [Cognitive Architecture](#-cognitive-architecture-v78)
+- 🧠 **v7.8.x — Cognitive Architecture:** Episodic-to-Semantic consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate, and Dynamic Fast Weight Decay. Validated by **LoCoMo-Plus benchmark**. → [Cognitive Architecture](#cognitive-architecture-v78)
 - 🌐 **v7.7.0 — Cloud-Native SSE Transport:** Full unauthenticated and authenticated Server-Sent Events MCP support for seamless network deployments.
 - 🩺 **v7.5.0 — Intent Health Dashboard + Security Hardening:** Real-time 0–100 project health scoring (staleness × TODO load × decisions). 10 XSS injection vectors patched. Algorithm hardened with NaN guards and score ceiling.
 - ⚔️ **v7.4.0 — Adversarial Evaluation:** Split-brain anti-sycophancy pipeline. Generator and evaluator in isolated roles with evidence-bound findings.
@@ -752,7 +752,7 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ---
 
-## ⚔️ How Prism Compares
+## How Prism Compares
 
 Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as passive filing cabinets — they wait for the LLM to search them. **Prism is an active cognitive architecture.** Designed specifically for the **Model Context Protocol (MCP)**, Prism doesn't just store vectors — it consolidates experience into principles, traverses causal graphs for multi-hop reasoning, and rejects queries it can't confidently answer.
 
@@ -804,7 +804,7 @@ Every other AI coding pipeline has a fatal flaw: it asks the same model that wro
 
 ---
 
-## 🔧 Tool Reference
+## Tool Reference
 
 Prism ships 30+ tools, but **90% of your workflow uses just three:**
 
@@ -1066,7 +1066,7 @@ Prism is a **stdio-based MCP server** that manages persistent agent memory. Here
 
 ### Auto-Load Architecture
 
-Each MCP client has its own mechanism for ensuring Prism context loads on session start. See the platform-specific [Setup Guides](#-setup-guides) above for detailed instructions:
+Each MCP client has its own mechanism for ensuring Prism context loads on session start. See the platform-specific [Setup Guides](#setup-guides) above for detailed instructions:
 
 - **Claude Code** — Lifecycle hooks (`SessionStart` / `Stop`)
 - **Gemini / Antigravity** — Three-layer architecture (User Rules + AGENTS.md + Startup Skill)
@@ -1077,7 +1077,7 @@ All platforms benefit from the **server-side fallback** (v5.2.1): if `session_lo
 
 ---
 
-## 🧬 Scientific Foundation
+## Scientific Foundation
 
 Prism has evolved from smart session logging into a **cognitive memory architecture** — grounded in real research, not marketing. Every retrieval decision is backed by peer-reviewed models from cognitive psychology, neuroscience, and distributed computing.
 
@@ -1120,7 +1120,7 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 
 ---
 
-## 📦 Milestones & Roadmap
+## Milestones & Roadmap
 
 > **Current: v8.0.0** — Synapse Engine ([CHANGELOG](CHANGELOG.md))
 
@@ -1145,7 +1145,7 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 👉 **[Full ROADMAP.md →](ROADMAP.md)**
 
 
-## ❓ Troubleshooting FAQ
+## Troubleshooting FAQ
 
 **Q: Why is the dashboard project selector stuck on "Loading projects..."?**
 A: Fixed in v7.3.3. The root cause was a multi-layer quote-escaping trap in the `abortPipeline` onclick handler that generated a `SyntaxError` in the browser, silently killing the entire dashboard IIFE. Update to v7.3.3+ (`npx -y prism-mcp-server`). If still stuck, check that Supabase env values are properly set (unresolved placeholders like `${SUPABASE_URL}` cause `/api/projects` to return empty). Prism auto-falls back to local SQLite when Supabase is misconfigured.
