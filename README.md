@@ -459,6 +459,40 @@ When you trigger a Dark Factory pipeline, Prism doesn't just run your task — i
 
 ---
 
+## 🤖 Autonomous Cognitive OS (v9.0)
+
+> *Memory isn't just about storing data; it's about economics and emotion. Prism v9.0 transforms passive memory into a living Cognitive Operating System that forces agents to learn compression and develop intuition.*
+
+Most AI agents have an infinite memory budget. They dump massive, repetitive logs into vector databases until they bankrupt your API budget and choke their own context windows. Prism v9.0 fixes this by introducing **Token-Economic Reinforcement Learning** and **Affect-Tagged Memory**.
+
+### 💰 Memory-as-an-Economy (The Surprisal Gate)
+Prism assigns every project a strict **Cognitive Budget** (e.g., 2,000 tokens) that persists across sessions. Every time the agent saves a memory, it costs tokens. 
+
+But not all memories are priced equally. Prism intercepts the save and runs a **Vector-Based Surprisal** calculation against recent memories:
+*   **High Surprisal (Novel thought):** Costs 0.5× tokens. The agent is rewarded for new insights.
+*   **Low Surprisal (Boilerplate):** Costs 2.0× tokens. The agent is penalized for repeating itself.
+*   **Universal Basic Income (UBI):** The budget recovers passively over time (+100 tokens/hour). 
+
+If an agent is too verbose, it goes into **Cognitive Debt**. You don't need to prompt the agent to "be concise." The physics of the system force the LLM to learn data compression to avoid bankruptcy.
+
+### 🎭 Affect-Tagged Memory (Giving AI a "Gut Feeling")
+Vector math measures *semantic similarity*, not *sentiment*. If an agent searches for "Authentication Architecture," standard RAG will return two past approaches—it doesn't know that Approach A caused a 3-day production outage, while Approach B worked perfectly.
+
+*   **Affective Salience:** Prism automatically tags experience events with a `valence` score (-1.0 for failure, +1.0 for success).
+*   **Emotional Retrieval:** At retrieval time, the absolute magnitude (`|valence|`) significantly boosts the memory's ranking score. Extreme failures and extreme successes surface to the top.
+*   **UX Warnings:** If an agent retrieves memories that are historically negative, Prism intercepts the prompt injection: `⚠️ Caution: This topic is strongly correlated with historical failures. Review past decisions before proceeding.` Your AI now has a "gut feeling" about bad code.
+
+### The Paradigm Shift
+
+| Feature | Standard RAG / Agents | Prism v9.0 |
+| :--- | :--- | :--- |
+| **Storage Limit** | Infinite (bloats context) | Bounded Token Economy |
+| **Data Quality** | Saves repetitive boilerplate | Surprisal Gate penalizes redundancy |
+| **Sentiment** | Treats all data as neutral facts | Affect-Tagged (Warns agent of past trauma) |
+| **Recovery** | Manual deletion | Universal Basic Income (UBI) over time |
+
+---
+
 ## 🧠 Cognitive Architecture (v7.8)
 
 > *Prism v7.8 is our biggest leap forward yet. We have moved beyond flat vector search and implemented a true Cognitive Architecture inspired by human brain mechanics. With the new ACT-R Spreading Activation Engine, Episodic-to-Semantic memory consolidation, and Uncertainty-Aware Rejection Gates, Prism doesn't just store logs anymore — it forms principles, follows causal trains of thought, and possesses the self-awareness to know when it lacks information.*
