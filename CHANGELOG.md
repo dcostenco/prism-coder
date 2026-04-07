@@ -28,6 +28,23 @@ All notable changes to this project will be documented in this file.
 - Feature-gated via `PRISM_VALENCE_ENABLED` and `PRISM_COGNITIVE_BUDGET_ENABLED` (both default `true`)
 - Graceful fallback on every failure path — zero hard crashes
 
+### Post-Review Hardening (8 fixes — architectural code review)
+
+#### Critical
+- **Valence Propagation No-Op** — `propagateValence()` was called with 2 args; signature requires 3 (`flowWeights`). Instrumented `synapseEngine.ts` to track energy `flowWeights` during propagation and wired to both storage backends.
+- **Experience Events Missing Valence** — `sessionSaveExperienceHandler` never called `deriveValence()`. Experience events (`failure`, `correction`, `success`) are the primary source of typed events, yet they stored NULL valence. Now derives and passes valence to `saveLedger()`.
+- **UBI "Death by 1000 Saves"** — `Math.floor()` on fractional UBI destroyed tokens on frequent saves: `floor(0.25 * 100) = 0`. Removed — `cognitive_budget` is REAL, fractional values are native. Display rounds at the format layer using `Math.round()`.
+
+#### High
+- **"Infinite Money Glitch"** — LLMs self-declaring `event_type: "success"` could mint free budget tokens. Decoupled budget bonuses from user-reported `event_type`; bonuses reserved for adversarial evaluation.
+- **Surprisal Gate Disconnected** — Hardcoded `surprisal = 0.5` was the only value ever used. Wired `computeVectorSurprisal()` with early embedding generation for real-time novelty scoring; `0.5` is now a fail-safe fallback only.
+- **Concurrency Race in Budget Writes** — Two agents loading the same budget, then writing absolute values, caused overwrites. Implemented delta-based updates: `COALESCE(cognitive_budget, 2000) + delta` in both SQLite and Supabase.
+
+#### Medium
+- **Missing SQLite Valence Index** — `idx_ledger_valence` was in the Supabase migration but absent from SQLite. Added `CREATE INDEX IF NOT EXISTS` in SQLite init.
+- **Missing Supabase `patch_budget_delta` RPC** — Code called `supabaseRpc("patch_budget_delta")` but migration 042 never created the function. Added `CREATE OR REPLACE FUNCTION` with `SECURITY DEFINER`.
+
+
 ## [8.0.3] - 2026-04-07 — Performance & Edge-Case Hardening
 
 ### Performance
