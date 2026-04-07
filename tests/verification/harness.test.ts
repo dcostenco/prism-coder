@@ -11,10 +11,12 @@ import { resolve } from "path";
 import * as fs from "fs";
 
 describe("Verification Harness & Runs", () => {
-  const dbPath = resolve(__dirname, "test-harness.sqlite");
+  let dbPath: string;
 
   afterEach(() => {
-    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+    if (dbPath && fs.existsSync(dbPath)) {
+      try { fs.unlinkSync(dbPath); } catch(e) {}
+    }
   });
 
   describe("Schema Validation", () => {
@@ -81,9 +83,16 @@ describe("Verification Harness & Runs", () => {
     let storage: SqliteStorage;
 
     beforeEach(async () => {
+      dbPath = resolve(__dirname, `test-harness-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`);
       if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
       storage = new SqliteStorage();
       await storage.initialize(dbPath);
+    });
+
+    afterEach(async () => {
+      if (storage) {
+        await storage.close();
+      }
     });
 
     it("saves and retrieves VerificationHarness", async () => {
