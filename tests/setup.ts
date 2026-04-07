@@ -39,6 +39,10 @@ process.env.PRISM_DASHBOARD_PORT = "0";
 // Disable Hivemind by default — individual test suites enable it as needed
 process.env.PRISM_ENABLE_HIVEMIND = "false";
 
+// Provide dummy API keys so LLM and Search instantiations don't throw warnings/errors in CI
+if (!process.env.GOOGLE_API_KEY) process.env.GOOGLE_API_KEY = "dummy_google_key_for_tests";
+if (!process.env.BRAVE_API_KEY) process.env.BRAVE_API_KEY = "dummy_brave_key_for_tests";
+
 // ─── Directory Setup ─────────────────────────────────────────────
 // Ensure the temp directory exists before any test uses it
 mkdirSync(TEMP_DIR, { recursive: true });

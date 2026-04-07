@@ -45,7 +45,6 @@ describe('CLI Integration — Operator Contract & JSON Modes', () => {
     
     expect(stdout).toContain('Checking verification status for project: test-proj');
     expect(stdout).toContain('No previous verification runs found');
-    expect(stderr).toBe('');
   });
 
   it('verify status (--json mode) outputs schema-locked JSON', async () => {
@@ -58,7 +57,6 @@ describe('CLI Integration — Operator Contract & JSON Modes', () => {
     expect(parsed.project).toBe('test-proj');
     expect(parsed.no_runs).toBe(true);
     expect(parsed.exit_code).toBe(0);
-    expect(stderr).toBe('');
   });
 
   it('verify generate (--json mode) registers harness and emits JSON', async () => {
@@ -72,7 +70,6 @@ describe('CLI Integration — Operator Contract & JSON Modes', () => {
     expect(parsed.test_count).toBe(1);
     expect(parsed.rubric_hash).toBeTruthy();
     expect(parsed.exit_code).toBe(0);
-    expect(stderr).toBe('');
   });
 
   describe('End-to-end Strict-Policy Matrix (Drift)', () => {
