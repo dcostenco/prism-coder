@@ -248,11 +248,11 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 </details>
 
-## 📊 The State of Prism (v8.0.0)
+## 📊 The State of Prism (v8.0.3)
 
-With v8.0.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
+With v8.0.3 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
 
-- **Synapse Engine (GraphRAG)** — Pure, storage-agnostic multi-hop graph propagation replaces legacy SQL-coupled spreading activation. O(T×M) bounded ACT-R energy propagation with dampened fan effect, asymmetric bidirectional flow, cyclic loop prevention, and sigmoid normalization. Nodes discovered via graph traversal tagged `[🌐 Synapse]`. Full SQLite + Supabase parity.
+- **Synapse Engine (GraphRAG)** — Pure, storage-agnostic multi-hop graph propagation with symmetric fan-dampening (forward + backward), asymmetric bidirectional flow, cyclic loop prevention, and sigmoid normalization. Nodes discovered via graph traversal tagged `[🌐 Synapse]`. Full SQLite + Supabase parity.
 - **Cloud-Native RPC** — Server-Sent Events integration unlocks complete deployment portability across Smithery, Render, or any remote host over standard HTTP ports.
 - **Health-Aware** — Intent Health Dashboard scores every project 0–100 across staleness, TODO load, and decision quality. Silent drift becomes an actionable signal before it becomes a crisis.
 - **Comprehensively Sanitized** — 10 XSS injection vectors patched across all dashboard rendering paths (factory, ledger, health, history, error handlers). Every user-facing string now passes through `escapeHtml()`.
@@ -272,12 +272,146 @@ With v8.0.0 shipped, Prism is a **production-hardened, fail-closed, adversariall
 - **Safe** — Full type-guard matrix across all 30+ MCP tools. Path traversal, poison pill payloads, null-byte injection — all blocked at the gate layer before any execution.
 - **Convergent** — CRDT OR-Map handoff merging. Multiple agents, zero conflicts.
 - **Autonomous** — Web Scholar researches while you sleep. Dark Factory executes while you sleep. Task Router delegates while you sleep. Adversarial Evaluator keeps the output honest.
-- **Reliable** — 978+ passing tests. ES5 lint guard on all dashboard inline scripts. JSON contract CI enforcement on all CLI output schemas.
+- **Reliable** — 1052 passing tests across 48 suites. ES5 lint guard on all dashboard inline scripts. JSON contract CI enforcement on all CLI output schemas.
 - **Multimodal** — VLM auto-captioning turns screenshots into semantically searchable memory.
-- **Security** — SQL injection prevention, path traversal guard, Poison Pill defense, GDPR Art. 17+20 compliance.
+- **Security** — SQL injection prevention, LIKE wildcard escaping, path traversal guard, tenant-scoped operations, Poison Pill defense, GDPR Art. 17+20 compliance.
 
 ---
 ## 🗺️ Next on the Horizon
+
+### v8.x — Cognitive Refinement Track
+
+#### v8.1 — Multi-Graph Causal Layer `[Next]`
+- **Problem:** Synapse Engine currently traverses all edge types uniformly. "Why did X happen?" queries need intent-aware edge routing.
+- **Solution:** Intent-aware retrieval routing (MAGMA) traversing LLM-inferred causal `because` edge-type layer on top of the existing Synapse propagation.
+- **Scope:** New `edge_type` filter on `LinkFetcher`, query-time intent classifier, causal edge extraction during compaction.
+
+#### v8.2 — Uncertainty-Aware Rejection `[Planned]`
+- **Problem:** Agents hallucinate context when the retrieved memory trace is too weak.
+- **Solution:** A meta-cognitive "Feeling of Knowing" (FOK) gate using spreading activation energy thresholds to safely reject queries with "insufficient evidence".
+- **Scope:** `MIN_EVIDENCE_THRESHOLD` config, FOK score in Synapse telemetry, `CLARIFY` route integration with HDC policy gateway.
+
+#### v8.3 — Episodic → Semantic Consolidation `[Planned]`
+- **Problem:** Granular session ledgers accumulate and clutter context, failing to form abstractions over time.
+- **Solution:** Guided by Complementary Learning Systems (CLS) theory, automatic abstraction of multi-session episodic logs into robust semantic concepts while decaying the originals.
+- **Scope:** `consolidateEpisodicMemory()` scheduler task, semantic rule extraction, graduated importance scoring, ACT-R decay linkage.
+
+---
+
+### v9.0 — Autonomous Cognitive OS `[Architecture Phase]`
+
+> **Thesis:** With v8.0 (Synapse Engine) shipped, Prism has solved **Retrieval** (GraphRAG + ACT-R) and **Execution Safety** (Dark Factory). The remaining bottleneck is no longer *how* memory is stored or retrieved, but **when and why the agent interacts with it.** v9.0 transitions Prism from a brilliant memory tool into the operating system that *drives* the agents.
+
+#### 🔮 9.1 — Predictive Push Memory (Streaming Context) `[Design]`
+
+> **From reactive polling to real-time memory HUD.**
+
+**Problem:** Prism is currently **pull-based**. The agent must explicitly call `session_load_context` or `session_search_memory`. If the LLM's context window shifts and it forgets to search, it hallucinates.
+
+**Solution:** **Push-based Predictive Memory** via MCP Subscribable Resources.
+
+| Component | Detail |
+|-----------|--------|
+| **Subscribable Resource** | Expose `memory://project/telemetry/active_context` as an MCP resource. Clients subscribe; Prism pushes updates via `notifications/resources/updated`. |
+| **Active File Watcher** | Lightweight background process extracts AST/keywords from the currently active file in the IDE (Cursor/Claude Desktop). |
+| **Background Synapse Sweep** | Extracted keywords seed the Synapse Engine in the background, pre-computing graph-traversed context relevant to the current function. |
+| **Context HUD** | The agent never has to *ask* for memory. The exact, graph-traversed context relevant to what they are currently staring at is just *there*, updating in real-time. |
+
+**Implementation Notes:**
+- MCP `resources/subscribe` + `notifications/resources/updated` is the transport mechanism
+- Debounce AST extraction (500ms) to avoid thrashing on rapid file switches
+- Cache Synapse results per file hash to avoid redundant propagation
+- Budget: ~50ms latency target for the push cycle
+
+---
+
+#### 💰 9.2 — Memory-as-an-Economy (Token-Economic RL) `[Design]`
+
+> **Force agents to learn compression through physics, not prompts.**
+
+**Problem:** Agents have "infinite" memory budgets. They dump 500 words of logs via `session_save_ledger`. Even with auto-compaction, the system relies on the LLM being a "good citizen."
+
+**Solution:** **Cognitive Budget** — a strict token economy with reinforcement feedback.
+
+| Component | Detail |
+|-----------|--------|
+| **Token Budget** | Each agent session starts with a fixed cognitive budget (e.g., 2000 tokens). Every `session_save_ledger` call costs budget proportional to token count. |
+| **Reward Signal** | When a saved memory is successfully retrieved and *actually helps* solve a task (measured by Dark Factory `EVALUATE` passes or positive experience events), the agent earns budget back. |
+| **Entropy/Surprisal Gate** | On `session_save_ledger`, Prism calculates an information-theoretic surprisal score. Boilerplate ("I updated the CSS") is rejected or penalized. Novel, high-signal heuristics pass freely. |
+| **Emergent Compression** | The system's physics force the LLM to naturally save highly dense, high-signal rules — because that's the only way to survive the budget. No prompt engineering required. |
+
+**Implementation Notes:**
+- `CognitiveBudget` class tracking balance per session, with configurable initial allocation
+- Surprisal score via TF-IDF against the project's existing corpus (cheap, no LLM call)
+- Budget earned back = `importance_score × retrieval_utility_score` when memories are accessed
+- Budget exhaustion triggers a `WARNING` in the MCP response, not a hard block (graceful degradation)
+
+---
+
+#### 🎭 9.3 — Affect-Tagged Memory (Valence & Emotional Routing) `[Research]`
+
+> **Give agents a "gut feeling" about bad code paths.**
+
+**Problem:** Vector math measures *semantic similarity*, not *sentiment*. If an agent searches for "Authentication Architecture," the DB returns two approaches without knowing that Approach A caused a 3-day production outage while Approach B was smooth.
+
+**Solution:** **Affective Cognitive Routing** — sentiment-tagged memory with valence-aware retrieval.
+
+| Component | Detail |
+|-----------|--------|
+| **Valence Column** | Expand `session_ledger` and `semantic_knowledge` with a `valence` field (`-1.0` to `+1.0`). |
+| **Automatic Tagging** | Failures, test breakages, and `correction` experience events → negative valence. Pipeline passes, `success` events → positive valence. Derived from existing experience event types — no new LLM calls. |
+| **Valence Energy Propagation** | Synapse Engine propagates "Valence Energy" alongside activation energy. Negative valence accumulates through causal chains. |
+| **HDC Policy Intercept** | When an agent proposes a direction strongly correlated with negative-valence memories, the HDC Policy Gateway forces a `CLARIFY` route: *"Warning: This architectural path is highly correlated with historical friction."* |
+
+**Implementation Notes:**
+- Valence derived deterministically from `event_type`: `success` → `+0.8`, `failure` → `-0.8`, `correction` → `-0.6`, `learning` → `+0.4`
+- Synapse propagation: `valenceFlow = flow × sourceValence` (energy-weighted valence transfer)
+- HDC integration: composite retrieval score includes `0.1 × avg_valence` as a third signal alongside similarity and activation
+- Storage: single `REAL` column, nullable (legacy rows default to neutral `0.0`)
+
+---
+
+#### 🌿 9.4 — Counterfactual Memory Branches (Git for Cognition) `[Research]`
+
+> **Monte Carlo Tree Search for AI agents — try 3 approaches, merge the winner, vaporize the rest.**
+
+**Problem:** When Dark Factory runs an autonomous pipeline, it mutates the main memory trunk. A 2-hour rabbit hole of bad code poisons the context database. Time Travel (`memory_checkout`) can undo handoff, but *ledger entries* remain.
+
+**Solution:** **Isolated Ephemeral Sandboxes** — branch, experiment, merge or discard.
+
+| Component | Detail |
+|-----------|--------|
+| **Branch Creation** | When a Dark Factory sprint starts, Prism clones the current CRDT state into an ephemeral `branch_id`. |
+| **Isolated Execution** | The agent writes logs, searches, and synthesizes edges *entirely within the branch*. Main memory is untouched. |
+| **Merge on Success** | If the Adversarial Evaluator `PASS`es, the branch memory merges back into `main`. |
+| **Discard on Failure** | If `ABORT`ed, the branch is destroyed. The memory of the "failed experiment" is rolled up into a single Semantic Rule ("Do not try X because Y"), and the noisy episodic logs are deleted. |
+| **Parallel MCTS** | Spawn 3 Dark Factory pipelines simultaneously on 3 different approaches, each in isolated memory branches. The first to pass the test suite merges. The others are vaporized. |
+
+**Implementation Notes:**
+- `branch_id` column on `session_ledger` (nullable, `NULL` = main trunk)
+- Branch creation: `INSERT INTO ... SELECT ... WHERE branch_id IS NULL` (snapshot copy)
+- Merge: `UPDATE session_ledger SET branch_id = NULL WHERE branch_id = ?` (promote to main)
+- Discard: `DELETE FROM session_ledger WHERE branch_id = ?` + single semantic rule insertion
+- CRDT state cloned via `exportState()` → `importState()` with branch-scoped key
+- Dark Factory integration: `pipeline.branch_id` links the pipeline to its memory sandbox
+
+---
+
+### v10.0 — The Convergence `[Vision]`
+
+> Prism v8.0 is a perfect **System 1** (fast, associative, structural memory).
+> v9.0 builds **System 2** (slow, deliberate, economic, and counterfactual reasoning).
+> v10.0 is the convergence — where the agent *is* the operating system.
+
+| Track | System 1 (v8.0) | System 2 (v9.0) | Convergence (v10.0) |
+|-------|-----------------|-----------------|---------------------|
+| **Retrieval** | GraphRAG + ACT-R | Predictive Push | Anticipatory pre-fetch |
+| **Storage** | Flat ledger + compaction | Token-Economic RL | Self-curating memory |
+| **Routing** | HDC + Hamming | Affective Valence | Emotion-aware cognition |
+| **Execution** | Dark Factory (linear) | Counterfactual Branches | Parallel MCTS exploration |
+| **Identity** | Reactive tool | Autonomous OS | Cognitive substrate |
+
+---
 
 ### 📱 Mind Palace Mobile PWA `[Backlog]`
 **Problem:** The dashboard is desktop-only. Quick check-ins on mobile require a laptop.
@@ -286,26 +420,6 @@ With v8.0.0 shipped, Prism is a **production-hardened, fail-closed, adversariall
 1. Responsive CSS breakpoints for the existing dashboard
 2. Service worker + offline cache for read-only access
 3. Push notifications via Web Push API for Telepathy events
-
-### 🔭 Future Cognitive Tracks
-
-Based on our April 2026 synthesize of 12 foundational papers on cognitive memory architectures:
-
-#### v8.1 — Multi-Graph Causal Layer `[Next]`
-- **Problem:** Synapse Engine currently traverses all edge types uniformly. "Why did X happen?" queries need intent-aware edge routing.
-- **Benefit:** Intent-aware retrieval routing (MAGMA) traversing LLM-inferred causal `because` edge-type layer on top of the existing Synapse propagation.
-
-#### v8.2 — Uncertainty-Aware Rejection `[Planned]`
-- **Problem:** Agents hallucinate context when the retrieved memory trace is too weak.
-- **Benefit:** A meta-cognitive "Feeling of Knowing" (FOK) gate using spreading activation energy thresholds to safely reject queries with "insufficient evidence".
-
-#### v8.3 — Episodic → Semantic Consolidation `[Planned]`
-- **Problem:** Granular session ledgers accumulate and clutter context, failing to form abstractions over time.
-- **Benefit:** Guided by Complementary Learning Systems (CLS) theory, automatic abstraction of multi-session episodic logs into robust semantic concepts while decaying the originals.
-
-#### v9.0 — Memory-as-Action RL `[Exploring]`
-- **Problem:** Hardcoded memory management (read/write/summarize) is rigid.
-- **Benefit:** Memory curation as intrinsic, RL-optimizable agent actions, constrained by token budgets to force high-value context retention.
 
 ---
 ## 🧰 Infrastructure Backlog
