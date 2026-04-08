@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.1.0] - 2026-04-08 — Task Router v2 & Local Agent Hardening
+
+### Added
+- **File-Type Complexity Signal** — New `fileTypeSignal` heuristic in the task router analyzes file extensions to bias routing decisions. Config/docs files (`.md`, `.json`, `.yml`, `.yaml`, `.toml`, `.cfg`, `.txt`, `.csv`, `.env`, `.ini`) bias toward local delegation; systems-programming files (`.cpp`, `.cc`, `.cxx`, `.c`, `.h`, `.hpp`, `.rs`, `.go`, `.java`, `.swift`, `.zig`) bias toward host. Common scripting/web langs (`.ts`, `.js`, `.py`) are intentionally neutral.
+- **Claw Agent Streaming Buffer** — Local agent (`claw_agent_lite.py`) now uses a buffered stream parser to correctly handle `<think>` / `</think>` reasoning tags split across network chunks. Previously, partial tags would leak raw DeepSeek-R1 reasoning into stdout.
+- **Claw Agent System Prompts** — Coding mode (`--code`) now injects a concise-output system prompt to prevent verbose explanations from the local model.
+- **Claw Agent Memory Trimming** — REPL sessions now trim conversation history to the last 20 turns (preserving system prompt) to prevent unbounded memory growth during long sessions.
+- **`--timeout` CLI Flag** — Configurable timeout for the local agent (default: 300s, up from 180s) to accommodate complex reasoning tasks on `deepseek-r1:32b`.
+
+### Fixed
+- **Multi-Step False Positives** — Removed bare `"1."`, `"2."`, `"3."` from `MULTI_STEP_MARKERS` — these matched version numbers (v1.2.3), decimal values, and IP addresses, inflating the multi-step detection signal and biasing tasks away from local delegation.
+- **File-Type Double Counting** — Changed file classification from dual `if` to `if/else if`, preventing files from being counted as both simple and complex.
+- **Claw Agent Error Output** — All error messages now go to `stderr` instead of `stdout`, keeping programmatic output clean for downstream tool consumption.
+- **Claw Agent Unused Import** — Removed unused `import os`.
+
+### Changed
+- **Router Weight Distribution** — Updated from 5-signal to 6-signal routing: Keyword (0.35), File Count (0.15), File Type (0.10), Scope (0.20), Length (0.10), Multi-Step (0.10). Previous weights overallocated to file count (0.20) and scope (0.25).
+- **Header Documentation** — Updated router header from v7.1.0/Qwen3 to v9.1.0/deepseek-r1+qwen2.5-coder, reflecting actual model names and weight table.
+- **Claw Agent Ollama API** — Migrated from stateless `/api/generate` to stateful `/api/chat` for proper multi-turn conversation support.
+
+### Engineering
+- 1023 tests across 46 suites, all passing, zero regressions
+- TypeScript: clean, zero errors
+- 2 files changed: `src/tools/taskRouterHandler.ts`, `claw_agent_lite.py`
+
+---
+
 ## [9.0.5] - 2026-04-07 — JWKS Auth Security Hardening
 
 ### Security

@@ -1,20 +1,20 @@
 /**
- * Task Router Handler (v7.1.0)
+ * Task Router Handler (v9.1.0)
  *
  * Pure, deterministic heuristic-based routing engine that analyzes a coding
  * task description and recommends whether it should be handled by the host
- * cloud model or delegated to the local claw-code-agent (Qwen3).
+ * cloud model or delegated to the local claw-code-agent (deepseek-r1 / qwen2.5-coder).
  *
- * No database queries. No API calls. Fully testable.
+ * No database queries in the pure route. No API calls. Fully testable.
+ * Experience-based ML bias (v7.2.0+) is applied post-hoc in the handler.
  *
- * Heuristic Signals (v7.1.0):
+ * Heuristic Signals:
  *   1. Keyword analysis        (weight: 0.35)
- *   2. File count               (weight: 0.20)
- *   3. estimated_scope enum     (weight: 0.25)
- *   4. Task length proxy        (weight: 0.10)
- *   5. Multi-step detection     (weight: 0.10)
- *
- * v7.2.0 will add experience-based ML routing using SQLite feedback data.
+ *   2. File count               (weight: 0.15)
+ *   3. File type / extension    (weight: 0.10)
+ *   4. estimated_scope enum     (weight: 0.20)
+ *   5. Task length proxy        (weight: 0.10)
+ *   6. Multi-step detection     (weight: 0.10)
  */
 
 import {
@@ -88,7 +88,8 @@ const MULTI_STEP_MARKERS = [
   "step 1", "step 2", "step 3",
   "then update", "then modify", "then create",
   "followed by", "subsequently",
-  "1.", "2.", "3.",
+  // Note: removed bare "1.", "2.", "3." — too many false positives
+  // on version numbers (v1.2.3), decimals, and IP addresses.
 ];
 
 // ─── Heuristic Engine ────────────────────────────────────────
@@ -136,7 +137,30 @@ function fileCountSignal(files: string[] | undefined): number {
 }
 
 /**
- * Compute a claw-affinity score from estimated_scope.
+ * Compute a claw-affinity score from file extentions.
+ * Simple configs/docs -> claw (+0.5)
+ * Complex low-level languages -> host (-0.5)
+ */
+function fileTypeSignal(files: string[] | undefined): number {
+  if (!files || files.length === 0) return 0;
+  
+  let simple = 0;
+  let complex = 0;
+  
+  for (const f of files) {
+    if (f.match(/\.(md|json|yml|yaml|txt|csv|env|ini|toml|cfg)$/i)) simple++;
+    else if (f.match(/\.(cpp|cc|cxx|c|h|hpp|rs|go|java|swift|zig)$/i)) complex++;
+    // .ts, .js, .py, .rb, .sh, .css, .html — common scripting/web langs stay neutral (0)
+  }
+  
+  if (simple > 0 && complex === 0) return 0.5;
+  if (complex > 0 && simple === 0) return -0.5;
+  if (complex > 0 && simple > 0) return -0.2; // Complex outweighs simple
+  return 0;
+}
+
+/**
+ * Compute a claw-affinity score from scope.
  * minor_edit → strongly claw (+1.0)
  * bug_fix → moderate claw (+0.4) — some bugs are complex
  * new_feature → moderate host (-0.3)
@@ -154,15 +178,19 @@ function scopeSignal(scope: SessionTaskRouteArgs["estimated_scope"]): number {
 
 /**
  * Compute a claw-affinity score from task description length.
- * Short (< 200 chars) → claw-favoring (+0.5)
+ * Short (< 100 chars) → strongly claw (+1.0)
+ * Short-medium (< 200 chars) → claw (+0.5)
  * Medium (200-500 chars) → neutral (0.0)
- * Long (> 500 chars) → host-favoring (-0.5) — long = complex context
+ * Long (500-1500 chars) → host-favoring (-0.5)
+ * Very long (> 1500 chars) → strongly host (-1.0) due to context complexity
  */
 function lengthSignal(description: string): number {
   const len = description.length;
+  if (len < 100) return 1.0;
   if (len < 200) return 0.5;
   if (len <= 500) return 0.0;
-  return -0.5;
+  if (len <= 1500) return -0.5;
+  return -1.0;
 }
 
 /**
@@ -181,8 +209,9 @@ function multiStepSignal(description: string): number {
 
 const WEIGHTS = {
   keyword: 0.35,
-  fileCount: 0.20,
-  scope: 0.25,
+  fileCount: 0.15,
+  fileType: 0.10,
+  scope: 0.20,
   length: 0.10,
   multiStep: 0.10,
 } as const;
@@ -209,6 +238,7 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
   // ── Compute individual signals ──
   const kw = keywordSignal(task_description);
   const fc = fileCountSignal(files_involved);
+  const ft = fileTypeSignal(files_involved);
   const sc = scopeSignal(estimated_scope);
   const ln = lengthSignal(task_description);
   const ms = multiStepSignal(task_description);
@@ -218,6 +248,7 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
   const composite =
     kw * WEIGHTS.keyword +
     fc * WEIGHTS.fileCount +
+    ft * WEIGHTS.fileType +
     sc * WEIGHTS.scope +
     ln * WEIGHTS.length +
     ms * WEIGHTS.multiStep;
@@ -244,6 +275,7 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
   const signals: string[] = [];
   if (kw !== 0) signals.push(`keyword analysis ${kw > 0 ? "favors claw" : "favors host"} (${kw.toFixed(2)})`);
   if (fc !== 0) signals.push(`file count signal: ${fc.toFixed(1)}`);
+  if (ft !== 0) signals.push(`file type signal: ${ft.toFixed(1)}`);
   if (sc !== 0) signals.push(`scope "${estimated_scope}" signal: ${sc.toFixed(1)}`);
   if (ms !== 0) signals.push(`multi-step detected (${ms.toFixed(1)})`);
   if (ln !== 0) signals.push(`length signal: ${ln.toFixed(1)}`);

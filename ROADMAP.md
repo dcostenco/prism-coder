@@ -7,6 +7,23 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v9.1.0 — Task Router v2 & Local Agent Hardening 🚦
+
+> **Problem:** The task router had stale documentation (referenced Qwen3 / v7.1.0 weights), lacked file-type awareness for routing decisions, and the local Claw agent suffered from streaming corruption, unbounded memory growth, and missing system prompts.
+> **Solution:** Full routing engine upgrade to 6-signal heuristics with file-type complexity analysis, plus a ground-up hardening of the local agent with buffered streaming, stateful chat API, and memory trimming.
+
+| Feature | Detail |
+|---------|--------|
+| 📂 **File-Type Complexity Signal** | New `fileTypeSignal` analyzes extensions — config/docs (`.md`, `.json`, `.yml`, `.toml`, etc.) bias toward local; systems code (`.cpp`, `.rs`, `.go`, `.java`, `.zig`) bias toward host. Common web/scripting langs intentionally neutral. |
+| 🔧 **6-Signal Weight Rebalance** | Keyword (0.35), File Count (0.15), File Type (0.10), Scope (0.20), Length (0.10), Multi-Step (0.10). Previous 5-signal weights overallocated to file count and scope. |
+| 🐛 **Multi-Step False Positive Fix** | Removed bare `"1."`, `"2."`, `"3."` markers that matched version numbers and decimals. |
+| 🌊 **Buffered Stream Parser** | Claw agent handles `<think>` tags split across network chunks — no more reasoning leakage into stdout. |
+| 💬 **Stateful `/api/chat`** | Migrated from `/api/generate` for proper multi-turn REPL conversations with the local model. |
+| 🧹 **Memory Trimming** | REPL sessions auto-trim to 20 turns, preventing OOM on long sessions. |
+| ⏱️ **Configurable Timeout** | `--timeout` flag (default: 300s) for complex `deepseek-r1:32b` reasoning. |
+| 🧪 **1023 Tests** | 46 suites, zero regressions. |
+
+---
 ### ✅ v7.8.0 — Agentic Cognition Pipeline 🧠
 
 > **Problem:** Compacting memory nodes blindly merged text, sacrificing structured reasoning and resulting in slow, un-indexed re-reads that couldn't construct causal relationships. Keyword engines were improperly gated by semantic thresholds, causing silent failures.
@@ -233,9 +250,9 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 </details>
 
-## 📊 The State of Prism (v7.7.0)
+## 📊 The State of Prism (v9.1.0)
 
-With v7.7.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
+With v9.1.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
 
 - **Cloud-Native RPC** — Server-Sent Events integration unlocks complete deployment portability across Smithery, Render, or any remote host over standard HTTP ports.
 - **Health-Aware** — Intent Health Dashboard scores every project 0–100 across staleness, TODO load, and decision quality. Silent drift becomes an actionable signal before it becomes a crisis.

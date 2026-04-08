@@ -445,7 +445,7 @@ Powered by a pure TypeScript port of Google's TurboQuant (inspired by Google's I
 While local SQLite is amazing for solo developers, enterprise teams cannot share a local SQLite file. Prism breaks the "local-only" ceiling via **Supabase Sync** and the **Multi-Agent Hivemind**—scaling effortlessly to teams of 50+ developers using agents. Multiple agents (dev, QA, PM) can work on the same project with **role-isolated memory**, discover each other automatically, and share context in real-time via Telepathy sync to a shared Postgres backend. → [Multi-agent setup example](examples/multi-agent-hivemind/)
 
 ### 🚦 Task Router
-Prism can score coding tasks and recommend whether to keep execution on the host model or delegate to a **local Claw agent** (a lightweight sub-agent powered by Ollama/vLLM for fast, local-safe edits). This enables faster handling of small edits while preserving host execution for complex work. In client startup/skill flows, use defensive delegation: route only coding tasks, call `session_task_route` only when available, delegate to `claw` only when executor tooling exists and task is non-destructive, and fallback to host when router/executor is unavailable. → [Task router real-life example](examples/router_real_life_test.ts)
+Prism scores coding tasks across **6 weighted heuristic signals** (keyword analysis, file count, file-type complexity, scope, length, multi-step detection) and recommends whether to keep execution on the host cloud model or delegate to a **local Claw agent** (powered by deepseek-r1 / qwen2.5-coder via Ollama). File-type awareness routes config/docs edits locally while reserving systems-programming tasks for the host. The local agent features buffered streaming (handles split `<think>` tags), stateful multi-turn conversations, and automatic memory trimming. In client startup/skill flows, use defensive delegation: route only coding tasks, call `session_task_route` only when available, delegate to `claw` only when executor tooling exists and task is non-destructive, and fallback to host when router/executor is unavailable. → [Task router real-life example](examples/router_real_life_test.ts)
 
 ### 🖼️ Visual Memory
 Save UI screenshots, architecture diagrams, and bug states to a searchable vault. Images are auto-captioned by a VLM (Claude Vision / GPT-4V / Gemini) and become semantically searchable across sessions.
@@ -727,13 +727,13 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v9.0.5 — JWKS Auth Security Hardening**
+> **Current release: v9.1.0 — Task Router v2 & Local Agent Hardening**
 
+- 🚦 **v9.1.0 — Task Router v2:** File-type complexity signal for intelligent code-vs-config routing, 6-signal weighted heuristic engine, multi-step false-positive fix, expanded file extension classification. Local agent hardened with buffered streaming, system prompts, memory trimming, and stateful `/api/chat` API.
 - 🔒 **v9.0.5 — JWKS Auth Security Hardening:** JWT audience/issuer claim validation (`PRISM_JWT_AUDIENCE`, `PRISM_JWT_ISSUER`), structured error logging for JWT failures, typed `PrismAuthenticatedRequest` interface, 11 new JWKS unit tests, Smithery server card fix. Vendor-neutral — tested with Auth0, AgentLair ([llms.txt](https://agentlair.com/llms.txt)), Keycloak, and custom JWKS endpoints.
 - 🧠 **v9.0.0 — Autonomous Cognitive OS:** Token-Economic Reinforcement Learning (Surprisal Gate + Cognitive Budget), Affect-Tagged Memory (valence-scored retrieval), and Episodic→Semantic Consolidation. Your agents learn compression and develop intuition. → [Cognitive OS](#-autonomous-cognitive-os-v90)
 - 🧠 **v7.8.0 — Cognitive Architecture:** Episodic-to-Semantic memory consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate, and Dynamic Fast Weight Decay. → [Cognitive Architecture](#-cognitive-architecture-v78)
 - 🌐 **v7.7.0 — Cloud-Native SSE Transport:** Full Server-Sent Events MCP support for seamless network deployments.
-- ⚔️ **v7.4.0 — Adversarial Evaluation:** Split-brain anti-sycophancy pipeline with evidence-bound findings.
 
 👉 **[Full release history → CHANGELOG.md](CHANGELOG.md)** · **[ROADMAP →](ROADMAP.md)**
 
@@ -1128,10 +1128,11 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 
 ## 📦 Milestones & Roadmap
 
-> **Current: v9.0.5** — JWKS Auth Security Hardening ([CHANGELOG](CHANGELOG.md))
+> **Current: v9.1.0** — Task Router v2 & Local Agent Hardening ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|
+| **v9.1.0** | 🚦 Task Router v2 — file-type routing signal, 6-signal heuristics, local agent streaming buffer |
 | **v9.0.5** | 🔒 JWKS Auth Security Hardening — audience/issuer validation, JWT failure logging, typed agent identity |
 | **v9.0** | 🧠 Autonomous Cognitive OS — Surprisal Gate, Cognitive Budget, Affect-Tagged Memory |
 | **v7.8** | 🧠 Cognitive Architecture — Hebbian consolidation, multi-hop reasoning, rejection gate, dynamic decay |
