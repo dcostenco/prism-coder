@@ -20,6 +20,10 @@ npx -y prism-mcp-server
 
 Works with **Claude Desktop · Claude Code · Cursor · Windsurf · Cline · Gemini · Antigravity** — **any MCP client.**
 
+<br>
+<video src="https://github.com/dcostenco/prism-mcp/raw/main/docs/prism_mcp_demo.mp4" controls="controls" width="100%"></video>
+<br>
+
 ## 📖 Table of Contents
 
 - [Why Prism?](#why-prism)
