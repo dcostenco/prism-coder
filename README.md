@@ -1100,6 +1100,30 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 
 ---
 
+## 💼 B2B Consulting & Enterprise Support
+
+Prism MCP is open-source and free for individual developers. For teams and enterprises building autonomous AI workflows or integrating MCP-native memory at scale, we offer professional consulting and setup packages.
+
+### 🥉 Team Pilot Package
+*Perfect for engineering teams adopting MCP tools and collaborative agents.*
+* **What's included:** Full team rollout, managed Supabase configuration (for multi-device sync), Universal Import of legacy chat history, and dedicated setup support.
+* **Model:** Fixed-price engagement.
+
+### 🥈 Cognitive Architecture Tuning
+*For teams building advanced AI agents or autonomous pipelines.*
+* **What's included:** "Dark Factory" pipeline implementation tailored to your workflows, adversarial evaluator tuning, custom HDC cognitive route configuration, and local open-weight model integration (BYOM).
+* **Model:** Retainer or project-based.
+
+### 🥇 Enterprise Integration
+*Full-scale deployment for high-compliance environments.*
+* **What's included:** Active Directory / custom JWKS auth integration, Air-gapped on-premise deployment, custom OTel Grafana dashboards for cognitive observability, and custom skills/tools development.
+* **Model:** Custom enterprise quote.
+
+**Interested in accelerating your team's autonomous workflows?**  
+[📧 Contact us for a consultation](mailto:inquiries@prism-mcp.com) — let's build your organization's cognitive memory engine.
+
+---
+
 ## 📦 Milestones & Roadmap
 
 > **Current: v9.0.5** — JWKS Auth Security Hardening ([CHANGELOG](CHANGELOG.md))
