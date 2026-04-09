@@ -71,10 +71,10 @@ program
 
       if (jsonOutput) {
         // ── JSON mode: structured output for programmatic consumption ──
-        const storage = await getStorage();
+        const storageBackend = await getStorage();
         const effectiveRole = role || await getSetting('default_role', '') || undefined;
         const agentName = await getSetting('agent_name', '') || undefined;
-        const data = await storage.loadContext(project, level, PRISM_USER_ID, effectiveRole);
+        const data = await storageBackend.loadContext(project, level, PRISM_USER_ID, effectiveRole);
 
         if (!data) {
           console.log(JSON.stringify({ error: `No session context found for project "${project}"` }));

@@ -656,38 +656,45 @@ export async function sessionLoadContextHandler(args: unknown) {
   // alternate backend (e.g. Supabase) exists with a different
   // version. This prevents agents from unknowingly acting on
   // stale state from a diverged backend.
+  //
+  // PERF NOTE: We do NOT construct a full StorageBackend for the
+  // alternate check — that would trigger full migrations/schema
+  // validation on every load (~200-1000ms). Instead we use
+  // lightweight direct queries: REST GET for Supabase, raw SQL
+  // for SQLite. This keeps the check under ~100ms.
   let splitBrainWarning = "";
   try {
-    const { SUPABASE_CONFIGURED } = await import("../config.js");
-    if (activeStorageBackend === "local" && SUPABASE_CONFIGURED) {
-      // We're on SQLite but Supabase creds exist — check for divergence
-      const { SupabaseStorage } = await import("../storage/supabase.js");
-      const altStorage = new SupabaseStorage();
-      await altStorage.initialize();
-      const altData = await altStorage.loadContext(project, "quick", PRISM_USER_ID);
-      await altStorage.close();
-      if (altData) {
-        const altVersion = (altData as any)?.version;
-        if (altVersion && altVersion !== version) {
-          splitBrainWarning = `\n\n⚠️ **SPLIT-BRAIN DETECTED** (v${version} local vs v${altVersion} cloud)\n` +
-            `Your local SQLite state (v${version}) differs from the Supabase cloud state (v${altVersion}). ` +
-            `This means another client (e.g. Claude Desktop) has saved state that this environment cannot see. ` +
-            `TODOs, summaries, and decisions may be stale. Please reconcile by running:\n` +
-            `  \`prism load ${project} --storage supabase\` to see the cloud state.`;
-          debugLog(`[session_load_context] SPLIT-BRAIN: local v${version} vs supabase v${altVersion}`);
-        }
+    const { SUPABASE_CONFIGURED, SUPABASE_URL, SUPABASE_KEY } = await import("../config.js");
+    if (activeStorageBackend === "local" && SUPABASE_CONFIGURED && SUPABASE_URL && SUPABASE_KEY) {
+      // Lightweight Supabase version check via REST (no full init/migrations)
+      const { supabaseGet } = await import("../utils/supabaseApi.js");
+      const rows = await supabaseGet("session_handoffs", {
+        project: `eq.${project}`,
+        select: "version",
+        limit: "1",
+      });
+      const altVersion = Array.isArray(rows) && rows[0] ? (rows[0] as any).version : null;
+      if (altVersion && altVersion !== version) {
+        splitBrainWarning = `\n\n⚠️ **SPLIT-BRAIN DETECTED** (v${version} local vs v${altVersion} cloud)\n` +
+          `Your local SQLite state (v${version}) differs from the Supabase cloud state (v${altVersion}). ` +
+          `This means another client (e.g. Claude Desktop) has saved state that this environment cannot see. ` +
+          `TODOs, summaries, and decisions may be stale. Please reconcile by running:\n` +
+          `  \`prism load ${project} --storage supabase\` to see the cloud state.`;
+        debugLog(`[session_load_context] SPLIT-BRAIN: local v${version} vs supabase v${altVersion}`);
       }
     } else if (activeStorageBackend === "supabase") {
-      // We're on Supabase — check if local SQLite has diverged
+      // Lightweight SQLite version check via direct file query (no full init/migrations)
       const dbPath = nodePath.join(os.homedir(), ".prism-mcp", "data.db");
       if (fs.existsSync(dbPath)) {
-        const { SqliteStorage } = await import("../storage/sqlite.js");
-        const altStorage = new SqliteStorage();
-        await altStorage.initialize();
-        const altData = await altStorage.loadContext(project, "quick", PRISM_USER_ID);
-        await altStorage.close();
-        if (altData) {
-          const altVersion = (altData as any)?.version;
+        let altClient: any = null;
+        try {
+          const { createClient } = await import("@libsql/client");
+          altClient = createClient({ url: `file:${dbPath}` });
+          const result = await altClient.execute(
+            `SELECT version FROM session_handoffs WHERE project = ? LIMIT 1`,
+            [project]
+          );
+          const altVersion = result.rows?.[0]?.version as number | undefined;
           if (altVersion && altVersion !== version) {
             splitBrainWarning = `\n\n⚠️ **SPLIT-BRAIN DETECTED** (v${version} cloud vs v${altVersion} local)\n` +
               `Your Supabase cloud state (v${version}) differs from the local SQLite state (v${altVersion}). ` +
@@ -696,6 +703,8 @@ export async function sessionLoadContextHandler(args: unknown) {
               `  \`prism load ${project} --storage local\` to see the local state.`;
             debugLog(`[session_load_context] SPLIT-BRAIN: supabase v${version} vs local v${altVersion}`);
           }
+        } finally {
+          if (altClient) altClient.close();
         }
       }
     }
