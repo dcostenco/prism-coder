@@ -41,6 +41,7 @@ program
       // Use the shared storage singleton (respects PRISM_STORAGE, dashboard config, etc.)
       const storage = await getStorage();
       const effectiveRole = role || await getSetting('default_role', '') || undefined;
+      const agentName = await getSetting('agent_name', '') || undefined;
       const data = await storage.loadContext(project, level, PRISM_USER_ID, effectiveRole);
 
       if (!data) {
@@ -62,6 +63,7 @@ program
       if (jsonOutput) {
         // Machine-readable JSON envelope — matches what prism_session_loader.sh produced
         const output = {
+          agent_name: agentName || null,
           handoff: [{
             project,
             role: effectiveRole || d.role || 'global',
@@ -87,7 +89,9 @@ program
         console.log(JSON.stringify(output, null, 2));
       } else {
         // Human-readable formatted output (same format as MCP tool)
-        let output = `📋 Session context for "${project}" (${level}):\n\n`;
+        let output = '';
+        if (agentName) output += `🤖 Agent: ${agentName}\n`;
+        output += `📋 Session context for "${project}" (${level}):\n\n`;
         if (d.last_summary) output += `📝 Last Summary: ${d.last_summary}\n`;
         if (d.active_branch) output += `🌿 Active Branch: ${d.active_branch}\n`;
         if (d.key_context) output += `💡 Key Context: ${d.key_context}\n`;
