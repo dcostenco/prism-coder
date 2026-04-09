@@ -789,8 +789,9 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v9.2.3 — Code Review Hardening**
+> **Current release: v9.2.4 — Cross-Backend Reconciliation**
 
+- 🔄 **v9.2.4 — Cross-Backend Reconciliation:** Automatic two-layer sync from Supabase → SQLite on startup. When Claude Desktop writes handoffs and ledger entries to Supabase, Antigravity (local SQLite) now automatically detects stale data and pulls newer handoffs + the 20 most recent ledger entries. 5-second timeout prevents startup freeze. Targeted ID lookups (not full table scans) keep it safe for large databases. 13 tests including malformed JSON resilience, multi-role dedup, and timeout handling.
 - 🔧 **v9.2.3 — Code Review Hardening:** 10x faster split-brain detection (lightweight direct queries replace full `StorageBackend` construction), variable shadowing fix in CLI, resource leak fix in SQLite alternate client.
 - 🚨 **v9.2.2 — Critical: Split-Brain Detection & Prevention:** When multiple MCP clients use different storage backends (e.g., Claude Desktop → Supabase, Antigravity → SQLite), session state could silently diverge, causing agents to act on stale TODOs and outdated context. **New: `--storage` flag** on `prism load` CLI lets callers explicitly select which backend to read from. **New: Split-Brain Drift Detection** in `session_load_context` — compares active and alternate backend versions at load time and warns prominently when they diverge. Session loader script updated to respect `PRISM_STORAGE` environment variable.
 - 💻 **v9.2.1 — CLI Full Feature Parity:** `prism load` text mode now delegates to the real `session_load_context` handler, giving CLI-only users the same enriched output as MCP clients: morning briefings, reality drift detection, SDM intuitive recall, visual memory index, role-scoped skill injection, behavioral warnings, importance scores, and agent identity. JSON mode now includes `agent_name` from dashboard settings. Session loader script PATH fix for Homebrew/nvm/volta environments.
@@ -1220,10 +1221,14 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 
 ## 📦 Milestones & Roadmap
 
-> **Current: v9.1.0** — Task Router v2 & Local Agent Hardening ([CHANGELOG](CHANGELOG.md))
+> **Current: v9.2.4** — Cross-Backend Reconciliation ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|
+| **v9.2.4** | 🔄 Cross-Backend Reconciliation — automatic Supabase → SQLite sync on startup, two-layer (handoff + ledger), 5s timeout, 13 tests |
+| **v9.2.3** | 🔧 Code Review Hardening — 10x faster split-brain detection, variable shadowing fix, resource leak fix |
+| **v9.2.2** | 🚨 Split-Brain Detection & Prevention — `--storage` flag, drift detection, session loader hardening |
+| **v9.2.1** | 💻 CLI Full Feature Parity — text mode enrichments, agent identity, PATH fix |
 | **v9.1.0** | 🚦 Task Router v2 — file-type routing signal, 6-signal heuristics, local agent streaming buffer |
 | **v9.0.5** | 🔒 JWKS Auth Security Hardening — audience/issuer validation, JWT failure logging, typed agent identity |
 | **v9.0** | 🧠 Autonomous Cognitive OS — Surprisal Gate, Cognitive Budget, Affect-Tagged Memory |
