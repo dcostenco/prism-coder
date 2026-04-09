@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.2.6] - 2026-04-09 — Windows CI Timeout Fix
+
+### Fixed
+- **Windows CI Flakiness** — CLI integration tests (`cli-integration.test.ts`) timed out on Windows + Node 22.x GitHub Actions runners. `npx tsx` cold-starts take 10-15s on Windows, exceeding Vitest's default 5s timeout. Added `{ timeout: 30_000 }` to the describe block. All 6 matrix combinations (ubuntu/macos/windows × Node 20/22) now pass reliably.
+
+### Engineering
+- 1 file changed: `tests/verification/cli-integration.test.ts`
+
+---
+
+## [9.2.5] - 2026-04-09 — Reconciliation Credential Probe Fix
+
+### Fixed
+- **Reconciliation Not Firing** — The `supabaseReady` guard in `getStorage()` only resolved dashboard credentials (from `prism-config.db`) when `requestedBackend === "supabase"`. When backend was `"local"` (the entire point of reconciliation), credentials were never looked up, so `canReconcile` was always `false`. Added a second credential probe specifically for the local + reconciliation path.
+- **Supabase Schema Mismatch** — The reconciliation `select` clause requested `key_context` column which doesn't exist in the Supabase `session_handoffs` table. Changed to `select: "*"` for schema-tolerant queries.
+
+### Verified
+- Live test: 9 handoffs + 43 ledger entries synced from Supabase → SQLite on first boot after fix.
+
+### Engineering
+- 2 files changed: `src/storage/index.ts`, `src/storage/reconcile.ts`
+- 13/13 reconciliation tests passing
+
+---
+
+## [9.2.4] - 2026-04-09 — Cross-Backend Reconciliation
+
+### Added
+- **Automatic Supabase → SQLite Reconciliation** — New `src/storage/reconcile.ts` module implements two-layer sync that runs automatically during `getStorage()` initialization when the backend is local SQLite but Supabase credentials exist:
+  - **Layer 1 (Handoffs):** Compares `updated_at` timestamps between Supabase and SQLite. Upserts newer remote handoffs into local SQLite.
+  - **Layer 2 (Ledger):** For any project with a stale handoff, pulls the 20 most recent ledger entries from Supabase, deduplicating by ID against local entries.
+- **13 New Tests** (`tests/storage/reconcile.test.ts`) — Syncing to empty local DB, skipping when local is newer, offline mode, ledger deduplication, malformed JSON resilience, multi-role project dedup, and Supabase timeout handling.
+
+### Fixed
+- **Race Condition** — Switched reconciliation from fire-and-forget to `await` in `getStorage()`, preventing `closeStorage()` from nulling the singleton mid-write.
+- **Unbounded Queries** — Replaced full-table ledger scans with targeted ID-based lookups for deduplication.
+
+### Performance
+- **5s Timeout** — `withTimeout()` wrapper on all Supabase REST calls prevents startup freeze if Supabase is unreachable.
+- **Safe JSON Parsing** — `safeParseArray()` prevents malformed Supabase JSON strings from aborting reconciliation.
+- **Project Dedup** — `Set<string>` for project tracking avoids redundant network calls for multi-role projects.
+
+### Design Decisions
+- **Read-Only Sync** — Reconciliation only pulls from Supabase; it never writes to the cloud, preserving local-first integrity.
+- **Targeted Ledger Sync** — Only the last 20 ledger entries per stale project are synced, keeping startup latency under 800ms even for large databases.
+
+### Engineering
+- 3 files changed: `src/storage/reconcile.ts` (new), `src/storage/index.ts`, `tests/storage/reconcile.test.ts` (new)
+- 1049 tests across 48 suites, all passing
+
+---
+
 ## [9.2.3] - 2026-04-09 — Code Review Hardening
 
 ### Performance
