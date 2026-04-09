@@ -74,21 +74,21 @@ export async function getStorage(): Promise<StorageBackend> {
   // pull any newer handoffs from Supabase into SQLite. This fixes
   // the split-brain where Claude Desktop writes go to Supabase but
   // Antigravity reads from SQLite and sees stale data.
-  // Fire-and-forget: never blocks startup, errors are logged silently.
+  //
+  // AWAITED (not fire-and-forget) to prevent closeStorage() from
+  // nulling the singleton while reconciliation is still writing.
+  // The 5s per-call timeout in reconcile.ts caps total wall time.
   if (activeStorageBackend === "local" && supabaseReady) {
-    // Dynamic import to avoid loading Supabase modules when not needed
-    import("./reconcile.js").then(async ({ reconcileHandoffs }) => {
-      try {
-        const { SqliteStorage } = await import("./sqlite.js");
-        const sqliteInstance = storageInstance as InstanceType<typeof SqliteStorage>;
-        const getTimestamps = () => sqliteInstance.getHandoffTimestamps();
-        await reconcileHandoffs(storageInstance!, getTimestamps);
-      } catch (err) {
-        debugLog(`[Prism Storage] Reconciliation skipped: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }).catch(() => {
-      // Silently ignore — reconciliation is best-effort
-    });
+    try {
+      const { reconcileHandoffs } = await import("./reconcile.js");
+      const { SqliteStorage } = await import("./sqlite.js");
+      const sqliteInstance = storageInstance as InstanceType<typeof SqliteStorage>;
+      const getTimestamps = () => sqliteInstance.getHandoffTimestamps();
+      await reconcileHandoffs(storageInstance!, getTimestamps);
+    } catch (err) {
+      // Non-fatal: reconciliation is best-effort
+      debugLog(`[Prism Storage] Reconciliation skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   return storageInstance;

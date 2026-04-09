@@ -14,18 +14,19 @@
  *     2. Supabase credentials are available (env or dashboard config)
  *
  * PERFORMANCE:
- *   - 2 Supabase REST calls:
+ *   - 2 Supabase REST calls per synced project:
  *     - session_handoffs: 1-5 rows (~1KB) → instant
- *     - session_ledger: last 20 entries per synced project (~50KB) → fast
- *   - Local SQLite: bulk timestamp check + N upserts
+ *     - session_ledger: last 20 entries per stale project (~50KB) → fast
+ *   - Local SQLite: bulk timestamp check + targeted ID lookups + N upserts
  *   - Total: ~300-800ms (dominated by network, not DB)
- *   - Safe for databases with millions of entries — we only fetch recent rows
+ *   - Safe for databases with millions of entries — scoped queries only
  *
  * DESIGN:
  *   - Read-only on Supabase (never writes to remote)
  *   - Last-writer-wins by updated_at/created_at timestamp
  *   - Non-blocking: wrapped in try/catch, errors downgraded to debug log
- *   - Idempotent: safe to run on every boot (ledger uses INSERT OR IGNORE)
+ *   - Idempotent: safe to run on every boot (ledger uses ID dedup)
+ *   - 5-second timeout on Supabase calls to prevent startup freeze
  */
 
 import { supabaseGet } from "../utils/supabaseApi.js";
@@ -33,11 +34,48 @@ import { debugLog } from "../utils/logger.js";
 import { PRISM_USER_ID } from "../config.js";
 import type { StorageBackend } from "./interface.js";
 
+/** Timeout for each Supabase REST call (ms). Prevents startup freeze. */
+const RECONCILE_TIMEOUT_MS = 5_000;
+
 export interface ReconcileResult {
   checked: number;
   synced: number;
   projects: string[];
   ledgerEntriesSynced: number;
+}
+
+/**
+ * Safely parse a JSON array field from Supabase.
+ * Handles: arrays (pass-through), JSON strings (parse), garbage (empty array).
+ * Never throws.
+ */
+function safeParseArray(val: unknown): string[] {
+  if (Array.isArray(val)) return val;
+  if (typeof val === "string") {
+    try {
+      const parsed = JSON.parse(val);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
+ * Wrap a promise with a timeout. Rejects with AbortError if exceeded.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`[Reconcile] Timeout after ${ms}ms: ${label}`)),
+      ms,
+    );
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
 }
 
 /**
@@ -59,10 +97,15 @@ export async function reconcileHandoffs(
     // ═══════════════════════════════════════════════════════════
 
     // Step 1: Fetch all handoffs from Supabase (single REST call, ~1-5 rows)
-    const remoteHandoffs = await supabaseGet("session_handoffs", {
-      user_id: `eq.${PRISM_USER_ID}`,
-      select: "project,user_id,role,last_summary,pending_todo,active_decisions,keywords,key_context,active_branch,version,metadata,updated_at",
-    });
+    // Timeout prevents startup freeze if Supabase is slow/unreachable.
+    const remoteHandoffs = await withTimeout(
+      supabaseGet("session_handoffs", {
+        user_id: `eq.${PRISM_USER_ID}`,
+        select: "project,user_id,role,last_summary,pending_todo,active_decisions,keywords,key_context,active_branch,version,metadata,updated_at",
+      }),
+      RECONCILE_TIMEOUT_MS,
+      "fetch handoffs",
+    ) as Record<string, unknown>[];
 
     if (!Array.isArray(remoteHandoffs) || remoteHandoffs.length === 0) {
       debugLog("[Reconcile] No remote handoffs found — nothing to sync");
@@ -81,7 +124,8 @@ export async function reconcileHandoffs(
     }
 
     // Step 3: Compare and sync only stale handoffs
-    const syncedProjects: string[] = [];
+    // Use a Set to deduplicate projects with multiple roles (FIX #6)
+    const syncedProjectsSet = new Set<string>();
 
     for (const remote of remoteHandoffs) {
       const project = remote.project as string;
@@ -95,28 +139,23 @@ export async function reconcileHandoffs(
         || (remoteUpdatedAt && new Date(remoteUpdatedAt) > new Date(localUpdatedAt));
 
       if (needsSync) {
+        // FIX #4: safeParseArray prevents JSON.parse crash from aborting all projects
         await localStorage.saveHandoff({
           project,
           user_id: PRISM_USER_ID,
           role,
-          last_summary: remote.last_summary ?? null,
-          pending_todo: Array.isArray(remote.pending_todo)
-            ? remote.pending_todo
-            : (typeof remote.pending_todo === "string" ? JSON.parse(remote.pending_todo) : []),
-          active_decisions: Array.isArray(remote.active_decisions)
-            ? remote.active_decisions
-            : (typeof remote.active_decisions === "string" ? JSON.parse(remote.active_decisions) : []),
-          keywords: Array.isArray(remote.keywords)
-            ? remote.keywords
-            : (typeof remote.keywords === "string" ? JSON.parse(remote.keywords) : []),
-          key_context: remote.key_context ?? null,
-          active_branch: remote.active_branch ?? null,
-          metadata: typeof remote.metadata === "object" ? remote.metadata : {},
+          last_summary: (remote.last_summary as string) ?? null,
+          pending_todo: safeParseArray(remote.pending_todo),
+          active_decisions: safeParseArray(remote.active_decisions),
+          keywords: safeParseArray(remote.keywords),
+          key_context: (remote.key_context as string) ?? null,
+          active_branch: (remote.active_branch as string) ?? null,
+          metadata: typeof remote.metadata === "object" && remote.metadata !== null ? remote.metadata as Record<string, unknown> : {},
         });
 
         result.synced++;
         result.projects.push(project);
-        syncedProjects.push(project);
+        syncedProjectsSet.add(project);  // FIX #6: dedup multi-role projects
         debugLog(
           `[Reconcile] Synced handoff "${project}" (role: ${role}) — ` +
           `remote: ${remoteUpdatedAt}, local: ${localUpdatedAt || "missing"}`
@@ -136,15 +175,16 @@ export async function reconcileHandoffs(
     // doing a bulk data migration.
     // ═══════════════════════════════════════════════════════════
 
-    if (syncedProjects.length > 0) {
+    if (syncedProjectsSet.size > 0) {
       result.ledgerEntriesSynced = await reconcileLedger(
         localStorage,
-        syncedProjects,
+        [...syncedProjectsSet],  // FIX #6: deduplicated list
       );
     }
 
     if (result.synced > 0) {
-      console.error(
+      // FIX #7: Use debugLog instead of console.error for non-error output
+      debugLog(
         `[Prism Reconcile] Synced ${result.synced} handoff(s)` +
         `${result.ledgerEntriesSynced > 0 ? ` + ${result.ledgerEntriesSynced} ledger entries` : ""}` +
         ` from Supabase → SQLite: ${result.projects.join(", ")}`
@@ -166,11 +206,11 @@ export async function reconcileHandoffs(
 /**
  * Pull recent ledger entries from Supabase for the given projects.
  *
- * Uses created_at dedup: if a ledger entry with the same id already
- * exists locally, it's skipped. This makes the operation idempotent.
+ * Uses targeted ID lookup for dedup: only queries the specific IDs
+ * returned from Supabase, not the entire local ledger. (FIX #2)
  *
  * @param localStorage - The initialized StorageBackend (SQLite)
- * @param projects - Projects that had stale handoffs
+ * @param projects - Deduplicated list of projects with stale handoffs
  * @returns Number of ledger entries synced
  */
 async function reconcileLedger(
@@ -182,24 +222,30 @@ async function reconcileLedger(
   for (const project of projects) {
     try {
       // Fetch the 20 most recent ledger entries for this project
-      const remoteLedger = await supabaseGet("session_ledger", {
-        user_id: `eq.${PRISM_USER_ID}`,
-        project: `eq.${project}`,
-        archived_at: "is.null",
-        deleted_at: "is.null",
-        select: "id,project,conversation_id,summary,user_id,role,todos,files_changed,decisions,keywords,event_type,importance,created_at,session_date",
-        order: "created_at.desc",
-        limit: "20",
-      });
+      // Timeout prevents hang if Supabase is slow (FIX #3)
+      const remoteLedger = await withTimeout(
+        supabaseGet("session_ledger", {
+          user_id: `eq.${PRISM_USER_ID}`,
+          project: `eq.${project}`,
+          archived_at: "is.null",
+          deleted_at: "is.null",
+          select: "id,project,conversation_id,summary,user_id,role,todos,files_changed,decisions,keywords,event_type,importance,created_at,session_date",
+          order: "created_at.desc",
+          limit: "20",
+        }),
+        RECONCILE_TIMEOUT_MS,
+        `fetch ledger for ${project}`,
+      ) as Record<string, unknown>[];
 
       if (!Array.isArray(remoteLedger) || remoteLedger.length === 0) {
         continue;
       }
 
-      // Check which entries already exist locally (by id)
+      // FIX #2: Only query the specific IDs we need to check — not the entire ledger.
+      // This is O(remote_count) not O(total_ledger_entries).
+      const remoteIds = remoteLedger.map(e => e.id as string);
       const existingEntries = await localStorage.getLedgerEntries({
-        project: `eq.${project}`,
-        user_id: `eq.${PRISM_USER_ID}`,
+        ids: remoteIds,
         select: "id",
       });
       const existingIds = new Set(
@@ -221,10 +267,10 @@ async function reconcileLedger(
             summary: entry.summary as string,
             user_id: PRISM_USER_ID,
             role: (entry.role as string) || "global",
-            todos: Array.isArray(entry.todos) ? entry.todos : [],
-            files_changed: Array.isArray(entry.files_changed) ? entry.files_changed : [],
-            decisions: Array.isArray(entry.decisions) ? entry.decisions : [],
-            keywords: Array.isArray(entry.keywords) ? entry.keywords : [],
+            todos: safeParseArray(entry.todos),
+            files_changed: safeParseArray(entry.files_changed),
+            decisions: safeParseArray(entry.decisions),
+            keywords: safeParseArray(entry.keywords),
             event_type: (entry.event_type as string) || "session",
             importance: (entry.importance as number) || 0,
           });
@@ -240,7 +286,7 @@ async function reconcileLedger(
 
       debugLog(
         `[Reconcile] Ledger sync for "${project}": ${remoteLedger.length} remote, ` +
-        `${existingIds.size} local, ${totalSynced} new`
+        `${existingIds.size} already local, ${totalSynced} new`
       );
     } catch (err) {
       debugLog(

@@ -31,7 +31,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
   let dbPath: string;
 
   beforeEach(async () => {
-    // Create a temp DB for each test
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "prism-reconcile-"));
     dbPath = path.join(tmpDir, "test.db");
     storage = new SqliteStorage();
@@ -51,7 +50,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
   // ═══════════════════════════════════════════════════════
 
   it("should sync a newer remote handoff into empty local SQLite", async () => {
-    // supabaseGet call 1: handoffs
     mockSupabaseGet.mockResolvedValueOnce([{
       project: "prism-mcp",
       user_id: "default",
@@ -66,7 +64,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
       metadata: {},
       updated_at: "2026-04-09T22:00:00Z",
     }]);
-    // supabaseGet call 2: ledger for synced project
     mockSupabaseGet.mockResolvedValueOnce([]);
 
     const getTimestamps = () => storage.getHandoffTimestamps();
@@ -76,14 +73,12 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
     expect(result.synced).toBe(1);
     expect(result.projects).toContain("prism-mcp");
 
-    // Verify the handoff was written to local SQLite
     const context = await storage.loadContext("prism-mcp", "standard", "default");
     expect(context).not.toBeNull();
     expect((context as any).last_summary).toContain("Grant applications");
   });
 
   it("should NOT sync when local is newer than remote", async () => {
-    // Save a local handoff first
     await storage.saveHandoff({
       project: "prism-mcp",
       user_id: "default",
@@ -93,7 +88,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
       keywords: ["local"],
     });
 
-    // Remote has an OLDER handoff
     mockSupabaseGet.mockResolvedValueOnce([{
       project: "prism-mcp",
       user_id: "default",
@@ -106,7 +100,7 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
       active_branch: null,
       version: 1,
       metadata: {},
-      updated_at: "2020-01-01T00:00:00Z", // Very old
+      updated_at: "2020-01-01T00:00:00Z",
     }]);
 
     const getTimestamps = () => storage.getHandoffTimestamps();
@@ -116,13 +110,11 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
     expect(result.synced).toBe(0);
     expect(result.ledgerEntriesSynced).toBe(0);
 
-    // Verify local data is unchanged
     const context = await storage.loadContext("prism-mcp", "standard", "default");
     expect((context as any).last_summary).toContain("Local is latest");
   });
 
   it("should sync when remote is newer than local", async () => {
-    // Save a local handoff first
     await storage.saveHandoff({
       project: "prism-mcp",
       user_id: "default",
@@ -132,7 +124,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
       keywords: ["old"],
     });
 
-    // Remote has a NEWER handoff
     mockSupabaseGet.mockResolvedValueOnce([{
       project: "prism-mcp",
       user_id: "default",
@@ -145,9 +136,8 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
       active_branch: "main",
       version: 5,
       metadata: {},
-      updated_at: new Date(Date.now() + 86400000).toISOString(), // Tomorrow
+      updated_at: new Date(Date.now() + 86400000).toISOString(),
     }]);
-    // supabaseGet call 2: ledger for synced project
     mockSupabaseGet.mockResolvedValueOnce([]);
 
     const getTimestamps = () => storage.getHandoffTimestamps();
@@ -156,7 +146,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
     expect(result.checked).toBe(1);
     expect(result.synced).toBe(1);
 
-    // Verify local was updated with remote data
     const context = await storage.loadContext("prism-mcp", "standard", "default");
     expect((context as any).last_summary).toContain("$487K pipeline");
     expect((context as any).pending_todo).toContain("Watch inbox for EV response");
@@ -184,7 +173,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
   });
 
   it("should handle multiple projects — only sync stale ones", async () => {
-    // Local has two projects
     await storage.saveHandoff({
       project: "project-a",
       user_id: "default",
@@ -200,7 +188,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
 
     const futureDate = new Date(Date.now() + 86400000).toISOString();
 
-    // supabaseGet call 1: handoffs
     mockSupabaseGet.mockResolvedValueOnce([
       {
         project: "project-a",
@@ -214,7 +201,7 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
         active_branch: null,
         version: 1,
         metadata: {},
-        updated_at: "2020-01-01T00:00:00Z", // Older than local
+        updated_at: "2020-01-01T00:00:00Z",
       },
       {
         project: "project-b",
@@ -228,20 +215,18 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
         active_branch: null,
         version: 3,
         metadata: {},
-        updated_at: futureDate, // Newer than local
+        updated_at: futureDate,
       },
     ]);
-    // supabaseGet call 2: ledger for project-b (only synced project)
     mockSupabaseGet.mockResolvedValueOnce([]);
 
     const getTimestamps = () => storage.getHandoffTimestamps();
     const result = await reconcileHandoffs(storage, getTimestamps);
 
     expect(result.checked).toBe(2);
-    expect(result.synced).toBe(1); // Only project-b
+    expect(result.synced).toBe(1);
     expect(result.projects).toEqual(["project-b"]);
 
-    // Verify project-a unchanged, project-b updated
     const contextA = await storage.loadContext("project-a", "standard", "default");
     expect((contextA as any).last_summary).toContain("Project A local");
 
@@ -250,7 +235,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
   });
 
   it("should work without getLocalTimestamps (fallback syncs all)", async () => {
-    // supabaseGet call 1: handoffs
     mockSupabaseGet.mockResolvedValueOnce([{
       project: "fallback-test",
       user_id: "default",
@@ -265,10 +249,8 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
       metadata: {},
       updated_at: "2026-04-09T22:00:00Z",
     }]);
-    // supabaseGet call 2: ledger
     mockSupabaseGet.mockResolvedValueOnce([]);
 
-    // No getLocalTimestamps provided — should still sync
     const result = await reconcileHandoffs(storage);
 
     expect(result.synced).toBe(1);
@@ -276,11 +258,10 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
   });
 
   // ═══════════════════════════════════════════════════════
-  // LAYER 2: Ledger Reconciliation (recent session history)
+  // LAYER 2: Ledger Reconciliation
   // ═══════════════════════════════════════════════════════
 
   it("should sync recent ledger entries for stale projects", async () => {
-    // supabaseGet call 1: handoffs — remote is newer
     mockSupabaseGet.mockResolvedValueOnce([{
       project: "prism-mcp",
       user_id: "default",
@@ -296,7 +277,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
       updated_at: new Date(Date.now() + 86400000).toISOString(),
     }]);
 
-    // supabaseGet call 2: ledger entries for prism-mcp
     mockSupabaseGet.mockResolvedValueOnce([
       {
         id: "ledger-001",
@@ -338,7 +318,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
     expect(result.synced).toBe(1);
     expect(result.ledgerEntriesSynced).toBe(2);
 
-    // Verify ledger entries exist locally via direct query
     const entries = await storage.getLedgerEntries({
       project: `eq.prism-mcp`,
       user_id: `eq.default`,
@@ -346,7 +325,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
     const entryList = entries as any[];
     expect(entryList.length).toBeGreaterThanOrEqual(2);
 
-    // Verify the Anthropic outreach entry is in the ledger
     const anthropicEntry = entryList.find(
       (e: any) => e.summary?.includes("Anthropic")
     );
@@ -355,7 +333,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
   });
 
   it("should NOT duplicate ledger entries that already exist locally", async () => {
-    // Pre-populate local with one ledger entry
     await storage.saveLedger({
       id: "ledger-existing",
       project: "prism-mcp",
@@ -367,7 +344,6 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
       keywords: [],
     });
 
-    // supabaseGet call 1: handoff
     mockSupabaseGet.mockResolvedValueOnce([{
       project: "prism-mcp",
       user_id: "default",
@@ -383,10 +359,9 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
       updated_at: new Date(Date.now() + 86400000).toISOString(),
     }]);
 
-    // supabaseGet call 2: ledger — includes the entry that already exists
     mockSupabaseGet.mockResolvedValueOnce([
       {
-        id: "ledger-existing", // Same ID as local
+        id: "ledger-existing",
         project: "prism-mcp",
         conversation_id: "conv-local",
         summary: "Already exists locally",
@@ -402,7 +377,7 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
         session_date: "2026-04-07T10:00:00Z",
       },
       {
-        id: "ledger-new", // New entry
+        id: "ledger-new",
         project: "prism-mcp",
         conversation_id: "conv-remote",
         summary: "New from Supabase",
@@ -422,12 +397,10 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
     const getTimestamps = () => storage.getHandoffTimestamps();
     const result = await reconcileHandoffs(storage, getTimestamps);
 
-    // Only the new entry should be synced
     expect(result.ledgerEntriesSynced).toBe(1);
   });
 
   it("should skip ledger sync for up-to-date projects", async () => {
-    // Local is newer — no handoff sync needed
     await storage.saveHandoff({
       project: "prism-mcp",
       user_id: "default",
@@ -453,10 +426,106 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
     const getTimestamps = () => storage.getHandoffTimestamps();
     const result = await reconcileHandoffs(storage, getTimestamps);
 
-    // No sync happened — supabaseGet should only be called once (handoffs)
-    // Ledger REST call should NOT have happened
     expect(result.synced).toBe(0);
     expect(result.ledgerEntriesSynced).toBe(0);
     expect(mockSupabaseGet).toHaveBeenCalledTimes(1);
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // EDGE CASES (from code review)
+  // ═══════════════════════════════════════════════════════
+
+  it("should handle malformed JSON in handoff fields without crashing", async () => {
+    mockSupabaseGet.mockResolvedValueOnce([{
+      project: "corrupt-test",
+      user_id: "default",
+      role: "global",
+      last_summary: "Valid summary",
+      pending_todo: "{not valid json[",         // Malformed JSON string
+      active_decisions: "also broken {{{",       // Malformed JSON string
+      keywords: null,                            // null
+      key_context: "some context",
+      active_branch: null,
+      version: 1,
+      metadata: null,                            // null metadata
+      updated_at: new Date(Date.now() + 86400000).toISOString(),
+    }]);
+    mockSupabaseGet.mockResolvedValueOnce([]);
+
+    const getTimestamps = () => storage.getHandoffTimestamps();
+    const result = await reconcileHandoffs(storage, getTimestamps);
+
+    // Should sync successfully despite malformed fields — defaults to []
+    expect(result.synced).toBe(1);
+
+    const context = await storage.loadContext("corrupt-test", "standard", "default");
+    expect(context).not.toBeNull();
+    expect((context as any).last_summary).toContain("Valid summary");
+    // pending_todo should default to empty array, not crash
+    expect((context as any).pending_todo).toEqual([]);
+  });
+
+  it("should deduplicate multi-role projects in ledger sync", async () => {
+    const futureDate = new Date(Date.now() + 86400000).toISOString();
+
+    // Same project, two roles — both stale
+    mockSupabaseGet.mockResolvedValueOnce([
+      {
+        project: "multi-role",
+        user_id: "default",
+        role: "global",
+        last_summary: "Global role",
+        pending_todo: [],
+        active_decisions: [],
+        keywords: [],
+        key_context: null,
+        active_branch: null,
+        version: 1,
+        metadata: {},
+        updated_at: futureDate,
+      },
+      {
+        project: "multi-role",
+        user_id: "default",
+        role: "dev",
+        last_summary: "Dev role",
+        pending_todo: [],
+        active_decisions: [],
+        keywords: [],
+        key_context: null,
+        active_branch: null,
+        version: 1,
+        metadata: {},
+        updated_at: futureDate,
+      },
+    ]);
+    // Only ONE ledger call should happen (deduped project)
+    mockSupabaseGet.mockResolvedValueOnce([]);
+
+    const getTimestamps = () => storage.getHandoffTimestamps();
+    const result = await reconcileHandoffs(storage, getTimestamps);
+
+    expect(result.synced).toBe(2); // Both roles synced
+    // But supabaseGet should be called exactly 2 times:
+    //   1. handoffs fetch
+    //   2. ledger fetch for "multi-role" (ONCE, not twice)
+    expect(mockSupabaseGet).toHaveBeenCalledTimes(2);
+  });
+
+  it("should handle Supabase timeout gracefully", async () => {
+    // Simulate a slow Supabase that never resolves
+    mockSupabaseGet.mockImplementationOnce(
+      () => new Promise((resolve) => setTimeout(resolve, 60_000))
+    );
+
+    const getTimestamps = () => storage.getHandoffTimestamps();
+    const start = Date.now();
+    const result = await reconcileHandoffs(storage, getTimestamps);
+    const elapsed = Date.now() - start;
+
+    // Should timeout at ~5s, not hang for 60s
+    expect(elapsed).toBeLessThan(10_000);
+    expect(result.synced).toBe(0);
+    expect(result.checked).toBe(0);
   });
 });
