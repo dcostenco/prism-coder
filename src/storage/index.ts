@@ -68,6 +68,29 @@ export async function getStorage(): Promise<StorageBackend> {
   }
 
   await storageInstance.initialize();
+
+  // ─── v9.2.4: Cross-Backend Handoff Reconciliation ──────────────
+  // When running on local SQLite but Supabase credentials exist,
+  // pull any newer handoffs from Supabase into SQLite. This fixes
+  // the split-brain where Claude Desktop writes go to Supabase but
+  // Antigravity reads from SQLite and sees stale data.
+  // Fire-and-forget: never blocks startup, errors are logged silently.
+  if (activeStorageBackend === "local" && supabaseReady) {
+    // Dynamic import to avoid loading Supabase modules when not needed
+    import("./reconcile.js").then(async ({ reconcileHandoffs }) => {
+      try {
+        const { SqliteStorage } = await import("./sqlite.js");
+        const sqliteInstance = storageInstance as InstanceType<typeof SqliteStorage>;
+        const getTimestamps = () => sqliteInstance.getHandoffTimestamps();
+        await reconcileHandoffs(storageInstance!, getTimestamps);
+      } catch (err) {
+        debugLog(`[Prism Storage] Reconciliation skipped: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }).catch(() => {
+      // Silently ignore — reconciliation is best-effort
+    });
+  }
+
   return storageInstance;
 }
 
