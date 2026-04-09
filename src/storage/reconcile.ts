@@ -101,7 +101,7 @@ export async function reconcileHandoffs(
     const remoteHandoffs = await withTimeout(
       supabaseGet("session_handoffs", {
         user_id: `eq.${PRISM_USER_ID}`,
-        select: "project,user_id,role,last_summary,pending_todo,active_decisions,keywords,key_context,active_branch,version,metadata,updated_at",
+        select: "*",
       }),
       RECONCILE_TIMEOUT_MS,
       "fetch handoffs",

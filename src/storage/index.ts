@@ -75,19 +75,42 @@ export async function getStorage(): Promise<StorageBackend> {
   // the split-brain where Claude Desktop writes go to Supabase but
   // Antigravity reads from SQLite and sees stale data.
   //
-  // AWAITED (not fire-and-forget) to prevent closeStorage() from
-  // nulling the singleton while reconciliation is still writing.
-  // The 5s per-call timeout in reconcile.ts caps total wall time.
-  if (activeStorageBackend === "local" && supabaseReady) {
-    try {
-      const { reconcileHandoffs } = await import("./reconcile.js");
-      const { SqliteStorage } = await import("./sqlite.js");
-      const sqliteInstance = storageInstance as InstanceType<typeof SqliteStorage>;
-      const getTimestamps = () => sqliteInstance.getHandoffTimestamps();
-      await reconcileHandoffs(storageInstance!, getTimestamps);
-    } catch (err) {
-      // Non-fatal: reconciliation is best-effort
-      debugLog(`[Prism Storage] Reconciliation skipped: ${err instanceof Error ? err.message : String(err)}`);
+  // IMPORTANT: The supabaseReady check above only resolves dashboard
+  // credentials when requestedBackend==="supabase". For reconciliation
+  // we need credentials even when backend is "local", so we do a
+  // second probe here.
+  if (activeStorageBackend === "local") {
+    let canReconcile = supabaseReady;
+    if (!canReconcile) {
+      // Probe dashboard config for Supabase credentials
+      const dashUrl = await getSetting("SUPABASE_URL");
+      const dashKey = await getSetting("SUPABASE_KEY");
+      if (dashUrl && dashKey) {
+        try {
+          const parsed = new URL(dashUrl);
+          if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+            canReconcile = true;
+            process.env.SUPABASE_URL = dashUrl;
+            process.env.SUPABASE_KEY = dashKey;
+            debugLog("[Prism Storage] Reconciliation: using Supabase credentials from dashboard config");
+          }
+        } catch {
+          // Invalid URL — skip reconciliation
+        }
+      }
+    }
+
+    if (canReconcile) {
+      try {
+        const { reconcileHandoffs } = await import("./reconcile.js");
+        const { SqliteStorage } = await import("./sqlite.js");
+        const sqliteInstance = storageInstance as InstanceType<typeof SqliteStorage>;
+        const getTimestamps = () => sqliteInstance.getHandoffTimestamps();
+        await reconcileHandoffs(storageInstance!, getTimestamps);
+      } catch (err) {
+        // Non-fatal: reconciliation is best-effort
+        debugLog(`[Prism Storage] Reconciliation skipped: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 
