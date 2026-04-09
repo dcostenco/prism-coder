@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.2.2] - 2026-04-09 — Critical: Split-Brain Detection & Prevention
+
+### ⚠️ Security / Data Integrity
+
+- **Split-Brain Drift Detection** — `session_load_context` now detects when the active storage backend (e.g. SQLite) is out of sync with an alternate backend (e.g. Supabase). When both backends exist and have different versions, a `⚠️ SPLIT-BRAIN DETECTED` warning is injected prominently into the context response. This prevents agents from unknowingly acting on stale TODOs, outdated summaries, or completed tasks from a divergent backend.
+
+### Added
+
+- **`--storage` CLI Flag** — `prism load` now accepts `--storage <local|supabase>` to explicitly select which storage backend to read from. This is critical for environments where the CLI's shell environment inherits different `PRISM_STORAGE` settings than the MCP server config. Without this flag, `prism load` could silently read from Supabase while the MCP server writes to SQLite (or vice versa), returning stale state.
+
+### Fixed
+
+- **Session Loader Split-Brain** — `prism_session_loader.sh` now passes `--storage` flag (defaulting to `PRISM_STORAGE` env var, falling back to `local`) to prevent the CLI from reading the wrong backend when Supabase credentials are present but the MCP server is configured for local SQLite.
+
+### Root Cause
+
+When multiple MCP clients use different storage backends (e.g., Claude Desktop → Supabase, Antigravity → SQLite), the two backends operate as completely independent data silos with no sync mechanism. The `prism load` CLI inherited `PRISM_STORAGE` from the shell environment (defaulting to `supabase` when Supabase credentials exist), regardless of what the MCP server was configured to use. This caused the CLI to return state from the wrong backend — including stale TODOs that had already been completed in the real backend.
+
+### Engineering
+- TypeScript: clean, zero errors
+- 3 files changed: `src/cli.ts`, `src/tools/ledgerHandlers.ts`, `README.md`
+- Session loader script updated: `prism_session_loader.sh`
+
+---
+
+
+
 ## [9.2.1] - 2026-04-09 — CLI Full Feature Parity
 
 ### Added

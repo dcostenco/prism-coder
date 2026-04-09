@@ -24,7 +24,7 @@ import { buildVaultDirectory } from "../utils/vaultExporter.js";
  */
 
 import { debugLog } from "../utils/logger.js";
-import { getStorage } from "../storage/index.js";
+import { getStorage, activeStorageBackend } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
 import { getCurrentGitState, getGitDrift } from "../utils/git.js";
@@ -651,6 +651,58 @@ export async function sessionLoadContextHandler(args: unknown) {
     ? `\n\n🔑 Session version: ${version}. Pass expected_version: ${version} when saving handoff.`
     : "";
 
+  // ─── v9.2.2: Split-Brain Drift Detection ───────────────────
+  // When using one storage backend (e.g. SQLite), check if an
+  // alternate backend (e.g. Supabase) exists with a different
+  // version. This prevents agents from unknowingly acting on
+  // stale state from a diverged backend.
+  let splitBrainWarning = "";
+  try {
+    const { SUPABASE_CONFIGURED } = await import("../config.js");
+    if (activeStorageBackend === "local" && SUPABASE_CONFIGURED) {
+      // We're on SQLite but Supabase creds exist — check for divergence
+      const { SupabaseStorage } = await import("../storage/supabase.js");
+      const altStorage = new SupabaseStorage();
+      await altStorage.initialize();
+      const altData = await altStorage.loadContext(project, "quick", PRISM_USER_ID);
+      await altStorage.close();
+      if (altData) {
+        const altVersion = (altData as any)?.version;
+        if (altVersion && altVersion !== version) {
+          splitBrainWarning = `\n\n⚠️ **SPLIT-BRAIN DETECTED** (v${version} local vs v${altVersion} cloud)\n` +
+            `Your local SQLite state (v${version}) differs from the Supabase cloud state (v${altVersion}). ` +
+            `This means another client (e.g. Claude Desktop) has saved state that this environment cannot see. ` +
+            `TODOs, summaries, and decisions may be stale. Please reconcile by running:\n` +
+            `  \`prism load ${project} --storage supabase\` to see the cloud state.`;
+          debugLog(`[session_load_context] SPLIT-BRAIN: local v${version} vs supabase v${altVersion}`);
+        }
+      }
+    } else if (activeStorageBackend === "supabase") {
+      // We're on Supabase — check if local SQLite has diverged
+      const dbPath = nodePath.join(os.homedir(), ".prism-mcp", "data.db");
+      if (fs.existsSync(dbPath)) {
+        const { SqliteStorage } = await import("../storage/sqlite.js");
+        const altStorage = new SqliteStorage();
+        await altStorage.initialize();
+        const altData = await altStorage.loadContext(project, "quick", PRISM_USER_ID);
+        await altStorage.close();
+        if (altData) {
+          const altVersion = (altData as any)?.version;
+          if (altVersion && altVersion !== version) {
+            splitBrainWarning = `\n\n⚠️ **SPLIT-BRAIN DETECTED** (v${version} cloud vs v${altVersion} local)\n` +
+              `Your Supabase cloud state (v${version}) differs from the local SQLite state (v${altVersion}). ` +
+              `This means another client has saved state that this environment cannot see. ` +
+              `TODOs, summaries, and decisions may be stale. Please reconcile by running:\n` +
+              `  \`prism load ${project} --storage local\` to see the local state.`;
+            debugLog(`[session_load_context] SPLIT-BRAIN: supabase v${version} vs local v${altVersion}`);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    debugLog(`[session_load_context] Split-brain check failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   // ─── Reality Drift Detection (v2.0 Step 5) ───
   // Check if the developer changed code since the last handoff save.
   let driftReport = "";
@@ -869,7 +921,7 @@ export async function sessionLoadContextHandler(args: unknown) {
   }
 
   // Build the response object before v4.0 augmentations
-  let responseText = `📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${driftReport}${briefingBlock}${sdmRecallBlock}${greetingBlock}${visualMemoryBlock}${skillBlock}${versionNote}`;
+  let responseText = `📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${splitBrainWarning}${driftReport}${briefingBlock}${sdmRecallBlock}${greetingBlock}${visualMemoryBlock}${skillBlock}${versionNote}`;
 
   // ─── v4.0: Behavioral Warnings Injection ───────────────────
   // If loadContext returned behavioral_warnings, add them to the

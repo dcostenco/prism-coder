@@ -23,6 +23,15 @@ program
 // Designed for environments that cannot use MCP tools directly
 // (Antigravity, Bash scripts, CI/CD pipelines).
 //
+// CRITICAL: --storage flag (v9.2.2)
+// When multiple MCP clients use different storage backends (e.g.
+// Claude Desktop → Supabase, Antigravity → SQLite), the CLI must
+// be told which backend to read from. Without this, the CLI
+// inherits PRISM_STORAGE from the shell env (defaulting to
+// supabase), which may differ from the MCP server's config.
+// This causes a "split-brain" where the CLI returns stale state
+// from the wrong backend.
+//
 // TEXT MODE: Delegates to the real sessionLoadContextHandler for
 // full feature parity — morning briefing, reality drift detection,
 // SDM recall, visual memory, skill injection, behavioral warnings,
@@ -37,10 +46,22 @@ program
   .description('Load session context for a project (same output as session_load_context MCP tool)')
   .option('-l, --level <level>', 'Context depth: quick, standard, deep', 'standard')
   .option('-r, --role <role>', 'Role scope for context loading')
+  .option('-s, --storage <backend>', 'Storage backend: local (SQLite) or supabase. Overrides PRISM_STORAGE env var.')
   .option('--json', 'Emit machine-readable JSON instead of formatted text')
-  .action(async (project: string, options: { level: string; role?: string; json?: boolean }) => {
+  .action(async (project: string, options: { level: string; role?: string; storage?: string; json?: boolean }) => {
     try {
-      const { level, role, json: jsonOutput } = options;
+      const { level, role, storage, json: jsonOutput } = options;
+
+      // v9.2.2: --storage flag overrides PRISM_STORAGE env var to prevent
+      // split-brain when CLI environment differs from MCP server config.
+      if (storage) {
+        const validStorages = ['local', 'supabase'];
+        if (!validStorages.includes(storage)) {
+          console.error(`Error: Invalid storage "${storage}". Must be one of: ${validStorages.join(', ')}`);
+          process.exit(1);
+        }
+        process.env.PRISM_STORAGE = storage;
+      }
 
       const validLevels = ['quick', 'standard', 'deep'];
       if (!validLevels.includes(level)) {
