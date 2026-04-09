@@ -1159,6 +1159,28 @@ export class SqliteStorage implements StorageBackend {
     debugLog(`[SqliteStorage] Hard-deleted ledger entry ${id}`);
   }
 
+  // ─── v9.2.4: Cross-Backend Reconciliation Helper ───────────
+  //
+  // Returns a Map of "project::role" → "updated_at" for all local handoffs.
+  // Used by reconcileHandoffs() for lightweight timestamp comparison.
+  // Single SELECT on session_handoffs — no joins, no ledger access.
+
+  async getHandoffTimestamps(): Promise<Map<string, string>> {
+    const result = await this.db.execute(
+      `SELECT project, role, updated_at FROM session_handoffs`
+    );
+    const map = new Map<string, string>();
+    for (const row of result.rows) {
+      const project = row.project as string;
+      const role = (row.role as string) || "global";
+      const updatedAt = row.updated_at as string;
+      if (updatedAt) {
+        map.set(`${project}::${role}`, updatedAt);
+      }
+    }
+    return map;
+  }
+
   // ─── Handoff Operations (OCC) ──────────────────────────────
 
   async saveHandoff(
