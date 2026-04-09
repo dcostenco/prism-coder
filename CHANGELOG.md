@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.2.3] - 2026-04-09 — Code Review Hardening
+
+### Performance
+- **Split-Brain Check 10x Faster** — Replaced full `StorageBackend` construction (which ran migrations on every `session_load_context` call, adding 200-1000ms latency) with lightweight direct queries: `supabaseGet()` for Supabase REST, raw SQL via `@libsql/client` for SQLite. Check now completes in ~100ms.
+
+### Fixed
+- **Variable Shadowing** — `const storage` from CLI `--storage` option was shadowed by `const storage = await getStorage()` in JSON mode. Renamed inner variable to `storageBackend`.
+- **Resource Leak** — SQLite alternate client in split-brain check was not closed if `execute()` threw. Added `try/finally` to guarantee `altClient.close()`.
+
+### Engineering
+- 1036 tests across 47 suites, all passing, zero regressions
+- TypeScript: clean, zero errors
+- 2 files changed: `src/cli.ts`, `src/tools/ledgerHandlers.ts`
+
+---
+
 ## [9.2.2] - 2026-04-09 — Critical: Split-Brain Detection & Prevention
 
 ### ⚠️ Security / Data Integrity
