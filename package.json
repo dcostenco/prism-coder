@@ -101,7 +101,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.80.0",
+    "@anthropic-ai/sdk": "^0.81.0",
     "@google-cloud/discoveryengine": "^2.5.3",
     "@google/generative-ai": "^0.24.1",
     "@libsql/client": "^0.17.2",
