@@ -7,6 +7,57 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v9.2.7 — Security Hardening 🔒
+
+> **Problem:** `sanitizeForMerge()` threw a generic `Error`, making prototype pollution indistinguishable from other errors at catch sites. Null-byte paths passed through to `path.resolve()` with OS-dependent behavior. CRDT merge docstring incorrectly described "Add-Wins" semantics.
+> **Solution:** Typed `PrototypePollutionError` with `offendingKey` property, explicit null-byte rejection in `SafetyController`, and corrected documentation to match the actual Remove-Wins-from-Either implementation.
+
+| Feature | Detail |
+|---------|--------|
+| 🔒 **Typed `PrototypePollutionError`** | New error class with `offendingKey` property enables catch-site discrimination and forensic logging. Replaces generic `Error` throw in `walkForForbiddenKeys`. |
+| 🛡️ **Null-Byte Path Guard** | `validateActionsInScope()` now explicitly rejects `targetPath` containing `\0` before `path.resolve()` processes it. Prevents C-string truncation attacks where `src/\0../../etc/passwd` could resolve to an unintended location. |
+| 📝 **CRDT Semantics Fix** | `mergeArray()` docstring corrected from "Add-Wins OR-Set" to "Remove-Wins-from-Either" — items removed by either agent are dropped from base, fresh additions preserved. |
+| 🧪 **1055 Tests** | 49 suites, zero regressions. |
+
+---
+### ✅ v9.2.4–v9.2.6 — Reconciliation & CI Hardening 🔄
+
+> **Problem:** Supabase credentials weren't resolved for local+reconciliation path, CLI tests timed out on Windows CI, and schema mismatches caused silent query failures.
+> **Solution:** Multi-fix series addressing cross-backend sync reliability, CI matrix stability, and TurboQuant empirical validation.
+
+| Feature | Detail |
+|---------|--------|
+| 🔄 **Cross-Backend Reconciliation** (v9.2.4) | Automatic Supabase → SQLite sync on startup. Targeted ID lookups (not full table scans), 5-second timeout, idempotent dedup. 13 tests including malformed JSON resilience and timeout handling. |
+| 🔧 **Credential Probe Fix** (v9.2.5) | `supabaseReady` guard now resolves dashboard credentials for local+reconciliation path, not only `requestedBackend === "supabase"`. Fixed `key_context` schema mismatch. |
+| 🪟 **Windows CI Fix** (v9.2.6) | `{ timeout: 30_000 }` on CLI integration tests — `npx tsx` cold-starts take 10-15s on Windows + Node 22.x. |
+| 📊 **QJL Residual Validation** (v9.2.6) | 6 new tests: zero R@5 delta between P50 and P95 residual vectors (d=128, N=2K). CV=0.038 at d=768 proves no long tail. Corpus-scale R@5 degrades only 2pp from N=100→2K. |
+
+---
+### ✅ v9.2.1–v9.2.3 — Split-Brain Detection & CLI Parity 🚨
+
+> **Problem:** Multiple MCP clients using different storage backends caused silent state divergence. CLI lacked feature parity with MCP tool output.
+> **Solution:** Split-brain drift detection, `--storage` flag for explicit backend selection, and full CLI delegation to the real `session_load_context` handler.
+
+| Feature | Detail |
+|---------|--------|
+| 🚨 **Split-Brain Drift Detection** (v9.2.2) | `session_load_context` compares active and alternate backend versions at load time and warns prominently when they diverge. |
+| 💻 **CLI Full Feature Parity** (v9.2.1) | `prism load` text mode delegates to real `session_load_context` handler — morning briefings, reality drift, SDM recall, visual memory, role-scoped skills, behavioral warnings, agent identity. |
+| 🔧 **Code Review Hardening** (v9.2.3) | 10x faster split-brain detection (lightweight direct queries), variable shadowing fix, resource leak fix in SQLite alternate client. |
+
+---
+### ✅ v9.0.0–v9.0.5 — Autonomous Cognitive OS 🧠
+
+> **Problem:** Agents have infinite memory budgets, dump repetitive logs, and treat all data as neutral facts — no concept of novelty, emotional valence, or resource constraints.
+> **Solution:** Token-Economic Reinforcement Learning (Surprisal Gate + Cognitive Budget), Affect-Tagged Memory (valence-scored retrieval), and JWKS auth hardening.
+
+| Feature | Detail |
+|---------|--------|
+| 💰 **Surprisal Gate** | Vector-based novelty pricing: high-surprisal saves cost 0.5× tokens, low-surprisal 2.0×. Forces LLM data compression. |
+| 🏦 **Cognitive Budget** | Per-project token economy with passive UBI recovery (+100 tokens/hr). Agents that over-save enter Cognitive Debt. |
+| 🎭 **Affect-Tagged Memory** | `|valence|` boosts retrieval ranking. Extreme failures and successes surface first. UX warnings on historically negative topics. |
+| 🔐 **JWKS Auth** (v9.0.5) | JWT audience/issuer claim validation, structured error logging, typed `PrismAuthenticatedRequest`. Vendor-neutral (Auth0, Keycloak, AgentLair). 11 new tests. |
+
+---
 ### ✅ v9.1.0 — Task Router v2 & Local Agent Hardening 🚦
 
 > **Problem:** The task router had stale documentation (referenced Qwen3 / v7.1.0 weights), lacked file-type awareness for routing decisions, and the local Claw agent suffered from streaming corruption, unbounded memory growth, and missing system prompts.
@@ -250,31 +301,32 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 </details>
 
-## 📊 The State of Prism (v9.1.0)
+## 📊 The State of Prism (v9.2.7)
 
-With v9.1.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
+With v9.2.7 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
 
-- **Cloud-Native RPC** — Server-Sent Events integration unlocks complete deployment portability across Smithery, Render, or any remote host over standard HTTP ports.
-- **Health-Aware** — Intent Health Dashboard scores every project 0–100 across staleness, TODO load, and decision quality. Silent drift becomes an actionable signal before it becomes a crisis.
-- **Comprehensively Sanitized** — 10 XSS injection vectors patched across all dashboard rendering paths (factory, ledger, health, history, error handlers). Every user-facing string now passes through `escapeHtml()`.
+- **Token Economics** — Surprisal Gate + Cognitive Budget force agents to learn data compression. High-novelty saves are cheap; boilerplate is expensive. Overspenders enter Cognitive Debt.
+- **Affect-Tagged Memory** — Valence-scored retrieval where emotional extremes (failures and successes) surface first. UX warnings fire on historically negative topics.
+- **Cross-Backend Resilience** — Split-brain drift detection across SQLite/Supabase, automatic reconciliation on startup, and explicit `--storage` flag for backend selection.
 - **Anti-Sycophancy by Design** — The Adversarial Evaluation (PLAN_CONTRACT → EVALUATE) pipeline separates generator and evaluator into isolated roles with pre-committed rubrics. The evaluator cannot approve without evidence; the generator cannot skip the contract.
-- **Fail-Closed by Default** — Dark Factory 3-gate pipeline (Parse → Type → Scope) means the LLM never writes a byte to disk directly. Every action validated before any side effect.
+- **Fail-Closed by Default** — Dark Factory 3-gate pipeline (Parse → Type → Scope) means the LLM never writes a byte to disk directly. Every action validated before any side effect. Null-byte paths explicitly rejected.
+- **Typed Security Errors** — `PrototypePollutionError` with forensic `offendingKey` for catch-site discrimination. Defense-in-depth from deserialization to filesystem.
 - **Conservatively Fail-Safe** — Parse failures default `plan_viable=false` — escalating to full PLAN re-planning instead of burning revision budget on broken LLM output.
 - **Autonomously Verified** — Verification Harness generates spec-freeze contracts before execution, hash-locks them, and gates finalization against immutable outcomes.
-- **Intelligently Routed** — Heuristic + ML Task Router delegates cloud vs. local in under 2ms, cold-start safe, experience-corrected per project.
-- **Scientifically-Grounded** — ACT-R activation model (`B_i = ln(Σ t_j^{-d})`) ranks memories by recency × frequency. Candidate-scoped spreading activation prevents centrality bias.
+- **Intelligently Routed** — 6-signal heuristic Task Router with file-type complexity analysis delegates cloud vs. local in under 2ms, cold-start safe, experience-corrected per project.
+- **Scientifically-Grounded** — ACT-R activation model (`B_i = ln(Σ t_j^{-d})`) ranks memories by recency × frequency. QJL-corrected TurboQuant with empirically validated zero R@5 delta at P95 residuals.
 - **Cognitively-Routed** — HDC binary hypervectors + Hamming distance concept resolution + policy gateway. Three-outcome routing: `direct / clarify / fallback`.
 - **Self-Organizing** — Edge Synthesis + Graph Pruning form an autonomous cognitive loop: the graph grows connective tissue overnight and prunes dead weight on schedule.
 - **Observable** — SLO dashboard: synthesis success rate, net link growth, prune ratio, sweep latency, cognitive route distribution, pipeline gate pass/fail. Warning badges fire proactively.
-- **Diagnostically Rich** — `verify status --json` emits `diff_counts` + `changed_keys` per layer. JSON contract is CI-enforced and schema-versioned.
+- **CLI Parity** — `prism load` text mode delivers the same enriched output as MCP clients: morning briefings, reality drift, SDM recall, visual memory, agent identity.
 - **Zero Cold-Start** — Universal Migration imports years of Claude/Gemini/ChatGPT history on day one. New memories are access-seeded immediately.
-- **Scale** — TurboQuant 10× compression + Deep Storage Purge + SQLite VACUUM. Decades of session history on a laptop.
-- **Safe** — Full type-guard matrix across all 30+ MCP tools. Path traversal, poison pill payloads, null-byte injection — all blocked at the gate layer before any execution.
-- **Convergent** — CRDT OR-Map handoff merging. Multiple agents, zero conflicts.
+- **Scale** — TurboQuant 10× compression + Deep Storage Purge + SQLite VACUUM. Decades of session history on a laptop. CV=0.038 at d=768 proves no long tail.
+- **Safe** — Full type-guard matrix across all 30+ MCP tools. Path traversal, poison pill payloads, null-byte injection, prototype pollution — all blocked at the gate layer before any execution.
+- **Convergent** — CRDT Remove-Wins-from-Either handoff merging. Multiple agents, zero conflicts.
 - **Autonomous** — Web Scholar researches while you sleep. Dark Factory executes while you sleep. Task Router delegates while you sleep. Adversarial Evaluator keeps the output honest.
-- **Reliable** — 978 passing tests. ES5 lint guard on all dashboard inline scripts. JSON contract CI enforcement on all CLI output schemas.
+- **Reliable** — 1055 passing tests across 49 suites. ES5 lint guard on all dashboard inline scripts. JSON contract CI enforcement on all CLI output schemas.
 - **Multimodal** — VLM auto-captioning turns screenshots into semantically searchable memory.
-- **Security** — SQL injection prevention, path traversal guard, Poison Pill defense, GDPR Art. 17+20 compliance.
+- **Security** — Typed `PrototypePollutionError`, null-byte path guard, SQL injection prevention, path traversal guard, Poison Pill defense, GDPR Art. 17+20 compliance, JWKS vendor-neutral auth.
 
 ---
 ## 🗺️ Next on the Horizon
@@ -289,28 +341,22 @@ With v9.1.0 shipped, Prism is a **production-hardened, fail-closed, adversariall
 
 ### 🔭 Future Cognitive Tracks
 
-Based on our April 2026 synthesize of 12 foundational papers on cognitive memory architectures:
+#### v10.0 — Zero-Search Retrieval `[Exploring]`
+- **Problem:** All current retrieval requires an index (FTS5, vector, graph). At extreme scale, index maintenance becomes the bottleneck.
+- **Benefit:** Holographic Reduced Representations (HRR) encode entire memory traces into a single superposition vector. Retrieval is a single dot product — no index, no ANN, just ask the vector.
+- **Dependency:** Requires a 4096+ dim HRR encoding layer on top of existing TurboQuant compressed vectors.
 
-#### v8.0 — Spreading Activation Engine `[Next]`
-- **Problem:** Static retrieval ignores structural salience, limiting multi-hop reasoning.
-- **Benefit:** ACT-R inspired energy propagation through the graph (Synapse) achieves +23% multi-hop performance by prioritizing nodes functionally connected to semantic anchors.
-- **Dependency:** Leverages existing SQLite `memory_links` table as the activation substrate with top-7 lateral inhibition and degree-normalized fan effect.
-
-#### v8.1 — Multi-Graph Causal Layer `[Planned]`
+#### v10.1 — Multi-Graph Causal Layer `[Planned]`
 - **Problem:** Semantic and contiguous temporal links cannot satisfy "Why did X happen?" queries effectively.
 - **Benefit:** Intent-aware retrieval routing (MAGMA) traversing an LLM-inferred causal `because` edge-type layer.
 
-#### v8.2 — Uncertainty-Aware Rejection `[Planned]`
-- **Problem:** Agents hallucinate context when the retrieved memory trace is too weak.
-- **Benefit:** A meta-cognitive "Feeling of Knowing" (FOK) gate using spreading activation energy thresholds to safely reject queries with "insufficient evidence".
+#### v10.2 — Federated Memory Mesh `[Exploring]`
+- **Problem:** Enterprise teams with 50+ agents need memory isolation with controlled sharing — current Hivemind is flat.
+- **Benefit:** Hierarchical memory namespaces with role-based access control, selective knowledge promotion across team boundaries, and audit trails for cross-team memory sharing.
 
-#### v8.3 — Episodic → Semantic Consolidation `[Planned]`
-- **Problem:** Granular session ledgers accumulate and clutter context, failing to form abstractions over time.
-- **Benefit:** Guided by Complementary Learning Systems (CLS) theory, automatic abstraction of multi-session episodic logs into robust semantic concepts while decaying the originals.
-
-#### v9.0 — Memory-as-Action RL `[Exploring]`
-- **Problem:** Hardcoded memory management (read/write/summarize) is rigid.
-- **Benefit:** Memory curation as intrinsic, RL-optimizable agent actions, constrained by token budgets to force high-value context retention.
+#### v10.3 — Predictive Prefetch `[Exploring]`
+- **Problem:** Agents wait for explicit search queries to surface relevant context.
+- **Benefit:** Time-of-day and workflow-stage predictive models prefetch likely-needed memories into a warm cache before the agent asks. Leverages existing ACT-R access log patterns as training signal.
 
 ---
 ## 🧰 Infrastructure Backlog
