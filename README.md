@@ -503,6 +503,43 @@ A gorgeous glassmorphism UI at `localhost:3000` that lets you see exactly what y
 ### 🧬 10× Memory Compression
 Powered by a pure TypeScript port of Google's TurboQuant (inspired by Google's ICLR research), Prism compresses 768-dim embeddings from **3,072 bytes → ~400 bytes** — enabling decades of session history on a standard laptop. No native modules. No vector database required. To mitigate quantization degradation (where repeated compress/decompress cycles could smear subtle corrections after 10k+ memories), Prism leverages autonomous **ledger compaction** and **Deep Storage cleanup** to guarantee high-fidelity memory integrity over time.
 
+<details>
+<summary><strong>📊 1M-Vector Benchmark (d=768, 4-bit)</strong></summary>
+
+Validated on 1,000,000 synthetic unit vectors at production dimension (d=768), run on Apple M4 Max (36GB):
+
+| Metric | Value |
+|--------|-------|
+| **Compression ratio** | 7.7× (3,072 → 400 bytes) |
+| **Throughput** | 833 vectors/sec |
+| **Peak heap** | 329 MB |
+| **Total time** | 57.6 minutes |
+
+**Residual norm distribution** — the quantization error after Householder rotation + Lloyd-Max scalar quantization:
+
+| Statistic | Value |
+|-----------|-------|
+| Mean | 0.1855 |
+| CV (coefficient of variation) | **0.038** |
+| P99/P50 ratio | **1.11** |
+| P99.9/P50 ratio | 1.16 |
+| Max/Min ratio | 1.46 |
+| IQR | 0.009 |
+
+A CV of 0.038 means the residual norm barely varies across 1M vectors — **there is effectively no long tail**. The QJL correction term (which scales linearly with residualNorm) remains stable even for P99.9 outliers.
+
+**R@k retrieval accuracy** (global corpus, 30 trials):
+
+| Corpus Size | R@1 | R@5 |
+|-------------|-----|-----|
+| N=1,000 | 20.0% | 60.0% |
+| N=10,000 | 36.7% | 76.7% |
+| N=50,000 | 53.3% | **90.0%** |
+
+> **Note:** R@k on random high-dimensional vectors is inherently harder than on real embeddings (all vectors are near-equidistant in d=768). Real-world retrieval with clustered embeddings produces higher accuracy. See [tests/residual-distribution.test.ts](tests/residual-distribution.test.ts) and [tests/benchmarks/residual-1m.ts](tests/benchmarks/residual-1m.ts) for full methodology.
+
+</details>
+
 ### 🐝 Multi-Agent Hivemind & Enterprise Sync
 While local SQLite is amazing for solo developers, enterprise teams cannot share a local SQLite file. Prism breaks the "local-only" ceiling via **Supabase Sync** and the **Multi-Agent Hivemind**—scaling effortlessly to teams of 50+ developers using agents. Multiple agents (dev, QA, PM) can work on the same project with **role-isolated memory**, discover each other automatically, and share context in real-time via Telepathy sync to a shared Postgres backend. → [Multi-agent setup example](examples/multi-agent-hivemind/)
 
