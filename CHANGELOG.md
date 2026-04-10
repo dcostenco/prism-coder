@@ -7,8 +7,16 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - **Windows CI Flakiness** — CLI integration tests (`cli-integration.test.ts`) timed out on Windows + Node 22.x GitHub Actions runners. `npx tsx` cold-starts take 10-15s on Windows, exceeding Vitest's default 5s timeout. Added `{ timeout: 30_000 }` to the describe block. All 6 matrix combinations (ubuntu/macos/windows × Node 20/22) now pass reliably.
 
+### Tests
+- **Residual Norm Distribution & Long-Tail R@k Impact** (`tests/residual-distribution.test.ts`) — 6 new tests validating TurboQuant's QJL correction stability, directly backing the claim from [LongMemEval Issue #31](https://github.com/xiaowu0162/LongMemEval/issues/31) discussion with @m13v:
+  - **ResidualNorm characterization** — CV=0.21 at d=128 (N=10K), CV=0.35 at d=768 (N=1K). P99/P50 ratio=2.57 confirms no extreme heavy tail.
+  - **Long-tail R@k impact** — R@5=97% for BOTH low-residual (<P50) and high-residual (>P95) vectors. **Delta R@5 = 0.0 percentage points** — the key finding.
+  - **Corpus scale stability** — R@5 degrades only 2pp from N=100 to N=2,000.
+  - **QJL correction MAE** — Outlier MAE (P99) = 0.047, Inlier MAE (<P50) = 0.014. Ratio 3.3×, but absolute error bounded.
+  - **Householder spread** — Max/min residualNorm ratio = 3.93 (bounded under 5.0).
+
 ### Engineering
-- 1 file changed: `tests/verification/cli-integration.test.ts`
+- 1 file changed: `tests/residual-distribution.test.ts`
 
 ---
 
