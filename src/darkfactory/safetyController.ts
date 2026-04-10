@@ -98,6 +98,13 @@ export class SafetyController {
         return `Action[${i}]: targetPath is empty or missing`;
       }
 
+      // Null-byte injection guard: C-string truncation attack vector.
+      // A path like "src/\0../../etc/passwd" would be truncated at the null byte
+      // by native fs syscalls, potentially resolving to an unintended location.
+      if (action.targetPath.includes('\0')) {
+        return `Action[${i}]: targetPath contains null byte (injection attempt)`;
+      }
+
       // Resolve targetPath relative to workingDirectory for scope check
       const resolvedTarget = spec.workingDirectory
         ? path.resolve(spec.workingDirectory, action.targetPath)

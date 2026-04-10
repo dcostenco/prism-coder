@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.2.7] - 2026-04-10 — Security Hardening: Typed Errors, Null-Byte Guard, CRDT Docs
+
+### Security
+- **Typed `PrototypePollutionError`** — `sanitizeForMerge()` now throws a `PrototypePollutionError` (with `offendingKey` property) instead of a generic `Error`. Enables callers to catch prototype pollution distinctly from other runtime errors and log the offending key for forensics.
+- **Null-Byte Path Injection Guard** — `SafetyController.validateActionsInScope()` now explicitly rejects paths containing `\0` before `path.resolve()` processes them. Null bytes are a C-string truncation attack vector that could cause OS-level path resolution to silently truncate at the null boundary. Previously only crash-safe (test asserted `not.toThrow`); now deterministically rejected with `"targetPath contains null byte (injection attempt)"`.
+
+### Fixed
+- **CRDT Merge Semantics Documentation** — `mergeArray()` comment block incorrectly described "Add-Wins OR-Set" semantics. The actual implementation is **Remove-Wins-from-Either**: items removed by either agent are dropped from the base, fresh additions from either agent are preserved. Updated docstring to match the code and the test at `edge-cases.test.ts:269-303` which explicitly documented this discrepancy.
+
+### Tests
+- `edge-cases.test.ts` — Prototype pollution tests now assert `instanceof PrototypePollutionError` and verify the `offendingKey` property (`"__proto__"`, `"constructor"`).
+- `darkfactory/edge-cases.test.ts` — Null-byte path test upgraded from crash-safety assertion (`not.toThrow`) to rejection assertion (`toContain('null byte')`).
+- **Full suite: 49 files, 1055 tests passed, 0 regressions.**
+
+### Engineering
+- 4 files changed: `src/utils/crdtMerge.ts`, `src/darkfactory/safetyController.ts`, `tests/edge-cases.test.ts`, `tests/darkfactory/edge-cases.test.ts`
+
+---
+
 ## [9.2.6] - 2026-04-09 — Windows CI Timeout Fix
 
 ### Fixed

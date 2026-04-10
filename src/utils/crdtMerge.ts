@@ -44,15 +44,29 @@ import type { HandoffEntry } from "../storage/interface.js";
 // This is a zero-dependency, fast (~10ms for a typical handoff object)
 // solution appropriate for Prism's small merge surfaces.
 
+/**
+ * Typed error thrown when sanitizeForMerge() detects prototype pollution.
+ * Provides the offending key for forensic logging and distinct catch handling.
+ */
+export class PrototypePollutionError extends Error {
+  public readonly offendingKey: string;
+  constructor(key: string) {
+    super(`Security violation: prototype pollution attempt detected via key "${key}"`);
+    this.name = "PrototypePollutionError";
+    this.offendingKey = key;
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, PrototypePollutionError);
+    }
+  }
+}
+
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function walkForForbiddenKeys(current: unknown): void {
   if (!current || typeof current !== "object") return;
   for (const key of Object.keys(current as object)) {
     if (FORBIDDEN_KEYS.has(key)) {
-      throw new Error(
-        `Security violation: prototype pollution attempt detected via key "${key}"`
-      );
+      throw new PrototypePollutionError(key);
     }
     walkForForbiddenKeys((current as Record<string, unknown>)[key]);
   }
@@ -94,18 +108,19 @@ export interface MergeResult {
   strategy: Record<string, FieldStrategy>;
 }
 
-// ─── OR-Set Logic (Add-Wins) ────────────────────────────────────
+// ─── OR-Set Logic (Remove-Wins-from-Either) ────────────────────
 //
 // 3-way set merge:
 //   added_by_incoming = incoming - base
 //   removed_by_incoming = base - incoming
 //   added_by_current = current - base
 //   removed_by_current = base - current
-//   result = (base - removals) ∪ all_adds
+//   result = (base - all_removals) ∪ all_adds
 //
-// "Add-Wins" means: if Agent A removes "X" and Agent B adds "X",
-// the add wins. This is safe for TODOs (better to have a duplicate
-// than lose work) and keywords (idempotent).
+// SEMANTICS: Items removed by EITHER agent are dropped from the base.
+// Fresh additions from either agent are always preserved (union).
+// This means a removal by one agent wins over non-action by the other,
+// but cannot override a fresh add. Safe for TODOs and keywords.
 
 function mergeArray(
   b: string[] = [],

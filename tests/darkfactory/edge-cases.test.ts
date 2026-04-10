@@ -452,16 +452,13 @@ describe('validateActionsInScope — type coercion edge cases', () => {
 
 describe('validateActionsInScope — adversarial targetPath values', () => {
 
-  it('should reject path with null bytes', () => {
+  it('should reject path with null bytes (injection attempt)', () => {
     const spec = makeSpec('/app/workspace');
     const actions: ActionPayload[] = [{ type: 'READ_FILE', targetPath: 'src/\0evil.ts' }];
-    // path.resolve handles null bytes; on macOS this may resolve oddly
-    // The key invariant: it should NOT resolve to a path within workspace
-    // that could be used for injection. We verify it doesn't crash.
+    // Null bytes are a C-string truncation attack vector — always rejected.
     const result = SafetyController.validateActionsInScope(actions, spec);
-    // The result may or may not be null depending on OS path handling,
-    // but the function must not throw
-    expect(() => SafetyController.validateActionsInScope(actions, spec)).not.toThrow();
+    expect(result).not.toBeNull();
+    expect(result).toContain('null byte');
   });
 
   it('should reject path with only spaces', () => {

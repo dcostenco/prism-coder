@@ -43,6 +43,7 @@ import {
   sanitizeForMerge,
   mergeHandoff,
   dbToHandoffSchema,
+  PrototypePollutionError,
   type HandoffSchema,
 } from "../src/utils/crdtMerge.js";
 import { buildVaultDirectory } from "../src/utils/vaultExporter.js";
@@ -77,7 +78,13 @@ describe("CRDT — sanitizeForMerge(): prototype pollution guards", () => {
      * sanitizeForMerge() must catch this JSON.parse vector.
      */
     const malicious = JSON.parse('{"__proto__":{"isAdmin":true}}');
-    expect(() => sanitizeForMerge(malicious)).toThrow("prototype pollution");
+    expect(() => sanitizeForMerge(malicious)).toThrow(PrototypePollutionError);
+    try {
+      sanitizeForMerge(malicious);
+    } catch (e) {
+      expect(e).toBeInstanceOf(PrototypePollutionError);
+      expect((e as PrototypePollutionError).offendingKey).toBe("__proto__");
+    }
   });
 
   it("throws on __proto__ key nested deeply (JSON.parse vector)", () => {
@@ -88,7 +95,12 @@ describe("CRDT — sanitizeForMerge(): prototype pollution guards", () => {
   it("throws on 'constructor' key (prototype chain vector)", () => {
     expect(() =>
       sanitizeForMerge({ constructor: { prototype: { evil: true } } })
-    ).toThrow("prototype pollution");
+    ).toThrow(PrototypePollutionError);
+    try {
+      sanitizeForMerge({ constructor: { prototype: { evil: true } } });
+    } catch (e) {
+      expect((e as PrototypePollutionError).offendingKey).toBe("constructor");
+    }
   });
 
   it("throws on 'prototype' key", () => {
