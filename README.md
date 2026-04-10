@@ -826,8 +826,11 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v9.2.4 — Cross-Backend Reconciliation**
+> **Current release: v9.2.7 — Security Hardening**
 
+- 🔒 **v9.2.7 — Security Hardening:** Typed `PrototypePollutionError` class (replaces generic `Error` in `sanitizeForMerge()` — enables catch-site discrimination and forensic logging with `offendingKey`), explicit null-byte path injection guard in `SafetyController.validateActionsInScope()` (C-string truncation attack vector), and corrected CRDT merge semantics documentation (Remove-Wins-from-Either, not Add-Wins). 1055 tests, 0 regressions.
+- 🪟 **v9.2.6 — Windows CI Timeout Fix:** CLI integration tests timed out on Windows + Node 22.x GitHub Actions runners. Added `{ timeout: 30_000 }` to the describe block. 6 new residual distribution tests validating TurboQuant's QJL correction stability (zero R@5 delta between P50 and P95 residual vectors at d=128, 2K corpus).
+- 🔧 **v9.2.5 — Reconciliation Credential Probe Fix:** `supabaseReady` guard only resolved credentials when `requestedBackend === "supabase"`, causing reconciliation to silently skip. Added second credential probe for local + reconciliation path. Fixed Supabase schema mismatch on `key_context` column.
 - 🔄 **v9.2.4 — Cross-Backend Reconciliation:** Automatic two-layer sync from Supabase → SQLite on startup. When Claude Desktop writes handoffs and ledger entries to Supabase, Antigravity (local SQLite) now automatically detects stale data and pulls newer handoffs + the 20 most recent ledger entries. 5-second timeout prevents startup freeze. Targeted ID lookups (not full table scans) keep it safe for large databases. 13 tests including malformed JSON resilience, multi-role dedup, and timeout handling.
 - 🔧 **v9.2.3 — Code Review Hardening:** 10x faster split-brain detection (lightweight direct queries replace full `StorageBackend` construction), variable shadowing fix in CLI, resource leak fix in SQLite alternate client.
 - 🚨 **v9.2.2 — Critical: Split-Brain Detection & Prevention:** When multiple MCP clients use different storage backends (e.g., Claude Desktop → Supabase, Antigravity → SQLite), session state could silently diverge, causing agents to act on stale TODOs and outdated context. **New: `--storage` flag** on `prism load` CLI lets callers explicitly select which backend to read from. **New: Split-Brain Drift Detection** in `session_load_context` — compares active and alternate backend versions at load time and warns prominently when they diverge. Session loader script updated to respect `PRISM_STORAGE` environment variable.
@@ -854,7 +857,7 @@ Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as p
 | **Storage Engine** | **BYO SQLite or Supabase** | Managed Cloud / VectorDBs | Managed Cloud / Postgres | Local SQLite only |
 | **Context Assembly** | **Progressive (Quick/Std/Deep)** | Top-K Semantic Search | Top-K + Temporal Summaries | Basic Entity Search |
 | **Memory Mechanics** | **ACT-R Activation, Spreading Activation, Hebbian Consolidation, Rejection Gate** | Basic Vector + Entity | Fading Temporal Graph | None (Infinite growth) |
-| **Multi-Agent Sync** | **CRDT (Add-Wins / LWW)** | Cloud locks | Postgres locks | ❌ None (Data races) |
+| **Multi-Agent Sync** | **CRDT (Remove-Wins / LWW)** | Cloud locks | Postgres locks | ❌ None (Data races) |
 | **Data Compression** | **TurboQuant (7x smaller vectors)** | ❌ Standard F32 Vectors | ❌ Standard Vectors | ❌ No Vectors |
 | **Observability** | **OTel Traces + Built-in PWA UI** | Cloud Dashboard | Cloud Dashboard | ❌ None |
 | **Maintenance** | **Autonomous Background Scheduler** | Manual/API driven | Automated (Cloud) | ❌ Manual |
@@ -1258,7 +1261,7 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 
 ## 📦 Milestones & Roadmap
 
-> **Current: v9.2.4** — Cross-Backend Reconciliation ([CHANGELOG](CHANGELOG.md))
+> **Current: v9.2.7** — Security Hardening ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|
