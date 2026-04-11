@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.3.0] - 2026-04-11 — TurboQuant ResidualNorm Tiebreaker
+
+### Added
+- **ResidualNorm Tiebreaker for Tier-2 Search** — New configurable ranking optimization for TurboQuant asymmetric search. When two compressed cosine scores are within ε of each other, the candidate with lower `residualNorm` is preferred — its compressed representation captured more signal energy, making its score more trustworthy. Inspired by [@m13v's suggestion](https://github.com/xiaowu0162/LongMemEval/issues/31) in the LongMemEval benchmark discussion.
+  - **`PRISM_TURBOQUANT_TIEBREAKER_EPSILON`** — New env var (default: `0`, disabled). Recommended: `0.005` for enterprise deployments with large corpora on Tier-2 fallback search. Applied to both SQLite and Supabase Tier-2 backends. Tier-1 native vector search (libSQL/pgvector) is unaffected.
+  - **Input validation** — NaN, negative, and non-finite epsilon values are clamped to `0` (disabled).
+
+### Performance
+- **Empirical validation** (d=128, N=5K, 100 trials, M4 Max):
+  - ε=0.005: **+2pp R@1, +1pp R@5** over standard cosine-only ranking
+  - ε=0.020 too aggressive: **−9pp R@5** from over-reordering
+  - 22% of queries have top-2 candidates within ε=0.005
+- **R@k plateau confirmed** — Extended sweep (N=500 → 10K): R@5 stable at 84–92%, R@10 at 90–98%, zero degradation trend
+
+### Security
+- **Internal field stripping** — `_residualNorm` transient property is deleted from results before returning to callers, preventing implementation detail leakage
+
+### Tests
+- **11 new tests** (1066 total across 50 suites):
+  - Tiebreaker A/B test at 4 ε thresholds with statistical validation
+  - R@k sweep across 5 corpus sizes (500 → 10K)
+  - 8 edge case tests: eps=0 disabled, reordering within ε, beyond-ε stability, missing residualNorm (corrupt data), single-element, empty array, identical values stability, NaN/negative config clamping, large-ε degenerate behavior
+
+### Engineering
+- 6 files changed: `src/config.ts`, `src/storage/sqlite.ts`, `src/storage/supabase.ts`, `tests/residual-tiebreaker.test.ts`
+- 1066 tests, 50 suites, zero regressions
+- TypeScript: clean, zero errors
+
+---
+
 ## [9.2.7] - 2026-04-10 — Security Hardening: Typed Errors, Null-Byte Guard, CRDT Docs
 
 ### Security

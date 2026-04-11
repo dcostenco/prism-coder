@@ -407,6 +407,10 @@ export const PRISM_DARK_FACTORY_MAX_RUNTIME_MS = parseInt(
 // Supabase backends). Tier-1 native vector search is unaffected.
 
 /** Tiebreaker threshold for TurboQuant Tier-2 ranking. 0 = disabled (default). */
-export const PRISM_TURBOQUANT_TIEBREAKER_EPSILON = parseFloat(
+const rawTiebreakerEpsilon = parseFloat(
   process.env.PRISM_TURBOQUANT_TIEBREAKER_EPSILON || "0"
 );
+export const PRISM_TURBOQUANT_TIEBREAKER_EPSILON =
+  Number.isFinite(rawTiebreakerEpsilon) && rawTiebreakerEpsilon >= 0
+    ? rawTiebreakerEpsilon
+    : 0;

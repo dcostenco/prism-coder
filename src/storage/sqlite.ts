@@ -1844,6 +1844,8 @@ export class SqliteStorage implements StorageBackend {
         });
         
         const baseResults = scored.slice(0, params.limit);
+        // Strip internal tiebreaker field before returning
+        for (const r of baseResults) delete (r as any)._residualNorm;
         debugLog(
           `[SqliteStorage] Tier-2 TurboQuant fallback: scored ${fallbackResult.rows.length} entries, ` +
           `${scored.length} above threshold`
