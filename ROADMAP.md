@@ -7,6 +7,19 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v9.3.0 — TurboQuant ResidualNorm Tiebreaker 🎯
+
+> **Problem:** Compressed cosine search (Tier-2 TurboQuant fallback) treats all candidates equally, even when some compressed representations lost more signal energy during quantization than others.
+> **Solution:** When two candidates' compressed cosine scores are within ε of each other, prefer the one with lower `residualNorm` — its compressed representation is more faithful to the original vector, making its similarity score more trustworthy.
+
+| Feature | Detail |
+|---------|--------|
+| 🎯 **ResidualNorm Tiebreaker** | Configurable via `PRISM_TURBOQUANT_TIEBREAKER_EPSILON` (default: `0`, disabled). Enterprise users set `0.005` for +2pp R@1, +1pp R@5 on Tier-2 fallback search. Applied to both SQLite and Supabase backends. |
+| 🔬 **Empirical Validation** | A/B test at 4 ε thresholds (d=128, N=5K, 100 trials). Sweet spot at ε=0.005; ε=0.020 causes −9pp R@5. 22% of queries have ties at ε=0.005. |
+| 🛡️ **Input Validation** | NaN, Infinity, and negative epsilon values are clamped to `0`. Internal `_residualNorm` field stripped before returning results to callers. |
+| 🧪 **1066 Tests** | 50 suites, 11 new tests (A/B, R@k sweep, 8 edge cases), zero regressions. |
+
+---
 ### ✅ v9.2.7 — Security Hardening 🔒
 
 > **Problem:** `sanitizeForMerge()` threw a generic `Error`, making prototype pollution indistinguishable from other errors at catch sites. Null-byte paths passed through to `path.resolve()` with OS-dependent behavior. CRDT merge docstring incorrectly described "Add-Wins" semantics.
@@ -301,9 +314,9 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 </details>
 
-## 📊 The State of Prism (v9.2.7)
+## 📊 The State of Prism (v9.3.0)
 
-With v9.2.7 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
+With v9.3.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
 
 - **Token Economics** — Surprisal Gate + Cognitive Budget force agents to learn data compression. High-novelty saves are cheap; boilerplate is expensive. Overspenders enter Cognitive Debt.
 - **Affect-Tagged Memory** — Valence-scored retrieval where emotional extremes (failures and successes) surface first. UX warnings fire on historically negative topics.
@@ -314,7 +327,7 @@ With v9.2.7 shipped, Prism is a **production-hardened, fail-closed, adversariall
 - **Conservatively Fail-Safe** — Parse failures default `plan_viable=false` — escalating to full PLAN re-planning instead of burning revision budget on broken LLM output.
 - **Autonomously Verified** — Verification Harness generates spec-freeze contracts before execution, hash-locks them, and gates finalization against immutable outcomes.
 - **Intelligently Routed** — 6-signal heuristic Task Router with file-type complexity analysis delegates cloud vs. local in under 2ms, cold-start safe, experience-corrected per project.
-- **Scientifically-Grounded** — ACT-R activation model (`B_i = ln(Σ t_j^{-d})`) ranks memories by recency × frequency. QJL-corrected TurboQuant with empirically validated zero R@5 delta at P95 residuals.
+- **Scientifically-Grounded** — ACT-R activation model (`B_i = ln(Σ t_j^{-d})`) ranks memories by recency × frequency. QJL-corrected TurboQuant with empirically validated zero R@5 delta at P95 residuals. ResidualNorm tiebreaker for enterprise-grade retrieval tuning.
 - **Cognitively-Routed** — HDC binary hypervectors + Hamming distance concept resolution + policy gateway. Three-outcome routing: `direct / clarify / fallback`.
 - **Self-Organizing** — Edge Synthesis + Graph Pruning form an autonomous cognitive loop: the graph grows connective tissue overnight and prunes dead weight on schedule.
 - **Observable** — SLO dashboard: synthesis success rate, net link growth, prune ratio, sweep latency, cognitive route distribution, pipeline gate pass/fail. Warning badges fire proactively.
@@ -324,7 +337,7 @@ With v9.2.7 shipped, Prism is a **production-hardened, fail-closed, adversariall
 - **Safe** — Full type-guard matrix across all 30+ MCP tools. Path traversal, poison pill payloads, null-byte injection, prototype pollution — all blocked at the gate layer before any execution.
 - **Convergent** — CRDT Remove-Wins-from-Either handoff merging. Multiple agents, zero conflicts.
 - **Autonomous** — Web Scholar researches while you sleep. Dark Factory executes while you sleep. Task Router delegates while you sleep. Adversarial Evaluator keeps the output honest.
-- **Reliable** — 1055 passing tests across 49 suites. ES5 lint guard on all dashboard inline scripts. JSON contract CI enforcement on all CLI output schemas.
+- **Reliable** — 1066 passing tests across 50 suites. ES5 lint guard on all dashboard inline scripts. JSON contract CI enforcement on all CLI output schemas.
 - **Multimodal** — VLM auto-captioning turns screenshots into semantically searchable memory.
 - **Security** — Typed `PrototypePollutionError`, null-byte path guard, SQL injection prevention, path traversal guard, Poison Pill defense, GDPR Art. 17+20 compliance, JWKS vendor-neutral auth.
 

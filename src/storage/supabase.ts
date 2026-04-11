@@ -403,7 +403,10 @@ export class SupabaseStorage implements StorageBackend {
           `[SupabaseStorage] Tier-2 TurboQuant fallback: scored ${rows.length} entries, ` +
           `${scored.length} above threshold`
         );
-        return scored.slice(0, params.limit);
+        const results = scored.slice(0, params.limit);
+        // Strip internal tiebreaker field before returning
+        for (const r of results) delete (r as any)._residualNorm;
+        return results;
       } catch (tier2Err) {
         // Both tiers failed — return empty; caller falls through to FTS5
         console.error(

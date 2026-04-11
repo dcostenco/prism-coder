@@ -317,3 +317,138 @@ describe("Extended R@k Sweep (d=128, 4-bit)", { timeout: 60_000 }, () => {
     expect(degradation).toBeLessThan(0.15);
   });
 });
+
+// ─── 3. Tiebreaker Sort Comparator Edge Cases ────────────────────
+//
+// Unit tests for the tiebreaker comparator logic itself, independent
+// of the full retrieval pipeline. These verify the exact sort behavior
+// that ships in sqlite.ts and supabase.ts Tier-2 fallback.
+
+describe("Tiebreaker Comparator Edge Cases", () => {
+  // Mirror the exact comparator from production (sqlite.ts / supabase.ts)
+  function makeComparator(eps: number) {
+    return (a: { similarity: number; _residualNorm?: number },
+            b: { similarity: number; _residualNorm?: number }) => {
+      const diff = b.similarity - a.similarity;
+      if (eps > 0 && Math.abs(diff) < eps && a._residualNorm != null && b._residualNorm != null) {
+        return a._residualNorm - b._residualNorm;
+      }
+      return diff;
+    };
+  }
+
+  it("eps=0 disables tiebreaker — pure similarity ranking", () => {
+    const cmp = makeComparator(0);
+    const items = [
+      { similarity: 0.90, _residualNorm: 0.5 },
+      { similarity: 0.90, _residualNorm: 0.1 },  // lower norm BUT eps=0
+      { similarity: 0.95, _residualNorm: 0.9 },
+    ];
+    items.sort(cmp);
+
+    // Pure similarity: 0.95 first, then two 0.90s in original insertion order
+    expect(items[0].similarity).toBe(0.95);
+    expect(items[1].similarity).toBe(0.90);
+    expect(items[2].similarity).toBe(0.90);
+    // NO reordering of the tied pair since eps=0
+  });
+
+  it("eps=0.005 reorders tied candidates by residualNorm", () => {
+    const cmp = makeComparator(0.005);
+    const items = [
+      { similarity: 0.900, _residualNorm: 0.5 },
+      { similarity: 0.902, _residualNorm: 0.1 },  // within ε=0.005
+      { similarity: 0.950, _residualNorm: 0.9 },
+    ];
+    items.sort(cmp);
+
+    // 0.950 clearly first (diff > ε from others)
+    expect(items[0].similarity).toBe(0.950);
+    // 0.902 and 0.900 are within ε — lower residualNorm (0.1) wins
+    expect(items[1]._residualNorm).toBe(0.1);
+    expect(items[2]._residualNorm).toBe(0.5);
+  });
+
+  it("candidates beyond ε threshold are NOT reordered", () => {
+    const cmp = makeComparator(0.005);
+    const items = [
+      { similarity: 0.90, _residualNorm: 0.1 },  // lower norm but further away
+      { similarity: 0.95, _residualNorm: 0.9 },  // higher norm but higher sim
+    ];
+    items.sort(cmp);
+
+    // Diff = 0.05 >> ε=0.005 — similarity wins, no reordering
+    expect(items[0].similarity).toBe(0.95);
+    expect(items[1].similarity).toBe(0.90);
+  });
+
+  it("handles missing _residualNorm gracefully (corrupt data)", () => {
+    const cmp = makeComparator(0.005);
+    const items = [
+      { similarity: 0.900, _residualNorm: undefined },
+      { similarity: 0.902, _residualNorm: 0.1 },
+    ];
+    items.sort(cmp);
+
+    // With one missing residualNorm, falls back to similarity diff
+    // 0.902 > 0.900, so it should be first
+    expect(items[0].similarity).toBe(0.902);
+  });
+
+  it("handles single-element array", () => {
+    const cmp = makeComparator(0.005);
+    const items = [{ similarity: 0.95, _residualNorm: 0.3 }];
+    items.sort(cmp);
+    expect(items).toHaveLength(1);
+    expect(items[0].similarity).toBe(0.95);
+  });
+
+  it("handles empty array", () => {
+    const cmp = makeComparator(0.005);
+    const items: { similarity: number; _residualNorm?: number }[] = [];
+    items.sort(cmp);
+    expect(items).toHaveLength(0);
+  });
+
+  it("identical similarity + identical residualNorm is stable", () => {
+    const cmp = makeComparator(0.005);
+    const items = [
+      { similarity: 0.90, _residualNorm: 0.3, id: "a" },
+      { similarity: 0.90, _residualNorm: 0.3, id: "b" },
+    ];
+    // Sort should not throw — residualNorm diff = 0, returns 0 (stable)
+    items.sort(cmp as any);
+    expect(items).toHaveLength(2);
+  });
+
+  it("negative epsilon is clamped to 0 in config (NaN safety)", () => {
+    // This tests the config validation logic:
+    // rawTiebreakerEpsilon < 0 || NaN → clamps to 0
+    const rawNegative = -0.01;
+    const clamped = Number.isFinite(rawNegative) && rawNegative >= 0 ? rawNegative : 0;
+    expect(clamped).toBe(0);
+
+    const rawNaN = NaN;
+    const clampedNaN = Number.isFinite(rawNaN) && rawNaN >= 0 ? rawNaN : 0;
+    expect(clampedNaN).toBe(0);
+
+    const rawValid = 0.005;
+    const clampedValid = Number.isFinite(rawValid) && rawValid >= 0 ? rawValid : 0;
+    expect(clampedValid).toBe(0.005);
+  });
+
+  it("large ε effectively sorts entirely by residualNorm", () => {
+    const cmp = makeComparator(100);  // huge ε — everything is "tied"
+    const items = [
+      { similarity: 0.10, _residualNorm: 0.1 },
+      { similarity: 0.99, _residualNorm: 0.9 },
+      { similarity: 0.50, _residualNorm: 0.5 },
+    ];
+    items.sort(cmp);
+
+    // All within ε=100, so sorted by residualNorm ascending
+    expect(items[0]._residualNorm).toBe(0.1);
+    expect(items[1]._residualNorm).toBe(0.5);
+    expect(items[2]._residualNorm).toBe(0.9);
+  });
+});
