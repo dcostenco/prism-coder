@@ -9,7 +9,7 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 ### ✅ v9.4.0 — Adversarial Security Hardening & Bidirectional Sync 🔒
 
-> **Problem:** Two-pass adversarial security audit discovered 18 vulnerabilities across Prism and Synalux, including a fail-open rate limiter, plan tier mismatch causing revenue loss, CORS reflection, and a one-way-only reconciliation gap.
+> **Problem:** Two-pass adversarial security audit discovered 18 vulnerabilities, including a fail-open rate limiter, plan tier mismatch causing revenue loss, CORS reflection, and a one-way-only reconciliation gap.
 > **Solution:** Comprehensive hardening: fail-closed defaults, path traversal guards, CORS/settings allowlists, concurrency counter refactor, NextAuth JWT enrichment, bidirectional SQLite↔Supabase push reconciliation, and request body DoS protection.
 
 | Feature | Detail |
