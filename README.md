@@ -25,23 +25,23 @@ https://github.com/dcostenco/prism-mcp/raw/main/docs/prism_mcp_demo.mp4
 ## 📖 Table of Contents
 
 - [Why Prism?](#why-prism)
-- [Quick Start](#quick-start)
-- [The Magic Moment](#the-magic-moment)
-- [Setup Guides](#setup-guides)
-- [Universal Import: Bring Your History](#universal-import-bring-your-history)
-- [What Makes Prism Different](#what-makes-prism-different)
+- [Quick Start](#-quick-start)
+- [The Magic Moment](#-the-magic-moment)
+- [Setup Guides](#-setup-guides)
+- [Universal Import: Bring Your History](#-universal-import-bring-your-history)
+- [What Makes Prism Different](#-what-makes-prism-different)
 - [Cognitive Architecture (v7.8)](#-cognitive-architecture-v78)
-- [Data Privacy & Egress](#data-privacy--egress)
-- [Use Cases](#use-cases)
-- [What's New](#whats-new)
-- [How Prism Compares](#how-prism-compares)
+- [Data Privacy & Egress](#-data-privacy--egress)
+- [Use Cases](#-use-cases)
+- [What's New](#-whats-new)
+- [How Prism Compares](#-how-prism-compares)
 - [CLI Reference](#-cli-reference)
-- [Tool Reference](#tool-reference)
+- [Tool Reference](#-tool-reference)
 - [Environment Variables](#environment-variables)
 - [Architecture](#architecture)
-- [Scientific Foundation](#scientific-foundation)
-- [Milestones & Roadmap](#milestones--roadmap)
-- [Troubleshooting FAQ](#troubleshooting-faq)
+- [Scientific Foundation](#-scientific-foundation)
+- [Milestones & Roadmap](#-milestones--roadmap)
+- [Troubleshooting FAQ](#-troubleshooting-faq)
 
 ---
 
@@ -438,7 +438,7 @@ Prism can be deployed natively to cloud platforms like [Render](https://render.c
 > ```
 > At the start of every conversation, call session_load_context with project "my-project" before doing any work.
 > ```
-> Claude Code users can use the `.clauderules` auto-load hook shown in the [Setup Guides](#setup-guides). Prism also has a **server-side fallback** (v5.2.1+) that auto-pushes context after 10 seconds if no load is detected.
+> Claude Code users can use the `.clauderules` auto-load hook shown in the [Setup Guides](#-setup-guides). Prism also has a **server-side fallback** (v5.2.1+) that auto-pushes context after 10 seconds if no load is detected.
 
 ---
 
@@ -1324,7 +1324,7 @@ A: Run `npm run build && npm test`, then open the Mind Palace dashboard (`localh
 ### 💡 Known Limitations & Quirks
 
 - **LLM-dependent features require an API key.** Semantic search, Morning Briefings, auto-compaction, and VLM captioning need a `GOOGLE_API_KEY` (your Gemini API key) or equivalent provider key. Without one, Prism falls back to keyword-only search (FTS5).
-- **Auto-load is model- and client-dependent.** Session auto-loading relies on both the LLM following system prompt instructions *and* the MCP client completing tool registration before the model's first turn. Prism provides platform-specific [Setup Guides](#setup-guides) and a server-side fallback (v5.2.1) that auto-pushes context after 10 seconds.
+- **Auto-load is model- and client-dependent.** Session auto-loading relies on both the LLM following system prompt instructions *and* the MCP client completing tool registration before the model's first turn. Prism provides platform-specific [Setup Guides](#-setup-guides) and a server-side fallback (v5.2.1) that auto-pushes context after 10 seconds.
 - **MCP client race conditions.** Some MCP clients may not finish tool enumeration before the model generates its first response, causing transient `unknown_tool` errors. This is a client-side timing issue — Prism's server completes the MCP handshake in ~60ms. Workaround: the server-side auto-push fallback and the startup skill's retry logic.
 - **No real-time sync without Supabase.** Local SQLite mode is single-machine only. Multi-device or team sync requires a Supabase backend.
 - **Embedding quality varies by provider.** Gemini `text-embedding-004` and OpenAI `text-embedding-3-small` produce high-quality 768-dim vectors. Prism passes `dimensions: 768` via the Matryoshka API for OpenAI models (native output is 1536-dim; this truncation is lossless and outperforms ada-002 at full 1536 dims). Ollama embeddings (e.g., `nomic-embed-text`) are usable but may reduce retrieval accuracy.
