@@ -48,10 +48,20 @@ import {
 const PORT = parseInt(process.env.PRISM_DASHBOARD_PORT || "3000", 10);
 
 /** Read HTTP request body as string (Buffer-based to avoid GC thrash on large imports) */
+/** SECURITY: 10MB limit prevents memory exhaustion from oversized POST payloads. */
+const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10MB
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => { chunks.push(chunk); });
+    let totalBytes = 0;
+    req.on("data", (chunk: Buffer) => {
+      totalBytes += chunk.length;
+      if (totalBytes > MAX_BODY_BYTES) {
+        req.destroy(new Error("Request body too large (>10MB)"));
+        return reject(new Error("Request body too large"));
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
     req.on("error", reject);
   });
@@ -189,8 +199,13 @@ return false;}
     // v6.5.1: CORS — restrict origin when auth is enabled to prevent CSRF
     if (AUTH_ENABLED) {
       const origin = req.headers.origin || "";
-      // Only echo back the origin if present (browser-initiated requests)
-      if (origin) {
+      // SECURITY: Allowlist-based CORS — don't echo arbitrary origins with credentials
+      const allowedOrigins = new Set([
+        `http://localhost:${PORT}`,
+        `http://127.0.0.1:${PORT}`,
+        process.env.PRISM_DASHBOARD_ORIGIN || "",
+      ].filter(Boolean));
+      if (origin && allowedOrigins.has(origin)) {
         res.setHeader("Access-Control-Allow-Origin", origin);
         res.setHeader("Access-Control-Allow-Credentials", "true");
       }
@@ -199,6 +214,9 @@ return false;}
     }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    // SECURITY: Prevent clickjacking via X-Frame-Options and CSP
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -638,6 +656,26 @@ return false;}
           const body = await readBody(req);
           const parsed = JSON.parse(body);
           if (parsed.key && parsed.value !== undefined) {
+            // SECURITY: Allowlist of dashboard-settable keys to prevent
+            // credential overwrite (SUPABASE_KEY, STRIPE_SECRET_KEY, etc.)
+            const SETTABLE_KEYS = new Set([
+              "PRISM_STORAGE", "SUPABASE_URL", "SUPABASE_KEY",
+              "BRAVE_API_KEY", "BRAVE_ANSWERS_API_KEY",
+              "GOOGLE_API_KEY", "VOYAGE_API_KEY",
+              "FIRECRAWL_API_KEY", "TAVILY_API_KEY",
+              "embedding_provider", "embedding_model",
+              "PRISM_ENABLE_HIVEMIND", "PRISM_DARK_FACTORY_ENABLED",
+              "PRISM_TASK_ROUTER_ENABLED", "PRISM_SCHOLAR_ENABLED",
+              "PRISM_HDC_ENABLED", "PRISM_ACTR_ENABLED",
+              "PRISM_GRAPH_PRUNING_ENABLED",
+            ]);
+            const isSkillKey = parsed.key.startsWith("skill:");
+            const isTTLKey = parsed.key.startsWith("ttl:");
+            const isAutoloadKey = parsed.key.startsWith("autoload:");
+            if (!SETTABLE_KEYS.has(parsed.key) && !isSkillKey && !isTTLKey && !isAutoloadKey) {
+              res.writeHead(403, { "Content-Type": "application/json" });
+              return res.end(JSON.stringify({ error: `Setting key "${parsed.key}" is not allowed via the dashboard.` }));
+            }
             const { setSetting } = await import("../storage/configStorage.js");
             await setSetting(parsed.key, String(parsed.value));
             res.writeHead(200, { "Content-Type": "application/json" });
@@ -817,6 +855,17 @@ return false;}
           if (!filePath) {
             res.writeHead(400, { "Content-Type": "application/json" });
             return res.end(JSON.stringify({ error: "path is required" }));
+          }
+
+          // SECURITY: Restrict import paths to prevent arbitrary file reads.
+          // Only allow files from home directory, /tmp, and current working directory.
+          const resolvedPath = path.resolve(filePath);
+          const homeDir = os.homedir();
+          const allowedPrefixes = [homeDir, os.tmpdir(), process.cwd()];
+          const isAllowed = allowedPrefixes.some(prefix => resolvedPath.startsWith(prefix + path.sep) || resolvedPath === prefix);
+          if (!isAllowed) {
+            res.writeHead(403, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: `Import path must be under home directory or /tmp` }));
           }
 
           // Verify file exists before starting import

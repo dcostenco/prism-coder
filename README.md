@@ -826,8 +826,9 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v9.3.0 — TurboQuant ResidualNorm Tiebreaker**
+> **Current release: v9.4.0 — Adversarial Security Hardening & Bidirectional Sync**
 
+- 🔒 **v9.4.0 — Security Hardening & Bidirectional Sync:** Two-pass adversarial audit found 18 vulnerabilities (4C/5H/9M) across Prism and Synalux — 17 fixed. Critical: fail-closed rate limiter, path traversal guards, error sanitization. High: plan name alignment (revenue fix), CORS allowlist, settings injection prevention. New: bidirectional `prism sync push` CLI command pushes local SQLite → Supabase, NextAuth JWT enrichment eliminates N+1 DB queries, concurrency counter guaranteed via `try/finally`, 10MB request body limits.
 - 🎯 **v9.3.0 — TurboQuant ResidualNorm Tiebreaker:** Configurable ranking optimization for Tier-2 search. When compressed cosine scores are within ε of each other, prefers the candidate with lower `residualNorm` (more trustworthy compressed representation). `PRISM_TURBOQUANT_TIEBREAKER_EPSILON=0.005` gives +2pp R@1, +1pp R@5. Empirically validated at N=5K with A/B test. 1066 tests, 0 regressions. Inspired by [@m13v's suggestion](https://github.com/xiaowu0162/LongMemEval/issues/31).
 - 🔒 **v9.2.7 — Security Hardening:** Typed `PrototypePollutionError` class (replaces generic `Error` in `sanitizeForMerge()` — enables catch-site discrimination and forensic logging with `offendingKey`), explicit null-byte path injection guard in `SafetyController.validateActionsInScope()` (C-string truncation attack vector), and corrected CRDT merge semantics documentation (Remove-Wins-from-Either, not Add-Wins). 1055 tests, 0 regressions.
 - 🪟 **v9.2.6 — Windows CI Timeout Fix:** CLI integration tests timed out on Windows + Node 22.x GitHub Actions runners. Added `{ timeout: 30_000 }` to the describe block. 6 new residual distribution tests validating TurboQuant's QJL correction stability (zero R@5 delta between P50 and P95 residual vectors at d=128, 2K corpus).
@@ -912,6 +913,10 @@ prism load my-project                          # Human-readable, standard depth
 prism load my-project --level deep             # Full context with all enrichments
 prism load my-project --level quick --json     # Machine-readable JSON
 prism load my-project --role dev --json        # Role-scoped loading
+
+# Bidirectional sync (v9.4.0)
+prism sync push                                # Push local SQLite → Supabase
+prism sync push --json                         # Machine-readable output
 
 # Verification harness
 prism verify status                            # Check verification state

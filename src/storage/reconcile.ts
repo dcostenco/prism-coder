@@ -298,3 +298,209 @@ async function reconcileLedger(
 
   return totalSynced;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// M4: PUSH RECONCILIATION (Local SQLite → Supabase)
+//
+// Closes the architectural gap where work saved locally (via
+// `prism save --storage local` or Antigravity's session saver)
+// was invisible to Claude Desktop reading from Supabase.
+//
+// Design:
+//   - Read-only on local SQLite (never modifies local data)
+//   - Upserts newer handoffs to Supabase
+//   - Pushes recent ledger entries that don't exist in Supabase
+//   - 5-second timeout per Supabase call
+//   - Non-blocking: errors are logged, never thrown
+// ═══════════════════════════════════════════════════════════════
+
+export interface PushReconcileResult {
+  handoffsPushed: number;
+  ledgerEntriesPushed: number;
+  projects: string[];
+}
+
+/**
+ * Push newer local handoffs and ledger entries to Supabase.
+ *
+ * @param localStorage - The initialized SQLite storage instance
+ * @param getLocalTimestamps - Function to bulk-read local handoff timestamps
+ */
+export async function pushReconciliation(
+  localStorage: StorageBackend,
+  getLocalTimestamps?: () => Promise<Map<string, string>>,
+): Promise<PushReconcileResult> {
+  const result: PushReconcileResult = { handoffsPushed: 0, ledgerEntriesPushed: 0, projects: [] };
+
+  try {
+    // Step 1: Get all local handoffs
+    let localTimestamps: Map<string, string>;
+    if (getLocalTimestamps) {
+      localTimestamps = await getLocalTimestamps();
+    } else {
+      debugLog("[Push Reconcile] No getLocalTimestamps provided — nothing to push");
+      return result;
+    }
+
+    if (localTimestamps.size === 0) {
+      debugLog("[Push Reconcile] No local handoffs — nothing to push");
+      return result;
+    }
+
+    // Step 2: Fetch all remote handoff timestamps for comparison
+    const remoteHandoffs = await withTimeout(
+      supabaseGet("session_handoffs", {
+        user_id: `eq.${PRISM_USER_ID}`,
+        select: "project,role,updated_at",
+      }),
+      RECONCILE_TIMEOUT_MS,
+      "fetch remote handoff timestamps",
+    ) as Record<string, unknown>[];
+
+    const remoteTimestamps = new Map<string, string>();
+    if (Array.isArray(remoteHandoffs)) {
+      for (const r of remoteHandoffs) {
+        const key = `${r.project}::${(r.role as string) || "global"}`;
+        remoteTimestamps.set(key, r.updated_at as string);
+      }
+    }
+
+    // Step 3: Find local handoffs that are newer than remote
+    const projectsToPush = new Set<string>();
+    for (const [key, localUpdatedAt] of localTimestamps) {
+      const remoteUpdatedAt = remoteTimestamps.get(key);
+      const localIsNewer = !remoteUpdatedAt
+        || (localUpdatedAt && new Date(localUpdatedAt) > new Date(remoteUpdatedAt));
+
+      if (localIsNewer) {
+        const [project, role] = key.split("::");
+        projectsToPush.add(project);
+
+        // Load the full handoff from local storage
+        const ctx = await localStorage.loadContext(project, "quick", PRISM_USER_ID, role || "global");
+        if (!ctx) continue;
+
+        // Upsert to Supabase
+        try {
+          const { supabasePost } = await import("../utils/supabaseApi.js");
+          await withTimeout(
+            supabasePost("session_handoffs", {
+              project,
+              user_id: PRISM_USER_ID,
+              role: role || "global",
+              last_summary: (ctx as any).last_summary ?? null,
+              pending_todo: (ctx as any).pending_todo ?? [],
+              active_decisions: (ctx as any).active_decisions ?? [],
+              keywords: (ctx as any).keywords ?? [],
+              key_context: (ctx as any).key_context ?? null,
+              active_branch: (ctx as any).active_branch ?? null,
+              metadata: (ctx as any).metadata ?? {},
+            }, {
+              on_conflict: "project,user_id,role",
+            }, {
+              "Prefer": "return=representation,resolution=merge-duplicates",
+            }),
+            RECONCILE_TIMEOUT_MS,
+            `push handoff ${project}`,
+          );
+          result.handoffsPushed++;
+          result.projects.push(project);
+          debugLog(`[Push Reconcile] Pushed handoff "${project}" (role: ${role || "global"}) to Supabase`);
+        } catch (pushErr) {
+          debugLog(
+            `[Push Reconcile] Failed to push handoff "${project}": ` +
+            `${pushErr instanceof Error ? pushErr.message : String(pushErr)}`
+          );
+        }
+      }
+    }
+
+    // Step 4: Push recent ledger entries for pushed projects
+    if (projectsToPush.size > 0) {
+      const { supabasePost, supabaseGet: sbGet } = await import("../utils/supabaseApi.js");
+
+      for (const project of projectsToPush) {
+        try {
+          // Get local recent entries
+          const localEntries = await localStorage.getLedgerEntries({
+            project: `eq.${project}`,
+            user_id: `eq.${PRISM_USER_ID}`,
+            archived_at: "is.null",
+            deleted_at: "is.null",
+            order: "created_at.desc",
+            limit: "20",
+            select: "id,project,conversation_id,summary,user_id,role,todos,files_changed,decisions,keywords,event_type,importance,created_at,session_date",
+          }) as Record<string, unknown>[];
+
+          if (!Array.isArray(localEntries) || localEntries.length === 0) continue;
+
+          // Check which IDs already exist in Supabase
+          const localIds = localEntries.map(e => e.id as string);
+          const remoteExisting = await withTimeout(
+            sbGet("session_ledger", {
+              id: `in.(${localIds.join(",")})`,
+              select: "id",
+            }),
+            RECONCILE_TIMEOUT_MS,
+            `check remote ledger for ${project}`,
+          ) as Record<string, unknown>[];
+
+          const existingRemoteIds = new Set(
+            (Array.isArray(remoteExisting) ? remoteExisting : []).map((e: any) => e.id)
+          );
+
+          // Push entries that don't exist remotely
+          for (const entry of localEntries) {
+            if (existingRemoteIds.has(entry.id as string)) continue;
+
+            try {
+              await supabasePost("session_ledger", {
+                id: entry.id,
+                project: entry.project,
+                conversation_id: entry.conversation_id || "pushed",
+                summary: entry.summary,
+                user_id: PRISM_USER_ID,
+                role: (entry.role as string) || "global",
+                todos: safeParseArray(entry.todos),
+                files_changed: safeParseArray(entry.files_changed),
+                decisions: safeParseArray(entry.decisions),
+                keywords: safeParseArray(entry.keywords),
+                event_type: (entry.event_type as string) || "session",
+                importance: (entry.importance as number) || 0,
+              });
+              result.ledgerEntriesPushed++;
+            } catch (insertErr) {
+              const msg = insertErr instanceof Error ? insertErr.message : String(insertErr);
+              // Skip duplicate key violations silently
+              if (!msg.includes("duplicate") && !msg.includes("23505")) {
+                debugLog(`[Push Reconcile] Failed to push ledger entry ${entry.id}: ${msg}`);
+              }
+            }
+          }
+        } catch (err) {
+          debugLog(
+            `[Push Reconcile] Ledger push failed for "${project}": ` +
+            `${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+    }
+
+    if (result.handoffsPushed > 0 || result.ledgerEntriesPushed > 0) {
+      debugLog(
+        `[Push Reconcile] Pushed ${result.handoffsPushed} handoff(s)` +
+        `${result.ledgerEntriesPushed > 0 ? ` + ${result.ledgerEntriesPushed} ledger entries` : ""}` +
+        ` from SQLite → Supabase: ${result.projects.join(", ")}`
+      );
+    } else {
+      debugLog("[Push Reconcile] Supabase already up-to-date with local data");
+    }
+  } catch (err) {
+    debugLog(
+      `[Push Reconcile] Failed (non-fatal): ` +
+      `${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  return result;
+}

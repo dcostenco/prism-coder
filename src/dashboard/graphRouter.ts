@@ -40,10 +40,20 @@ interface GraphEdge {
 }
 
 /** Read HTTP request body as string */
+/** SECURITY: 10MB limit prevents memory exhaustion from oversized POST payloads. */
+const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10MB
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => { chunks.push(chunk); });
+    let totalBytes = 0;
+    req.on("data", (chunk: Buffer) => {
+      totalBytes += chunk.length;
+      if (totalBytes > MAX_BODY_BYTES) {
+        req.destroy(new Error("Request body too large (>10MB)"));
+        return reject(new Error("Request body too large"));
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
     req.on("error", reject);
   });

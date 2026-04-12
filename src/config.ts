@@ -85,14 +85,14 @@ export const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
 
 // ─── v2.0: Storage Backend Selection ─────────────────────────
 // REVIEWER NOTE: Step 1 of v2.0 introduces a storage abstraction.
-// Currently only "supabase" is implemented. "local" (SQLite) is
-// coming in Step 2. Default is "supabase" for backward compat.
+// Both "local" (SQLite) and "supabase" (PostgreSQL) are implemented.
+// Default is "local" for zero-config operation.
 //
-// Set PRISM_STORAGE=local to use SQLite (once implemented).
-// Set PRISM_STORAGE=supabase to use Supabase REST API (default).
+// Set PRISM_STORAGE=supabase to use Supabase REST API.
+// Set PRISM_STORAGE=local to use SQLite (default).
 
 export const PRISM_STORAGE: "local" | "supabase" =
-  (process.env.PRISM_STORAGE as "local" | "supabase") || "supabase";
+  (process.env.PRISM_STORAGE as "local" | "supabase") || "local";
 // Logged at debug level — see debug() at bottom of file
 
 // ─── Optional: Supabase (Session Memory Module) ───────────────

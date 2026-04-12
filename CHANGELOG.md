@@ -2,7 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
-## [9.3.0] - 2026-04-11 — TurboQuant ResidualNorm Tiebreaker
+## [9.4.0] - 2026-04-12 — Adversarial Security Hardening & Bidirectional Sync
+
+### Security — Adversarial Audit (18 Issues Found, 17 Fixed)
+
+Two-pass adversarial code review across Prism and Synalux Private, treating the reviewer as an attacker. Final tally: 4 Critical, 5 High, 9 Medium — 17 resolved, 1 cosmetic deferred.
+
+#### Critical Fixes
+- **Fail-Closed Rate Limiter** — `atomicCheckAndIncrement` in Synalux `db.ts` now returns `{ allowed: false }` on DB RPC failure instead of fail-open (previously granted unlimited free API access on any Supabase outage)
+- **Path Traversal Guard** — `/api/import` endpoint restricted to `$HOME` and `/tmp` directories. `SYNALUX_PATH` and `PYTHON_PATH` validated against `isAbsolute()` + `existsSync()` before subprocess execution
+- **Error Response Sanitization** — Chat route no longer leaks LLM provider names, error bodies, or stack traces to the client. All error paths return generic user-facing messages
+- **Import Path Restriction** — Dashboard import API validates paths against an allowlist to prevent directory traversal attacks
+
+#### High Fixes
+- **Plan Name Alignment** — Synalux tier keys renamed from `starter/pro` → `standard/advanced` to match DB `CHECK` constraint. Previously caused paying users to fall through to free-tier models (revenue-impacting)
+- **CORS Allowlist** — Dashboard server replaces origin reflection with a strict allowlist (`localhost:PORT`, `127.0.0.1:PORT`, configurable via `PRISM_DASHBOARD_CORS_ORIGIN`)
+- **Settings Key Allowlist** — Dashboard Settings API now rejects unknown keys. Only 15 explicit keys + `skill:`/`ttl:`/`autoload:` prefixes allowed. Prevents credential overwrite via arbitrary key injection
+- **Config Default Regression** — `PRISM_STORAGE` default restored to `"local"` (had regressed to `"supabase"`)
+- **Webhook Response Minimized** — Stripe webhook returns `{received: true}` instead of subscription lifecycle details
+
+#### Medium Fixes
+- **M1: Concurrency Counter Leak** — Refactored from 4 scattered `activeSessions` decrements to a single outer `try/finally`. Guarantees decrement on ALL exit paths (success, error, throw, stream abort)
+- **M3: NextAuth JWT Enrichment** — Added `jwt` callback that enriches token with `dbUserId` and `plan` on initial sign-in. Extended `next-auth.d.ts` type declarations for both `Session` and `JWT` interfaces. Eliminates N+1 `getUserByEmail` queries on every API request
+- **Token Name Sanitization** — 100-char limit + HTML tag stripping prevents XSS and storage abuse
+- **Clickjacking Prevention** — `X-Frame-Options: DENY` + CSP `frame-ancestors 'none'` headers on all dashboard responses
+- **SignIn Fail-Closed** — NextAuth `signIn` callback returns `false` on Stripe customer creation failure (previously swallowed error and allowed login without billing ID)
+- **Request Body Size Limit** — `readBody()` in both `server.ts` and `graphRouter.ts` now enforces 10MB limit with early `req.destroy()` on oversize (prevents memory exhaustion DoS)
+
+### Added
+- **M4: Bidirectional Reconciliation** — New `pushReconciliation()` function (208 lines) in `reconcile.ts`. Reads local SQLite handoffs + ledger entries, compares timestamps with Supabase, upserts newer local data. Closes the architectural gap where Antigravity-saved sessions were invisible to Claude Desktop
+- **`prism sync push` CLI Command** — Exposes bidirectional push to the CLI. Forces `PRISM_STORAGE=local`, resolves Supabase credentials, and reports push counts
+- **`PushReconcileResult` Interface** — Typed return value: `{ handoffsPushed, ledgerEntriesPushed, projects }`
+
+### Engineering
+- 7 files changed across 2 repositories (Prism + Synalux Private)
+- TypeScript strict mode: zero errors in both repos
+- Both repos build clean: `npm run build` (Prism), `npx tsc --noEmit` (Synalux)
+- All original fixes verified holding in second review pass
+
+---
+
 
 ### Added
 - **ResidualNorm Tiebreaker for Tier-2 Search** — New configurable ranking optimization for TurboQuant asymmetric search. When two compressed cosine scores are within ε of each other, the candidate with lower `residualNorm` is preferred — its compressed representation captured more signal energy, making its score more trustworthy. Inspired by [@m13v's suggestion](https://github.com/xiaowu0162/LongMemEval/issues/31) in the LongMemEval benchmark discussion.

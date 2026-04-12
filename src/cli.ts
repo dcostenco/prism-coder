@@ -8,7 +8,7 @@ import { getStorage, closeStorage } from './storage/index.js';
 import { getSetting } from './storage/configStorage.js';
 import { PRISM_USER_ID, SERVER_CONFIG } from './config.js';
 import { getCurrentGitState } from './utils/git.js';
-import { sessionLoadContextHandler } from './tools/ledgerHandlers.js';
+import { sessionLoadContextHandler, sessionSaveLedgerHandler, sessionSaveHandoffHandler } from './tools/ledgerHandlers.js';
 
 const program = new Command();
 
@@ -146,6 +146,175 @@ program
     }
   });
 
+// ─── prism save ───────────────────────────────────────────────
+// Saves session state using the same storage layer as the MCP
+// session_save_ledger and session_save_handoff tools. Works with
+// both SQLite and Supabase.
+//
+// Designed for Antigravity and other environments that cannot use
+// MCP tools directly. This is the counterpart to `prism load`.
+//
+// Two subcommands:
+//   prism save ledger <project>  — append immutable session log entry
+//   prism save handoff <project> — update live project state for next session
+
+const saveCmd = program
+  .command('save')
+  .description('Save session state (ledger entries and handoff)');
+
+/**
+ * Parse a CLI string argument that may be a JSON array or a plain string.
+ * Returns string[] for arrays, wraps plain strings in an array.
+ */
+function parseJsonArrayArg(val: string | undefined, fieldName: string): string[] | undefined {
+  if (!val) return undefined;
+  const trimmed = val.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!Array.isArray(parsed)) throw new Error('not an array');
+      return parsed.map(String);
+    } catch (err) {
+      console.error(`Error: --${fieldName} must be a valid JSON array. Got: ${trimmed}`);
+      process.exit(1);
+    }
+  }
+  // Plain string → single-element array
+  return [trimmed];
+}
+
+saveCmd
+  .command('ledger <project>')
+  .description('Save an immutable session log entry (same as session_save_ledger MCP tool)')
+  .requiredOption('-c, --conversation-id <id>', 'Unique conversation/session identifier')
+  .requiredOption('-m, --summary <text>', 'Summary of what was accomplished')
+  .option('-t, --todos <json>', 'Open TODO items as JSON array, e.g. \'["item1","item2"]\'')
+  .option('-f, --files-changed <json>', 'Files changed as JSON array')
+  .option('-d, --decisions <json>', 'Key decisions as JSON array')
+  .option('-r, --role <role>', 'Agent role for Hivemind scoping')
+  .option('-s, --storage <backend>', 'Storage backend: local (SQLite) or supabase')
+  .option('--json', 'Emit machine-readable JSON output')
+  .action(async (project: string, options: {
+    conversationId: string;
+    summary: string;
+    todos?: string;
+    filesChanged?: string;
+    decisions?: string;
+    role?: string;
+    storage?: string;
+    json?: boolean;
+  }) => {
+    try {
+      // Storage override
+      if (options.storage) {
+        const validStorages = ['local', 'supabase'];
+        if (!validStorages.includes(options.storage)) {
+          console.error(`Error: Invalid storage "${options.storage}". Must be one of: ${validStorages.join(', ')}`);
+          process.exit(1);
+        }
+        process.env.PRISM_STORAGE = options.storage;
+      }
+
+      const args = {
+        project,
+        conversation_id: options.conversationId,
+        summary: options.summary,
+        todos: parseJsonArrayArg(options.todos, 'todos'),
+        files_changed: parseJsonArrayArg(options.filesChanged, 'files-changed'),
+        decisions: parseJsonArrayArg(options.decisions, 'decisions'),
+        role: options.role,
+      };
+
+      const result = await sessionSaveLedgerHandler(args);
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: !result.isError,
+          text: (result.content[0] as any)?.text || '',
+        }, null, 2));
+      } else {
+        console.log((result.content[0] as any)?.text || 'Done');
+      }
+
+      if (result.isError) {
+        await closeStorage();
+        process.exit(1);
+      }
+
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error saving ledger: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => {});
+      process.exit(1);
+    }
+  });
+
+saveCmd
+  .command('handoff <project>')
+  .description('Update the live project state for next session (same as session_save_handoff MCP tool)')
+  .option('-m, --last-summary <text>', 'Summary of the most recent session')
+  .option('-t, --open-todos <json>', 'Current open TODO items as JSON array')
+  .option('-k, --key-context <text>', 'Free-form critical context for next session')
+  .option('-b, --active-branch <branch>', 'Git branch or context to resume on')
+  .option('-v, --expected-version <n>', 'Version for optimistic concurrency control', parseInt)
+  .option('-r, --role <role>', 'Agent role for Hivemind scoping')
+  .option('-s, --storage <backend>', 'Storage backend: local (SQLite) or supabase')
+  .option('--json', 'Emit machine-readable JSON output')
+  .action(async (project: string, options: {
+    lastSummary?: string;
+    openTodos?: string;
+    keyContext?: string;
+    activeBranch?: string;
+    expectedVersion?: number;
+    role?: string;
+    storage?: string;
+    json?: boolean;
+  }) => {
+    try {
+      // Storage override
+      if (options.storage) {
+        const validStorages = ['local', 'supabase'];
+        if (!validStorages.includes(options.storage)) {
+          console.error(`Error: Invalid storage "${options.storage}". Must be one of: ${validStorages.join(', ')}`);
+          process.exit(1);
+        }
+        process.env.PRISM_STORAGE = options.storage;
+      }
+
+      const args = {
+        project,
+        last_summary: options.lastSummary,
+        open_todos: parseJsonArrayArg(options.openTodos, 'open-todos'),
+        key_context: options.keyContext,
+        active_branch: options.activeBranch,
+        expected_version: options.expectedVersion,
+        role: options.role,
+      };
+
+      const result = await sessionSaveHandoffHandler(args);
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: !result.isError,
+          text: (result.content[0] as any)?.text || '',
+        }, null, 2));
+      } else {
+        console.log((result.content[0] as any)?.text || 'Done');
+      }
+
+      if (result.isError) {
+        await closeStorage();
+        process.exit(1);
+      }
+
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error saving handoff: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => {});
+      process.exit(1);
+    }
+  });
+
 // ─── prism verify ─────────────────────────────────────────────
 
 const verifyCmd = program
@@ -187,6 +356,64 @@ verifyCmd
       await handleGenerateHarness(storage, options.project, !!options.force, options.user, !!options.json);
     } finally {
       await storage.close();
+    }
+  });
+// ─── prism sync ───────────────────────────────────────────────
+// M4: Bidirectional reconciliation commands.
+// `prism sync push` pushes local SQLite data to Supabase.
+
+const syncCmd = program
+  .command('sync')
+  .description('Cross-backend data synchronization');
+
+syncCmd
+  .command('push')
+  .description('Push local SQLite data to Supabase (handoffs + recent ledger)')
+  .option('--json', 'Emit machine-readable JSON output')
+  .action(async (options) => {
+    try {
+      // Force local storage mode to read from SQLite
+      process.env.PRISM_STORAGE = 'local';
+      const storage = await getStorage();
+
+      // Verify Supabase credentials are available
+      const { getSetting } = await import('./storage/configStorage.js');
+      const sbUrl = process.env.SUPABASE_URL || await getSetting('SUPABASE_URL');
+      const sbKey = process.env.SUPABASE_KEY || await getSetting('SUPABASE_KEY');
+      if (!sbUrl || !sbKey) {
+        console.error('❌ Supabase credentials not configured. Set SUPABASE_URL and SUPABASE_KEY.');
+        await closeStorage();
+        process.exit(1);
+      }
+      // Ensure process.env has the credentials for supabaseApi.ts
+      process.env.SUPABASE_URL = sbUrl;
+      process.env.SUPABASE_KEY = sbKey;
+
+      const { pushReconciliation } = await import('./storage/reconcile.js');
+      const { SqliteStorage } = await import('./storage/sqlite.js');
+      const sqliteInstance = storage as InstanceType<typeof SqliteStorage>;
+      const getTimestamps = () => sqliteInstance.getHandoffTimestamps();
+
+      const result = await pushReconciliation(storage, getTimestamps);
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        if (result.handoffsPushed === 0 && result.ledgerEntriesPushed === 0) {
+          console.log('✅ Supabase is already up-to-date with local data.');
+        } else {
+          console.log(`✅ Pushed ${result.handoffsPushed} handoff(s) + ${result.ledgerEntriesPushed} ledger entries to Supabase`);
+          if (result.projects.length > 0) {
+            console.log(`   Projects: ${result.projects.join(', ')}`);
+          }
+        }
+      }
+
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error during sync push: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => {});
+      process.exit(1);
     }
   });
 
