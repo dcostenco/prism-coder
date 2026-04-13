@@ -826,8 +826,9 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v9.4.2 — Shell Injection Fix (Git Drift Detection)**
+> **Current release: v9.4.3 — ESM Bundling Fix (async_hooks)**
 
+- 🔧 **v9.4.3 — ESM Bundling Fix:** Bundled dist had inlined OpenTelemetry CJS `require("async_hooks")` into ESM chunks, causing `Dynamic require of "async_hooks" is not supported` at runtime. Rebuilt with `tsc`. Affects CLI, session save/load, and MCP server startup.
 - 🔒 **v9.4.2 — Shell Injection Fix:** Deep code review found shell injection in `getGitDrift()` — `oldSha` was interpolated into `execSync` template string. Fixed with SHA format validation + `execFileSync` (no shell). Defense-in-depth.
 - 🔒 **v9.4.1 — Security Hardening & Bidirectional Sync:** Two-pass adversarial audit found 18 vulnerabilities (4C/5H/9M) — 17 fixed. Critical: fail-closed rate limiter, path traversal guards, error sanitization. High: plan name alignment (revenue fix), CORS allowlist, settings injection prevention. New: bidirectional `prism sync push` CLI command pushes local SQLite → Supabase, JWT enrichment eliminates N+1 DB queries, concurrency counter guaranteed via `try/finally`, 10MB request body limits.
 - 🎯 **v9.3.0 — TurboQuant ResidualNorm Tiebreaker:** Configurable ranking optimization for Tier-2 search. When compressed cosine scores are within ε of each other, prefers the candidate with lower `residualNorm` (more trustworthy compressed representation). `PRISM_TURBOQUANT_TIEBREAKER_EPSILON=0.005` gives +2pp R@1, +1pp R@5. Empirically validated at N=5K with A/B test. 1066 tests, 0 regressions. Inspired by [@m13v's suggestion](https://github.com/xiaowu0162/LongMemEval/issues/31).
