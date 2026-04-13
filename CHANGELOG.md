@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.4.2] - 2026-04-13 — Shell Injection Fix (Git Drift Detection)
+
+### Security
+- **Shell Injection in `getGitDrift`** — `oldSha` was interpolated directly into a template string passed to `execSync`, enabling arbitrary command execution via a corrupted database entry (e.g., `"; rm -rf /"`). Fixed by: (1) validating SHA format against `/^[0-9a-f]{4,40}$/i`, and (2) replacing `execSync` (shell) with `execFileSync` (no shell, args as array). Defense-in-depth: even if validation is bypassed, `execFileSync` prevents shell metacharacter injection.
+
+### Engineering
+- 1 file changed: `src/utils/git.ts`
+- TypeScript: clean, zero errors
+
+---
+
 ## [9.4.1] - 2026-04-12 — Adversarial Security Hardening & Bidirectional Sync
 
 ### Security — Adversarial Audit (18 Issues Found, 17 Fixed)

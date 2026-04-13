@@ -826,8 +826,9 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v9.4.1 — Adversarial Security Hardening & Bidirectional Sync**
+> **Current release: v9.4.2 — Shell Injection Fix (Git Drift Detection)**
 
+- 🔒 **v9.4.2 — Shell Injection Fix:** Deep code review found shell injection in `getGitDrift()` — `oldSha` was interpolated into `execSync` template string. Fixed with SHA format validation + `execFileSync` (no shell). Defense-in-depth.
 - 🔒 **v9.4.1 — Security Hardening & Bidirectional Sync:** Two-pass adversarial audit found 18 vulnerabilities (4C/5H/9M) — 17 fixed. Critical: fail-closed rate limiter, path traversal guards, error sanitization. High: plan name alignment (revenue fix), CORS allowlist, settings injection prevention. New: bidirectional `prism sync push` CLI command pushes local SQLite → Supabase, JWT enrichment eliminates N+1 DB queries, concurrency counter guaranteed via `try/finally`, 10MB request body limits.
 - 🎯 **v9.3.0 — TurboQuant ResidualNorm Tiebreaker:** Configurable ranking optimization for Tier-2 search. When compressed cosine scores are within ε of each other, prefers the candidate with lower `residualNorm` (more trustworthy compressed representation). `PRISM_TURBOQUANT_TIEBREAKER_EPSILON=0.005` gives +2pp R@1, +1pp R@5. Empirically validated at N=5K with A/B test. 1066 tests, 0 regressions. Inspired by [@m13v's suggestion](https://github.com/xiaowu0162/LongMemEval/issues/31).
 - 🔒 **v9.2.7 — Security Hardening:** Typed `PrototypePollutionError` class (replaces generic `Error` in `sanitizeForMerge()` — enables catch-site discrimination and forensic logging with `offendingKey`), explicit null-byte path injection guard in `SafetyController.validateActionsInScope()` (C-string truncation attack vector), and corrected CRDT merge semantics documentation (Remove-Wins-from-Either, not Add-Wins). 1055 tests, 0 regressions.
@@ -1238,6 +1239,7 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 | **v9.0** | Surprisal Gate — vector-based novelty pricing: high-surprisal saves cost 0.5× tokens, low-surprisal 2.0×; forces LLM data compression | Information-theoretic surprisal (Shannon), predictive coding | ✅ Shipped |
 | **v9.0** | Cognitive Budget — per-project token economy with passive UBI recovery (+100 tokens/hr); agents that over-save enter Cognitive Debt | Resource-bounded rationality (Simon, 1955) | ✅ Shipped |
 | **v9.1** | Task Router v2 — 6-signal weighted heuristic engine routing tasks between cloud host and local LLM based on file-type complexity, scope, and multi-step detection | Heuristic classification, cognitive load theory | ✅ Shipped |
+| **v9.4** | Shell Injection Fix — `execSync` → `execFileSync` + SHA format validation in git drift detection | Defense-in-depth, secure subprocess execution | ✅ Shipped |
 | **v9.2** | Cross-Backend Reconciliation — automatic Supabase → SQLite sync with idempotent dedup and 5s timeout | Eventual consistency, crdt-style reconciliation | ✅ Shipped |
 | **v9.2** | Split-Brain Drift Detection — dual-backend version comparison with prominent divergence warnings at load time | Byzantine fault detection, split-brain resolution | ✅ Shipped |
 | **v9.2** | TurboQuant QJL Validation — zero R@5 delta between P50 and P95 residual vectors (d=128, N=2K); CV=0.038 at d=768 proves no long tail | QJL estimator (ICLR 2026), Householder orthogonal rotation | ✅ Shipped |

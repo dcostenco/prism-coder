@@ -7,6 +7,17 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v9.4.2 — Shell Injection Fix (Git Drift Detection) 🔒
+
+> **Problem:** `getGitDrift()` interpolated `oldSha` directly into a `execSync` template string. A corrupted database entry could inject arbitrary shell commands.
+> **Solution:** SHA format validation (`/^[0-9a-f]{4,40}$/i`) + migration from `execSync` to `execFileSync` (no shell). Defense-in-depth: even if validation is bypassed, `execFileSync` prevents shell metacharacter injection.
+
+| Feature | Detail |
+|---------|--------|
+| 🔒 **Shell Injection Fix** | `execSync` template literal → `execFileSync` array args. SHA validated before git invocation. |
+| 🛡️ **Defense-in-Depth** | Two layers: regex validation + shell-free execution. Either alone prevents the attack. |
+
+---
 ### ✅ v9.4.0 — Adversarial Security Hardening & Bidirectional Sync 🔒
 
 > **Problem:** Two-pass adversarial security audit discovered 18 vulnerabilities, including a fail-open rate limiter, plan tier mismatch causing revenue loss, CORS reflection, and a one-way-only reconciliation gap.
@@ -328,9 +339,9 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 </details>
 
-## 📊 The State of Prism (v9.4.0)
+## 📊 The State of Prism (v9.4.2)
 
-With v9.4.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
+With v9.4.2 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
 
 - **Token Economics** — Surprisal Gate + Cognitive Budget force agents to learn data compression. High-novelty saves are cheap; boilerplate is expensive. Overspenders enter Cognitive Debt.
 - **Affect-Tagged Memory** — Valence-scored retrieval where emotional extremes (failures and successes) surface first. UX warnings fire on historically negative topics.

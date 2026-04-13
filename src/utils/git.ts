@@ -22,7 +22,7 @@
  * ═══════════════════════════════════════════════════════════════════
  */
 
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 
 export interface GitState {
   isRepo: boolean;
@@ -70,12 +70,25 @@ export function getGitDrift(
   oldSha: string,
   projectPath: string = process.cwd()
 ): string | null {
+  // SECURITY: Validate SHA format before passing to git.
+  // Without this, a corrupted DB entry like "; rm -rf /" would be
+  // shell-injected via the old template string approach.
+  if (!/^[0-9a-f]{4,40}$/i.test(oldSha)) {
+    return null;
+  }
+
   try {
-    const diff = execSync(`git diff --name-status ${oldSha} HEAD`, {
-      cwd: projectPath,
-      stdio: "pipe",
-      timeout: 10000,
-    })
+    // Use execFileSync (no shell) to prevent injection even if
+    // validation is somehow bypassed. Args are passed as array.
+    const diff = execFileSync(
+      "git",
+      ["diff", "--name-status", oldSha, "HEAD"],
+      {
+        cwd: projectPath,
+        stdio: "pipe",
+        timeout: 10000,
+      }
+    )
       .toString()
       .trim();
 
