@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.4.3] - 2026-04-13 — ESM Bundling Fix (async_hooks)
+
+### Fixed
+- **Dynamic require of "async_hooks" crash** — Previous dist was built by a bundler that inlined OpenTelemetry's CJS `require("async_hooks")` into ESM chunks, causing runtime failure (`Error: Dynamic require of "async_hooks" is not supported`). Rebuilt with `tsc` which emits proper ESM imports. Affects CLI (`prism`), session save/load, and MCP server startup.
+
+### Engineering
+- Build command remains `tsc` (not esbuild/tsup/bun). Bundler use for dist is now explicitly prohibited.
+- Created `esm-bundling-fix` diagnostic skill for future prevention.
+- TypeScript: clean, zero errors
+
+---
+
 ## [9.4.2] - 2026-04-13 — Shell Injection Fix (Git Drift Detection)
 
 ### Security
