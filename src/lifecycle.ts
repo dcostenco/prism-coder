@@ -9,7 +9,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { closeConfigStorage } from "./storage/configStorage.js";
 import { getStorage } from "./storage/index.js";
 import { shutdownTelemetry } from "./utils/telemetry.js";
@@ -75,8 +75,12 @@ function isOrphanProcess(pid: number): boolean {
   }
 
   try {
-    // 'ps -o ppid= -p PID' returns just the parent PID
-    const ppid = execSync(`ps -o ppid= -p ${pid}`, { encoding: "utf8" }).trim();
+    // SECURITY: Use execFileSync (no shell) to prevent command injection.
+    // The PID comes from a file that could be tampered with by another process.
+    const ppid = execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], {
+      encoding: "utf8",
+      timeout: 5000,
+    }).trim();
     return ppid === "1";
   } catch {
     // If ps fails (e.g. process gone), assume it's safe to claim
