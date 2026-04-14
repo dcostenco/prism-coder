@@ -94,6 +94,7 @@
     "@types/jsdom": "^28.0.1",
     "@types/mozilla-readability": "^0.2.1",
     "@types/turndown": "^5.0.6",
+    "dotenv": "^17.4.2",
     "tsx": "^4.19.3",
     "vitest": "^4.1.1"
   },
