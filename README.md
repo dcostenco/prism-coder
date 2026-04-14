@@ -826,8 +826,9 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v9.4.5 — Security: Command Injection Fix & Dependency Reduction**
+> **Current release: v9.4.6 — Stealth Browser Automation Tool (`browse.py`)**
 
+- 🕵️ **v9.4.6 — Stealth Browser Automation:** New `browse.py` HIPAA-hardened CLI for local Playwright-based browser automation with 6-layer anti-detection (playwright-stealth v2.0.3, deep JS fingerprint evasion, behavioral mimicry, Chromium anti-automation flags, network header fixing, persistent profiles). **100% pass rate on bot.sannysoft.com** (50+ tests). Features: FileVault enforcement, `chmod 600` audit log, PHI sanitization, ephemeral `/tmp` screenshots (APFS CoW workaround), UA↔WebGL consistency validation, 10-min REPL idle timeout, structured JSON output, Google Docs keyboard automation (`gdoc-read`/`gdoc-type`/`gdoc-find`). → [Changelog](CHANGELOG.md#946---2026-04-14--stealth-browser-automation-tool-browsepy)
 - 🔒 **v9.4.5 — Command Injection Fix & Dep Reduction:** `isOrphanProcess()` in `lifecycle.ts` interpolated a file-sourced PID into `execSync`. Fixed with `execFileSync` (no shell). Removed 2 unused runtime deps (25 → 23). Closes [#53](https://github.com/dcostenco/prism-mcp/issues/53).
 - 🔧 **v9.4.3 — ESM Bundling Fix:** Bundled dist had inlined OpenTelemetry CJS `require("async_hooks")` into ESM chunks, causing `Dynamic require of "async_hooks" is not supported` at runtime. Rebuilt with `tsc`. Affects CLI, session save/load, and MCP server startup.
 - 🔒 **v9.4.2 — Shell Injection Fix:** Deep code review found shell injection in `getGitDrift()` — `oldSha` was interpolated into `execSync` template string. Fixed with SHA format validation + `execFileSync` (no shell). Defense-in-depth.

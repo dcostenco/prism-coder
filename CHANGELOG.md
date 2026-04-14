@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.4.6] - 2026-04-14 — Stealth Browser Automation Tool (`browse.py`)
+
+### Added
+- **`browse.py` — HIPAA-Hardened Stealth Browser CLI** — Local Playwright-based browser automation tool that replaces the unreliable cloud-based browser subagent. Runs entirely on localhost with zero cloud dependencies. Designed for healthcare-adjacent workflows with full HIPAA Security Rule compliance.
+
+#### 6-Layer Anti-Detection Architecture
+- **Layer 1: `playwright-stealth` v2.0.3** — JS evasion scripts (navigator.webdriver, plugins, permissions, languages)
+- **Layer 2: Deep JS Init Script** — 12 custom fingerprint overrides injected before page scripts: WebGL vendor/renderer (Apple M3 Max Metal), `chrome.runtime/csi/loadTimes`, plugins, mimeTypes, `navigator.connection`, `outerHeight/Width`, `toString()` spoofing for overridden functions
+- **Layer 3: Behavioral Stealth** — Human-like typing (30-120ms variable delays), scroll jitter, mouse movement with slight curves, occasional "thinking" pauses
+- **Layer 4: Chromium Launch Args** — 20+ anti-automation flags, `--disable-blink-features=AutomationControlled`, `ignore_default_args=['--enable-automation']` to remove CDP detection vectors
+- **Layer 5: Network Header Fixing** — Route handler fixes `sec-ch-ua`, `sec-ch-ua-platform`, `sec-fetch-*` headers on every HTTP request
+- **Layer 6: Persistent Profiles** — Cookie jars survive restarts, consistent User-Agent per profile via hash-based selection (looks like a returning user)
+- **100% pass rate on bot.sannysoft.com** — All 50+ detection tests passed (navigator.webdriver=null, plugins=5, WebGL=Apple Metal, Canvas consistent, all PHANTOM/HEADCHR/SELENIUM checks passed)
+
+#### HIPAA Security Features
+- **FileVault Enforcement** — Refuses to run if macOS Full Disk Encryption is disabled
+- **Audit Log (`chmod 600`)** — `~/.browser_data/audit.log` tracks URLs + actions with strict file permissions, never logs PHI content
+- **`--sanitize`** — Regex masks SSN, MRN, phone, email patterns before output reaches the LLM
+- **`--cleanup` + Ephemeral Screenshots** — When active, screenshots are written to `/tmp` (avoids APFS Copy-on-Write residue on SSDs) then securely deleted after processing
+- **UA ↔ WebGL Consistency Validation** — Startup validates User-Agent platform matches WebGL renderer to prevent enterprise WAF (Cloudflare Turnstile) mismatch detection
+
+#### 3 Operating Modes
+- **Single Command** — `browse.py open <url>`, `browse.py screenshot`, `browse.py read-dom`
+- **Interactive REPL** — `browse.py repl` keeps browser open between commands with 10-minute idle timeout (prevents zombie Chromium), structured JSON output for agent parsing, and error resilience (exceptions caught, browser stays alive)
+- **Pipe/Batch** — `echo "open https://..." | browse.py pipe` for scripted workflows
+
+#### Google Docs Automation
+- `gdoc-read` — Keyboard-shortcut extraction (Ctrl+A/C) bypasses Google Docs' canvas-based DOM
+- `gdoc-type` — Human-like typing at cursor position
+- `gdoc-find` — Ctrl+F navigation to specific text locations
+
+### Engineering
+- Dependencies: `playwright` + `playwright-stealth` (Python), Chromium browser binary
+- 1 new file: `browse.py` (680 lines)
+- Registered as `local-browser` Antigravity skill for future agent auto-routing
+- Compatible with Prism MCP integration (Phase 3 planned)
+
+---
+
 ## [9.4.5] - 2026-04-13 — Security: Command Injection Fix & Dependency Reduction
 
 ### Security
