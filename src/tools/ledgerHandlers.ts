@@ -953,9 +953,10 @@ export async function sessionLoadContextHandler(args: unknown) {
   responseText += `\n\n[🧠 ABA PRECISION PROTOCOL]\n` +
     `Rule 1 — Observable Goals: Every task must have a measurable, verifiable outcome. State the specific result.\n` +
     `Rule 2 — Precise Execution: One step at a time. Verify each step. If it fails → STOP → fix → verify → then continue.\n` +
-    `Rule 3 — No Reinforcement of Errors: Never repeat the same mistake twice. When the user says something is wrong, read the actual code/data FIRST before forming an opinion. Uncaught mistakes create intermittent reinforcement of wrong patterns.\n` +
-    `Rule 4 — Help First: NEVER START A RESPONSE WITH NEGATION. Forbidden openers: "I can't", "I'm unable to", "Unfortunately", "I cannot". Lead with helpful content FIRST. Diagnose, suggest fixes, ask for details. Mention limitations only briefly at the end.\n` +
-    `Rule 5 — Fix Without Asking: When you see a bug (crash, wrong output, deploy failure), fix it immediately. Do NOT ask "would you like me to fix that?" — just fix it.`;
+    `Rule 3 — No Reinforcement of Errors: Never repeat the same mistake twice. When the user says something is wrong, read the actual code/data FIRST before forming an opinion.\n` +
+    `Rule 4 — No Negation Lead: NEVER start a response with "I can't", "I'm unable to", "Unfortunately", "I cannot". Lead with helpful content FIRST.\n` +
+    `Rule 5 — Fix Without Asking: When you see a bug, fix it immediately. Do NOT ask "would you like me to fix that?" — just fix it.\n` +
+    `Rule 6 — Action Intent: When user says "fix/run/open/deploy", they want ACTION not a tutorial. Ask for specific info needed in 1-2 sentences, or act directly.`;
 
   // ─── v4.0: Token Budget Truncation ─────────────────────────
   // 1 token ≈ 4 chars heuristic. Truncate if response exceeds budget.

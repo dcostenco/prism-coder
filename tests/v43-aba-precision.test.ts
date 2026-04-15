@@ -1067,7 +1067,7 @@ describe("Skill Consolidation Verification", () => {
 
   it("all merged skills are covered by ABA rules", () => {
     const mergedSkills = [
-      { name: "fix-without-asking", coveredBy: "Rule 3" },
+      { name: "fix-without-asking", coveredBy: "Rule 5" },
       { name: "command_verification", coveredBy: "Rule 2" },
       { name: "critical_resolution_memory", coveredBy: "Rule 3" },
       { name: "ask-first", coveredBy: "REMOVED (contradiction)" },
@@ -1076,5 +1076,200 @@ describe("Skill Consolidation Verification", () => {
     // Each merged skill maps to exactly one ABA rule
     expect(mergedSkills.every(s => s.coveredBy.length > 0)).toBe(true);
     expect(mergedSkills.find(s => s.name === "ask-first")?.coveredBy).toContain("REMOVED");
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// BEHAVIORAL ANTI-PATTERNS (Deep Investigation)
+// ═══════════════════════════════════════════════════════
+
+describe("Behavioral Anti-Patterns", () => {
+
+  // ─── Excessive Apology Detection ───
+  describe("excessive apology", () => {
+    function hasExcessiveApology(response: string): boolean {
+      const patterns = [
+        /I apologize/i,
+        /I'm sorry for (the|any) (confusion|inconvenience|trouble)/i,
+        /my apologies/i,
+        /sorry about that/i,
+        /I regret/i,
+      ];
+      return patterns.some(p => p.test(response));
+    }
+
+    it("catches 'I apologize for the confusion'", () => {
+      expect(hasExcessiveApology("I apologize for the confusion. Let me fix that.")).toBe(true);
+    });
+
+    it("catches 'I'm sorry for the inconvenience'", () => {
+      expect(hasExcessiveApology("I'm sorry for any inconvenience. Here's the fix.")).toBe(true);
+    });
+
+    it("allows simple acknowledgment", () => {
+      expect(hasExcessiveApology("Got it. Fixed the issue.")).toBe(false);
+    });
+
+    it("allows direct correction without apology", () => {
+      expect(hasExcessiveApology("You're right, that was wrong. Here's the fix.")).toBe(false);
+    });
+  });
+
+  // ─── Question Echo / Parroting Detection ───
+  describe("question echo / parroting", () => {
+    function hasQuestionEcho(prompt: string, response: string): boolean {
+      // Detects when AI repeats user's question back to them
+      const echoPatterns = [
+        /you('re| are) asking (me )?to/i,
+        /you('d| would) like (me )?to/i,
+        /I understand you want/i,
+        /so you need/i,
+        /let me understand/i,
+        /if I understand correctly/i,
+      ];
+      return echoPatterns.some(p => p.test(response));
+    }
+
+    it("catches 'You're asking me to fix...'", () => {
+      expect(hasQuestionEcho("fix vercel", "You're asking me to fix the Vercel deployment. Let me help.")).toBe(true);
+    });
+
+    it("catches 'I understand you want...'", () => {
+      expect(hasQuestionEcho("deploy", "I understand you want to deploy. Here's how.")).toBe(true);
+    });
+
+    it("allows direct answers", () => {
+      expect(hasQuestionEcho("fix it", "Fixed. The root cause was a missing env var.")).toBe(false);
+    });
+  });
+
+  // ─── Hedging Language Detection ───
+  describe("hedging language", () => {
+    function hasHedging(response: string): boolean {
+      const hedges = [
+        /^I think /i,
+        /^It seems like /i,
+        /^It appears that /i,
+        /^It looks like /i,
+        /^It might be /i,
+        /^Perhaps /i,
+        /^Maybe /i,
+        /^It could be /i,
+      ];
+      return hedges.some(p => p.test(response.trim()));
+    }
+
+    it("catches 'I think the issue is...'", () => {
+      expect(hasHedging("I think the issue is with your config.")).toBe(true);
+    });
+
+    it("catches 'It seems like there's an error'", () => {
+      expect(hasHedging("It seems like there's an error in the build.")).toBe(true);
+    });
+
+    it("allows definitive statements", () => {
+      expect(hasHedging("The issue is a missing semicolon on line 42.")).toBe(false);
+    });
+
+    it("allows confident diagnosis", () => {
+      expect(hasHedging("Your build failed because next.config.js has an invalid export.")).toBe(false);
+    });
+  });
+
+  // ─── False Promise Detection ───
+  describe("false promises", () => {
+    function hasFalsePromise(response: string, canActually: boolean): boolean {
+      const promises = [
+        /I'll (check|look into|investigate|examine|review)/i,
+        /let me (check|look into|investigate|pull up)/i,
+        /I'll go ahead and/i,
+        /I'm going to (check|look|investigate)/i,
+      ];
+      // It's a false promise if the AI says "I'll do X" but can't actually do it
+      if (!canActually && promises.some(p => p.test(response))) return true;
+      return false;
+    }
+
+    it("catches 'I'll check your Vercel' when in cloud mode (can't)", () => {
+      expect(hasFalsePromise("I'll check your Vercel dashboard now.", false)).toBe(true);
+    });
+
+    it("allows 'I'll check' when AI can actually do it (local mode)", () => {
+      expect(hasFalsePromise("I'll check your Vercel dashboard now.", true)).toBe(false);
+    });
+
+    it("allows statements without promises", () => {
+      expect(hasFalsePromise("What error do you see?", false)).toBe(false);
+    });
+  });
+
+  // ─── Tool Claim Accuracy ───
+  describe("tool claim accuracy", () => {
+    function hasPhantomToolClaim(response: string, availableTools: string[]): string[] {
+      const toolMentions = [
+        { pattern: /\b(terminal|command line|shell)\b/i, tool: "terminal" },
+        { pattern: /\b(browser|open a page|navigate to)\b/i, tool: "browser" },
+        { pattern: /\bgit\s+(push|pull|clone|commit)\b/i, tool: "git" },
+        { pattern: /\b(file system|read files|write files)\b/i, tool: "filesystem" },
+      ];
+      const phantoms: string[] = [];
+      for (const { pattern, tool } of toolMentions) {
+        if (pattern.test(response) && !availableTools.includes(tool)) {
+          phantoms.push(tool);
+        }
+      }
+      return phantoms;
+    }
+
+    it("detects terminal claim when not available (cloud mode)", () => {
+      const phantoms = hasPhantomToolClaim(
+        "I can run terminal commands to check your deploy.",
+        ["patient_management", "scheduling"]
+      );
+      expect(phantoms).toContain("terminal");
+    });
+
+    it("no phantom when terminal IS available (local mode)", () => {
+      const phantoms = hasPhantomToolClaim(
+        "I'll run a terminal command to check.",
+        ["terminal", "browser", "git"]
+      );
+      expect(phantoms).toHaveLength(0);
+    });
+
+    it("detects multiple phantom claims", () => {
+      const phantoms = hasPhantomToolClaim(
+        "I'll open a browser and run git push for you.",
+        ["patient_management"]
+      );
+      expect(phantoms).toContain("browser");
+      expect(phantoms).toContain("git");
+    });
+  });
+
+  // ─── Response Proportionality ───
+  describe("response proportionality", () => {
+    function isProportional(promptWordCount: number, responseWordCount: number): boolean {
+      // Short prompts (1-5 words) should get short responses (≤50 words)
+      // Medium prompts (6-20 words) can get medium responses (≤150 words)
+      // Long prompts (20+) can get longer responses
+      if (promptWordCount <= 5) return responseWordCount <= 50;
+      if (promptWordCount <= 20) return responseWordCount <= 150;
+      return true; // Long prompts can have long responses
+    }
+
+    it("short prompt 'fix it' → short response expected", () => {
+      expect(isProportional(2, 15)).toBe(true);   // good
+      expect(isProportional(2, 100)).toBe(false);  // too verbose
+    });
+
+    it("medium prompt → medium response OK", () => {
+      expect(isProportional(10, 80)).toBe(true);
+      expect(isProportional(10, 200)).toBe(false);
+    });
+
+    it("long detailed prompt → long response OK", () => {
+      expect(isProportional(30, 200)).toBe(true);
+    });
   });
 });
