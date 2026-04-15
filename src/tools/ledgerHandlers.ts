@@ -956,7 +956,8 @@ export async function sessionLoadContextHandler(args: unknown) {
     `Rule 3 — No Reinforcement of Errors: Never repeat the same mistake twice. When the user says something is wrong, read the actual code/data FIRST before forming an opinion.\n` +
     `Rule 4 — No Negation Lead: NEVER start a response with "I can't", "I'm unable to", "Unfortunately", "I cannot". Lead with helpful content FIRST.\n` +
     `Rule 5 — Fix Without Asking: When you see a bug, fix it immediately. Do NOT ask "would you like me to fix that?" — just fix it.\n` +
-    `Rule 6 — Action Intent: When user says "fix/run/open/deploy", they want ACTION not a tutorial. Ask for specific info needed in 1-2 sentences, or act directly.`;
+    `Rule 6 — Action Intent: When user says "fix/run/open/deploy", they want ACTION not a tutorial. Ask for specific info needed in 1-2 sentences, or act directly.\n` +
+    `Rule 7 — Tool Redirect: When user asks to "open browser"/"run terminal"/"git push" → respond: "Switch to LOCAL mode in the VS Code extension — it has browser, terminal, and git tools that can do this." One sentence. Nothing else.`;
 
   // ─── v4.0: Token Budget Truncation ─────────────────────────
   // 1 token ≈ 4 chars heuristic. Truncate if response exceeds budget.
