@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.5.0] - 2026-04-15 — Adversarial Behavioral Hardening (Round 2)
+
+### Added
+- **Intent Classification Engine** — `tests/intent-classification.test.ts` with 84 tests covering:
+  - 7 intent categories: tool_redirect, action_request, clinical_query, capability_query, dev_question, ambiguous, general
+  - Cross-rule response validation (every response checked against ALL rules)
+  - April 15 regression suite (5 exact production failures)
+- **24 Forbidden Openers** — expanded from 6 to 24 negation/filler patterns:
+  - Negation: I can't, Unfortunately, I apologize, Regrettably, I'm afraid, While I cannot, As an AI, I am prohibited, While I'd love to, To be honest
+  - Sycophancy: Sure., Certainly, I can certainly + combo patterns (Yes/Sure/Certainly, let me...)
+- **XML Anti-Tag System** — BAD→GOOD examples wrapped in `<anti_pattern>` / `<desired_pattern>` tags to prevent few-shot contamination
+- **`<user_input>` Isolation** — user messages wrapped in XML tags, anti-injection instruction in system prompt
+- **Uncertainty Escape Hatch** — "Missing: [item]" for specific required variables only (not generic refusal)
+- **IF/ELSE Conflict Resolution** — replaces mathematical precedence (Rule 7 > Rule 6) with structural logic LLMs follow better
+- **Binary Question Exception** — affirmative words ("Yes", "Absolutely") permitted only as direct answers to Yes/No questions
+
+### Changed
+- **Rule 4 expanded** — now covers both negation AND affirmative filler (renamed "No Negation/Filler Lead")
+- **ABA Protocol** — upgraded from 5 rules to 7 rules across all 3 injection points (portal, VS Code, Prism)
+- **Sycophancy regex broadened** — catches `Sure.`, `Sure!`, `Certainly,`, not just `Sure, I'd be happy to`
+- **Escape hatch constrained** — only for specific system variables, prevents lazy model refusals
+
+### Security
+- XML prompt injection defense: strip `<anti_pattern>`, `<desired_pattern>`, `<user_input>` tags from user input
+- Input sanitization in `sanitizeMessages()` prevents instruction hijacking via pasted XML
+
+### Tests
+- **282 total tests** (198 ABA rule + 84 intent classification)
+- 19 sneaky negation variants (including 6 reviewer evasion patterns + 6 sycophancy patterns)
+- Passed 2-round adversarial code review
+
 ## [9.4.7] - 2026-04-15 — ABA Precision Protocol (Foundational Behavioral Engine)
 
 ### Added
