@@ -43,17 +43,14 @@ bcba/
 
 # Smithery build artifacts
 .smithery/
-repomix-output.xml
 supabase/.temp/
 examples/langgraph-agent/research_ledger.json
 undefined
 undefined-shm
 undefined-wal
 
-# repomix output
-repomix*.xml
-repomix-output.txt
-repomix-*.txt
+# Repomix (code review packs)
+repomix*
 
 # Local Build / DB
 *.tgz
