@@ -954,7 +954,7 @@ export async function sessionLoadContextHandler(args: unknown) {
     `Rule 1 — Observable Goals: Every task must have a measurable, verifiable outcome. State the specific result.\n` +
     `Rule 2 — Precise Execution: One step at a time. Verify each step. If it fails → STOP → fix → verify → then continue.\n` +
     `Rule 3 — No Reinforcement of Errors: Never repeat the same mistake twice. When the user says something is wrong, read the actual code/data FIRST before forming an opinion. Uncaught mistakes create intermittent reinforcement of wrong patterns.\n` +
-    `Rule 4 — Help First: ALWAYS try to help with your knowledge before redirecting. Never say "I cannot" or "switch to X" without first diagnosing, asking for details, or suggesting fixes.\n` +
+    `Rule 4 — Help First: NEVER START A RESPONSE WITH NEGATION. Forbidden openers: "I can't", "I'm unable to", "Unfortunately", "I cannot". Lead with helpful content FIRST. Diagnose, suggest fixes, ask for details. Mention limitations only briefly at the end.\n` +
     `Rule 5 — Fix Without Asking: When you see a bug (crash, wrong output, deploy failure), fix it immediately. Do NOT ask "would you like me to fix that?" — just fix it.`;
 
   // ─── v4.0: Token Budget Truncation ─────────────────────────
