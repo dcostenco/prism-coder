@@ -46,6 +46,8 @@ import { GeminiAdapter } from "./adapters/gemini.js";
 import { OpenAIAdapter } from "./adapters/openai.js";
 import { AnthropicAdapter } from "./adapters/anthropic.js";
 import { VoyageAdapter } from "./adapters/voyage.js";
+import { LocalEmbeddingAdapter } from "./adapters/local.js";
+import { DisabledTextAdapter } from "./adapters/disabledText.js";
 import { TracingLLMProvider } from "./adapters/traced.js";
 
 // Module-level singleton — one composed provider per MCP server process.
@@ -59,6 +61,7 @@ function buildTextAdapter(type: string): LLMProvider {
   switch (type) {
     case "anthropic": return new AnthropicAdapter();
     case "openai":    return new OpenAIAdapter();
+    case "none":      return new DisabledTextAdapter();
     case "gemini":
     default:          return new GeminiAdapter();
   }
@@ -72,6 +75,7 @@ function buildEmbeddingAdapter(type: string): LLMProvider {
   switch (type) {
     case "openai": return new OpenAIAdapter();
     case "voyage": return new VoyageAdapter();
+    case "local":  return new LocalEmbeddingAdapter();
     case "gemini":
     default:       return new GeminiAdapter();
   }
