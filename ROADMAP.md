@@ -7,6 +7,20 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v9.12.0 — Memory Security Hardening (Stored Prompt Injection Prevention) 🔒
+
+> **Problem:** A compromised LLM could save poisoned text containing `<system>` tags into Prism memory. When any *future* session loaded this context, the poisoned tags were injected raw into the new LLM's prompt — hijacking the agent across sessions. This is the stored XSS equivalent for AI systems.
+> **Solution:** Input sanitization (`sanitizeMemoryInput()`) strips 8 categories of dangerous XML tags on every save. Output boundary tags (`<prism_memory context="historical">`) wrap all context output to prevent LLMs from treating loaded memory as instructions.
+
+| Feature | Detail |
+|---------|--------|
+| 🔒 **Input Sanitization** | `sanitizeMemoryInput()` strips `<system>`, `<instruction>`, `<user_input>`, `<assistant>`, `<tool_call>`, `<anti_pattern>`, `<desired_pattern>`, `<prism_memory>` tags. Case-insensitive, attribute-aware, zero-latency (pure regex). |
+| 🛡️ **Boundary Tags** | All 3 context output paths (MCP tool, `/resume_session` prompt, `memory://` resource) wrapped in `<prism_memory context="historical">` with HTML comment warning. |
+| 🛡️ **Spoofing Prevention** | `<prism_memory>` tag itself included in sanitization regex — attackers cannot inject fake boundary tags. |
+| 🧪 **311 Tests** | 30 new security tests covering 14 tag vectors, 6 safe content preservation, 4 edge cases, 3 real-world attack scenarios, 5 boundary tag structure tests. |
+
+---
+
 ### ✅ v9.4.5 — Command Injection Fix & Dep Reduction (Issue #53) 🔒
 
 > **Problem:** `isOrphanProcess()` in `lifecycle.ts` interpolated a file-sourced PID directly into `execSync`. A tampered PID file could inject arbitrary shell commands.  
@@ -351,9 +365,11 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 </details>
 
-## 📊 The State of Prism (v9.4.2)
+## 📊 The State of Prism (v9.12.0)
 
-With v9.4.2 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
+With v9.12.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
+
+- **Memory Security** — All text fields sanitized on save to prevent stored prompt injection. Context output wrapped in boundary tags to prevent context confusion. Boundary tag spoofing blocked. Cross-session and Hivemind multi-agent poisoning attacks prevented at the persistence layer.
 
 - **Token Economics** — Surprisal Gate + Cognitive Budget force agents to learn data compression. High-novelty saves are cheap; boilerplate is expensive. Overspenders enter Cognitive Debt.
 - **Affect-Tagged Memory** — Valence-scored retrieval where emotional extremes (failures and successes) surface first. UX warnings fire on historically negative topics.

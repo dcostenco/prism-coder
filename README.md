@@ -12,7 +12,7 @@
 
 **Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
-Prism v7.8 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.**
+Prism v9.12 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.**
 
 ```bash
 npx -y prism-mcp-server
@@ -826,8 +826,10 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## 🆕 What's New
 
-> **Current release: v9.4.7 — ABA Precision Protocol (Foundational Behavioral Engine)**
+> **Current release: v9.12.0 — Memory Security Hardening (Stored Prompt Injection Prevention)**
 
+- 🔒 **v9.12.0 — Memory Security Hardening:** Prevents **stored prompt injection** — the AI equivalent of stored XSS. New `sanitizeMemoryInput()` strips 8 categories of dangerous XML tags (`<system>`, `<instruction>`, `<prism_memory>`, etc.) from all text fields on every save. Context output now wrapped in `<prism_memory context="historical">` boundary tags across all 3 output paths (MCP tool, prompt, resource) so LLMs treat loaded memory as data, not instructions. Boundary tag spoofing blocked. 30 new security tests covering real-world attack scenarios (cross-session poisoning, Hivemind multi-agent hijacking). 311 total tests, 0 regressions. → [Changelog](CHANGELOG.md#9120---2026-04-15--memory-security-hardening-stored-prompt-injection-prevention)
+- 🧠 **v9.5.0 — Adversarial Behavioral Hardening:** Intent Classification Engine with 84 tests, 24 forbidden openers, XML Anti-Tag system, `<user_input>` isolation, IF/ELSE conflict resolution. 282 total tests.
 - 🧠 **v9.4.7 — ABA Precision Protocol:** Foundational behavioral engine injected into every `session_load_context` output. 5 rules: (1) Observable measurable goals with IOA≥80%, (2) Precise step-by-step execution with stop-fix-verify, (3) No reinforcement of wrong patterns, (4) Help first before redirecting, (5) Fix bugs without asking permission. Consolidates 4 previous skills (`fix-without-asking`, `command_verification`, `critical_resolution_memory`, removed contradictory `ask-first`) into 1 unified protocol. 83-test behavioral verification suite with edge cases. Split-brain false-warning fix. → [Changelog](CHANGELOG.md#947---2026-04-15--aba-precision-protocol-foundational-behavioral-engine)
 - 🕵️ **v9.4.6 — Stealth Browser Automation:** New `browse.py` HIPAA-hardened CLI for local Playwright-based browser automation with 6-layer anti-detection (playwright-stealth v2.0.3, deep JS fingerprint evasion, behavioral mimicry, Chromium anti-automation flags, network header fixing, persistent profiles). **100% pass rate on bot.sannysoft.com** (50+ tests). Features: FileVault enforcement, `chmod 600` audit log, PHI sanitization, ephemeral `/tmp` screenshots (APFS CoW workaround), UA↔WebGL consistency validation, 10-min REPL idle timeout, structured JSON output, Google Docs keyboard automation (`gdoc-read`/`gdoc-type`/`gdoc-find`). → [Changelog](CHANGELOG.md#946---2026-04-14--stealth-browser-automation-tool-browsepy)
 - 🔒 **v9.4.5 — Command Injection Fix & Dep Reduction:** `isOrphanProcess()` in `lifecycle.ts` interpolated a file-sourced PID into `execSync`. Fixed with `execFileSync` (no shell). Removed 2 unused runtime deps (25 → 23). Closes [#53](https://github.com/dcostenco/prism-mcp/issues/53).
