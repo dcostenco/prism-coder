@@ -946,6 +946,15 @@ export async function sessionLoadContextHandler(args: unknown) {
       behavWarnings.map(w => `- ${w.summary} (importance: ${w.importance})`).join("\n");
   }
 
+  // ─── v9.4.7: ABA Precision Protocol (foundational) ────────
+  // Injected into EVERY session load so the agent always operates
+  // under these behavioral rules. Never truncated (placed before
+  // token budget check).
+  responseText += `\n\n[🧠 ABA PRECISION PROTOCOL]\n` +
+    `Rule 1 — Observable Goals: Every task must have a measurable, verifiable outcome. State the specific result.\n` +
+    `Rule 2 — Precise Execution: One step at a time. Verify each step. If it fails → STOP → fix → verify → then continue.\n` +
+    `Rule 3 — No Reinforcement of Errors: Never repeat the same mistake twice. When the user says something is wrong, read the actual code/data FIRST before forming an opinion. Uncaught mistakes create intermittent reinforcement of wrong patterns.`;
+
   // ─── v4.0: Token Budget Truncation ─────────────────────────
   // 1 token ≈ 4 chars heuristic. Truncate if response exceeds budget.
   if (maxTokens && maxTokens > 0) {
