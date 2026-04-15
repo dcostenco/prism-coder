@@ -746,6 +746,12 @@ function hasNegationLead(response: string): { violation: boolean; opener: string
     /^Certainly[.,! \n]/i,
     /^I can certainly/i,
     /^(Yes|Sure|Certainly|Absolutely|Of course),? (let me|I('ll| will)|here)/i,
+    // Soft hedging evasion patterns
+    /^Let me be transparent/i,
+    /^I should (note|point out|mention)/i,
+    /^Just to clarify/i,
+    /^It'?s worth (noting|mentioning)/i,
+    /^I want to be upfront/i,
   ];
   const trimmed = response.trim();
   for (const pattern of forbidden) {
@@ -869,6 +875,12 @@ describe("Rule 4: Help First — No Negation Lead", () => {
       "I can certainly help with that deployment issue.",
       "Absolutely, let me check your Vercel logs now.",
       "Of course, I'll fix that right away for you.",
+      // Review Round 2: soft hedging evasion
+      "Let me be transparent — I don't have access to your browser.",
+      "I should note that browser tools aren't available in cloud mode.",
+      "Just to clarify, I can't open a browser directly.",
+      "It's worth noting that this requires LOCAL mode.",
+      "I want to be upfront — this isn't something I can do right now.",
     ];
     sneakyResponses.forEach(response => {
       it(`catches: "${response.substring(0, 55)}..."`, () => {

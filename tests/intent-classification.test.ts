@@ -34,14 +34,15 @@ function classifyIntent(prompt: string): Intent {
   const p = prompt.trim().toLowerCase();
 
   // Tool redirect — mentions specific tools (highest priority)
+  // Articles (the/a/an/my/your) allowed between verb and noun
   const toolPatterns = [
-    /\b(open|launch|use|start)\s+(browser|terminal|shell|console)\b/,
+    /\b(open|launch|use|start)\s+(the|a|an|my|your)?\s*(browser|terminal|shell|console)\b/,
     /\bgit\s+(push|pull|clone|commit|log|status|diff)\b/,
-    /\b(run|execute)\s+(command|script|terminal|shell)\b/,
+    /\b(run|execute)\s+(the|a|an|my|your)?\s*(command|script|terminal|shell)\b/,
     /\blogin\s+(to\s+)?(vercel|github|supabase|dashboard)\b/,
     /\bcheck\s+(vercel\s+)?(deploy\s+)?(logs?|dashboard)\b/,
-    /^open\s+browser/,
-    /^run\s+terminal/,
+    /^open\s+(the\s+)?browser/,
+    /^run\s+(the\s+|a\s+)?terminal/,
     /^git\s+/,
   ];
   if (toolPatterns.some(p2 => p2.test(p))) return "tool_redirect";
@@ -154,7 +155,7 @@ function hasExcessiveApology(response: string): boolean {
 }
 
 function hasHedging(response: string): boolean {
-  return /^(I think|It seems|It appears|It looks like|It might|Perhaps|Maybe|It could)\b/i.test(response.trim());
+  return /^(I think|It seems|It appears|It looks like|It might|Perhaps|Maybe|It could|Let me be transparent|I should (note|point out)|Just to clarify|It'?s worth (noting|mentioning)|I want to be upfront|I should mention)\b/i.test(response.trim());
 }
 
 function hasQuestionEcho(response: string): boolean {
@@ -185,6 +186,14 @@ describe("Intent: Tool Redirect", () => {
     "check deploy logs",
     "check vercel logs",
     "open browser, login to vercel",
+    // Article variants (CRITICAL: must not break on "the"/"a"/"my")
+    "open the browser",
+    "run a terminal",
+    "open my terminal",
+    "launch the browser",
+    "start a terminal",
+    "run the command to deploy",
+    "open the browser and check vercel",
   ];
 
   toolPrompts.forEach(prompt => {
