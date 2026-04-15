@@ -58,6 +58,11 @@ describe("LocalEmbeddingAdapter", () => {
     // Reuse the same mockPipelineFn so test assertions on it remain valid
     mockPipelineFactory.mockResolvedValue(mockPipelineFn);
     mockPipelineFn.mockResolvedValue({ data: new Float32Array(768) });
+    // Prevent env-var pollution between tests. HF_ENDPOINT and
+    // LOCAL_EMBEDDING_MODEL are read by initPipeline() — if a prior test
+    // failed before its inline cleanup ran, these would leak.
+    delete process.env.HF_ENDPOINT;
+    delete process.env.LOCAL_EMBEDDING_MODEL;
   });
 
   // ── Construction ───────────────────────────────────────────────────────────
@@ -261,7 +266,6 @@ describe("LocalEmbeddingAdapter", () => {
 
   it("warns when HF_ENDPOINT points to a non-huggingface.co host", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const originalEnv = process.env.HF_ENDPOINT;
     process.env.HF_ENDPOINT = "https://evil.example.com";
     mockSettings();
     const { LocalEmbeddingAdapter } = await import("../../src/utils/llm/adapters/local.js");
@@ -269,13 +273,10 @@ describe("LocalEmbeddingAdapter", () => {
     await adapter.loadPromise;
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("HF_ENDPOINT"));
     warnSpy.mockRestore();
-    if (originalEnv === undefined) delete process.env.HF_ENDPOINT;
-    else process.env.HF_ENDPOINT = originalEnv;
   });
 
   it("warns when HF_ENDPOINT is a subdomain-spoofing URL (huggingface.co.evil.com)", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const originalEnv = process.env.HF_ENDPOINT;
     process.env.HF_ENDPOINT = "https://huggingface.co.evil.com";
     mockSettings();
     const { LocalEmbeddingAdapter } = await import("../../src/utils/llm/adapters/local.js");
@@ -283,13 +284,10 @@ describe("LocalEmbeddingAdapter", () => {
     await adapter.loadPromise;
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("HF_ENDPOINT"));
     warnSpy.mockRestore();
-    if (originalEnv === undefined) delete process.env.HF_ENDPOINT;
-    else process.env.HF_ENDPOINT = originalEnv;
   });
 
   it("does NOT warn when HF_ENDPOINT is a trusted huggingface.co subdomain", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const originalEnv = process.env.HF_ENDPOINT;
     process.env.HF_ENDPOINT = "https://endpoints.huggingface.co";
     mockSettings();
     const { LocalEmbeddingAdapter } = await import("../../src/utils/llm/adapters/local.js");
@@ -297,8 +295,6 @@ describe("LocalEmbeddingAdapter", () => {
     await adapter.loadPromise;
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("HF_ENDPOINT"));
     warnSpy.mockRestore();
-    if (originalEnv === undefined) delete process.env.HF_ENDPOINT;
-    else process.env.HF_ENDPOINT = originalEnv;
   });
 
   // ── Revision validation ───────────────────────────────────────────────────
