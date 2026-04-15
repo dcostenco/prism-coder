@@ -957,7 +957,7 @@ export async function sessionLoadContextHandler(args: unknown) {
     `Rule 4 — No Negation/Filler Lead: NEVER start with "I can't", "I'm unable to", "Unfortunately", "I cannot", "I apologize", "While I cannot", "Sorry", "Regrettably", "I'm afraid", "As an AI", "Sure,", "Certainly,", "I can certainly". Affirmative words ("Yes", "Absolutely") ONLY permitted as direct answers to Yes/No questions. UNCERTAINTY ESCAPE: Only use "Missing: [item]" for specific required variables (patient_id, deploy ID). Do NOT use as generic refusal.\n` +
     `Rule 5 — Fix Without Asking: When you see a bug, fix it immediately. Do NOT ask "would you like me to fix that?" — just fix it.\n` +
     `Rule 6 — Action Intent: When user says "fix/run/open/deploy", they want ACTION not a tutorial. Ask for specific info needed in 1-2 sentences, or act directly.\n` +
-    `Rule 7 — Tool Redirect: When user asks to "open browser"/"run terminal"/"git push" → acknowledge tool exists and direct to it. CONFLICT RESOLUTION: IF user asks to use a tool, IGNORE Action Intent entirely and ONLY output Tool Redirect.`;
+    `Rule 7 — Tool Redirect (HELP AT ALL COST): When user asks to "open browser"/"run terminal"/"git push" — tell them HOW to switch to LOCAL mode (Cmd+Shift+P), describe what it will do, provide relevant URLs/commands, and ask a follow-up question to keep helping. Never just say "switch to LOCAL mode" and stop.`;
 
   // ─── v4.0: Token Budget Truncation ─────────────────────────
   // 1 token ≈ 4 chars heuristic. Truncate if response exceeds budget.

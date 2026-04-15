@@ -132,6 +132,15 @@ function mentionsLocalMode(response: string): boolean {
   return /\bLOCAL\s+mode\b/i.test(response);
 }
 
+function isActionable(response: string): boolean {
+  // Tool redirect responses must contain actionable detail, not just "switch to LOCAL mode"
+  const hasHow = /Cmd\+Shift\+P|command palette|settings|preferences/i.test(response);
+  const hasUrl = /https?:\/\//i.test(response);
+  const hasCommand = /`[^`]+`/i.test(response); // backtick-wrapped command
+  const hasDescription = /will (launch|execute|run|open|do)|launches|executes/i.test(response);
+  return hasHow || hasUrl || hasCommand || hasDescription;
+}
+
 function isExcessivelyVerbose(response: string, promptWords: number): boolean {
   const words = response.split(/\s+/).length;
   if (promptWords <= 3) return words > 30;
@@ -184,12 +193,22 @@ describe("Intent: Tool Redirect", () => {
   });
 
   describe("correct response for tool requests", () => {
-    const goodResponse = "Switch to LOCAL mode in the VS Code extension — it has browser, terminal, and git tools that can do this.";
+    const goodResponse = "Switch to LOCAL mode in VS Code (Cmd+Shift+P → Synalux: Switch to Local). LOCAL mode launches a Chromium browser with full automation. What site do you need to open?";
+    const lazyResponse = "Switch to LOCAL mode in the VS Code extension — it has browser tools that can do this.";
     const badResponse = "What were you hoping to do in the browser? I can help with tasks like managing patients.";
     const negationResponse = "I cannot directly open a browser. Please try LOCAL mode.";
 
     it("good response mentions LOCAL mode", () => {
       expect(mentionsLocalMode(goodResponse)).toBe(true);
+    });
+
+    it("good response is actionable (has HOW)", () => {
+      expect(isActionable(goodResponse)).toBe(true);
+    });
+
+    it("lazy response mentions LOCAL but is NOT actionable", () => {
+      expect(mentionsLocalMode(lazyResponse)).toBe(true);
+      expect(isActionable(lazyResponse)).toBe(false);
     });
 
     it("bad response does NOT mention LOCAL mode", () => {
@@ -384,20 +403,20 @@ describe("Cross-Rule Response Validation", () => {
 
     const responses = [
       {
-        text: "Switch to LOCAL mode in the VS Code extension — it has browser tools.",
-        passes: { negation: true, localMode: true, verbose: true, apology: true, hedging: true, echo: true },
+        text: "Switch to LOCAL mode in VS Code (Cmd+Shift+P). LOCAL mode launches a Chromium browser with full automation. What site do you need?",
+        passes: { negation: true, localMode: true, actionable: true, apology: true, hedging: true, echo: true },
+      },
+      {
+        text: "Switch to LOCAL mode in the VS Code extension. It has browser tools.",
+        passes: { negation: true, localMode: true, actionable: false, apology: true, hedging: true, echo: true },
       },
       {
         text: "I cannot open a browser. Try LOCAL mode.",
-        passes: { negation: false, localMode: true, verbose: true, apology: true, hedging: true, echo: true },
+        passes: { negation: false, localMode: true, actionable: false, apology: true, hedging: true, echo: true },
       },
       {
         text: "What were you hoping to do in the browser? I can help with patients.",
-        passes: { negation: true, localMode: false, verbose: true, apology: true, hedging: true, echo: true },
-      },
-      {
-        text: "I apologize, but I'm unable to open a browser for you right now. Unfortunately, in cloud mode I don't currently have direct access to any browser automation tools on your machine. However, you can easily switch to LOCAL mode in the VS Code extension to get full browser capabilities.",
-        passes: { negation: false, localMode: true, verbose: false, apology: false, hedging: true, echo: true },
+        passes: { negation: true, localMode: false, actionable: false, apology: true, hedging: true, echo: true },
       },
     ];
 
@@ -405,7 +424,7 @@ describe("Cross-Rule Response Validation", () => {
       it(`response ${i + 1}: "${text.substring(0, 50)}..."`, () => {
         expect(!hasNegationLead(text)).toBe(passes.negation);
         expect(mentionsLocalMode(text)).toBe(passes.localMode);
-        expect(!isExcessivelyVerbose(text, 2)).toBe(passes.verbose);
+        expect(isActionable(text)).toBe(passes.actionable);
         expect(!hasExcessiveApology(text)).toBe(passes.apology);
         expect(!hasHedging(text)).toBe(passes.hedging);
         expect(!hasQuestionEcho(text)).toBe(passes.echo);
@@ -477,25 +496,25 @@ describe("Regression: Apr 15 Failures", () => {
     {
       prompt: "open browser with my vercel logs",
       badResponse: "I can't directly open a browser on your machine, but you can easily access your Vercel logs by navigating to your project dashboard.",
-      goodResponse: "Switch to LOCAL mode in VS Code — it has browser tools to check Vercel logs.",
+      goodResponse: "Your Vercel logs: https://vercel.com/dashboard/deployments. To open automatically, switch to LOCAL mode in VS Code (Cmd+Shift+P). What deploy are you checking?",
       rules: ["negation", "tool_redirect"],
     },
     {
       prompt: "open browser i logged in to vercel, fix deploy error",
       badResponse: "I cannot directly open a browser or log in for you. To help fix the Vercel deploy error, please tell me what error message you are seeing.",
-      goodResponse: "Switch to LOCAL mode in VS Code — it has browser and terminal tools to fix deploy errors.",
+      goodResponse: "Switch to LOCAL mode in VS Code (Cmd+Shift+P) to open browser and fix the deploy. What error message do you see in the build log?",
       rules: ["negation", "tool_redirect"],
     },
     {
       prompt: "open browser fix vercel deploy error, prompt for login if needed",
       badResponse: "I cannot directly open a browser or log in for you. To help fix the Vercel deploy error, please tell me what error message you are seeing in the Vercel build log.",
-      goodResponse: "Switch to LOCAL mode in VS Code — it has browser tools that can do this.",
+      goodResponse: "Switch to LOCAL mode in VS Code (Cmd+Shift+P) — it will launch a browser, handle login, and check deploy logs. What project are you deploying?",
       rules: ["negation", "tool_redirect"],
     },
     {
       prompt: "open browser",
       badResponse: "What were you hoping to do in the browser? I can help with tasks like managing patients, scheduling, or generating reports.",
-      goodResponse: "Switch to LOCAL mode in the VS Code extension — it has browser tools.",
+      goodResponse: "Switch to LOCAL mode in VS Code (Cmd+Shift+P). LOCAL mode launches a Chromium browser with full automation. What site do you need to open?",
       rules: ["tool_redirect"],
     },
     {
