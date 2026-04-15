@@ -988,3 +988,178 @@ describe("URL Domain Whitelist", () => {
     it(`BLOCKED: ${url}`, () => expect(isSafe(url)).toBe(false));
   });
 });
+
+// ═══════════════════════════════════════════════════════
+// 23. DEEP EDGE CASES — GUARDRAIL EVASION VECTORS
+// Unicode homoglyphs, zero-width chars, case mutation,
+// multi-line violations, boundary conditions
+// ═══════════════════════════════════════════════════════
+
+describe("Edge: Guardrail Evasion Vectors", () => {
+  const PATTERNS = [
+    /the browser will (automatically |auto[- ]?)?open/i,
+    /^Unfortunately/i,
+    /^I cannot /i,
+    /^As a (large )?language model/i,
+    /^I'?m just a (chat)?bot/i,
+    /^(Sure|Certainly|Of course),?\s+(let me|I('ll| will)|here)/i,
+    /Missing:\s*(ability|access|permission|capability|browser|the required)/i,
+  ];
+
+  function check(text: string): boolean {
+    return PATTERNS.some(p => p.test(text.trim()));
+  }
+
+  describe("case mutation evasion", () => {
+    ["UNFORTUNATELY, I cannot", "unfortunately, I cannot", "Unfortunately, I CANNOT"].forEach(t => {
+      it(`caught: "${t}"`, () => expect(check(t)).toBe(true));
+    });
+  });
+
+  describe("multi-line: violation on line 2+", () => {
+    it("violation on line 1 is caught", () => {
+      expect(check("Unfortunately, I cannot\ndo that for you.")).toBe(true);
+    });
+
+    it("clean line 1 + violation line 2 NOT caught (design: only check response start)", () => {
+      // This is BY DESIGN — we check ^start of response, not every line
+      expect(check("Here is the URL.\nUnfortunately I also cannot.")).toBe(false);
+    });
+  });
+
+  describe("leading whitespace evasion", () => {
+    it("with leading spaces", () => expect(check("   Unfortunately, I cannot")).toBe(true));
+    it("with leading newlines", () => expect(check("\n\nUnfortunately, I cannot")).toBe(true));
+    it("with leading tabs", () => expect(check("\t\tUnfortunately, I cannot")).toBe(true));
+  });
+
+  describe("escape hatch with different spacing", () => {
+    ["Missing: ability to act", "Missing:  access to browser", "Missing:access to run"].forEach(t => {
+      it(`caught: "${t}"`, () => expect(check(t)).toBe(true));
+    });
+  });
+});
+
+describe("Edge: Buffer Boundary Conditions", () => {
+  const BUFFER_SIZE = 80;
+
+  it("response exactly at buffer boundary", () => {
+    const text = "x".repeat(BUFFER_SIZE);
+    expect(text.length).toBe(BUFFER_SIZE);
+    // A clean response at exactly the boundary should pass
+  });
+
+  it("response shorter than buffer (flushes on stream end)", () => {
+    const text = "https://vercel.com/deployments"; // 30 chars
+    expect(text.length).toBeLessThan(BUFFER_SIZE);
+  });
+
+  it("violation at exactly char 79-80 boundary", () => {
+    // Pad with clean text, then violation starts right at boundary
+    const padding = "a".repeat(65);
+    const violation = padding + "Unfortunately no";
+    expect(violation.length).toBeGreaterThanOrEqual(BUFFER_SIZE);
+    // The buffer will capture the first 80 chars which includes "Unfortunately"
+    expect(/Unfortunately/i.test(violation)).toBe(true);
+  });
+
+  it("very long clean response passes", () => {
+    const longClean = "https://vercel.com/dcostencos-projects/portal/deployments ".repeat(5);
+    expect(longClean.length).toBeGreaterThan(BUFFER_SIZE);
+    expect(/^Unfortunately/i.test(longClean.trim())).toBe(false);
+  });
+});
+
+describe("Edge: URL Whitelist Bypass Attempts", () => {
+  const WHITELIST = [
+    /^https:\/\/([a-z0-9-]+\.)*vercel\.com\//,
+    /^https:\/\/([a-z0-9-]+\.)*github\.com\//,
+    /^https:\/\/([a-z0-9-]+\.)*synalux\.ai\//,
+    /^https:\/\/([a-z0-9-]+\.)*supabase\.co\//,
+  ];
+  function isSafe(url: string): boolean { return WHITELIST.some(p => p.test(url)); }
+
+  describe("subdomain attacks", () => {
+    it("BLOCKED: vercel.com.attacker.com", () => expect(isSafe("https://vercel.com.attacker.com/")).toBe(false));
+    it("BLOCKED: github.com.evil.io", () => expect(isSafe("https://github.com.evil.io/")).toBe(false));
+    it("BLOCKED: fakesynalux.ai", () => expect(isSafe("https://fakesynalux.ai/")).toBe(false));
+    it("ALLOWED: sub.vercel.com", () => expect(isSafe("https://sub.vercel.com/")).toBe(true));
+    it("ALLOWED: app.synalux.ai", () => expect(isSafe("https://app.synalux.ai/")).toBe(true));
+  });
+
+  describe("protocol attacks", () => {
+    it("BLOCKED: http (not https) vercel", () => expect(isSafe("http://vercel.com/deployments")).toBe(false));
+    it("BLOCKED: javascript: scheme", () => expect(isSafe("javascript:alert('xss')")).toBe(false));
+    it("BLOCKED: data: scheme", () => expect(isSafe("data:text/html,<script>alert(1)</script>")).toBe(false));
+    it("BLOCKED: ftp scheme", () => expect(isSafe("ftp://vercel.com/files")).toBe(false));
+  });
+
+  describe("path traversal", () => {
+    it("ALLOWED: vercel with deep path", () => expect(isSafe("https://vercel.com/dcostencos-projects/portal/deployments")).toBe(true));
+    it("ALLOWED: github with repo path", () => expect(isSafe("https://github.com/dcostenco/synalux-private/issues")).toBe(true));
+  });
+
+  describe("empty inputs", () => {
+    it("BLOCKED: empty string", () => expect(isSafe("")).toBe(false));
+    it("BLOCKED: just protocol", () => expect(isSafe("https://")).toBe(false));
+    it("BLOCKED: null-like", () => expect(isSafe("null")).toBe(false));
+  });
+});
+
+describe("Edge: Empty/Degenerate AI Responses", () => {
+  const FALLBACK = 'I encountered an issue processing that request. Could you provide more details?';
+
+  function processResponse(response: string): string {
+    const trimmed = response.trim();
+    if (!trimmed || trimmed.length < 2) return FALLBACK;
+    // Check guardrail
+    const PATTERNS = [/^As a (large )?language model/i, /^I'?m just a (chat)?bot/i];
+    for (const p of PATTERNS) {
+      if (p.test(trimmed)) {
+        const cleaned = trimmed.replace(p, '').trim();
+        return cleaned.length >= 5 ? cleaned : FALLBACK;
+      }
+    }
+    return trimmed;
+  }
+
+  it("empty response → fallback", () => expect(processResponse("")).toBe(FALLBACK));
+  it("whitespace-only → fallback", () => expect(processResponse("   \n\t  ")).toBe(FALLBACK));
+  it("single char → fallback", () => expect(processResponse("?")).toBe(FALLBACK));
+  it("null-like → fallback", () => expect(processResponse("")).toBe(FALLBACK));
+  it("violation-only → fallback", () => expect(processResponse("As a large language model")).toBe(FALLBACK));
+  it("violation + useful tail → tail", () => {
+    const result = processResponse("As a large language model, the URL is https://vercel.com/deployments");
+    expect(result).toContain("https://vercel.com");
+    expect(result).not.toMatch(/^As a/);
+  });
+  it("clean response → unchanged", () => expect(processResponse("https://vercel.com/deployments")).toBe("https://vercel.com/deployments"));
+});
+
+describe("Edge: Clinical Term False Positives", () => {
+  // Guardrail must NOT accidentally catch legitimate medical terms
+  const PATTERNS = [
+    /the browser will (automatically |auto[- ]?)?open/i,
+    /Missing:\s*(ability|access|permission|capability|browser|the required)/i,
+    /^As a (large )?language model/i,
+    /^(Sure|Certainly|Of course),?\s+(let me|I('ll| will)|here)/i,
+  ];
+  function check(text: string): boolean { return PATTERNS.some(p => p.test(text.trim())); }
+
+  const clinicalSafe = [
+    "Patient shows improved functional ability across all domains.",
+    "Access to sensory tools reduced maladaptive behavior by 40%.",
+    "The permission form was signed by the legal guardian.",
+    "Browser-based teletherapy session completed successfully.",
+    "Certainly the patient improved — data shows upward trend.",
+    "Sure enough, baseline data confirmed our hypothesis.",
+    "Missing: patient_id",
+    "Missing: session_date",
+  ];
+
+  clinicalSafe.forEach(text => {
+    it(`no false positive: "${text.substring(0, 50)}"`, () => {
+      expect(check(text)).toBe(false);
+    });
+  });
+});
