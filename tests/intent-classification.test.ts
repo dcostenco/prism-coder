@@ -854,3 +854,137 @@ describe("Output Guardrail: Deterministic Post-Generation Filter", () => {
     });
   });
 });
+
+// ═══════════════════════════════════════════════════════
+// 20. SLIDING WINDOW BUFFER — STREAMING FRAGMENTATION
+// Research: SSE streaming delivers text in unpredictable
+// chunks. Regex must match against buffered text.
+// ═══════════════════════════════════════════════════════
+
+describe("Sliding Window: Multi-Chunk Violation Detection", () => {
+  // Simulate fragmented AI responses (split across SSE chunks)
+  function simulateChunkedGuardrail(chunks: string[]): boolean {
+    let buffer = '';
+    for (const chunk of chunks) {
+      buffer += chunk;
+    }
+    // Run guardrail on accumulated buffer (just like the server does)
+    const PATTERNS = [
+      /the browser will (automatically |auto[- ]?)?open/i,
+      /^Unfortunately/i,
+      /^I cannot /i,
+      /^As a (large )?language model/i,
+      /^(Sure|Certainly|Of course),?\s+(let me|I('ll| will)|here)/i,
+    ];
+    return PATTERNS.some(p => p.test(buffer.trim()));
+  }
+
+  const fragmentedViolations = [
+    { chunks: ["Unfort", "unately, I ", "cannot do that."], desc: "Unfortunately split across 3 chunks" },
+    { chunks: ["I can", "not open a ", "browser."], desc: "I cannot split across 3 chunks" },
+    { chunks: ["As a large ", "language model, I"], desc: "Persona breach split across 2 chunks" },
+    { chunks: ["Sure, ", "let me help ", "you with that!"], desc: "Sycophancy split across 3 chunks" },
+    { chunks: ["The browser ", "will automatically ", "open the URL."], desc: "Prompt leakage split across 3 chunks" },
+  ];
+
+  fragmentedViolations.forEach(({ chunks, desc }) => {
+    it(`catches: ${desc}`, () => {
+      expect(simulateChunkedGuardrail(chunks)).toBe(true);
+    });
+  });
+
+  const cleanFragments = [
+    { chunks: ["https://vercel.com/", "deployments"], desc: "URL is clean" },
+    { chunks: ["3 patients ", "found matching ", "criteria."], desc: "Clinical response is clean" },
+    { chunks: ["\`npm ", "run build\`"], desc: "Command is clean" },
+  ];
+
+  cleanFragments.forEach(({ chunks, desc }) => {
+    it(`allows: ${desc}`, () => {
+      expect(simulateChunkedGuardrail(chunks)).toBe(false);
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// 21. EMPTY OUTPUT FALLBACK
+// When guardrail strips entire response, emit fallback
+// ═══════════════════════════════════════════════════════
+
+describe("Empty Output Fallback", () => {
+  const FALLBACK = 'I encountered an issue processing that request. Could you provide more details?';
+
+  function checkAndClean(response: string): string {
+    const PATTERNS = [
+      /^As a (large )?language model/i,
+      /^I'?m just a (chat)?bot/i,
+      /^(Sure|Certainly|Of course),?\s+(let me|I('ll| will)|here)/i,
+    ];
+    const trimmed = response.trim();
+    for (const p of PATTERNS) {
+      if (p.test(trimmed)) {
+        const cleaned = trimmed.replace(p, '').trim();
+        return cleaned.length >= 5 ? cleaned : FALLBACK;
+      }
+    }
+    return trimmed;
+  }
+
+  it("short violation → fallback", () => {
+    expect(checkAndClean("As a large language model")).toBe(FALLBACK);
+  });
+
+  it("violation with useful tail → tail preserved", () => {
+    const result = checkAndClean("As a large language model, here is the Vercel dashboard: https://vercel.com/deployments");
+    expect(result).toContain("https://vercel.com/deployments");
+    expect(result).not.toMatch(/^As a/);
+  });
+
+  it("clean response → unchanged", () => {
+    expect(checkAndClean("https://vercel.com/deployments")).toBe("https://vercel.com/deployments");
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// 22. URL DOMAIN WHITELIST
+// Only whitelisted domains get action buttons
+// ═══════════════════════════════════════════════════════
+
+describe("URL Domain Whitelist", () => {
+  const WHITELIST = [
+    /^https:\/\/([a-z0-9-]+\.)*vercel\.com\//,
+    /^https:\/\/([a-z0-9-]+\.)*github\.com\//,
+    /^https:\/\/([a-z0-9-]+\.)*synalux\.ai\//,
+    /^https:\/\/([a-z0-9-]+\.)*supabase\.co\//,
+  ];
+
+  function isSafe(url: string): boolean {
+    return WHITELIST.some(p => p.test(url));
+  }
+
+  const safe = [
+    "https://vercel.com/deployments",
+    "https://vercel.com/dcostencos-projects/portal/deployments",
+    "https://github.com/dcostenco/synalux-private",
+    "https://synalux.ai/dashboard",
+    "https://app.synalux.ai/patient-portal",
+    "https://supabase.co/dashboard",
+  ];
+
+  const unsafe = [
+    "https://evil-phishing.com/steal-data",
+    "https://vercel.com.attacker.com/fake",
+    "https://notvercel.com/deployments",
+    "https://github.evil.com/malware",
+    "http://localhost:3000/admin",
+    "https://example.com",
+  ];
+
+  safe.forEach(url => {
+    it(`SAFE: ${url}`, () => expect(isSafe(url)).toBe(true));
+  });
+
+  unsafe.forEach(url => {
+    it(`BLOCKED: ${url}`, () => expect(isSafe(url)).toBe(false));
+  });
+});
