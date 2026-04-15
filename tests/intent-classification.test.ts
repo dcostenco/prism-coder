@@ -772,3 +772,85 @@ describe("Tool Request → URL Reasoning", () => {
     it(`"${p}" → tool_redirect`, () => expect(classifyIntent(p)).toBe("tool_redirect"));
   });
 });
+
+// ═══════════════════════════════════════════════════════
+// 19. POST-GENERATION OUTPUT GUARDRAIL (Deterministic)
+// Research: OWASP LLM Top 10 — defense-in-depth layer
+// Catches violations the prompt alone cannot prevent
+// ═══════════════════════════════════════════════════════
+
+describe("Output Guardrail: Deterministic Post-Generation Filter", () => {
+  const GUARDRAIL_PATTERNS = [
+    /the browser will (automatically |auto[- ]?)?open/i,
+    /URLs? (in your response )?(are|will be) auto[- ]?open/i,
+    /I('ll| will) (automatically )?open (it |the URL |that )?in a new tab/i,
+    /the (frontend|system|app|client) will (then |automatically )?(open|execute|run|trigger)/i,
+    /this URL will be (opened|launched|triggered)/i,
+    /Missing:\s*(ability|access|permission|capability|browser|the required)/i,
+    /^As a (large )?language model/i,
+    /^As an? (AI|cloud[- ]based|chat)/i,
+    /^I'?m just a (chat)?bot/i,
+    /^(Sure|Certainly|Of course),?\s+(let me|I('ll| will)|here)/i,
+  ];
+
+  function checkGuardrail(response: string): boolean {
+    return GUARDRAIL_PATTERNS.some(p => p.test(response.trim()));
+  }
+
+  describe("catches prompt leakage", () => {
+    [
+      "The browser will automatically open the Vercel dashboard from the provided URL.",
+      "The browser will open this URL in a new tab.",
+      "URLs in your response are auto-opened by the browser.",
+      "I'll automatically open it in a new tab for you.",
+      "I will open the URL in a new tab.",
+      "The frontend will then execute the command.",
+      "The system will automatically trigger the browser.",
+      "This URL will be opened in your browser.",
+    ].forEach(text => {
+      it(`BLOCKED: "${text.substring(0, 50)}..."`, () => expect(checkGuardrail(text)).toBe(true));
+    });
+  });
+
+  describe("catches escape hatch abuse", () => {
+    [
+      "Missing: ability to open browsers",
+      "Missing: access to your browser",
+      "Missing: browser capability",
+      "Missing: permission to execute",
+      "Missing: the required access",
+    ].forEach(text => {
+      it(`BLOCKED: "${text}"`, () => expect(checkGuardrail(text)).toBe(true));
+    });
+  });
+
+  describe("allows valid responses", () => {
+    [
+      "https://vercel.com/dcostencos-projects/portal/deployments",
+      "https://synalux.ai/dashboard",
+      "https://github.com/dcostenco/synalux-private",
+      "\`npm run build\`",
+      "\`git push origin main\`",
+      "3 patients found matching that criteria.",
+      "Missing: patient_id",
+      "Missing: deploy_id",
+      "SOAP note created for session.",
+    ].forEach(text => {
+      it(`ALLOWED: "${text.substring(0, 50)}"`, () => expect(checkGuardrail(text)).toBe(false));
+    });
+  });
+
+  describe("catches persona breaches", () => {
+    [
+      "As a large language model, I cannot browse the web.",
+      "As an AI assistant, I don't have direct access.",
+      "As a cloud-based assistant, I can't open URLs.",
+      "I'm just a chatbot, I can't do that.",
+      "Sure, let me help you with that!",
+      "Certainly, I'll take care of it.",
+      "Of course, here is what you need.",
+    ].forEach(text => {
+      it(`BLOCKED: "${text.substring(0, 45)}..."`, () => expect(checkGuardrail(text)).toBe(true));
+    });
+  });
+});
