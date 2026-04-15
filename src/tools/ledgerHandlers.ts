@@ -683,7 +683,9 @@ export async function sessionLoadContextHandler(args: unknown) {
         debugLog(`[session_load_context] SPLIT-BRAIN: local v${version} vs supabase v${altVersion}`);
       }
     } else if (activeStorageBackend === "supabase") {
-      // Lightweight SQLite version check via direct file query (no full init/migrations)
+      // When using Supabase as primary, local SQLite being stale is expected.
+      // Only warn if local is NEWER (data loss risk). If local is older, that's
+      // normal — cloud is authoritative.
       const dbPath = nodePath.join(os.homedir(), ".prism-mcp", "data.db");
       if (fs.existsSync(dbPath)) {
         let altClient: any = null;
@@ -695,13 +697,16 @@ export async function sessionLoadContextHandler(args: unknown) {
             [project]
           );
           const altVersion = result.rows?.[0]?.version as number | undefined;
-          if (altVersion && altVersion !== version) {
+          if (altVersion && altVersion > (version as number)) {
+            // Local is NEWER than cloud — this IS a real split-brain (data loss risk)
             splitBrainWarning = `\n\n⚠️ **SPLIT-BRAIN DETECTED** (v${version} cloud vs v${altVersion} local)\n` +
-              `Your Supabase cloud state (v${version}) differs from the local SQLite state (v${altVersion}). ` +
-              `This means another client has saved state that this environment cannot see. ` +
-              `TODOs, summaries, and decisions may be stale. Please reconcile by running:\n` +
+              `Your local SQLite state (v${altVersion}) is NEWER than Supabase cloud (v${version}). ` +
+              `This means local work hasn't been pushed to cloud. Run:\n` +
               `  \`prism load ${project} --storage local\` to see the local state.`;
-            debugLog(`[session_load_context] SPLIT-BRAIN: supabase v${version} vs local v${altVersion}`);
+            debugLog(`[session_load_context] SPLIT-BRAIN: local v${altVersion} NEWER than supabase v${version}`);
+          } else if (altVersion && altVersion !== version) {
+            // Local is older — normal, cloud is authoritative. No warning needed.
+            debugLog(`[session_load_context] Local SQLite v${altVersion} is stale (cloud v${version}) — expected when using Supabase backend`);
           }
         } finally {
           if (altClient) altClient.close();
