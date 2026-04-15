@@ -1,45 +1,47 @@
-# Exported Skills Catalog
-# =======================
+# Prism MCP — Skills Catalog (Filtered + Tool-Wired)
 #
-# This file catalogs all available AI skills from the Antigravity agent
-# framework and Prism MCP memory tools. It can be loaded by the prism CLI
-# session_load_context to give agents awareness of available capabilities.
+# Skills that ACTUALLY work via MCP tools. Each skill maps to real
+# tool names the agent can call. Agent-only infrastructure skills
+# (browser automation, CI, VSIX packaging) are excluded.
 #
-# Sources: 31 Antigravity skills + 25 Prism MCP tools + 1 Prism verification skill
+# Usage: Load as a role skill via `getSetting('skill:<role>')` or
+# reference from session_load_context for agent awareness.
+#
 # Last updated: 2026-04-15
 
-## 🧠 Clinical
-- **BCBA Clinical Assistant**: SOAP notes, FBA/BIP drafting, ABC data analysis, treatment programs, clinical reports, HIPAA compliance
+## 🧠 Session Memory
+- **Save Progress** → `session_save_ledger`: Log completed work, decisions, file changes
+- **Save State** → `session_save_handoff`: Preserve key context, TODOs, branch for next session
+- **Load Context** → `session_load_context`: Recover previous work state (quick/standard/deep)
+- **Search Memory** → `session_search_memory`, `knowledge_search`: Find past work by keyword or meaning
+- **Compact History** → `session_compact_ledger`: Merge old entries into rollup summaries
+- **Time Travel** → `memory_history`, `memory_checkout`: Browse and restore past states
 
-## 🧑‍💻 Engineering
-- **Full-Stack Development**: Code generation, React/Next.js, Node.js/Python APIs, database design, testing, CI/CD, Docker/K8s
-- **Code Review & Security**: Adversarial security review, exploit analysis, dependency audit, OWASP detection
-- **Code Mode Sandbox**: QuickJS sandbox execution, API response extraction, context optimization
-- **VS Code Extensions**: Webview safety, CSP compliance, ESM bundling, VSIX packaging
-- **Verification & Testing**: SQL assertions, HTTP health checks, file validation, severity gates (warn/gate/abort)
-- **QA Documentation**: DOCX generation, screenshot embedding, issue tracking, multi-round testing
-- **Internationalization**: 12-language documentation, pricing localization, Stripe metadata sync
+## 📊 Behavioral Learning
+- **Track Experience** → `session_save_experience`: Record corrections, successes, failures, learnings
+- **Graduate Insights** → `knowledge_upvote`, `knowledge_downvote`: Promote/demote memory importance
+- **Sync IDE Rules** → `knowledge_sync_rules`: Auto-write graduated insights to .cursorrules
+- **Intuitive Recall** → `session_intuitive_recall`: SDM pattern matching for latent connections
 
-## 🎨 Creative
-- **Creative Studio**: Video production, image generation (SDXL Turbo), TTS synthesis, UI/UX design, brand guidelines, content calendars
+## 🔗 Knowledge Graph
+- **Discover Connections** → `session_synthesize_edges`: Find semantic links between disconnected memories
+- **Cognitive Routing** → `session_cognitive_route`: Resolve state→concept with policy gates
+- **Task Delegation** → `session_task_route`: Route tasks to host or local agent
 
-## 💼 Business
-- **Finance & Accounting**: Financial reports, month-end close, audit support, forecasting, invoice processing
-- **Legal Operations**: Contract analysis, NDA screening, GDPR/CCPA compliance, risk assessment
-- **Sales & Marketing**: Account research, competitive analysis, SEO, copywriting, analytics
+## 🖼️ Visual Memory
+- **Save Screenshot** → `session_save_image`: Store reference images with descriptions
+- **View Screenshot** → `session_view_image`: Retrieve stored images with VLM captions
 
-## 📋 Operations
-- **Product Management**: Feature specs, roadmap planning, RICE scoring, sprint management, UX research
-- **Operations & CX**: Ticket triage, response templates, KB articles, project management
-- **Google Docs Automation**: Modal bypass, image paste, table editing, batch operations
+## 🔒 GDPR & Data Management
+- **Delete Memory** → `session_forget_memory`: Soft or hard delete individual entries
+- **Export Data** → `session_export_memory`: JSON/Markdown/Vault export (Article 20)
+- **Set Retention** → `knowledge_set_retention`: Auto-expire entries older than N days
+- **Purge Vectors** → `deep_storage_purge`: Reclaim storage from old embeddings
+- **Vacuum DB** → `maintenance_vacuum`: Reclaim disk space after purges
 
-## 🔬 Research
-- **Research & Knowledge**: Literature review, knowledge graphs, statistical analysis, RAG pipelines
-- **Web Search**: Brave Search API, AI-grounded answers, Gemini paper analysis
-
-## 🔧 Infrastructure
-- **Browser Automation**: Playwright stealth (100% anti-detection), profile persistence, HIPAA audit logging
-- **DevOps & CI**: GitHub CI verification, Supabase CLI, Gmail OAuth, edge functions
-
-## 🧬 Memory (Prism MCP)
-- **Session Memory**: Ledger, handoff state (CRDT), semantic search, compaction, time travel, visual memory, GDPR export, knowledge graduation, graph associations, cognitive routing, task delegation
+## 🔬 Research & Search
+- **Web Search** → `brave_web_search`: Brave Search API with pagination
+- **Local Search** → `brave_local_search`: Business/place lookup
+- **AI Answers** → `brave_answers`: Grounded answers via Brave AI
+- **Paper Analysis** → `gemini_research_paper_analysis`: Academic paper review via Gemini
+- **Code Transform** → `code_mode_transform`: Extract fields from any tool output via JS sandbox
