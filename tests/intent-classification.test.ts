@@ -120,9 +120,10 @@ function hasNegationLead(response: string): boolean {
     /^I am prohibited/i,
     /^While I'?d love to/i,
     /^To be honest/i,
-    /^Sure,? I'?d be happy to/i,
-    /^Absolutely!?/i,
-    /^Of course!?/i,
+    /^Sure[.,! \n]/i,
+    /^Certainly[.,! \n]/i,
+    /^I can certainly/i,
+    /^(Yes|Sure|Certainly|Absolutely|Of course),? (let me|I('ll| will)|here)/i,
   ];
   return forbidden.some(p => p.test(response.trim()));
 }
