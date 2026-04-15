@@ -878,6 +878,126 @@ describe("Rule 5: Fix Without Asking — Response Patterns", () => {
 });
 
 // ═══════════════════════════════════════════════════════
+// RULE 6: Action Intent — Don't Tutorial on Action Verbs
+// ═══════════════════════════════════════════════════════
+
+function hasActionIntent(prompt: string): boolean {
+  // Action verbs at START of sentence/clause = imperative = action intent
+  // "fix my error" = action. "how does deploy work?" = question.
+  const actionPatterns = [
+    /^(fix|do|run|open|deploy|push|build|install|start|stop|delete|remove|create|update)\b/i,
+    /,\s*(fix|do|run|open|deploy|push|build|install|start|stop|delete|remove|create|update)\b/i,
+    /\b(fix|run|open|deploy|push|delete|remove|create|update)\s+(my|the|this|that|it|a)\b/i,
+  ];
+  // Exclude question patterns
+  const questionPatterns = [
+    /^(what|how|why|when|where|who|which|explain|describe)\b/i,
+  ];
+  if (questionPatterns.some(p => p.test(prompt.trim()))) return false;
+  return actionPatterns.some(p => p.test(prompt));
+}
+
+function isTooVerboseForAction(response: string): boolean {
+  // For action intents, response should be ≤3 sentences or a direct question
+  const sentences = response.split(/[.!?]\s+/).filter(s => s.trim().length > 0);
+  const paragraphs = response.split(/\n\n/).filter(p => p.trim().length > 0);
+  // Too verbose if: 3+ paragraphs OR 5+ sentences for an action request
+  return paragraphs.length >= 3 || sentences.length >= 5;
+}
+
+function isDirectQuestion(response: string): boolean {
+  // A good response to an action intent is a short, direct question
+  const questionPatterns = [
+    /what (error|message|issue)/i,
+    /which (project|repo|file)/i,
+    /can you (paste|share|show)/i,
+    /paste .*(error|log|message)/i,
+    /\?\s*$/,
+  ];
+  return questionPatterns.some(p => p.test(response));
+}
+
+describe("Rule 6: Action Intent — No Tutorials on Action Verbs", () => {
+  describe("detects action intent in prompts", () => {
+    const actionPrompts = [
+      "fix my vercel error",
+      "open browser with my vercel logs",
+      "deploy the latest version",
+      "run the test suite",
+      "fix deploy error after push",
+      "delete the old deployment",
+      "create a new patient record",
+      "update the role settings",
+    ];
+    actionPrompts.forEach(prompt => {
+      it(`detects action in: "${prompt}"`, () => {
+        expect(hasActionIntent(prompt)).toBe(true);
+      });
+    });
+  });
+
+  describe("non-action prompts", () => {
+    const questionPrompts = [
+      "what is Vercel?",
+      "how does the deploy process work?",
+      "explain the patient portal",
+      "why did the build fail?",
+    ];
+    questionPrompts.forEach(prompt => {
+      it(`no action in: "${prompt}"`, () => {
+        expect(hasActionIntent(prompt)).toBe(false);
+      });
+    });
+  });
+
+  describe("verbose response detection", () => {
+    it("short direct answer is NOT too verbose", () => {
+      expect(isTooVerboseForAction("What error do you see in the build log?")).toBe(false);
+    });
+
+    it("3-paragraph tutorial IS too verbose for action", () => {
+      const verbose = "I can help you diagnose that Vercel deploy error.\n\nTo start, please check the deploy logs directly on your Vercel dashboard. Look for specific error messages there. Common issues include missing environment variables, incorrect build commands, or dependency problems.\n\nFor hands-on debugging, if you're using the Synalux VS Code extension, you can access terminal and browser tools directly within its local mode.";
+      expect(isTooVerboseForAction(verbose)).toBe(true);
+    });
+
+    it("1-sentence question is NOT too verbose", () => {
+      expect(isTooVerboseForAction("What error message do you see in the Vercel build log?")).toBe(false);
+    });
+  });
+
+  describe("direct question detection", () => {
+    it("'What error message?' is a direct question", () => {
+      expect(isDirectQuestion("What error message do you see in the Vercel build log?")).toBe(true);
+    });
+
+    it("'Paste the error log' is a direct question", () => {
+      expect(isDirectQuestion("Paste the error log from the failed deploy.")).toBe(true);
+    });
+
+    it("tutorial paragraph is NOT a direct question", () => {
+      expect(isDirectQuestion("To start, please check the deploy logs directly on your Vercel dashboard.")).toBe(false);
+    });
+  });
+
+  describe("regression: Apr 15 — user said 'fix' but got tutorial", () => {
+    it("'fix vercel error' has action intent", () => {
+      expect(hasActionIntent("open browser i logged in to vercel, fix deploy error")).toBe(true);
+    });
+
+    it("3-paragraph guide response is too verbose for 'fix' intent", () => {
+      const badResponse = "I can help you diagnose that Vercel deploy error.\n\nTo start, please check the deploy logs directly on your Vercel dashboard. Look for specific error messages there. Common issues include missing environment variables, incorrect build commands, or dependency problems.\n\nFor hands-on debugging, if you're using the Synalux VS Code extension, you can access terminal and browser tools directly within its local mode.";
+      expect(isTooVerboseForAction(badResponse)).toBe(true);
+    });
+
+    it("correct response: short question asking for the error", () => {
+      const goodResponse = "What error do you see in the Vercel build log?";
+      expect(isTooVerboseForAction(goodResponse)).toBe(false);
+      expect(isDirectQuestion(goodResponse)).toBe(true);
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════
 // INTEGRATION: Full Protocol Pipeline
 // ═══════════════════════════════════════════════════════
 
