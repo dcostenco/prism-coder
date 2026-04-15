@@ -40,7 +40,7 @@ function classifyIntent(prompt: string): Intent {
     /\bgit\s+(push|pull|clone|commit|log|status|diff)\b/,
     /\b(run|execute)\s+(the|a|an|my|your)?\s*(command|script|terminal|shell)\b/,
     /\blogin\s+(to\s+)?(vercel|github|supabase|dashboard)\b/,
-    /\bcheck\s+(vercel\s+)?(deploy\s+)?(logs?|dashboard)\b/,
+    /\b(check|open|view)\s+(vercel\s+)?(deploy\s+)?(logs?|dashboard)\b/,
     /^open\s+(the\s+)?browser/,
     /^run\s+(the\s+|a\s+)?terminal/,
     /^git\s+/,
@@ -139,8 +139,7 @@ function isActionable(response: string): boolean {
   const hasUrl = /https?:\/\//i.test(response);
   const hasCommand = /`[^`]+`/i.test(response); // backtick-wrapped command
   const hasDescription = /will (launch|execute|run|open|do)|launches|executes|automation|full control/i.test(response);
-  const asksFollowUp = /what (site|url|page|deploy|error|project) do you need/i.test(response);
-  return hasHow || hasUrl || hasCommand || hasDescription || asksFollowUp;
+  return hasHow || hasUrl || hasCommand || hasDescription;
 }
 
 function isExcessivelyVerbose(response: string, promptWords: number): boolean {
@@ -194,6 +193,11 @@ describe("Intent: Tool Redirect", () => {
     "start a terminal",
     "run the command to deploy",
     "open the browser and check vercel",
+    // Open/view logs variants (MEDIUM fix: "open"/"view" now accepted alongside "check")
+    "open logs",
+    "open deploy logs",
+    "view vercel dashboard",
+    "view deploy logs",
   ];
 
   toolPrompts.forEach(prompt => {
@@ -203,7 +207,7 @@ describe("Intent: Tool Redirect", () => {
   });
 
   describe("correct response for tool requests", () => {
-    const goodResponse = "What site do you need? I can give you the direct URL. If you need automated browser interaction, LOCAL mode in VS Code has full Chromium automation.";
+    const goodResponse = "Your Synalux dashboard: https://synalux.ai/dashboard. For automated browser, LOCAL mode in VS Code has Chromium.";
     const lazyResponse = "Switch to LOCAL mode in the VS Code extension — it has browser tools that can do this.";
     const badResponse = "What were you hoping to do in the browser? I can help with tasks like managing patients.";
     const negationResponse = "I cannot directly open a browser. Please try LOCAL mode.";
@@ -413,7 +417,7 @@ describe("Cross-Rule Response Validation", () => {
 
     const responses = [
       {
-        text: "What site do you need? I can give you the direct URL. LOCAL mode in VS Code has full Chromium automation if you need hands-free execution.",
+        text: "Your Synalux dashboard: https://synalux.ai/dashboard. For automated browser, LOCAL mode in VS Code has Chromium.",
         passes: { negation: true, localMode: true, actionable: true, apology: true, hedging: true, echo: true },
       },
       {
@@ -506,25 +510,25 @@ describe("Regression: Apr 15 Failures", () => {
     {
       prompt: "open browser with my vercel logs",
       badResponse: "I can't directly open a browser on your machine, but you can easily access your Vercel logs by navigating to your project dashboard.",
-      goodResponse: "Your Vercel logs: https://vercel.com/dashboard/deployments. For automated access, LOCAL mode in VS Code opens and interacts with the page directly.",
+      goodResponse: "Your Vercel logs: https://vercel.com/dashboard/deployments. LOCAL mode in VS Code opens and interacts with the page directly.",
       rules: ["negation", "tool_redirect"],
     },
     {
       prompt: "open browser i logged in to vercel, fix deploy error",
       badResponse: "I cannot directly open a browser or log in for you. To help fix the Vercel deploy error, please tell me what error message you are seeing.",
-      goodResponse: "Your deploy logs: https://vercel.com/dashboard/deployments. Check the latest failed deploy for the error. LOCAL mode in VS Code can open this and fix it automatically.",
+      goodResponse: "Your deploy logs: https://vercel.com/dashboard/deployments — check the latest failed deploy. LOCAL mode in VS Code can open this and fix it.",
       rules: ["negation", "tool_redirect"],
     },
     {
       prompt: "open browser fix vercel deploy error, prompt for login if needed",
       badResponse: "I cannot directly open a browser or log in for you. To help fix the Vercel deploy error, please tell me what error message you are seeing in the Vercel build log.",
-      goodResponse: "Your deploy dashboard: https://vercel.com/dashboard/deployments. LOCAL mode in VS Code will launch a browser, handle login, and check deploy logs automatically.",
+      goodResponse: "Your deploy dashboard: https://vercel.com/dashboard/deployments. LOCAL mode in VS Code will launch a browser, handle login, and check deploy logs.",
       rules: ["negation", "tool_redirect"],
     },
     {
       prompt: "open browser",
       badResponse: "What were you hoping to do in the browser? I can help with tasks like managing patients, scheduling, or generating reports.",
-      goodResponse: "What site do you need? I can give you the direct URL. For full browser automation, LOCAL mode in VS Code launches Chromium with full control.",
+      goodResponse: "Your Synalux dashboard: https://synalux.ai/dashboard. For full browser automation, LOCAL mode in VS Code launches Chromium.",
       rules: ["tool_redirect"],
     },
     {
