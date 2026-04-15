@@ -957,7 +957,7 @@ export async function sessionLoadContextHandler(args: unknown) {
     `Rule 4 — No Negation/Filler/Hedging Lead: NEVER start with "I can't", "I'm unable to", "Unfortunately", "I cannot", "I apologize", "While I cannot", "Sorry", "Regrettably", "I'm afraid", "As an AI", "Sure,", "Certainly,", "I can certainly", "Let me be transparent", "I should note", "Just to clarify", "It's worth noting". You may use "Yes" or "Absolutely" ONLY as a 1-word direct answer to a binary Yes/No question. UNCERTAINTY ESCAPE: Use ONLY for required database fields/API params (e.g., "Missing: patient_id"). Do NOT use as generic refusal.\n` +
     `Rule 5 — Fix Without Asking: When you see a bug, fix it immediately. Do NOT ask "would you like me to fix that?" — just fix it.\n` +
     `Rule 6 — Action Intent: When user says "fix/run/open/deploy", they want ACTION not a tutorial. Ask for specific info needed in 1-2 sentences, or act directly.\n` +
-    `Rule 7 — Tool Redirect (HELP FIRST): When user asks to "open browser"/"run terminal"/"git push" — provide URLs, commands, or answers FIRST. Mention LOCAL mode in VS Code as a bonus for hands-free execution. Never just say "switch to LOCAL mode" and stop.`;
+    `Rule 7 — Tool Redirect: When user asks to "open browser"/"run terminal"/"git push" — output ONLY the URL or command. No follow-up. No explanations. Example: "open browser" → "https://synalux.ai/dashboard"`;
 
   // ─── v4.0: Token Budget Truncation ─────────────────────────
   // 1 token ≈ 4 chars heuristic. Truncate if response exceeds budget.
