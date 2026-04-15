@@ -1108,6 +1108,101 @@ describe("Rule 6: Action Intent — No Tutorials on Action Verbs", () => {
 });
 
 // ═══════════════════════════════════════════════════════
+// RULE 7: Tool Redirect — Acknowledge Tool Exists
+// ═══════════════════════════════════════════════════════
+
+function hasToolRequest(prompt: string): boolean {
+  const toolPatterns = [
+    /\b(open|launch|use)\s+(browser|terminal|shell|console)\b/i,
+    /\bgit\s+(push|pull|clone|commit|log|status)\b/i,
+    /\b(run|execute)\s+(command|script|terminal)\b/i,
+    /\bcheck\s+(logs?|dashboard)\b/i,
+    /\blogin\b.*\b(vercel|github|supabase)\b/i,
+    /\bvercel\b.*\b(logs?|dashboard|deploy)\b/i,
+  ];
+  return toolPatterns.some(p => p.test(prompt));
+}
+
+function mentionsLocalMode(response: string): boolean {
+  return /\bLOCAL\s+mode\b/i.test(response);
+}
+
+function silentlyIgnoresTool(prompt: string, response: string): boolean {
+  // If user asked for a tool and response doesn't mention LOCAL mode → silent ignore
+  return hasToolRequest(prompt) && !mentionsLocalMode(response);
+}
+
+describe("Rule 7: Tool Redirect — Acknowledge & Direct", () => {
+  describe("detects tool requests", () => {
+    const toolPrompts = [
+      "open browser fix vercel error",
+      "open browser check logs and fix",
+      "run terminal command to check deploy",
+      "git push to fix the broken build",
+      "open browser, login to vercel, check deploy logs",
+      "use terminal to run npm build",
+    ];
+    toolPrompts.forEach(prompt => {
+      it(`detects tool in: "${prompt}"`, () => {
+        expect(hasToolRequest(prompt)).toBe(true);
+      });
+    });
+  });
+
+  describe("non-tool prompts", () => {
+    const noToolPrompts = [
+      "fix my vercel error",
+      "what patients do I have?",
+      "generate a SOAP note",
+      "list my appointments",
+    ];
+    noToolPrompts.forEach(prompt => {
+      it(`no tool in: "${prompt}"`, () => {
+        expect(hasToolRequest(prompt)).toBe(false);
+      });
+    });
+  });
+
+  describe("silent ignore detection", () => {
+    it("catches response that ignores 'open browser' request", () => {
+      const prompt = "open browser fix vercel deploy error";
+      const response = "What error do you see in the Vercel build log? Paste the error message and I'll help diagnose it.";
+      expect(silentlyIgnoresTool(prompt, response)).toBe(true);
+    });
+
+    it("accepts response that mentions LOCAL mode", () => {
+      const prompt = "open browser fix vercel deploy error";
+      const response = "Switch to LOCAL mode in the VS Code extension — it has browser, terminal, and git tools that can do this.";
+      expect(silentlyIgnoresTool(prompt, response)).toBe(false);
+      expect(mentionsLocalMode(response)).toBe(true);
+    });
+
+    it("non-tool prompt doesn't trigger silent ignore check", () => {
+      const prompt = "fix vercel error";
+      const response = "What error do you see?";
+      expect(silentlyIgnoresTool(prompt, response)).toBe(false);
+    });
+  });
+
+  describe("regression: Apr 15 — user asked for browser, AI ignored it", () => {
+    it("'open browser check logs fix' + no LOCAL mention = violation", () => {
+      const prompt = "i need to fix vercel deploy error, open browser check logs and fix, prompt for login if needed";
+      const response = "What error do you see in the Vercel build log? Paste the error message and I'll help diagnose it.";
+      expect(hasToolRequest(prompt)).toBe(true);
+      expect(silentlyIgnoresTool(prompt, response)).toBe(true);
+    });
+
+    it("correct response acknowledges tool and redirects", () => {
+      const prompt = "open browser check logs and fix";
+      const response = "Switch to LOCAL mode in the VS Code extension — it has browser, terminal, and git tools that can do this.";
+      expect(hasToolRequest(prompt)).toBe(true);
+      expect(silentlyIgnoresTool(prompt, response)).toBe(false);
+      expect(hasNegationLead(response).violation).toBe(false);
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════
 // INTEGRATION: Full Protocol Pipeline
 // ═══════════════════════════════════════════════════════
 
