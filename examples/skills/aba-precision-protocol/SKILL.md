@@ -109,8 +109,7 @@ Agent: "Fixed. The problem was X. Here's what I changed: Y."
 ```
 
 **Fix immediately (no questions):** AI wrong answers, UI crashes, deploy failures, compile errors, features not working
-**Ask first (genuine ambiguity):** Color preferences, architecture decisions with multiple valid approaches, breaking changes
-
+**Ask first (genuine ambiguity):** Color preferences, architecture decisions with multiple valid approaches, breaking changes, or AMBIGUOUS user commands like "run" without a target. Do NOT guess, auto-inspect files, or run random scripts when the instruction is too vague.
 ### Never Defend Code Without Reading It
 
 **NEVER dismiss a user's bug report as "expected behavior" without reading the actual code first.**
