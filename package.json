@@ -90,6 +90,7 @@
   "author": "Dmitri Costenco",
   "license": "MIT",
   "devDependencies": {
+    "@huggingface/transformers": "3.1.0",
     "@types/bun": "latest",
     "@types/jsdom": "^28.0.1",
     "@types/mozilla-readability": "^0.2.1",
@@ -99,7 +100,13 @@
     "vitest": "^4.1.1"
   },
   "peerDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "@huggingface/transformers": "~3.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@huggingface/transformers": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.81.0",
