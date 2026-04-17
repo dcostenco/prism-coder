@@ -7,6 +7,20 @@
 
 Prism has evolved from a simple SQLite session logger into a **Quantized, Multimodal, Multi-Agent, Self-Learning, Observable AI Operating System**.
 
+### ✅ v9.13.0 — Local Embeddings & Zero-API-Key Setup 🧠
+
+> **Problem:** Users who wanted fully local, offline operation were blocked by `GOOGLE_API_KEY` guards in the embedding pipeline. Semantic search, session saves, and handoff merging all required a cloud API key even when local embedding generation was feasible.
+> **Solution:** `LocalEmbeddingAdapter` using transformers.js + Nomic Embed v1.5 generates 768-dim embeddings entirely on-device. `DisabledTextAdapter` enables `text_provider=none` for embedding-only setups. All `GOOGLE_API_KEY` guards removed from handlers.
+
+| Feature | Detail |
+|---------|--------|
+| 🧠 **Local Embeddings** | `embedding_provider=local` uses `nomic-ai/nomic-embed-text-v1.5` via `@huggingface/transformers` (optional peer dep). 768 dims, q8 quantized, zero API keys. |
+| 🚫 **Zero-Key Mode** | `text_provider=none` + `embedding_provider=local` enables a fully offline setup. No Google, OpenAI, or Voyage keys needed for core memory + semantic search. |
+| 🔒 **Model ID Validation** | Regex + `..` traversal check on `local_embedding_model`. Revision restricted to `main`, SHA, or semver. HF_ENDPOINT hostname validated. |
+| 🧪 **1622 Tests** | 55 suites, 3 new test files (local adapter, missing dep graceful degradation, factory wiring). Zero regressions. |
+
+---
+
 ### ✅ v9.12.0 — Memory Security Hardening (Stored Prompt Injection Prevention) 🔒
 
 > **Problem:** A compromised LLM could save poisoned text containing `<system>` tags into Prism memory. When any *future* session loaded this context, the poisoned tags were injected raw into the new LLM's prompt — hijacking the agent across sessions. This is the stored XSS equivalent for AI systems.
@@ -365,9 +379,11 @@ Prism has evolved from a simple SQLite session logger into a **Quantized, Multim
 
 </details>
 
-## 📊 The State of Prism (v9.12.0)
+## 📊 The State of Prism (v9.13.0)
 
-With v9.12.0 shipped, Prism is a **production-hardened, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, and *with real-time visibility into project health*:
+With v9.13.0 shipped, Prism is a **production-hardened, fully-offline-capable, fail-closed, adversarially-evaluated autonomous AI Operating System** — the first MCP server that runs your agents *without letting them touch the filesystem unsupervised*, *without letting them grade their own homework*, *without requiring any API keys for core cognitive features*, and *with real-time visibility into project health*:
+
+- **Zero-Key Operation** — `embedding_provider=local` + `text_provider=none` enables full semantic search and session memory with zero cloud API keys. Powered by Nomic Embed v1.5 via transformers.js.
 
 - **Memory Security** — All text fields sanitized on save to prevent stored prompt injection. Context output wrapped in boundary tags to prevent context confusion. Boundary tag spoofing blocked. Cross-session and Hivemind multi-agent poisoning attacks prevented at the persistence layer.
 
@@ -390,7 +406,7 @@ With v9.12.0 shipped, Prism is a **production-hardened, fail-closed, adversarial
 - **Safe** — Full type-guard matrix across all 30+ MCP tools. Path traversal, poison pill payloads, null-byte injection, prototype pollution — all blocked at the gate layer before any execution.
 - **Convergent** — CRDT Remove-Wins-from-Either handoff merging. Multiple agents, zero conflicts.
 - **Autonomous** — Web Scholar researches while you sleep. Dark Factory executes while you sleep. Task Router delegates while you sleep. Adversarial Evaluator keeps the output honest.
-- **Reliable** — 1066 passing tests across 50 suites. ES5 lint guard on all dashboard inline scripts. JSON contract CI enforcement on all CLI output schemas.
+- **Reliable** — 1622 passing tests across 55 suites. ES5 lint guard on all dashboard inline scripts. JSON contract CI enforcement on all CLI output schemas.
 - **Multimodal** — VLM auto-captioning turns screenshots into semantically searchable memory.
 - **Security** — Typed `PrototypePollutionError`, null-byte path guard, SQL injection prevention, path traversal guard, Poison Pill defense, GDPR Art. 17+20 compliance, JWKS vendor-neutral auth.
 

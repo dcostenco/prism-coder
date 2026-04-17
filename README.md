@@ -12,7 +12,7 @@
 
 **Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
-Prism v9.12 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.**
+Prism v9.13 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.** With v9.13, semantic search works **100% offline** — no API keys required.
 
 ```bash
 npx -y prism-mcp-server
