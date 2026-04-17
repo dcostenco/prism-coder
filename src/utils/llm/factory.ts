@@ -11,7 +11,7 @@
  *   Two independent settings control text and embedding routing:
  *
  *   text_provider      — "gemini" (default) | "openai" | "anthropic"
- *   embedding_provider — "auto" (default)   | "gemini" | "openai" | "voyage"
+ *   embedding_provider — "auto" (default)   | "gemini" | "openai" | "voyage" | "local"
  *
  *   When embedding_provider = "auto":
  *     * If text_provider is gemini or openai → use same provider for embeddings

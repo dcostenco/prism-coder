@@ -29,7 +29,7 @@
  *   "Merge skipped due to active session."
  *
  * REQUIREMENTS:
- *   - GOOGLE_API_KEY must be set (skips gracefully if not)
+ *   - A text provider must be configured (skips gracefully if not)
  *   - Uses gemini-2.5-flash for speed (~2-3s per merge)
  * ═══════════════════════════════════════════════════════════════════
  */

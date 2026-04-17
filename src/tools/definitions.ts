@@ -250,7 +250,7 @@ export const BRAVE_ANSWERS_TOOL: Tool = {
 
 // Analyzes academic research papers using Google's Gemini model.
 // Supports multiple analysis types: summary, critique, literature review, key findings.
-// Requires GOOGLE_API_KEY to be configured.
+// Requires a configured text provider (Gemini, OpenAI, or Anthropic).
 export const RESEARCH_PAPER_ANALYSIS_TOOL: Tool = {
   name: "gemini_research_paper_analysis",
   description:
