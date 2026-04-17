@@ -38,7 +38,7 @@ import { mergeHandoff, dbToHandoffSchema, sanitizeForMerge } from "../utils/crdt
 // containing: strategy, scores, latency breakdown (embedding/storage/total), and metadata.
 // See src/utils/tracing.ts for full type definitions and design decisions.
 import { createMemoryTrace, traceToContentBlock } from "../utils/tracing.js";
-import { GOOGLE_API_KEY, PRISM_USER_ID, PRISM_AUTO_CAPTURE, PRISM_CAPTURE_PORTS } from "../config.js";
+import { PRISM_USER_ID, PRISM_AUTO_CAPTURE, PRISM_CAPTURE_PORTS } from "../config.js";
 import { captureLocalEnvironment } from "../utils/autoCapture.js";
 import { fireCaptionAsync } from "../utils/imageCaptioner.js";
 import {
@@ -184,7 +184,7 @@ export async function sessionSaveLedgerHandler(args: unknown) {
   });
 
   // ─── Fire-and-forget embedding generation ───
-  if (GOOGLE_API_KEY && result) {
+  if (result) {
     const embeddingText = [summary, ...(decisions || [])].join("\n");
     const savedEntry = Array.isArray(result) ? result[0] : result;
     const entryId = (savedEntry as any)?.id;
@@ -294,7 +294,7 @@ export async function sessionSaveLedgerHandler(args: unknown) {
         (todos?.length ? `TODOs: ${todos.length} items\n` : "") +
         (files_changed?.length ? `Files changed: ${files_changed.length}\n` : "") +
         (decisions?.length ? `Decisions: ${decisions.length}\n` : "") +
-        (GOOGLE_API_KEY ? `📊 Embedding generation queued for semantic search.\n` : "") +
+        `📊 Embedding generation queued for semantic search.\n` +
         repoPathWarning +
         `\nRaw response: ${JSON.stringify(result)}`,
     }],
@@ -562,15 +562,14 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   // merges contradicting facts in the background (~2-3s).
   //
   // TRIGGER CONDITIONS (all must be true):
-  //   1. GOOGLE_API_KEY is configured (Gemini is available)
-  //   2. The handoff was an UPDATE (not a brand-new project)
-  //   3. key_context was provided (something to merge)
+  //   1. The handoff was an UPDATE (not a brand-new project)
+  //   2. key_context was provided (something to merge)
   //
   // OCC SAFETY:
   //   If the user saves another handoff while the merger runs,
   //   the merger's save will fail with a version conflict. This is
   //   intentional — active user input always wins over background merging.
-  if (GOOGLE_API_KEY && data.status === "updated" && key_context) {
+  if (data.status === "updated" && key_context) {
     // Use dynamic import to avoid loading Gemini SDK if not needed
     import("../utils/factMerger.js").then(async ({ consolidateFacts }) => {
       try {
@@ -881,7 +880,7 @@ export async function sessionLoadContextHandler(args: unknown) {
   if (d.last_summary) formattedContext += `📝 Last Summary: ${d.last_summary}\n`;
   if (d.active_branch) formattedContext += `🌿 Active Branch: ${d.active_branch}\n`;
   if (d.key_context) formattedContext += `💡 Key Context: ${d.key_context}\n`;
-  
+
   if (d.pending_todo?.length) {
     formattedContext += `\n✅ Open TODOs:\n` + d.pending_todo.map((t: string) => `  - ${t}`).join("\n") + `\n`;
   }
@@ -948,20 +947,20 @@ export async function sessionLoadContextHandler(args: unknown) {
   // ─── SDM Intuitive Recall (v5.5) ───
   // Generate embedding of current context and fetch latent SDM patterns
   let sdmRecallBlock = "";
-  if (level !== "quick" && GOOGLE_API_KEY) {
+  if (level !== "quick") {
     try {
       const activeText = [d.last_summary, d.key_context, ...(d.keywords || [])].filter(Boolean).join(" ");
       if (activeText.length > 10) {
         // v2.1 LLM factory handles the API call
         const queryVector = await getLLMProvider().generateEmbedding(activeText);
-        
+
         // Lazy-load to avoid blocking server boot
         const { getSdmEngine } = await import("../sdm/sdmEngine.js");
         const { decodeSdmVector } = await import("../sdm/sdmDecoder.js");
 
         const sdmEngine = getSdmEngine(project);
         const targetVector = sdmEngine.read(new Float32Array(queryVector));
-        
+
         const topMatches = await decodeSdmVector(project, targetVector, 3, 0.55);
         if (topMatches.length > 0) {
           sdmRecallBlock = `\n\n[🧠 INTUITIVE RECALL]\nThe deeper Superposed Memory matrix resonated with your current task and surfaced these latent patterns:\n`;
@@ -1443,7 +1442,7 @@ export async function sessionSaveExperienceHandler(args: unknown) {
   });
 
   // Fire-and-forget embedding generation
-  if (GOOGLE_API_KEY && result) {
+  if (result) {
     const embeddingText = summary;
     const savedEntry = Array.isArray(result) ? result[0] : result;
     const entryId = (savedEntry as any)?.id;

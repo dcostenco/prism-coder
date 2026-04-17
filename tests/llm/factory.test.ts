@@ -1,5 +1,5 @@
 /**
- * LLM Provider Factory — Split Provider Tests (v4.5 Voyage AI)
+ * LLM Provider Factory — Split Provider Tests (v4.5 Voyage AI + v9.5 LocalEmbeddingAdapter)
  *
  * Validates the factory's text_provider + embedding_provider composition logic
  * without making real API calls. Uses _resetLLMProvider() between tests.
@@ -11,6 +11,10 @@
  *
  * v4.5 Voyage AI:
  *   embedding_provider=voyage → uses VoyageAdapter (Anthropic-recommended pairing)
+ *
+ * v9.5 Local Embeddings:
+ *   embedding_provider=local → uses LocalEmbeddingAdapter (no API key required)
+ *   text_provider=none       → uses DisabledTextAdapter (local-only setup)
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -19,6 +23,8 @@ import { GeminiAdapter } from "../../src/utils/llm/adapters/gemini.js";
 import { OpenAIAdapter } from "../../src/utils/llm/adapters/openai.js";
 import { AnthropicAdapter } from "../../src/utils/llm/adapters/anthropic.js";
 import { VoyageAdapter } from "../../src/utils/llm/adapters/voyage.js";
+import { LocalEmbeddingAdapter } from "../../src/utils/llm/adapters/local.js";
+import { DisabledTextAdapter } from "../../src/utils/llm/adapters/disabledText.js";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 // We mock getSettingSync so tests don't need a real SQLite DB.
@@ -63,9 +69,32 @@ vi.mock("../../src/utils/llm/adapters/voyage.js", () => ({
   }),
 }));
 
+vi.mock("../../src/utils/llm/adapters/local.js", () => ({
+  LocalEmbeddingAdapter: vi.fn(function (this: any) {
+    this.generateEmbedding = vi.fn();
+    this.generateText = vi.fn().mockRejectedValue(
+      new Error("LocalEmbeddingAdapter does not support text generation")
+    );
+    this.loadPromise = Promise.resolve();
+  }),
+}));
+
+vi.mock("../../src/utils/llm/adapters/disabledText.js", () => ({
+  DisabledTextAdapter: vi.fn(function (this: any) {
+    this.generateText = vi.fn().mockRejectedValue(
+      new Error("Text generation is not available")
+    );
+    this.generateEmbedding = vi.fn().mockRejectedValue(
+      new Error("[DisabledTextAdapter] Embedding is handled by a separate adapter")
+    );
+  }),
+}));
+
 import { getSettingSync } from "../../src/storage/configStorage.js";
 const mockGetSettingSync = vi.mocked(getSettingSync);
 const mockVoyageAdapter = vi.mocked(VoyageAdapter);
+const mockLocalEmbeddingAdapter = vi.mocked(LocalEmbeddingAdapter);
+const mockDisabledTextAdapter = vi.mocked(DisabledTextAdapter);
 
 // Helper: mock both text_provider and embedding_provider together
 function mockProviders(text: string, embedding = "auto", extras: Record<string, string> = {}) {
@@ -197,6 +226,30 @@ describe("LLM Provider Factory — Split Architecture", () => {
     expect(infoSpy).toHaveBeenCalledWith(
       expect.stringContaining("embedding_provider=voyage")
     );
+    infoSpy.mockRestore();
+  });
+
+  // ── Local embedding provider ──────────────────────────────────────────────
+
+  it("embedding_provider=local → LocalEmbeddingAdapter for embeddings", () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    mockProviders("gemini", "local");
+    getLLMProvider();
+    expect(mockLocalEmbeddingAdapter).toHaveBeenCalledOnce();
+    expect(GeminiAdapter).toHaveBeenCalledOnce(); // text only
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Split provider: text=gemini, embedding=local")
+    );
+    infoSpy.mockRestore();
+  });
+
+  it("text_provider=none, embedding_provider=local → DisabledTextAdapter + LocalEmbeddingAdapter", () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    mockProviders("none", "local");
+    getLLMProvider();
+    expect(mockDisabledTextAdapter).toHaveBeenCalledOnce();
+    expect(mockLocalEmbeddingAdapter).toHaveBeenCalledOnce();
+    expect(GeminiAdapter).not.toHaveBeenCalled();
     infoSpy.mockRestore();
   });
 

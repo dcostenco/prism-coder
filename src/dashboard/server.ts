@@ -101,10 +101,10 @@ export async function startDashboardServer(): Promise<void> {
   const AUTH_USER = process.env.PRISM_DASHBOARD_USER || "";
   const AUTH_PASS = process.env.PRISM_DASHBOARD_PASS || "";
   const AUTH_JWKS_URI = process.env.PRISM_JWKS_URI || process.env.AUTH_JWKS_URI || "";
-  
+
   // Auth is enabled if basic auth is configured OR if JWKS is configured
   const AUTH_ENABLED = (AUTH_USER.length > 0 && AUTH_PASS.length > 0) || AUTH_JWKS_URI.length > 0;
-  
+
   if (AUTH_JWKS_URI) {
     initJWKS(AUTH_JWKS_URI);
   }
@@ -409,7 +409,7 @@ return false;}
           console.error("[Dashboard] SSE Connection failed:", err);
           activeSSETransports.delete(transport.sessionId);
         }
-        
+
         return; // SSEServerTransport handles keeping the response open
       }
 
@@ -522,7 +522,7 @@ return false;}
               let cursorId: string | undefined = undefined;
               let iterations = 0;
               const MAX_ITERATIONS = 100; // safety cap: 100 × 50 = 5000 entries max
-              
+
               while (hasMore && iterations < MAX_ITERATIONS) {
                 iterations++;
                 const result: any = await backfillEmbeddingsHandler({ dry_run: false, limit: 50, _cursor_id: cursorId });
@@ -560,8 +560,8 @@ return false;}
           }
           if (cleaned.length > 0) cleanupMessages.push(`Cleaned ${cleaned.length} orphaned handoffs`);
 
-          const message = cleanupMessages.length > 0 
-            ? cleanupMessages.join(", ") 
+          const message = cleanupMessages.length > 0
+            ? cleanupMessages.join(", ")
             : "No issues to clean up.";
 
           res.writeHead(200, { "Content-Type": "application/json" });
@@ -960,12 +960,12 @@ return false;}
       if (url.pathname === "/api/scholar/trigger" && req.method === "POST") {
         try {
           const { runWebScholar } = await import("../scholar/webScholar.js");
-          
+
           // Fire and forget, don't block the request
           runWebScholar().catch(err => {
             console.error("[Dashboard] Web Scholar async trigger failed:", err);
           });
-          
+
           res.writeHead(200, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ ok: true, message: "Autonomous research started in background" }));
         } catch (err: any) {
@@ -1008,12 +1008,12 @@ return false;}
             llm = getLLMProvider();
           } catch {
             res.writeHead(503, { "Content-Type": "application/json" });
-            return res.end(JSON.stringify({ error: "LLM Provider not configured for semantic search. Provide a GOOGLE_API_KEY or equivalent." }));
+            return res.end(JSON.stringify({ error: "LLM Provider not configured for semantic search. Configure an embedding provider in the Mind Palace dashboard." }));
           }
 
           const queryEmbedding = await llm.generateEmbedding(queryText);
 
-          // We query limit + offset, then slice manually since the storage 
+          // We query limit + offset, then slice manually since the storage
           // layer interface limit parameter doesn't natively expose offset.
           const results = await s!.searchMemory({
             queryEmbedding: JSON.stringify(queryEmbedding),
@@ -1259,7 +1259,7 @@ self.addEventListener('message', (e) => {
     .bg {
       position: fixed;
       inset: 0;
-      background-image: 
+      background-image:
         radial-gradient(circle at 20% 30%, rgba(139, 92, 246, 0.08) 0%, transparent 50%),
         radial-gradient(circle at 80% 70%, rgba(59, 130, 246, 0.06) 0%, transparent 50%);
       z-index: 0;

@@ -1,7 +1,7 @@
 # 🧠 Web Scholar — Setup & Configuration Guide
 
-> **Version:** 5.4.0+  
-> **Status:** Production Ready  
+> **Version:** 5.4.0+
+> **Status:** Production Ready
 > **Requires:** Brave API Key, Google API Key, Firecrawl API Key
 
 The **Autonomous Web Scholar** is Prism's background research pipeline that automatically discovers, scrapes, synthesizes, and injects knowledge from the web into your agent's memory — without manual intervention.
@@ -43,11 +43,11 @@ You need **three API keys** to enable Web Scholar:
 | # | Key | Provider | Purpose | Get It |
 |---|-----|----------|---------|--------|
 | 1 | `BRAVE_API_KEY` | Brave Search | Discovers relevant web articles | [brave.com/search/api](https://brave.com/search/api/) |
-| 2 | `GOOGLE_API_KEY` | Google AI Studio | LLM synthesis (Gemini 2.5 Flash) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| 2 | A text provider key | Google AI Studio, OpenAI, or Anthropic | LLM synthesis | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | 3 | `FIRECRAWL_API_KEY` | Firecrawl | Scrapes and extracts web content | [firecrawl.dev](https://www.firecrawl.dev/) |
 
 > [!IMPORTANT]
-> All three keys are **required**. If any are missing, the Scholar pipeline will fail silently and the dashboard will show "🔴 Disabled".
+> All three are **required**. If any are missing, the Scholar pipeline will fail silently and the dashboard will show "🔴 Disabled". The text provider can be Gemini (`GOOGLE_API_KEY`), OpenAI (`OPENAI_API_KEY`), or Anthropic (`ANTHROPIC_API_KEY`).
 
 ---
 
@@ -108,7 +108,7 @@ Web Scholar: 🟢 Enabled (every 5m)
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `BRAVE_API_KEY` | ✅ Yes | — | Brave Search Pro API key. Powers topic discovery. |
-| `GOOGLE_API_KEY` | ✅ Yes | — | Google AI Studio key. Powers Gemini LLM synthesis. |
+| Text provider key | ✅ Yes | — | `GOOGLE_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`. Powers LLM synthesis. |
 | `FIRECRAWL_API_KEY` | ✅ Yes | — | Firecrawl API key. Powers web page scraping and content extraction. |
 
 ### Scholar Configuration
