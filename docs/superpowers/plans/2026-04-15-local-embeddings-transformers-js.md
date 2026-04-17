@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `LocalEmbeddingAdapter` using `@huggingface/transformers` + `Xenova/nomic-embed-text-v1.5` (q8 ONNX) so Prism can generate 768-dim embeddings fully locally with no API keys.
+**Goal:** Add `LocalEmbeddingAdapter` using `@huggingface/transformers` + `nomic-ai/nomic-embed-text-v1.5` (q8 ONNX) so Prism can generate 768-dim embeddings fully locally with no API keys.
 
 **Architecture:** New `LocalEmbeddingAdapter` in `src/utils/llm/adapters/local.ts` and `DisabledTextAdapter` stub in `src/utils/llm/adapters/disabledText.ts`, both following the existing `VoyageAdapter` pattern. The factory (`src/utils/llm/factory.ts`) gains separate try/catch blocks for text and embedding adapters — explicit provider choices throw on failure; `"auto"` paths degrade gracefully to local/disabled.
 
@@ -165,7 +165,7 @@ function make768Tensor(): { data: Float32Array; dims: number[] } {
 }
 
 function defaultSettings(key: string, fallback?: string): string {
-  if (key === "local_embedding_model")     return "Xenova/nomic-embed-text-v1.5";
+  if (key === "local_embedding_model")     return "nomic-ai/nomic-embed-text-v1.5";
   if (key === "local_embedding_quantized") return "true";
   if (key === "local_embedding_revision")  return "main";
   return fallback ?? "";
@@ -240,7 +240,7 @@ describe("LocalEmbeddingAdapter", () => {
   });
 
   it("accepts valid HuggingFace model ID", async () => {
-    // The default mock already uses "Xenova/nomic-embed-text-v1.5" — just
+    // The default mock already uses "nomic-ai/nomic-embed-text-v1.5" — just
     // verify no validation error is thrown during happy-path init.
     const adapter = new LocalEmbeddingAdapter();
     await adapter.loadPromise;
@@ -282,10 +282,10 @@ import type { LLMProvider } from "../provider.js";
 
 const EMBEDDING_DIMS = 768;
 const MAX_EMBEDDING_CHARS = 8000;
-const DEFAULT_MODEL = "Xenova/nomic-embed-text-v1.5";
+const DEFAULT_MODEL = "nomic-ai/nomic-embed-text-v1.5";
 // Pin to a specific commit to prevent silent model updates (CWE-494).
 // Update when upgrading the model by checking:
-// https://huggingface.co/Xenova/nomic-embed-text-v1.5/commits/main
+// https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/commits/main
 const DEFAULT_REVISION = "main";
 
 // Allows only HuggingFace model IDs in "owner/name" format.
@@ -699,7 +699,7 @@ vi.mock("@huggingface/transformers", () => {
 
 vi.mock("../../src/storage/configStorage.js", () => ({
   getSettingSync: (key: string, fallback?: string) => {
-    if (key === "local_embedding_model") return "Xenova/nomic-embed-text-v1.5";
+    if (key === "local_embedding_model") return "nomic-ai/nomic-embed-text-v1.5";
     if (key === "local_embedding_quantized") return "true";
     if (key === "local_embedding_revision") return "main";
     return fallback ?? "";
