@@ -124,16 +124,16 @@ Then open `http://localhost:3001` instead.
 | Time travel & versioning | ✅ | ✅ |
 | Mind Palace Dashboard | ✅ | ✅ |
 | GDPR export (JSON/Markdown/Vault) | ✅ | ✅ |
-| Semantic vector search | ❌ | ✅ `GOOGLE_API_KEY` |
-| Morning Briefings | ❌ | ✅ `GOOGLE_API_KEY` |
-| Auto-compaction | ❌ | ✅ `GOOGLE_API_KEY` |
+| Semantic vector search | ✅ (`embedding_provider=local`) | ✅ (gemini, openai, or voyage) |
+| Morning Briefings | ❌ | ✅ Text provider key |
+| Auto-compaction | ❌ | ✅ Text provider key |
 | Web Scholar research | ❌ | ✅ [`BRAVE_API_KEY`](#environment-variables) + [`FIRECRAWL_API_KEY`](#environment-variables) (or `TAVILY_API_KEY`) |
 | VLM image captioning | ❌ | ✅ Provider key |
-| Autonomous Pipelines (Dark Factory) | ❌ | ✅ `GOOGLE_API_KEY` (or LLM override) |
+| Autonomous Pipelines (Dark Factory) | ❌ | ✅ Text provider key |
 
-> 🔑 The core Mind Palace works **100% offline** with zero API keys. Cloud keys unlock intelligence features. See [Environment Variables](#environment-variables).
+> 🔑 The core Mind Palace works **100% offline** with zero API keys — including semantic vector search with `embedding_provider=local`. Cloud keys unlock text generation features (Briefings, compaction, pipelines). See [Environment Variables](#environment-variables).
 
-> 💰 **API Cost Note:** `GOOGLE_API_KEY` (Gemini) has a generous free tier that covers most individual use. `BRAVE_API_KEY` offers 2,000 free searches/month. `FIRECRAWL_API_KEY` has a free plan with 500 credits. For typical solo development, expect **$0/month** on the free tiers. Only high-volume teams or heavy autonomous pipeline usage will incur meaningful costs.
+> 💰 **API Cost Note:** With `embedding_provider=local`, semantic search is fully free and offline. Cloud providers (`GOOGLE_API_KEY` for Gemini, `VOYAGE_API_KEY`, `OPENAI_API_KEY`) have generous free tiers. `BRAVE_API_KEY` offers 2,000 free searches/month. `FIRECRAWL_API_KEY` has a free plan with 500 credits. For typical solo development, expect **$0/month** on the free tiers.
 
 ---
 
@@ -377,8 +377,7 @@ Then add to your MCP config:
       "command": "node",
       "args": ["/path/to/prism-mcp/dist/server.js"],
       "env": {
-        "BRAVE_API_KEY": "your-key",
-        "GOOGLE_API_KEY": "your-gemini-key"
+        "BRAVE_API_KEY": "your-key"
       }
     }
   }
@@ -432,7 +431,7 @@ Prism can be deployed natively to cloud platforms like [Render](https://render.c
 > `npx` resolves the correct binary automatically, always fetches the latest version, and works identically on macOS, Linux, and Windows. Already installed globally? Run `npm uninstall -g prism-mcp-server` first.
 
 > **❓ Seeing warnings about missing API keys on startup?**
-> That's expected and not an error. `BRAVE_API_KEY` / `GOOGLE_API_KEY` warnings are informational only — core session memory works with zero keys. See [Environment Variables](#environment-variables) for what each key unlocks.
+> That's expected and not an error. API key warnings are informational only — core session memory and semantic search (with `embedding_provider=local`) work with zero keys. See [Environment Variables](#environment-variables) for what each key unlocks.
 
 > 💡 **Do agents auto-load Prism?** Agents using Cursor, Windsurf, or other MCP clients will see the `session_load_context` tool automatically, but may not call it unprompted. Add this to your project's `.cursorrules` (or equivalent system prompt) to guarantee auto-load:
 > ```
@@ -567,12 +566,12 @@ When you trigger a Dark Factory pipeline, Prism doesn't just run your task — i
 Most AI agents have an infinite memory budget. They dump massive, repetitive logs into vector databases until they bankrupt your API budget and choke their own context windows. Prism v9.0 fixes this by introducing **Token-Economic Reinforcement Learning** and **Affect-Tagged Memory**.
 
 ### 💰 Memory-as-an-Economy (The Surprisal Gate)
-Prism assigns every project a strict **Cognitive Budget** (e.g., 2,000 tokens) that persists across sessions. Every time the agent saves a memory, it costs tokens. 
+Prism assigns every project a strict **Cognitive Budget** (e.g., 2,000 tokens) that persists across sessions. Every time the agent saves a memory, it costs tokens.
 
 But not all memories are priced equally. Prism intercepts the save and runs a **Vector-Based Surprisal** calculation against recent memories:
 *   **High Surprisal (Novel thought):** Costs 0.5× tokens. The agent is rewarded for new insights.
 *   **Low Surprisal (Boilerplate):** Costs 2.0× tokens. The agent is penalized for repeating itself.
-*   **Universal Basic Income (UBI):** The budget recovers passively over time (+100 tokens/hour). 
+*   **Universal Basic Income (UBI):** The budget recovers passively over time (+100 tokens/hour).
 
 If an agent is too verbose, it goes into **Cognitive Debt**. You don't need to prompt the agent to "be concise." The physics of the system force the LLM to learn data compression to avoid bankruptcy.
 
@@ -625,7 +624,7 @@ Standard RAG (Retrieval-Augmented Generation) is now a commodity. Everyone has v
                     │
       ┌─────────────┼─────────────┐
       ▼             ▼             ▼
-  [Memory: API     [Memory:      [Memory:       
+  [Memory: API     [Memory:      [Memory:
    timeout error]   DB pool       rate limiter
                     exhaustion]   misconfigured]
       │                │
@@ -680,9 +679,9 @@ rm -rf ~/.prism-mcp
 Prism will recreate the directory with empty databases on next startup.
 
 **What leaves your machine?**
-- **Local mode (default):** Nothing. Zero network calls. All data is on-disk SQLite.
-- **With `GOOGLE_API_KEY`:** Text snippets are sent to Gemini for embedding generation, summaries, and Morning Briefings. No session data is stored on Google's servers beyond the API call.
-- **With `VOYAGE_API_KEY` / `OPENAI_API_KEY`:** Text snippets are sent to providers if selected as your embedding endpoints.
+- **Local mode (default):** Nothing. Zero network calls. All data is on-disk SQLite. With `embedding_provider=local`, even semantic search stays fully offline.
+- **With `GOOGLE_API_KEY`:** Text snippets are sent to Gemini for text generation (summaries, Morning Briefings) and optionally embeddings. No session data is stored on Google's servers beyond the API call.
+- **With `VOYAGE_API_KEY` / `OPENAI_API_KEY`:** Text snippets are sent to providers if selected as your embedding or text endpoints.
 - **With `BRAVE_API_KEY` / `FIRECRAWL_API_KEY`:** Web Scholar queries are sent to Brave/Firecrawl for search and scraping.
 - **With Supabase:** Session data syncs to your own Supabase instance (you control the Postgres database).
 
@@ -1072,13 +1071,17 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 
 ## Environment Variables
 
-> **🚦 TL;DR — Just want the best experience fast?** Set these three keys and you're done:
+> **🚦 TL;DR — Just want the best experience fast?** Two options:
 > ```
-> GOOGLE_API_KEY=...      # Unlocks: semantic search, Morning Briefings, auto-compaction
+> # Option A: Fully offline (no API keys needed)
+> # Set embedding_provider=local in the Mind Palace dashboard — semantic search works out of the box.
+>
+> # Option B: Cloud-powered (best quality)
+> GOOGLE_API_KEY=...      # Unlocks: Gemini embeddings, Morning Briefings, auto-compaction
 > BRAVE_API_KEY=...       # Unlocks: Web Scholar research + Brave Answers
 > FIRECRAWL_API_KEY=...   # Unlocks: Web Scholar deep scraping (or use TAVILY_API_KEY instead)
 > ```
-> **Zero keys = zero problem.** Core session memory, keyword search, time travel, and the full dashboard work 100% offline. Cloud keys are optional power-ups.
+> **Zero keys = zero problem.** Core session memory, keyword search, semantic search (local embeddings), time travel, and the full dashboard work 100% offline. Cloud keys are optional power-ups.
 
 <details>
 <summary><strong>Full variable reference</strong></summary>
@@ -1091,7 +1094,7 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 | `PRISM_STORAGE` | No | `"local"` (default) or `"supabase"` — restart required |
 | `PRISM_ENABLE_HIVEMIND` | No | `"true"` to enable multi-agent tools — restart required |
 | `PRISM_INSTANCE` | No | Instance name for multi-server PID isolation |
-| `GOOGLE_API_KEY` | No | Gemini — enables semantic search, Briefings, compaction |
+| `GOOGLE_API_KEY` | No | Gemini — enables Briefings, compaction, and cloud embeddings (not needed with `embedding_provider=local`) |
 | `VOYAGE_API_KEY` | No | Voyage AI — optional premium embedding provider |
 | `OPENAI_API_KEY` | No | OpenAI — optional proxy model and embedding provider |
 | `BRAVE_ANSWERS_API_KEY` | No | Separate Brave Answers key |
@@ -1277,7 +1280,7 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 * **What's included:** Active Directory / custom JWKS auth integration, Air-gapped on-premise deployment, custom OTel Grafana dashboards for cognitive observability, and custom skills/tools development.
 * **Model:** Custom enterprise quote.
 
-**Interested in accelerating your team's autonomous workflows?**  
+**Interested in accelerating your team's autonomous workflows?**
 [📧 Contact us for a consultation](mailto:inquiries@prism-mcp.com) — let's build your organization's cognitive memory engine.
 
 ---
@@ -1332,11 +1335,11 @@ A: Run `npm run build && npm test`, then open the Mind Palace dashboard (`localh
 
 ### 💡 Known Limitations & Quirks
 
-- **LLM-dependent features require an API key.** Semantic search, Morning Briefings, auto-compaction, and VLM captioning need a `GOOGLE_API_KEY` (your Gemini API key) or equivalent provider key. Without one, Prism falls back to keyword-only search (FTS5).
+- **Text generation features require an API key.** Morning Briefings, auto-compaction, and VLM captioning need a cloud provider key (`GOOGLE_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`). Semantic search works offline with `embedding_provider=local` (no key needed). Without any embedding provider, Prism falls back to keyword-only search (FTS5).
 - **Auto-load is model- and client-dependent.** Session auto-loading relies on both the LLM following system prompt instructions *and* the MCP client completing tool registration before the model's first turn. Prism provides platform-specific [Setup Guides](#-setup-guides) and a server-side fallback (v5.2.1) that auto-pushes context after 10 seconds.
 - **MCP client race conditions.** Some MCP clients may not finish tool enumeration before the model generates its first response, causing transient `unknown_tool` errors. This is a client-side timing issue — Prism's server completes the MCP handshake in ~60ms. Workaround: the server-side auto-push fallback and the startup skill's retry logic.
 - **No real-time sync without Supabase.** Local SQLite mode is single-machine only. Multi-device or team sync requires a Supabase backend.
-- **Embedding quality varies by provider.** Gemini `text-embedding-004` and OpenAI `text-embedding-3-small` produce high-quality 768-dim vectors. Prism passes `dimensions: 768` via the Matryoshka API for OpenAI models (native output is 1536-dim; this truncation is lossless and outperforms ada-002 at full 1536 dims). Ollama embeddings (e.g., `nomic-embed-text`) are usable but may reduce retrieval accuracy.
+- **Embedding quality varies by provider.** Gemini `text-embedding-004` and OpenAI `text-embedding-3-small` produce high-quality 768-dim vectors. Prism passes `dimensions: 768` via the Matryoshka API for OpenAI models (native output is 1536-dim; this truncation is lossless and outperforms ada-002 at full 1536 dims). Local embeddings (`nomic-embed-text-v1.5` via `@huggingface/transformers`) provide good quality with zero API cost. Ollama embeddings are usable but may reduce retrieval accuracy.
 - **Dashboard is HTTP-only.** The Mind Palace dashboard at `localhost:3000` does not support HTTPS. For remote access, use a reverse proxy (nginx/Caddy) or SSH tunnel. Basic auth is available via `PRISM_DASHBOARD_USER` / `PRISM_DASHBOARD_PASS`. JWKS JWT auth is available via `PRISM_JWKS_URI` for agent-native authentication (works with Auth0, AgentLair ([llms.txt](https://agentlair.com/llms.txt)), Keycloak, Cognito, or any standard JWKS endpoint).
 - **Long-lived clients can accumulate zombie processes.** MCP clients that run for extended periods (e.g., Claude CLI) may leave orphaned Prism server processes. The lifecycle manager detects true orphans (PPID=1) but allows coexistence for active parent processes. Use `PRISM_INSTANCE` to isolate instances across clients.
 - **Migration is one-way.** Universal Import ingests sessions *into* Prism but does not export back to Claude/Gemini/OpenAI formats. Use `session_export_memory` for portable JSON/Markdown export, or the `vault` format for Obsidian/Logseq-compatible `.zip` archives.
