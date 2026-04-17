@@ -4,7 +4,7 @@ import type { LLMProvider } from "../provider.js";
 
 const EMBEDDING_DIMS = 768;
 const MAX_EMBEDDING_CHARS = 8000;
-const DEFAULT_MODEL = "Xenova/nomic-embed-text-v1.5";
+const DEFAULT_MODEL = "nomic-ai/nomic-embed-text-v1.5";
 const DEFAULT_REVISION = "main";
 // MODEL_ID_PATTERN allows '.' in the name segment — the separate '..' check below
 // handles directory traversal (e.g., "owner/foo..bar" passes the regex but is invalid).
