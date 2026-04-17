@@ -499,6 +499,9 @@ A gorgeous glassmorphism UI at `localhost:3000` that lets you see exactly what y
 
 
 
+### 🛡️ ABA Precision Security Protocol
+Inspired by Applied Behavior Analysis (ABA) structures in the Synalux platform, Prism incorporates rigorous behavioral safety constraints directly into the MCP connection layer. Advanced output sanitization (`sanitizeMcpOutput`) and behavior-guided guardrails eliminate prompt injection, constrain the generator, and enforce strict, hallucination-free outputs for clinical precision.
+
 ### 🧬 10× Memory Compression
 Powered by a pure TypeScript port of Google's TurboQuant (inspired by Google's ICLR research), Prism compresses 768-dim embeddings from **3,072 bytes → ~400 bytes** — enabling decades of session history on a standard laptop. No native modules. No vector database required. To mitigate quantization degradation (where repeated compress/decompress cycles could smear subtle corrections after 10k+ memories), Prism leverages autonomous **ledger compaction** and **Deep Storage cleanup** to guarantee high-fidelity memory integrity over time.
 
