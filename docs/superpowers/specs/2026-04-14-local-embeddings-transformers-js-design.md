@@ -24,7 +24,7 @@ We want a **fully local embedding path** so Prism can:
 **Goals**
 
 1. Add a `LocalEmbeddingAdapter` that satisfies the existing `LLMProvider` interface for the embedding half (text generation explicitly unsupported, mirroring `VoyageAdapter`).
-2. Use [`@huggingface/transformers`](https://www.npmjs.com/package/@huggingface/transformers) to run [`Xenova/nomic-embed-text-v1.5`](https://huggingface.co/Xenova/nomic-embed-text-v1.5) (q8 quantized ONNX) locally via onnxruntime-node.
+2. Use [`@huggingface/transformers`](https://www.npmjs.com/package/@huggingface/transformers) to run [`nomic-ai/nomic-embed-text-v1.5`](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) (q8 quantized ONNX) locally via onnxruntime-node.
 3. Output exactly **768-dim** vectors so existing storage schemas, TurboQuant compression, and SDM cognitive engine work unchanged.
 4. Activate via two paths:
    - Explicit: `embedding_provider=local`
@@ -178,7 +178,7 @@ private async initPipeline(): Promise<void> {
   // Pin to a specific model revision to prevent silent updates if the HuggingFace
   // repository is updated or compromised (CWE-494).
   // IMPORTANT: When updating DEFAULT_MODEL or DEFAULT_REVISION, verify the new
-  // revision SHA from https://huggingface.co/Xenova/nomic-embed-text-v1.5/commits/main
+  // revision SHA from https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/commits/main
   const revision = getSettingSync("local_embedding_revision", DEFAULT_REVISION);
 
   try {
@@ -352,7 +352,7 @@ export class DisabledTextAdapter implements LLMProvider {
 | Setting key | Default | Read via | Purpose |
 |---|---|---|---|
 | `embedding_provider` | `"auto"` | `getSettingSync` | New accepted value: `"local"` |
-| `local_embedding_model` | `"Xenova/nomic-embed-text-v1.5"` | `getSettingSync`, then `process.env.LOCAL_EMBEDDING_MODEL` | HuggingFace model ID (format: `owner/name` only) |
+| `local_embedding_model` | `"nomic-ai/nomic-embed-text-v1.5"` | `getSettingSync`, then `process.env.LOCAL_EMBEDDING_MODEL` | HuggingFace model ID (format: `owner/name` only) |
 | `local_embedding_quantized` | `"true"` | `getSettingSync` | Maps to `dtype: "q8"` (true) or `dtype: "fp32"` (false) |
 | `local_embedding_revision` | pinned SHA | `getSettingSync` | HuggingFace model revision commit SHA |
 
@@ -459,7 +459,7 @@ These are explicitly out of scope for this PR:
 - [ ] Factory auto-falls-back to Local only when `embedding_provider=auto` fails; explicit choices throw.
 - [ ] Factory auto-falls-back to Disabled text only when `text_provider` is default/unset; explicit text choices throw.
 - [ ] `package.json` has `@huggingface/transformers ~3.1.0` as optional peer dep + exact version devDep.
-- [ ] `DEFAULT_REVISION` constant is set to the pinned commit SHA for `Xenova/nomic-embed-text-v1.5`.
+- [ ] `DEFAULT_REVISION` constant is set to the pinned commit SHA for `nomic-ai/nomic-embed-text-v1.5`.
 - [ ] Warmup failure is non-fatal (logs warn, does NOT set `loadError`).
 - [ ] `dtype: "q8"` (not `quantized: boolean`) is used in the pipeline options.
 - [ ] Tensor extraction uses `Array.from(result.data)` (`Float32Array` access, not nested array).
