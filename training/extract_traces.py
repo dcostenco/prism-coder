@@ -71,7 +71,8 @@ def extract_session_ledger_examples(conn):
         if role and role != "global":
             tool_call["arguments"]["role"] = role
 
-        assistant = f"I'll save this session to Prism memory.\n\n<tool_call>\n{json.dumps(tool_call, indent=2)}\n</tool_call>"
+        think = f"<think>The user wants to persist a work session for project '{project}'. This is a write operation to the session ledger. The correct tool is session_save, which requires 'project' and 'summary'. I have both from the user's message. Optional fields like todos, files_changed, decisions, and keywords should be included if available.</think>"
+        assistant = f"{think}\n\nI'll save this session to Prism memory.\n\n<tool_call>\n{json.dumps(tool_call, indent=2)}\n</tool_call>"
 
         examples.append({
             "messages": [
@@ -95,7 +96,9 @@ def extract_session_ledger_examples(conn):
                 "project": project
             }
         }
-        search_response = f"Let me search Prism memory for that.\n\n<tool_call>\n{json.dumps(search_call, indent=2)}\n</tool_call>"
+        search_query = keywords_list[0] if keywords_list else summary[:80]
+        search_think = f"<think>The user is asking about past work. This is a read/retrieval operation. I need to search session history, not save anything new. The correct tool is session_search with a 'query' parameter. The best query term is '{search_query}' extracted from their message. I should also scope it to project '{project}'.</think>"
+        search_response = f"{search_think}\n\nLet me search Prism memory for that.\n\n<tool_call>\n{json.dumps(search_call, indent=2)}\n</tool_call>"
 
         examples.append({
             "messages": [
@@ -144,7 +147,7 @@ def extract_semantic_knowledge_examples(conn):
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": random.choice(save_prompts)},
-                {"role": "assistant", "content": f"I'll store this knowledge in Prism.\n\n<tool_call>\n{json.dumps(save_call, indent=2)}\n</tool_call>"}
+                {"role": "assistant", "content": f"<think>The user wants to store a reusable insight about '{concept}' for project '{project}'. This is a knowledge persistence operation, not a session log. The correct tool is knowledge_save (not session_save). Required parameters are project, concept, and description. Confidence and related_entities are optional but I have them.</think>\n\nI'll store this knowledge in Prism.\n\n<tool_call>\n{json.dumps(save_call, indent=2)}\n</tool_call>"}
             ]
         })
 
@@ -167,7 +170,7 @@ def extract_semantic_knowledge_examples(conn):
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": random.choice(search_prompts)},
-                {"role": "assistant", "content": f"Let me search Prism's knowledge base.\n\n<tool_call>\n{json.dumps(search_call, indent=2)}\n</tool_call>"}
+                {"role": "assistant", "content": f"<think>The user is asking about a concept ('{concept}'). They want existing knowledge, not session history. The correct tool is knowledge_search (not session_search), scoped to project '{project}'. The query should be the concept name itself.</think>\n\nLet me search Prism's knowledge base.\n\n<tool_call>\n{json.dumps(search_call, indent=2)}\n</tool_call>"}
             ]
         })
 
@@ -197,11 +200,12 @@ def generate_context_loading_examples():
             }
 
             for prompt in prompts:
+                ctx_think = f"<think>The user wants to start or resume work on '{project}'. This requires loading project context from Prism memory. The correct tool is session_load_context. The 'level' parameter controls depth: 'shallow' for quick summaries, 'deep' for full history. Based on the phrasing, I'll use '{level}' depth.</think>"
                 examples.append({
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
-                        {"role": "assistant", "content": f"Loading {level} context for {project}.\n\n<tool_call>\n{json.dumps(call, indent=2)}\n</tool_call>"}
+                        {"role": "assistant", "content": f"{ctx_think}\n\nLoading {level} context for {project}.\n\n<tool_call>\n{json.dumps(call, indent=2)}\n</tool_call>"}
                     ]
                 })
 
@@ -220,11 +224,12 @@ def generate_negative_examples():
 
     examples = []
     for user, assistant in no_tool_pairs:
+        neg_think = f"<think>The user is asking a general programming question ('{user[:60]}'). This does not involve session history, knowledge storage, or project context from Prism memory. None of my MCP tools are relevant here. I should answer directly with my own knowledge without calling any tool.</think>"
         examples.append({
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user},
-                {"role": "assistant", "content": assistant}
+                {"role": "assistant", "content": f"{neg_think}\n\n{assistant}"}
             ]
         })
 
@@ -250,11 +255,12 @@ def generate_handoff_examples():
                 "summary": summary
             }
         }
+        handoff_think = f"<think>The user wants to transfer work between agents. This is a handoff operation — not a save or search. The correct tool is session_handoff, which requires 'project', 'from_agent', 'to_agent', and 'summary'. I'll route from '{from_a}' to '{to_a}' for project '{project}'.</think>"
         examples.append({
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
-                {"role": "assistant", "content": f"Creating handoff from {from_a} to {to_a}.\n\n<tool_call>\n{json.dumps(call, indent=2)}\n</tool_call>"}
+                {"role": "assistant", "content": f"{handoff_think}\n\nCreating handoff from {from_a} to {to_a}.\n\n<tool_call>\n{json.dumps(call, indent=2)}\n</tool_call>"}
             ]
         })
 

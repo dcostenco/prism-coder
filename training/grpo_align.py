@@ -39,21 +39,36 @@ def compute_reward(response_text: str) -> float:
       -2.0 for hallucinated tool name
       -1.0 for missing required param
       +0.5 for natural language before tool call (reasoning)
+
+    Chain-of-Thought (CoT) rewards:
+      +0.5 if <think> block present with > 100 chars of reasoning
+      -0.2 if <think> block exceeds 1000 chars (anti-thought-farming)
     """
     import re
 
     reward = 0.0
+
+    # ── CoT reasoning reward ──
+    think_match = re.search(r'<think>(.*?)</think>', response_text, re.DOTALL)
+    if think_match:
+        think_len = len(think_match.group(1).strip())
+        if think_len > 100:
+            reward += 0.5  # Substantive reasoning
+        if think_len > 1000:
+            reward -= 0.2  # Anti-thought-farming penalty (capped conciseness)
 
     # Check if response contains a tool call
     tool_match = re.search(r'<tool_call>\s*(.*?)\s*</tool_call>', response_text, re.DOTALL)
     if not tool_match:
         # No tool call — could be valid for non-tool queries
         # Give neutral reward if response is substantive
-        return 0.0 if len(response_text) > 20 else -0.5
+        return reward + (0.0 if len(response_text) > 20 else -0.5)
 
-    # Check if there's reasoning text before the tool call
+    # Check if there's reasoning text before the tool call (legacy pre-think format)
     pre_tool = response_text[:response_text.index('<tool_call>')].strip()
-    if len(pre_tool) > 10:
+    # Remove the <think> block itself from pre_tool length check to avoid double-counting
+    pre_tool_clean = re.sub(r'<think>.*?</think>', '', pre_tool, flags=re.DOTALL).strip()
+    if len(pre_tool_clean) > 10:
         reward += 0.5  # Reasoning before action
 
     # Try to parse JSON
@@ -253,11 +268,15 @@ def main():
     print("=" * 60)
     
     test_cases = [
-        ('I\'ll save this.\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "test", "summary": "test"}}\n</tool_call>', "Valid save"),
+        ('I\'ll save this.\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "test", "summary": "test"}}\n</tool_call>', "Valid save (no think)"),
         ('<tool_call>\n{"name": "fake_tool", "arguments": {}}\n</tool_call>', "Hallucinated tool"),
         ('<tool_call>\n{invalid json}\n</tool_call>', "Invalid JSON"),
         ('Python is a programming language used for web development and data science.', "No tool (correct)"),
         ('<tool_call>\n{"name": "session_save", "arguments": {}}\n</tool_call>', "Missing required params"),
+        # CoT-specific test cases
+        ('<think>The user wants to save a session for project prism-mcp. This is a write operation. The correct tool is session_save which requires project and summary parameters. I have both values from the request.</think>\n\nI\'ll save this.\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "test", "summary": "test"}}\n</tool_call>', "Valid save WITH think (+0.5 CoT)"),
+        ('<think>Let me think about this question. ' + 'I need to reason carefully. ' * 80 + '</think>\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "test", "summary": "test"}}\n</tool_call>', "Thought farming (>1000 chars, -0.2)"),
+        ('<think>Short.</think>\n\nJust explaining code.', "Short think + no tool (neutral)"),
     ]
     
     for response, desc in test_cases:
