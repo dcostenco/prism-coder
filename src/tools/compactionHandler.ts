@@ -74,10 +74,22 @@ function buildCompactionPrompt(entries: any[]): string {
   // prompt wrapper. The previous .substring(0, 30000) on the final string could
   // sever the closing </raw_user_log> tag and the JSON format instructions,
   // leaving the LLM with an unclosed boundary and no output schema.
+  //
+  // FIX (mid-tag truncation): cut at entry boundaries (double-newline separators)
+  // instead of raw character offsets. Raw slicing could sever a <raw_user_log>
+  // tag mid-string, producing malformed XML that confuses the LLM.
   const MAX_ENTRIES_CHARS = 25_000;
-  const truncatedEntries = entriesText.length > MAX_ENTRIES_CHARS
-    ? entriesText.substring(0, MAX_ENTRIES_CHARS) + "\n</raw_user_log>\n[... truncated ...]"
-    : entriesText;
+  let truncatedEntries = entriesText;
+  if (entriesText.length > MAX_ENTRIES_CHARS) {
+    // Split on entry boundaries (each entry is separated by \n\n)
+    const entryBlocks = entriesText.split("\n\n");
+    let accumulated = "";
+    for (const block of entryBlocks) {
+      if (accumulated.length + block.length + 2 > MAX_ENTRIES_CHARS) break;
+      accumulated += (accumulated ? "\n\n" : "") + block;
+    }
+    truncatedEntries = accumulated + "\n\n[... remaining entries truncated ...]";
+  }
 
   return (
     `You are compressing a session history log for an AI agent's persistent memory.\n\n` +
@@ -258,32 +270,52 @@ export async function compactLedgerHandler(args: unknown) {
     let finalPrinciples: any[] = [];
     let finalCausalLinks: any[] = [];
 
-    if (chunks.length === 1) {
-      const res = await summarizeEntries(chunks[0]);
-      finalSummaryText = typeof res === 'string' ? res : (res.summary || JSON.stringify(res));
-      finalPrinciples = res.principles || [];
-      finalCausalLinks = res.causal_links || [];
-    } else {
-      const chunkSummaries = await Promise.all(
-        chunks.map(chunk => summarizeEntries(chunk))
-      );
+    // FIX (Gap 1): wrap summarizeEntries in try/catch. If PRISM_STRICT_LOCAL_MODE
+    // is enabled and the local LLM fails, summarizeEntries throws a HIPAA error.
+    // Without this catch, the unhandled rejection crashes the MCP server.
+    try {
+      if (chunks.length === 1) {
+        const res = await summarizeEntries(chunks[0]);
+        finalSummaryText = typeof res === 'string' ? res : (res.summary || JSON.stringify(res));
+        finalPrinciples = res.principles || [];
+        finalCausalLinks = res.causal_links || [];
+      } else {
+        const chunkSummaries = await Promise.all(
+          chunks.map(chunk => summarizeEntries(chunk))
+        );
 
-      chunkSummaries.forEach(s => {
-        finalPrinciples.push(...(s.principles || []));
-        finalCausalLinks.push(...(s.causal_links || []));
-      });
+        chunkSummaries.forEach(s => {
+          finalPrinciples.push(...(s.principles || []));
+          finalCausalLinks.push(...(s.causal_links || []));
+        });
 
-      const metaEntries = chunkSummaries.map((s, i) => ({
-        id: `chunk-${i}`,
-        session_date: `chunk ${i + 1}`,
-        summary: s.summary,
-        decisions: [],
-        files_changed: [],
-      }));
-      const metaRes = await summarizeEntries(metaEntries);
-      finalSummaryText = typeof metaRes === 'string' ? metaRes : (metaRes.summary || JSON.stringify(metaRes));
-      finalPrinciples.push(...(metaRes.principles || []));
-      finalCausalLinks.push(...(metaRes.causal_links || []));
+        const metaEntries = chunkSummaries.map((s, i) => ({
+          id: `chunk-${i}`,
+          session_date: `chunk ${i + 1}`,
+          summary: s.summary,
+          decisions: [],
+          files_changed: [],
+        }));
+        const metaRes = await summarizeEntries(metaEntries);
+        finalSummaryText = typeof metaRes === 'string' ? metaRes : (metaRes.summary || JSON.stringify(metaRes));
+        finalPrinciples.push(...(metaRes.principles || []));
+        finalCausalLinks.push(...(metaRes.causal_links || []));
+      }
+    } catch (err) {
+      // HIPAA strict mode: local LLM failed and cloud fallback is blocked.
+      // Return a graceful MCP error instead of crashing the server.
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('[HIPAA]')) {
+        return {
+          content: [{
+            type: "text",
+            text: `🚫 ${errMsg}\n\nCompaction for "${proj}" was aborted to protect data residency.`,
+          }],
+          isError: true,
+        };
+      }
+      // Non-HIPAA errors: re-throw to preserve existing error handling
+      throw err;
     }
 
     // Collect all unique keywords from rolled-up entries
