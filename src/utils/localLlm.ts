@@ -30,6 +30,22 @@ import {
   PRISM_LOCAL_LLM_TIMEOUT_MS,
 } from "../config.js";
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Redact credentials from a URL for safe logging (strips user:pass@). */
+function redactUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.username || parsed.password) {
+      parsed.username = "***";
+      parsed.password = "***";
+    }
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return "[invalid URL]";
+  }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface OllamaChatMessage {
@@ -105,7 +121,7 @@ export async function callLocalLlm(
   const timeoutId = setTimeout(() => controller.abort(), PRISM_LOCAL_LLM_TIMEOUT_MS);
 
   try {
-    debugLog(`[localLlm] Calling model="${model}" at ${url} (timeout=${PRISM_LOCAL_LLM_TIMEOUT_MS}ms)`);
+    debugLog(`[localLlm] Calling model="${model}" at ${redactUrl(url)} (timeout=${PRISM_LOCAL_LLM_TIMEOUT_MS}ms)`);
 
     const res = await fetch(url, {
       method: "POST",
