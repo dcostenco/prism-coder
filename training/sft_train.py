@@ -34,15 +34,15 @@ def main():
         "--train",
         "--data", os.path.dirname(TRAIN_DATA),
         "--adapter-path", OUTPUT_ADAPTER,
-        "--lora-layers", "16",
-        "--lora-rank", "16",
-        "--batch-size", "2",
+        "--num-layers", "16",
+        "--batch-size", "1",
         "--iters", "1000",
-        "--val-batches", "25",
+        "--val-batches", "2",
         "--learning-rate", "2e-5",
         "--steps-per-report", "50",
         "--steps-per-eval", "200",
         "--save-every", "200",
+        "--max-seq-length", "1024",
     ]
 
     print(f"Command: {' '.join(cmd)}")

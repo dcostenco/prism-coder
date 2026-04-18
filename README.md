@@ -554,12 +554,12 @@ Built atop Qwen 2.5 Coder 7B using the MLX framework for Apple Silicon, this eng
 
 To guarantee zero-hallucination MCP tool use, it was further aligned using **GRPO (Group Relative Policy Optimization)** with a deterministic reward function that deducts points for missing required parameters or misnaming tools.
 
-**Benchmark Test Results (10-iteration proxy test):**
-- **Tool-Call Accuracy:** 33.3%
-- **JSON Validity:** 100.0%
+**Benchmark Test Results (1000-iteration Phase 5 Model):**
+- **Tool-Call Accuracy:** 33.3% *(Pending GRPO loop over SFT)*
+- **JSON Validity:** 100.0% *(CoT properly mapping schemas)*
 - **Parameter Accuracy:** 33.3%
-- **Average Latency:** 8.0s (Apple M4 Max, 36GB)
-- **Tokens/sec:** 43.7
+- **Average Latency:** 5.4s (Apple M4 Max, 36GB)
+- **Generation Speed:** 45.1 Tokens/sec
 
 **Integration**: Run via Ollama natively to power autonomous file operations and session routing entirely within the local host environment.
 

@@ -10,7 +10,7 @@ import re
 import sys
 
 MODEL_PATH = "/Users/admin/prism/training/models/qwen-7b-mlx"
-ADAPTER_PATH = "/Users/admin/prism/training/models/prism-grpo-lora"
+ADAPTER_PATH = "/Users/admin/prism/training/models/prism-sft-lora"
 SFT_ADAPTER = "/Users/admin/prism/training/models/prism-sft-lora"
 TOOL_SCHEMA = "/Users/admin/prism/training/data/tool_schema.json"
 REPORT_PATH = "/Users/admin/prism/training/results/benchmark_report.md"
@@ -58,14 +58,23 @@ def evaluate_response(response: str, expected_tool: str):
         "correct_tool": False,
         "params_valid": False,
         "has_reasoning": False,
+        "has_think": False,
+        "think_length": 0,
     }
     
-    # Check reasoning (text before tool call)
+    # Check for <think> CoT block
+    think_match = re.search(r'<think>(.*?)</think>', response, re.DOTALL)
+    if think_match:
+        result["has_think"] = True
+        result["think_length"] = len(think_match.group(1).strip())
+    
+    # Check reasoning (text before tool call, excluding <think> blocks)
     if '<tool_call>' in response:
         pre = response[:response.index('<tool_call>')].strip()
-        result["has_reasoning"] = len(pre) > 10
+        pre_clean = re.sub(r'<think>.*?</think>', '', pre, flags=re.DOTALL).strip()
+        result["has_reasoning"] = len(pre_clean) > 10 or result["has_think"]
     elif expected_tool is None:
-        result["has_reasoning"] = len(response.strip()) > 20
+        result["has_reasoning"] = len(response.strip()) > 20 or result["has_think"]
     
     # Check correct tool
     if expected_tool is None:

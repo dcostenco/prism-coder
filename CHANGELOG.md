@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.14.0] - 2026-04-18 — Dynamic Hardware Routing & Semantic Tool RAG
+
+### Added
+- **Dynamic Hardware Routing** — `claw_agent_lite.py` now leverages platform-aware memory detection (`sysctl hw.memsize` on Darwin) to auto-select optimal models. Automatically targets 32b reasoning and coding models on hardware ≥32GB Unified Memory, degrading gracefully to 14b and 7b architectures for performance stability and OOM avoidance.
+- **Nomic Semantic Tool Pruning (RAG)** — Decoupled the 17 MCP Tools from static system prompt bloat. Embedded all tools into offline vectors using `nomic-embed-text-v1.5`. At runtime, user queries undergo cosine similarity analysis, injecting only the Top-3 highest-scoring tool schemas into the active context limit, maximizing inference speed.
+- **Chain-of-Thought (CoT) Distillation & GRPO** — Upgraded the model extraction compiler (`extract_traces.py`) to systematically inject strict `<think>` reasoning tags, training the LoRA adapters to map thought evaluation prior to `<tool_call>` emit cycles.
+- **Enhanced MLX Training Safety** — Applied dynamic parameter caps (`--batch-size 1`, `--max-seq-length 1024`) to eliminate Metal OOM allocation errors natively inside local training sequences. 
+- **Tested & Benchmarked Loop** — Integrated the `benchmark.py` evaluator capable of mapping reasoning accuracy correctly in compliance with GRPO constraints.
+
+
+
 ## [9.13.0] - 2026-04-17 — Local Embeddings & Zero-API-Key Setup
 
 ### Added
