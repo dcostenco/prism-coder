@@ -2,7 +2,7 @@
   "name": "prism-mcp-server",
   "version": "10.0.2",
   "mcpName": "io.github.dcostenco/prism-mcp",
-  "description": "The Mind Palace for AI Agents — a true Cognitive Architecture with Hebbian learning (episodic→semantic consolidation), ACT-R spreading activation (multi-hop causal reasoning), uncertainty-aware rejection gates (agents that know when they don't know), adversarial evaluation (anti-sycophancy), fail-closed Dark Factory pipelines, persistent memory (SQLite/Supabase), multi-agent Hivemind, time travel & visual dashboard. Zero-config local mode.",
+  "description": "Prism v11.0: The world's first O(1) Cognitive Memory Architecture for AI Agents. Features Zero-Search Retrieval (Holographic Reduced Representations), Parallel Academic Discovery (PubMed, ERIC, Semantic Scholar), ACT-R spreading activation, episodic→semantic consolidation, uncertainty-aware rejection gates, adversarial evaluation, and HIPAA-hardened local-first storage. Flagship engine for Synalux Clinical Reasoning.",
   "module": "index.ts",
   "type": "module",
   "main": "dist/server.js",
