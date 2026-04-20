@@ -19,7 +19,7 @@ The ABA (Applied Behavior Analysis) Precision Protocol establishes three foundat
 
 ## Test Suite
 
-The protocol includes a 24-test Vitest suite at [`tests/v43-aba-precision.test.ts`](../../tests/v43-aba-precision.test.ts) that verifies:
+The protocol includes a 24-test Vitest suite at [`tests/v43-aba-precision.test.ts`](../../../tests/v43-aba-precision.test.ts) that verifies:
 
 - Vague goals are rejected, observable goals are accepted
 - Execution stops on verification failure (never skips)

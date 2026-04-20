@@ -175,7 +175,7 @@ Verification coverage:  0%  → 100%
 
 ## Test Suite Coverage
 
-All 3 rules are encoded as executable Vitest tests in [v43-aba-precision.test.ts](file:///Users/admin/prism/tests/v43-aba-precision.test.ts):
+All 3 rules are encoded as executable Vitest tests in [v43-aba-precision.test.ts](../../../tests/v43-aba-precision.test.ts):
 
 | Rule | Tests | Status |
 |------|-------|--------|
