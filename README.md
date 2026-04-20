@@ -53,10 +53,23 @@ Prism v11.0 introduces **Deep Research Intelligence**, a multi-provider discover
 
 | Feature | **Standard (Free Stack)** | **Elite (Tavily Upgrade)** |
 | :--- | :--- | :--- |
-| **Discovery Reach** | PubMed & DuckDuckGo | **Full Web + AI-Optimized Academic Crawl** |
+| **Discovery Reach** | PubMed, ERIC, Semantic Scholar, DDG | **Full Web + AI-Optimized Academic Crawl** |
 | **Data Quality** | Snippets & Titles | **Full Page Extraction & Conclusion Scraping** |
 | **Reasoning Depth** | Theoretical & Generic | **Data-Driven & Percentile-Specific** |
 | **Synalux Clinical Value** | "Here is how to help with focus." | **"62% of patients show X; use Strategy Y instead."** |
+
+### 🔍 Supported Discovery Engines & Databases
+
+Prism (and Synalux) uses a multi-layered discovery pipeline to ensure high-signal reasoning:
+
+1.  **Tavily AI** (Elite): Primary discovery engine for AI-native deep crawling and PDF/Abstract extraction.
+2.  **PubMed (NCBI)** (Academic): The world's largest biomedical database for clinical citations and life science research.
+3.  **ERIC (Education Research)** (Behavioral): Definitive database for ABA, speech therapy, and educational interventions.
+4.  **Semantic Scholar** (Academic): AI-powered research tool providing "TLDR" summaries of scientific papers.
+5.  **DuckDuckGo Lite** (Web Fallback): Privacy-focused web discovery for general context and non-academic info.
+6.  **Brave Search** (Web/Local): Real-time internet index with support for local business data (POIs).
+7.  **Google Search** (Web): High-precision web search via Google Custom Search Engine (CSE).
+8.  **Yahoo Search** (Web): Robust HTML-based fallback scraper.
 
 <details>
 <summary><strong>See Live Samples (Simplified Terms)</strong></summary>
