@@ -4,9 +4,9 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 6.x     | ✅ Active support   |
-| 5.x     | ⚠️ Critical fixes only |
-| < 5.0   | ❌ End of life      |
+| 11.x    | ✅ Active support   |
+| 10.x    | ⚠️ Critical fixes only |
+| < 10.0  | ❌ End of life      |
 
 ## Reporting a Vulnerability
 
@@ -14,7 +14,7 @@ If you discover a security vulnerability in Prism MCP, please report it responsi
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email: **security@dcostenco.com**
+Instead, please email: **dcostenco@synalux.ai**
 
 You can expect:
 - **Acknowledgment** within 48 hours
