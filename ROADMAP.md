@@ -455,7 +455,8 @@ With v10 shipped, Prism is a **HIPAA-hardened, production-ready, fully air-gappe
 
 #### v11.0 — Zero-Search Retrieval `[🧪 Field Testing - Synalux]`
 - **Problem:** All current retrieval requires an index (FTS5, vector, graph). At extreme scale, index maintenance becomes the bottleneck.
-- **Benefit:** Holographic Reduced Representations (HRR) encode entire memory traces into a single superposition vector. Retrieval is a single dot product — no index, no ANN, just ask the vector. Prototypes verified in Synalux practice management system.
+- **Benefit:** Holographic Reduced Representations (HRR) encode entire memory traces into a single superposition vector. Retrieval is a single dot product — no index, no ANN, just ask the vector.
+- **Verification:** Successfully prototyped in Synalux ([Math](https://github.com/dcostenco/synalux-private/blob/main/portal/src/lib/cognitive/hrr.ts), [Tests](https://github.com/dcostenco/synalux-private/blob/main/portal/src/lib/cognitive/__tests__/hrr.test.ts)). Verified $O(1)$ constant-time retrieval.
 
 ---
 ## 🧰 Infrastructure Backlog

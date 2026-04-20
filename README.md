@@ -1286,7 +1286,15 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 | **v9.2** | Typed Security Errors — `PrototypePollutionError` with `offendingKey` for forensic logging; null-byte path injection guard in SafetyController | Defense-in-depth (NIST), C-string truncation attack mitigation | ✅ Shipped |
 | **v9.3** | ResidualNorm Tiebreaker — within-ε candidates ranked by compression fidelity (`PRISM_TURBOQUANT_TIEBREAKER_EPSILON`); +2pp R@1, +1pp R@5 at ε=0.005 | Quantization confidence scoring, compression-aware retrieval | ✅ Shipped |
 | **v10.0** | HIPAA-Hardened Local LLM — `prism-coder:7b` manages ledger compaction, task routing, and semantic search 100% on-device | Air-gapped cognitive pipelines, secure PHI redaction | ✅ Shipped |
-| **v11.0** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations (HRR) | 🧪 Testing (Synalux) |
+| **v11.0** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations (HRR) | 🧪 [Field Testing (Synalux)](https://github.com/dcostenco/synalux-private#%F0%9F\u009A\u0080-zero-search-retrieval-hrr-architecture) |
+
+---
+
+### 🧪 Verified Zero-Search Implementation
+The core unbinding engine is verified via Synalux's cognitive testing suite:
+- **Core Math**: [Holographic Reduced Representations (HRR.ts)](https://github.com/dcostenco/synalux-private/blob/main/portal/src/lib/cognitive/hrr.ts)
+- **Unit Tests**: [HRR Performance & Capacity Tests](https://github.com/dcostenco/synalux-private/blob/main/portal/src/lib/cognitive/__tests__/hrr.test.ts)
+- **Benchmarks**: [O(1) Retrieval Comparison Script](https://github.com/dcostenco/synalux-private/blob/main/portal/scripts/retrieval-comparison.ts)
 
 > Informed by Anderson's ACT-R (Adaptive Control of Thought—Rational), Collins & Loftus spreading activation networks (1975), Kanerva's SDM (1988), Hebb's learning rule, and LeCun's "Why AI Systems Don't Learn" (Dupoux, LeCun, Malik).
 
