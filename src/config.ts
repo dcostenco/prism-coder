@@ -481,3 +481,33 @@ if (PRISM_LOCAL_LLM_ENABLED) {
   );
 }
 
+// ─── v11.0: Zero-Search Retrieval (HRR) ───────────────────────
+// Dynamic dimension selection based on available system memory.
+// Higher dimensions = higher fact capacity but slower unbinding.
+
+import { totalmem } from "node:os";
+
+export const PRISM_HRR_DIMENSION = (() => {
+  // 1. Manual override via env var
+  const envVal = parseInt(process.env.PRISM_HRR_DIMENSION || "0", 10);
+  if (envVal > 0) {
+    // Ensure power of 2 for FFT
+    if ((envVal & (envVal - 1)) !== 0) {
+      console.error(`Warning: PRISM_HRR_DIMENSION (${envVal}) is not a power of 2. FFT unbinding may fail.`);
+    }
+    return envVal;
+  }
+
+  // 2. Auto-adjustment based on system RAM
+  const totalRamGb = totalmem() / (1024 ** 3);
+  
+  if (totalRamGb >= 48) return 8192; // High-end (M4 Max)
+  if (totalRamGb >= 32) return 4096; // Mid-high (M3 Pro)
+  if (totalRamGb >= 16) return 2048; // Standard (M1/M2/M3)
+  return 1024; // Low-memory / Baseline
+})();
+
+if (PRISM_DEBUG_LOGGING) {
+  console.error(`[Prism] HRR Zero-Search Dimension: ${PRISM_HRR_DIMENSION} (Total RAM: ${(totalmem() / (1024**3)).toFixed(1)}GB)`);
+}
+
