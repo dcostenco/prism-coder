@@ -40,6 +40,7 @@ import {
   PipelineStatus,          // v7.3: Dark Factory Pipeline
   VerificationHarness,     // v7.2.0: Verification Harness
   ValidationResult,        // v7.2.0: Verification Harness
+  ResearchTask,            // v11.0: Research Task Bridge
 } from "./interface.js";
 
 import { debugLog } from "../utils/logger.js";

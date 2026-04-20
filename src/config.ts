@@ -69,6 +69,7 @@ if (!GOOGLE_API_KEY && process.env.PRISM_DEBUG_LOGGING === "true") {
 // This is a separate API key from the main Brave Search key.
 
 export const BRAVE_ANSWERS_API_KEY = process.env.BRAVE_ANSWERS_API_KEY;
+export const SEMANTIC_SCHOLAR_API_KEY = process.env.SEMANTIC_SCHOLAR_API_KEY;
 if (!BRAVE_ANSWERS_API_KEY && process.env.PRISM_DEBUG_LOGGING === "true") {
   console.error("Warning: BRAVE_ANSWERS_API_KEY environment variable is missing. Brave Answers tool will be unavailable.");
 }
