@@ -12,7 +12,7 @@
 
 **Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
-Prism v10 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.** With v10, the entire cognitive pipeline — including ledger compaction, task routing, and semantic search — runs **100% on-device** via `prism-coder:7b`, a HIPAA-hardened local LLM that underwent 3 rounds of adversarial security review. No API keys. No cloud. No data leaves your machine.
+Prism v11.0 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.** With v11.0, the entire cognitive pipeline — including ledger compaction, task routing, semantic search, and the new **Deep Research Intelligence** — runs **100% on-device** or via secure clinical discovery (PubMed/ERIC), backed by `prism-coder:7b`, a HIPAA-hardened local LLM. No API keys for core features. No data leaves your machine.
 
 ```bash
 npx -y prism-mcp-server
@@ -1370,12 +1370,12 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 
 ## <a name="milestones-roadmap"></a>📦 Milestones & Roadmap
 
-> **Current: v10.0.1** — HIPAA-Hardened Local LLM Engine + 3-Round Adversarial Security Audit ([CHANGELOG](CHANGELOG.md))
+> **Current: v11.0.0** — Deep Research Intelligence + $O(1)$ HRR Memory Breakthrough ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|
-| **v11.0** | 🧠 **Deep Research Intelligence** — Multi-provider discovery (Tavily/PubMed/DDG) with Gemini 2.5 Flash synthesis. |
-| **v10.0** | 🛡️ **HIPAA-Hardened Local LLM** — `prism-coder:7b` powers compaction + task routing 100% on-device; 22-finding adversarial audit. Zero API keys required. |
+| **v11.0** | 🧠 **Zero-Search Retrieval** — Holographic Reduced Representations (HRR) + Deep Research Intelligence [🧪 [Field Testing - Synalux](https://synalux.ai/docs)] |
+| **v10.0** | 🛡️ **HIPAA-Hardened Local LLM** — `prism-coder:7b` powers compaction + task routing 100% on-device. |
 | **v9.14** | 🧬 Dynamic Hardware Routing & Semantic Tool RAG — MLX SFT pipeline, Nomic pruning, GRPO alignment |
 | **v9.13** | 🔬 Local Embeddings & Zero-API-Key Semantic Search — `nomic-embed-text-v1.5` on-device |
 | **v9.5** | 🛡️ Adversarial Behavioral Hardening — 24 forbidden openers, XML anti-tag system, sycophancy defense |
@@ -1385,10 +1385,9 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 | **v7.0** | 🧬 ACT-R Activation Memory |
 
 ### Future Tracks
-- **v10.1: Multi-Graph Causal Layer** — Intent-aware retrieval routing traversing an LLM-inferred causal `because` edge-type layer for deep reasoning.
-- **v10.2: Federated Memory Mesh** — Hierarchical memory namespaces with role-based access control for enterprise agent teams.
-- **v10.3: Predictive Prefetch** — ACT-R based predictive models prefetch likely-needed memories before the agent asks.
-- **v11+: Zero-Search Retrieval** — Holographic Reduced Representations (HRR) eliminate retrieval indirection entirely.
+- **v11.1: Multi-Graph Causal Layer** — Intent-aware retrieval routing traversing an LLM-inferred causal `because` edge-type layer for deep reasoning.
+- **v11.2: Federated Memory Mesh** — Hierarchical memory namespaces with role-based access control for enterprise agent teams.
+- **v11.3: Predictive Prefetch** — ACT-R based predictive models prefetch likely-needed memories before the agent asks.
 
 👉 **[Full ROADMAP.md →](ROADMAP.md)**
 
