@@ -453,9 +453,9 @@ With v10 shipped, Prism is a **HIPAA-hardened, production-ready, fully air-gappe
 - **Problem:** Agents wait for explicit search queries to surface relevant context.
 - **Benefit:** Time-of-day and workflow-stage predictive models prefetch likely-needed memories into a warm cache before the agent asks. Leverages existing ACT-R access log patterns as training signal.
 
-#### v11.0 — Zero-Search Retrieval `[Exploring]`
+#### v11.0 — Zero-Search Retrieval `[🧪 Field Testing - Synalux]`
 - **Problem:** All current retrieval requires an index (FTS5, vector, graph). At extreme scale, index maintenance becomes the bottleneck.
-- **Benefit:** Holographic Reduced Representations (HRR) encode entire memory traces into a single superposition vector. Retrieval is a single dot product — no index, no ANN, just ask the vector.
+- **Benefit:** Holographic Reduced Representations (HRR) encode entire memory traces into a single superposition vector. Retrieval is a single dot product — no index, no ANN, just ask the vector. Prototypes verified in Synalux practice management system.
 
 ---
 ## 🧰 Infrastructure Backlog
