@@ -1,6 +1,6 @@
 # Prism MCP — Roadmap
 
-> Full release history: [`CHANGELOG.md`](CHANGELOG.md) · Issue tracking: [GitHub Issues](../../issues)
+> Full release history: [`CHANGELOG.md`](CHANGELOG.md) · Issue tracking: [GitHub Issues](https://github.com/dcostenco/prism-mcp/issues)
 
 ---
 ## 🏆 Shipped
