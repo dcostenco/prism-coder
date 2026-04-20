@@ -69,7 +69,7 @@ Prism v11.0 transforms your AI agent from a "Coder" into a "Clinical Scientist."
 
 ---
 
-### 🏥 Flagship Implementation: [Synalux](https://github.com/dcostenco/synalux-private)
+### 🏥 Flagship Implementation: [Synalux](https://synalux.ai)
 **Synalux** is a high-compliance, local-first Practice Management System for ABA and Pediatrics. It is the flagship implementation of the Prism v11.0 engine, utilizing **Zero-Search Retrieval** and **Parallel Academic Discovery** to provide clinicians with real-time, evidence-based reasoning.
 
 ---
