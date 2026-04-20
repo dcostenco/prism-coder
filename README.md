@@ -25,23 +25,23 @@ https://github.com/dcostenco/prism-mcp/raw/main/docs/prism_mcp_demo.mp4
 ## 📖 Table of Contents
 
 - [Why Prism?](#why-prism)
-- [Quick Start](#-quick-start)
-- [The Magic Moment](#-the-magic-moment)
-- [Setup Guides](#-setup-guides)
-- [Universal Import: Bring Your History](#-universal-import-bring-your-history)
-- [What Makes Prism Different](#-what-makes-prism-different)
-- [Cognitive Architecture (v7.8)](#-cognitive-architecture-v78)
-- [Data Privacy & Egress](#-data-privacy-egress)
-- [Use Cases](#-use-cases)
-- [What's New](#-whats-new)
-- [How Prism Compares](#-how-prism-compares)
-- [CLI Reference](#-cli-reference)
-- [Tool Reference](#-tool-reference)
+- [Quick Start](#quick-start)
+- [The Magic Moment](#the-magic-moment)
+- [Setup Guides](#setup-guides)
+- [Universal Import: Bring Your History](#universal-import-bring-your-history)
+- [What Makes Prism Different](#what-makes-prism-different)
+- [Cognitive Architecture (v7.8)](#cognitive-architecture-v78)
+- [Data Privacy & Egress](#data-privacy-egress)
+- [Use Cases](#use-cases)
+- [What's New](#whats-new)
+- [How Prism Compares](#how-prism-compares)
+- [CLI Reference](#cli-reference)
+- [Tool Reference](#tool-reference)
 - [Environment Variables](#environment-variables)
 - [Architecture](#architecture)
-- [Scientific Foundation](#-scientific-foundation)
-- [Milestones & Roadmap](#-milestones-roadmap)
-- [Troubleshooting FAQ](#-troubleshooting-faq)
+- [Scientific Foundation](#scientific-foundation)
+- [Milestones & Roadmap](#milestones-roadmap)
+- [Troubleshooting FAQ](#troubleshooting-faq)
 
 ---
 
@@ -55,11 +55,11 @@ Every time you start a new conversation with an AI coding assistant, it starts f
 
 Prism has three pillars:
 
-1. **🧠 Cognitive Memory** — Memories are ranked like a human brain: recently and frequently accessed context surfaces first, while stale context fades naturally via ACT-R activation decay. Raw experience consolidates into semantic principles through Hebbian learning. The result is retrieval quality that no flat vector search can match. *(See [Cognitive Architecture](#-cognitive-architecture-v78) and [Scientific Foundation](#-scientific-foundation).)*
+1. **🧠 Cognitive Memory** — Memories are ranked like a human brain: recently and frequently accessed context surfaces first, while stale context fades naturally via ACT-R activation decay. Raw experience consolidates into semantic principles through Hebbian learning. The result is retrieval quality that no flat vector search can match. *(See [Cognitive Architecture(#cognitive-architecture-v78) and [Scientific Foundation(#scientific-foundation).)*
 
-2. **🔗 Multi-Hop Reasoning** — When your agent searches for "Error X", Prism doesn't just find logs mentioning "Error X". Spreading activation traverses the causal graph and brings back "Workaround Y", which is connected to "Architecture Decision Z" — a literal train of thought. *(See [Cognitive Architecture](#-cognitive-architecture-v78).)*
+2. **🔗 Multi-Hop Reasoning** — When your agent searches for "Error X", Prism doesn't just find logs mentioning "Error X". Spreading activation traverses the causal graph and brings back "Workaround Y", which is connected to "Architecture Decision Z" — a literal train of thought. *(See [Cognitive Architecture(#cognitive-architecture-v78).)*
 
-3. **🏭 Autonomous Execution (Dark Factory)** — When you're ready, Prism can run coding tasks end-to-end with a fail-closed pipeline where an adversarial evaluator catches bugs the generator missed — before you ever see the PR. *(See [Dark Factory](#-dark-factory-adversarial-autonomous-pipelines).)*
+3. **🏭 Autonomous Execution (Dark Factory)** — When you're ready, Prism can run coding tasks end-to-end with a fail-closed pipeline where an adversarial evaluator catches bugs the generator missed — before you ever see the PR. *(See [Dark Factory(#dark-factory-adversarial-autonomous-pipelines).)*
 
 ---
 
@@ -438,7 +438,7 @@ Prism can be deployed natively to cloud platforms like [Render](https://render.c
 > ```
 > At the start of every conversation, call session_load_context with project "my-project" before doing any work.
 > ```
-> Claude Code users can use the `.clauderules` auto-load hook shown in the [Setup Guides](#-setup-guides). Prism also has a **server-side fallback** (v5.2.1+) that auto-pushes context after 10 seconds if no load is detected.
+> Claude Code users can use the `.clauderules` auto-load hook shown in the [Setup Guides(#setup-guides). Prism also has a **server-side fallback** (v5.2.1+) that auto-pushes context after 10 seconds if no load is detected.
 
 ---
 
@@ -863,15 +863,15 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 > **Current release: v10.0.1 — HIPAA-Hardened Local LLM Engine**
 
-- 🛡️ **v10.0.0 — HIPAA-Hardened Local LLM:** Your agent's memory now runs entirely on-device. Introducing `prism-coder:7b` for local compaction, task routing, and semantic search. Includes `PRISM_STRICT_LOCAL_MODE` to block cloud fallbacks, SSRF protection, URL credential redaction, and full XML escaping to prevent prompt injection. 22-finding adversarial audit completed. → [Changelog](CHANGELOG.md#1000---2026-04-18--hipaa-hardened-local-llm-engine)
+- 🛡️ **v10.0.0 — HIPAA-Hardened Local LLM:** Your agent's memory now runs entirely on-device. Introducing `prism-coder:7b` for local compaction, task routing, and semantic search. Includes `PRISM_STRICT_LOCAL_MODE` to block cloud fallbacks, SSRF protection, URL credential redaction, and full XML escaping to prevent prompt injection. 22-finding adversarial audit completed. → [Changelog](CHANGELOG.md#1000)
 - 🧬 **v9.14.0 — Dynamic Hardware Routing:** Platform-aware memory detection auto-selects optimal models (32b for ≥32GB RAM, 14b/7b for lighter hardware). Includes **Nomic Semantic Tool Pruning (RAG)** which embeds all 17 MCP tools into offline vectors, injecting only the Top-3 relevant schemas into context to maximize inference speed.
-- 🔬 **v9.13.0 — Local Embeddings & Zero-API-Key Setup:** `LocalEmbeddingAdapter` using `nomic-embed-text-v1.5` generates 768-dim embeddings entirely on-device. Full semantic search and session memory now work with **zero cloud API keys**. → [Changelog](CHANGELOG.md#9130---2026-04-17--local-embeddings--zero-api-key-setup)
-- 🔒 **v9.12.0 — Memory Security Hardening:** Prevents **stored prompt injection** — the AI equivalent of stored XSS. New `sanitizeMemoryInput()` strips 8 categories of dangerous XML tags from all text fields. Context output wrapped in `<prism_memory context="historical">` boundary tags. → [Changelog](CHANGELOG.md#9120---2026-04-15--memory-security-hardening-stored-prompt-injection-prevention)
+- 🔬 **v9.13.0 — Local Embeddings & Zero-API-Key Setup:** `LocalEmbeddingAdapter` using `nomic-embed-text-v1.5` generates 768-dim embeddings entirely on-device. Full semantic search and session memory now work with **zero cloud API keys**. → [Changelog](CHANGELOG.md#9130)
+- 🔒 **v9.12.0 — Memory Security Hardening:** Prevents **stored prompt injection** — the AI equivalent of stored XSS. New `sanitizeMemoryInput()` strips 8 categories of dangerous XML tags from all text fields. Context output wrapped in `<prism_memory context="historical">` boundary tags. → [Changelog](CHANGELOG.md#9120)
 - 🧠 **v9.4.7 — ABA Precision Protocol:** Foundational behavioral engine with 5 core rules (Observable goals, Stop-fix-verify, No reinforcement of wrong patterns, Help first, Fix bugs without asking). 83-test behavioral verification suite.
 - 🕵️ **v9.4.6 — Stealth Browser Automation:** `browse.py` HIPAA-hardened CLI for local Playwright-based browser automation with 6-layer anti-detection. **100% pass rate on bot.sannysoft.com**.
 - 🔄 **v9.2.4 — Cross-Backend Reconciliation:** Automatic sync from Supabase → SQLite on startup. Reality drift detection warns when backend versions diverge.
 - 🧠 **v9.0.0 — Autonomous Cognitive OS:** Token-Economic Reinforcement Learning (Surprisal Gate + Cognitive Budget), Affect-Tagged Memory, and Episodic→Semantic Consolidation.
-- 🧠 **v7.8.0 — Cognitive Architecture:** Episodic-to-Semantic memory consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate, and Dynamic Fast Weight Decay. → [Cognitive Architecture](#-cognitive-architecture-v78)
+- 🧠 **v7.8.0 — Cognitive Architecture:** Episodic-to-Semantic memory consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate, and Dynamic Fast Weight Decay. → [Cognitive Architecture(#cognitive-architecture-v78)
 - 🌐 **v7.7.0 — Cloud-Native SSE Transport:** Full Server-Sent Events MCP support for seamless network deployments.
 
 👉 **[Full release history → CHANGELOG.md](CHANGELOG.md)** · **[ROADMAP →](ROADMAP.md)**
@@ -1224,7 +1224,7 @@ Prism is a **stdio-based MCP server** that manages persistent agent memory. Here
 
 ### Auto-Load Architecture
 
-Each MCP client has its own mechanism for ensuring Prism context loads on session start. See the platform-specific [Setup Guides](#-setup-guides) above for detailed instructions:
+Each MCP client has its own mechanism for ensuring Prism context loads on session start. See the platform-specific [Setup Guides(#setup-guides) above for detailed instructions:
 
 - **Claude Code** — Lifecycle hooks (`SessionStart` / `Stop`)
 - **Gemini / Antigravity** — Three-layer architecture (User Rules + AGENTS.md + Startup Skill)
@@ -1354,7 +1354,7 @@ A: Run `npm run build && npm test`, then open the Mind Palace dashboard (`localh
 ### 💡 Known Limitations & Quirks
 
 - **Text generation features require an API key.** Morning Briefings, auto-compaction, and VLM captioning need a cloud provider key (`GOOGLE_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`). Semantic search works offline with `embedding_provider=local` (no key needed). Without any embedding provider, Prism falls back to keyword-only search (FTS5).
-- **Auto-load is model- and client-dependent.** Session auto-loading relies on both the LLM following system prompt instructions *and* the MCP client completing tool registration before the model's first turn. Prism provides platform-specific [Setup Guides](#-setup-guides) and a server-side fallback (v5.2.1) that auto-pushes context after 10 seconds.
+- **Auto-load is model- and client-dependent.** Session auto-loading relies on both the LLM following system prompt instructions *and* the MCP client completing tool registration before the model's first turn. Prism provides platform-specific [Setup Guides(#setup-guides) and a server-side fallback (v5.2.1) that auto-pushes context after 10 seconds.
 - **MCP client race conditions.** Some MCP clients may not finish tool enumeration before the model generates its first response, causing transient `unknown_tool` errors. This is a client-side timing issue — Prism's server completes the MCP handshake in ~60ms. Workaround: the server-side auto-push fallback and the startup skill's retry logic.
 - **No real-time sync without Supabase.** Local SQLite mode is single-machine only. Multi-device or team sync requires a Supabase backend.
 - **Embedding quality varies by provider.** Gemini `text-embedding-004` and OpenAI `text-embedding-3-small` produce high-quality 768-dim vectors. Prism passes `dimensions: 768` via the Matryoshka API for OpenAI models (native output is 1536-dim; this truncation is lossless and outperforms ada-002 at full 1536 dims). Local embeddings (`nomic-embed-text-v1.5` via `@huggingface/transformers`) provide good quality with zero API cost. Ollama embeddings are usable but may reduce retrieval accuracy.
