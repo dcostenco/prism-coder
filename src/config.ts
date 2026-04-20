@@ -83,6 +83,14 @@ if (!BRAVE_ANSWERS_API_KEY && process.env.PRISM_DEBUG_LOGGING === "true") {
 
 export const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
 
+// ─── Optional: Google Search (Scholar Pipeline Fallback) ──────
+// Used when Brave or Tavily keys are missing.
+// Requires: Google Custom Search API Key + Search Engine ID (CX).
+// Get yours at: https://developers.google.com/custom-search/v1/overview
+
+export const GOOGLE_SEARCH_API_KEY = process.env.GOOGLE_SEARCH_API_KEY;
+export const GOOGLE_SEARCH_CX = process.env.GOOGLE_SEARCH_CX;
+
 // ─── v2.0: Storage Backend Selection ─────────────────────────
 // REVIEWER NOTE: Step 1 of v2.0 introduces a storage abstraction.
 // Both "local" (SQLite) and "supabase" (PostgreSQL) are implemented.

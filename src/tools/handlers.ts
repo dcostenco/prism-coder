@@ -22,10 +22,20 @@
 
 import { performWebSearch, performWebSearchRaw, performLocalSearch, performLocalSearchRaw, performBraveAnswers } from "../utils/braveApi.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
-import { isBraveWebSearchArgs, isBraveLocalSearchArgs, isBraveAnswersArgs, isGeminiResearchPaperAnalysisArgs, isBraveWebSearchCodeModeArgs, isBraveLocalSearchCodeModeArgs, isCodeModeTransformArgs } from "./definitions.js";
+import { 
+  isBraveWebSearchArgs, 
+  isBraveLocalSearchArgs, 
+  isBraveAnswersArgs, 
+  isGeminiResearchPaperAnalysisArgs, 
+  isBraveWebSearchCodeModeArgs, 
+  isBraveLocalSearchCodeModeArgs, 
+  isCodeModeTransformArgs,
+  isScholarResearchArgs,
+} from "./definitions.js";
 import { runInSandbox } from "../utils/executor.js";
 import { CODE_MODE_TEMPLATES, getTemplateNames } from "../templates/codeMode.js";
 import { debugLog } from "../utils/logger.js";
+import { runWebScholar } from "../scholar/webScholar.js";
 
 // ─── Simple Search Handlers ──────────────────────────────────
 

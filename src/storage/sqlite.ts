@@ -3732,5 +3732,15 @@ export class SqliteStorage implements StorageBackend {
       return id;
     }
   }
+
+  // ─── v11.0: Research Task Bridge ──────────────────────────────
+
+  async listPendingResearchTasks(): Promise<ResearchTask[]> {
+    return []; // Only supported via Supabase bridge
+  }
+
+  async updateResearchTask(_id: string, _data: any): Promise<void> {
+    // No-op
+  }
 }
 

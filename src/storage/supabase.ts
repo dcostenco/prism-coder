@@ -1753,5 +1753,29 @@ export class SupabaseStorage implements StorageBackend {
     debugLog(`[SupabaseStorage] upsertSemanticKnowledge is not fully implemented in Supabase yet. Skipping for ${data.concept}.`);
     return crypto.randomUUID();
   }
+
+  // ─── v11.0: Research Task Bridge ──────────────────────────────
+
+  async listPendingResearchTasks(): Promise<ResearchTask[]> {
+    try {
+      const result = await supabaseGet("research_tasks", {
+        status: "eq.PENDING",
+        order: "created_at.asc"
+      });
+      return (Array.isArray(result) ? result : []) as unknown as ResearchTask[];
+    } catch (e: any) {
+      if (e.message?.includes("PGRST202") || e.message?.includes("Could not find the relation")) return [];
+      throw e;
+    }
+  }
+
+  async updateResearchTask(id: string, data: Partial<ResearchTask>): Promise<void> {
+    await supabasePatch("research_tasks", {
+      ...data,
+      updated_at: new Date().toISOString()
+    }, {
+      id: `eq.${id}`
+    });
+  }
 }
 

@@ -885,6 +885,26 @@ export interface StorageBackend {
     related_entities?: string[];
     userId?: string;
   }): Promise<string>;
+
+  // ─── v11.0: Research Task Bridge ──────────────────────────────
+
+  /** List pending research tasks across all projects for the watcher. */
+  listPendingResearchTasks(): Promise<ResearchTask[]>;
+
+  /** Update research task status/result. */
+  updateResearchTask(id: string, data: Partial<ResearchTask>): Promise<void>;
+}
+
+export interface ResearchTask {
+  id: string;
+  project: string;
+  user_id: string;
+  topic: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  result_summary?: string;
+  error_message?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // ─── v6.0: Memory Link Type ───────────────────────────────────

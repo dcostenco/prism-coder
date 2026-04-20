@@ -783,10 +783,42 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE public.dark_factory_pipelines
         ADD CONSTRAINT chk_pipeline_status
         CHECK (status IN ('PENDING', 'RUNNING', 'PAUSED', 'ABORTED', 'COMPLETED', 'FAILED'));
-    `
-  },
+      `
+      },
+      {
+      version: 39,
+      name: "research_tasks_bridge",
+      sql: `
+      CREATE TABLE IF NOT EXISTS public.research_tasks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project TEXT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT 'default',
+        topic TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED')),
+        result_summary TEXT,
+        error_message TEXT,
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+      );
 
-];
+      ALTER TABLE public.research_tasks ENABLE ROW LEVEL SECURITY;
+
+      -- Use existing 'all' policy pattern for consistency with memory_links
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_policies WHERE tablename = 'research_tasks' AND policyname = 'research_tasks_all'
+        ) THEN
+          CREATE POLICY research_tasks_all ON public.research_tasks
+            FOR ALL USING (true) WITH CHECK (true);
+        END IF;
+      END $$;
+
+      CREATE INDEX IF NOT EXISTS idx_research_tasks_status ON public.research_tasks(status, created_at ASC);
+      `
+      },
+      ];
+
 
 /**
  * Current schema version — derived from the MIGRATIONS array.

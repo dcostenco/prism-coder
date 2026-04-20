@@ -281,6 +281,41 @@ export const RESEARCH_PAPER_ANALYSIS_TOOL: Tool = {
   },
 };
 
+// ─── v11.0: Scholar Deep Research ────────────────────────────
+
+export const SCHOLAR_RESEARCH_TOOL: Tool = {
+  name: "scholar_research",
+  description:
+    "Triggers an autonomous research pipeline on a specific topic. " +
+    "Uses Tavily/Brave to discover scientific papers and journals, " +
+    "extracts their content, synthesizes a comprehensive markdown report, " +
+    "and saves the result to the Mind Palace ledger. " +
+    "Best for deep clinical research, literature reviews, and evidence-based practice updates.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      topic: {
+        type: "string",
+        description: "The research topic (e.g., 'ABA therapy for non-verbal toddlers')",
+      },
+      project: {
+        type: "string",
+        description: "The project to associate this research with (defaults to 'prism-scholar')",
+      },
+    },
+    required: ["topic"],
+  },
+};
+
+export function isScholarResearchArgs(args: unknown): args is { topic: string; project?: string } {
+  return (
+    typeof args === "object" &&
+    args !== null &&
+    "topic" in args &&
+    typeof (args as any).topic === "string"
+  );
+}
+
 // ─── Type Guards ──────────────────────────────────────────────
 //
 // Type guards validate that incoming tool arguments match the expected shape.
