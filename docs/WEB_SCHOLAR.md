@@ -18,7 +18,7 @@ The **Autonomous Web Scholar** is Prism's background research pipeline that auto
 - [How It Works](#how-it-works)
 - [Configuration Examples](#configuration-examples)
 - [Troubleshooting](#troubleshooting)
-- [Cost & Rate Limits](#cost--rate-limits)
+- [Cost & Rate Limits](#cost-rate-limits)
 
 ---
 

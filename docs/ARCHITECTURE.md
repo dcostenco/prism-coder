@@ -8,9 +8,9 @@
 
 ## Table of Contents
 1. [The Vector Storage Engine (v5)](#1-the-vector-storage-engine-v5)
-2. [The Memory Lifecycle & OCC](#2-the-memory-lifecycle--occ)
+2. [The Memory Lifecycle & OCC](#2-the-memory-lifecycle-occ)
 3. [The VLM Multimodal Pipeline](#3-the-vlm-multimodal-pipeline)
-4. [Telemetry & Observability (OTel)](#4-telemetry--observability-otel)
+4. [Telemetry & Observability (OTel)](#4-telemetry-observability-otel)
 5. [The Knowledge Graph Engine](#5-the-knowledge-graph-engine)
 6. [Cognitive Memory (v5.2)](#6-cognitive-memory-v52)
 7. [Universal History Migration (v5.2)](#7-universal-history-migration-v52)
