@@ -67,6 +67,13 @@ Prism v11.0 transforms your AI agent from a "Coder" into a "Clinical Scientist."
 4.  **Semantic Scholar** (Academic): AI-powered research tool providing "TLDR" summaries of 200M+ papers.
 5.  **DuckDuckGo Lite** (Fallback): Privacy-focused web discovery for general context.
 
+---
+
+### 🏥 Flagship Implementation: [Synalux](https://github.com/dcostenco/synalux-private)
+**Synalux** is a high-compliance, local-first Practice Management System for ABA and Pediatrics. It is the flagship implementation of the Prism v11.0 engine, utilizing **Zero-Search Retrieval** and **Parallel Academic Discovery** to provide clinicians with real-time, evidence-based reasoning.
+
+---
+
 <details>
 <summary><strong>See Live Samples (Simplified Terms)</strong></summary>
 
