@@ -59,6 +59,22 @@ Prism v11.0 transforms your AI agent from a "Coder" into a "Clinical Scientist."
 | **Privacy Mode** | Cloud-First (SaaS) | **Local-First (HIPAA-Hardened / Air-Gapped)** |
 | **Intelligence Floor** | Generic GPT-4 Advice | **Data-Driven Clinical Evidence (62% CI Warnings)** |
 
+---
+
+## ⚡ <a name="zero-search"></a>Zero-Search Retrieval (HRR Architecture)
+Prism features a cutting-edge **Zero-Search Retrieval** system for its cognitive memory, moving beyond traditional vector databases toward a mathematically direct, $O(1)$ retrieval model.
+
+#### 🧠 What is Zero-Search?
+**Zero-Search Retrieval** uses Holographic Reduced Representations (HRR) to "ask the vector" directly. Structured facts are bound into a single, high-dimensional "superposition" vector (typically 4096-dims). Retrieval is a direct mathematical **unbinding** operation (circular correlation).
+
+| Metric | Traditional Vector Search | **Zero-Search (HRR)** |
+| :--- | :--- | :--- |
+| **Complexity** | $O(N)$ or $O(\log N)$ (Scales with data) | **$O(1)$ (Constant time)** |
+| **Retrieval Speed** | Decays as memory grows | **Instant regardless of memory size** |
+| **Precision** | Approximate (Top-K) | **Mathematical Unbinding (Exact)** |
+
+---
+
 ### 🔍 Supported Discovery Engines & Databases
 
 1.  **Tavily AI** (Elite): Primary discovery engine for AI-native deep crawling and PDF/Abstract extraction.
