@@ -11,14 +11,18 @@ const exec = promisify(execCb);
 // Timeout: 30s per test — npx tsx cold-starts take 10-15s on Windows CI runners.
 describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000 }, () => {
   const cliPath = path.resolve(__dirname, '../../src/cli.ts');
-  const dbPath = './prism-local.db';
+  const dbPath = path.resolve(process.cwd(), 'prism-local.db');
   const harnessPath = './verification_harness.json';
   // Clear ALL CI-detection env vars to simulate local dev (isStrictVerificationEnv checks CI, GITHUB_ACTIONS, GITLAB_CI, PRISM_STRICT_VERIFICATION)
   const execOpts = { env: { ...process.env, CI: '', GITHUB_ACTIONS: '', GITLAB_CI: '', PRISM_STRICT_VERIFICATION: '' } };
 
   beforeAll(async () => {
     // Ensure clean state
-    await fs.rm(dbPath, { force: true });
+    try {
+      await fs.rm(dbPath, { force: true });
+      await fs.rm(path.resolve(process.cwd(), 'prism-local.db-wal'), { force: true });
+      await fs.rm(path.resolve(process.cwd(), 'prism-local.db-shm'), { force: true });
+    } catch {}
     await fs.rm(harnessPath, { force: true });
     
     // Create a dummy harness so we don't just hit the 'no file' branch
@@ -95,13 +99,13 @@ describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000
 
       // Insert a fake run so drift is detected exactly (status requires a run)
       const storage = new SqliteStorage();
-      await storage.initialize(dbPath);
+      await storage.initialize(true, dbPath);
       await (storage as any).db.execute({
-        sql: "INSERT INTO verification_harnesses (rubric_hash, project, conversation_id, created_at, min_pass_rate, user_id, tests) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        sql: "INSERT OR IGNORE INTO verification_harnesses (rubric_hash, project, conversation_id, created_at, min_pass_rate, user_id, tests) VALUES (?, ?, ?, ?, ?, ?, ?)",
         args: ['old-fake-hash', 'test-proj', 'c1', new Date().toISOString(), 1.0, 'default', '[]']
       });
       await (storage as any).db.execute({
-        sql: "INSERT INTO verification_runs (id, project, rubric_hash, conversation_id, run_at, passed, pass_rate, critical_failures, coverage_score, result_json, gate_action, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        sql: "INSERT OR IGNORE INTO verification_runs (id, project, rubric_hash, conversation_id, run_at, passed, pass_rate, critical_failures, coverage_score, result_json, gate_action, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         args: ['fake-run', 'test-proj', 'old-fake-hash', 'c1', new Date().toISOString(), 1, 1, 0, 1, '{}', 'continue', 'default']
       });
       await storage.close();
