@@ -93,7 +93,7 @@ Prism features a cutting-edge **Zero-Search Retrieval** system for its cognitive
 ---
 
 <details>
-<summary><strong>See Live Samples (Simplified Terms)</strong></summary>
+<summary><strong>See Live Samples</strong></summary>
 
 #### Topic: Helping a child with tactile focus
 *   **Without Deep Research**: "I recommend using sensory toys and maintaining a calm environment to help the child focus during tasks."
