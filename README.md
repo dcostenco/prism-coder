@@ -926,7 +926,7 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 > **Current release: v11.5.0 — Structural GRPO Alignment (100% Accuracy)**
 
-- 🧠 **v11.5.0 — Structural GRPO Alignment:** Perfect 100% accuracy cross-validated on Synalux. → [Changelog](CHANGELOG.md#1140)
+- 🧠 **v11.5.0 — Structural GRPO Alignment:** Perfect 100% accuracy cross-validated on Synalux. → [Changelog](CHANGELOG.md#1150)
 - 🧪 **v11.5.0 — Zero-Search Field Testing:** Field-verified constant-time retrieval. → [Changelog](CHANGELOG.md#1101)
 - 🛡️ **v11.5.0 — HIPAA-Hardened Local LLM:** Your agent's memory now runs entirely on-device. Introducing `prism-coder:7b` for local compaction, task routing, and semantic search. Includes `PRISM_STRICT_LOCAL_MODE` to block cloud fallbacks, SSRF protection, URL credential redaction, and full XML escaping to prevent prompt injection. 22-finding adversarial audit completed. → [Changelog](CHANGELOG.md#1100)
 
