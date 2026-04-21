@@ -22,6 +22,7 @@ def check_markdown_links(root_dir):
             content = f.read()
             links = link_pattern.findall(content)
             for text, link in links:
+                print(f"Checking link in {md_file}: [{text}]({link})")
                 # Ignore web links and email links
                 if link.startswith('http') or link.startswith('mailto:'):
                     continue
@@ -35,7 +36,7 @@ def check_markdown_links(root_dir):
                 if not link_path:
                     if anchor:
                         # Verify anchor exists in current file
-                        if not verify_anchor(md_file, anchor):
+                        if not verify_anchor(md_file, anchor, debug=True):
                             broken_links.append((md_file, link, "Broken Anchor"))
                     continue
 
@@ -47,7 +48,9 @@ def check_markdown_links(root_dir):
                     broken_links.append((md_file, link, "Broken Path"))
                 elif anchor:
                     # Verify anchor exists in target file
-                    if not verify_anchor(target_path, anchor):
+                    res = verify_anchor(target_path, anchor, debug=True)
+                    print(f"  Result: {'OK' if res else 'FAILED'}")
+                    if not res:
                         broken_links.append((md_file, link, f"Broken Anchor in {target_path}"))
     
     if broken_links:
@@ -63,26 +66,23 @@ def generate_github_slug(text):
     """
     Simulates GitHub's anchor generation logic.
     - Lowercase
-    - Remove punctuation (except hyphens and underscores)
-    - Replace spaces and special chars (like &) with hyphens
-    - Remove emojis
+    - Remove punctuation (including dots)
+    - Replace spaces with hyphens
     - Collapse multiple hyphens
     """
-    # Remove emojis and other non-ASCII symbols
-    slug = text.encode('ascii', 'ignore').decode('ascii')
     # Lowercase
-    slug = slug.lower()
-    # Replace anything that isn't a letter, number, hyphen, underscore, or space with nothing
-    slug = re.sub(r'[^a-z0-9\-_ ]', '', slug)
+    slug = text.lower()
     # Replace spaces with hyphens
     slug = slug.replace(' ', '-')
+    # Remove everything except letters, numbers, hyphens, and underscores
+    slug = re.sub(r'[^a-z0-9\-_]', '', slug)
     # Collapse multiple hyphens
     slug = re.sub(r'-+', '-', slug)
     # Strip leading/trailing hyphens
     slug = slug.strip('-')
     return slug
 
-def verify_anchor(file_path, anchor):
+def verify_anchor(file_path, anchor, debug=False):
     """Check for either <a name="..."> or GitHub-style header slug."""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -96,8 +96,13 @@ def verify_anchor(file_path, anchor):
                 if line.startswith('#'):
                     # Strip leading # and whitespace
                     header_text = line.lstrip('#').strip()
-                    if generate_github_slug(header_text) == anchor:
+                    slug = generate_github_slug(header_text)
+                    if debug:
+                        print(f"  [Anchor Check] Header: '{header_text}' -> Slug: '{slug}' (looking for: '{anchor}')")
+                    if slug == anchor:
                         return True
+                    if debug and anchor in slug:
+                         print(f"DEBUG: Found partial match in {file_path}: header '{header_text}' -> slug '{slug}' vs anchor '{anchor}'")
             return False
     except Exception:
         return False
