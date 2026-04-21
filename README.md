@@ -615,15 +615,14 @@ Prism scores coding tasks across **6 weighted heuristic signals** (keyword analy
 To achieve zero-latency, offline routing and memory compilation without cloud dependencies, Prism utilizes an internal fine-tuned ML model: **`prism-coder:7b`**.
 Built atop Qwen 2.5 Coder 7B using the MLX framework for Apple Silicon, this engine underwent aggressive Supervised Fine-Tuning (SFT) over 1,000+ past session traces and semantic architectures.
 
-To guarantee zero-hallucination MCP tool use, it was further aligned using **GRPO (Group Relative Policy Optimization)** with a deterministic reward function that deducts points for missing required parameters or misnaming tools.
+To guarantee structured MCP tool use, it was further aligned using **GRPO (Group Relative Policy Optimization)** with a deterministic reward function that deducts points for missing required parameters or misnaming tools.
 
-**Benchmark Test Results (Verified Phase 6 Model):**
-- **Tool-Call Accuracy:** 100.0% (N=24 verified)
-- **JSON Validity:** 100.0% (Deterministic)
-- **Think Token Accuracy:** 100.0% (Strict tagging)
-- **Parameter Accuracy:** 100.0%
-- **Average Latency:** 5.4s (Apple M4 Max, 36GB)
-- **Generation Speed:** 45.1 Tokens/sec
+**Benchmark Results ([`training/benchmark.py`](training/benchmark.py), N=15 held-out):**
+- **JSON Validity:** 100.0% — all outputs parse as valid JSON
+- **Retrieval Accuracy:** 100.0% (3/3) — perfect on search/list/knowledge tasks
+- **Parameter Accuracy:** 80.0% — required params present when tool is correct
+- **Tool-Call Accuracy:** 40.0% — correct tool on unseen prompts (improving with additional GRPO iterations)
+- **Generation Speed:** 47.0 Tokens/sec (Apple M4 Max, 36GB)
 
 **Integration**: Run via Ollama natively to power autonomous file operations and session routing entirely within the local host environment.
 
@@ -924,9 +923,9 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## <a name="whats-new"></a>🆕 What's New
 
-> **Current release: v11.5.1 — Structural GRPO Alignment (100% Accuracy)**
+> **Current release: v11.5.1 — Structural GRPO Alignment & Held-Out Benchmarking**
 
-- 🧠 **v11.5.1 — Structural GRPO Alignment:** Perfect 100% accuracy cross-validated on Synalux. → [Changelog](CHANGELOG.md#1150)
+- 🧠 **v11.5.1 — Structural GRPO Alignment:** GRPO-aligned local engine with held-out benchmark suite (N=15). 100% JSON validity, 100% retrieval accuracy. → [Changelog](CHANGELOG.md#1150)
 - 🧪 **v11.5.1 — Zero-Search Field Testing:** Field-verified constant-time retrieval. → [Changelog](CHANGELOG.md#1101)
 - 🛡️ **v11.5.1 — HIPAA-Hardened Local LLM:** Your agent's memory now runs entirely on-device. Introducing `prism-coder:7b` for local compaction, task routing, and semantic search. Includes `PRISM_STRICT_LOCAL_MODE` to block cloud fallbacks, SSRF protection, URL credential redaction, and full XML escaping to prevent prompt injection. 22-finding adversarial audit completed. → [Changelog](CHANGELOG.md#1100)
 
@@ -968,23 +967,25 @@ Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as p
 
 ### 📊 Local Engine Benchmarks (Prism-Coder 7B)
 
-Prism's local engine (`prism-coder:7b`) is optimized for low-latency, high-validity tool orchestration. The techniques developed here were cross-validated on **Synalux v11.1 Elite**, achieving **perfect precision** through Structural GRPO.
+Prism's local engine (`prism-coder:7b`) is optimized for low-latency, high-validity tool orchestration. Benchmarked on a **held-out test set of 15 prompts** (zero overlap with GRPO training data) to measure real-world generalization, not memorization.
 
-| Metric | **Prism-Coder (7B Local)** | **GPT-4o (Cloud)** | **DeepSeek-V3 (Cloud)** | **Codestral (22B Local)** |
-|:-------|:---:|:---:|:---:|:---:|
-| **JSON Validity** | **100.0%** | 99.8% | 99.9% | 98.2% |
-| **Tool-Call Accuracy** | **100.0%** (N=24) | 94.2% | 91.5% | 72.4% |
-| **Think Token Accuracy**| **100.0%** | 92.1% | 89.2% | 68.9% |
-| **Parameter Accuracy** | **100.0%** | 91.2% | 91.5% | 88.5% |
-| **Generation Speed** | **45.1 Tok/sec** | ~80 Tok/sec | ~60 Tok/sec | 18.2 Tok/sec |
+| Metric | Score | Details |
+|:-------|:---:|:---|
+| **JSON Validity** | **100.0%** | Every model output parses as valid JSON |
+| **Tool-Call Accuracy** | **40.0%** (N=15 held-out) | Correct tool selection on unseen prompts |
+| **Retrieval Accuracy** | **100.0%** (3/3) | `session_search`, `session_list`, `knowledge_search` |
+| **Reasoning Accuracy** | **60.0%** (3/5) | Correctly avoids tool calls on pure reasoning |
+| **Parameter Accuracy** | **80.0%** | Required params present when tool is correct |
+| **Generation Speed** | **47.0 Tok/sec** | Apple M4 Max, 36GB |
+| **Avg Latency** | **1.6s** | Per-prompt inference time |
 
-> 🧪 **Verifiable Proof**: These results are produced by our physical inference benchmark suite. View the [Tool-Call Benchmark Source](https://github.com/dcostenco/prism-mcp/blob/main/tests/verification/cli-integration.test.ts) and [Protocol Verification Harness](https://github.com/dcostenco/prism-mcp/blob/main/src/verification/gatekeeper.ts) to audit our methodology.
+> 🧪 **Verifiable Proof**: These results are produced by our held-out benchmark suite at [`training/benchmark.py`](training/benchmark.py) using 15 non-overlapping test prompts. View the [Benchmark Source](https://github.com/dcostenco/prism-mcp/blob/main/training/benchmark.py), [GRPO Training Script](https://github.com/dcostenco/prism-mcp/blob/main/training/grpo_align.py), and [Protocol Verification Harness](https://github.com/dcostenco/prism-mcp/blob/main/src/verification/gatekeeper.ts) to audit our methodology.
 
-#### 🛡️ Why 100%? The Case for Structural GRPO
-Synalux achieves 100% tool-call accuracy because of **Structural GRPO (Group Relative Policy Optimization)**. 
-1. **Deterministic Structural Rewards:** Unlike cloud models that use fuzzy LLM-based reward models, we use a code-based validator that strictly rewards the `<think> → <tool_call>` sequence and heavily penalizes any deviation.
-2. **Synthetic Preference Injection:** We anchor the model with "perfect" synthetic samples during alignment, effectively hard-wiring the correct tool-name and parameter mapping for the specific project registry.
-3. **Specialized Adapter Tuning:** While general models (GPT-4o) must handle millions of tasks, our 7B adapter is hyper-specialized for the 13-module Synalux/Prism registry, eliminating the "jack-of-all-trades" tax.
+#### 🛡️ The Case for Structural GRPO
+Prism achieves high-validity tool orchestration through **Structural GRPO (Group Relative Policy Optimization)**.
+1. **Deterministic Structural Rewards:** Unlike cloud models that use fuzzy LLM-based reward models, we use a code-based validator that strictly rewards the `<think> → <tool_call>` sequence and penalizes any deviation.
+2. **Synthetic Preference Injection:** We anchor the model with synthetic preference samples during alignment, mapping correct tool-name and parameter schemas for the specific project registry.
+3. **Specialized Adapter Tuning:** While general models (GPT-4o) must handle millions of tasks, our 7B adapter is hyper-specialized for the Prism MCP tool registry, eliminating the "jack-of-all-trades" tax.
 
 
 ### 🏆 Where Prism Crushes the Giants

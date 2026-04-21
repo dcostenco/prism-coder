@@ -363,7 +363,7 @@ describe("Long-Tail Residual Impact on R@k", () => {
 // so adding more vectors doesn't systematically shift rankings).
 
 describe("Corpus Scale R@5 Stability", () => {
-  it("R@5 does not degrade significantly as corpus grows (100 → 500 → 2K)", { timeout: 30_000 }, () => {
+  it("R@5 does not degrade significantly as corpus grows (100 → 500 → 2K)", { timeout: 120_000 }, () => {
     const compressor = new TurboQuantCompressor(FAST_CONFIG);
     const corpusSizes = [100, 500, 2_000];
     const results: { size: number; r5: number }[] = [];

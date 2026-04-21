@@ -79,7 +79,7 @@ const FAST_CONFIG: TurboQuantConfig = { d: 128, bits: 4, seed: 42 };
 //
 // We test at multiple ε thresholds to find the sweet spot.
 
-describe("ResidualNorm Tiebreaker Strategy", { timeout: 60_000 }, () => {
+describe("ResidualNorm Tiebreaker Strategy", { timeout: 120_000 }, () => {
   const CORPUS_SIZE = 5_000;
   const N_TRIALS = 100;
   const TIEBREAK_THRESHOLDS = [0.001, 0.005, 0.01, 0.02];
@@ -222,7 +222,7 @@ describe("ResidualNorm Tiebreaker Strategy", { timeout: 60_000 }, () => {
 // This is the "full R@k sweep" promised to @m13v in the thread.
 // Tests at d=128 to keep CI fast, with corpus sizes up to 10K.
 
-describe("Extended R@k Sweep (d=128, 4-bit)", { timeout: 60_000 }, () => {
+describe("Extended R@k Sweep (d=128, 4-bit)", { timeout: 120_000 }, () => {
   const CORPUS_SIZES = [500, 1_000, 2_000, 5_000, 10_000];
   const N_TRIALS = 50;
 

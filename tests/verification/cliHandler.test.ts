@@ -83,25 +83,27 @@ function realHash(): string {
 // ─── computeVerifyStatus — pure result shape ──────────────────────────────────
 
 describe('computeVerifyStatus', () => {
-  // Save/restore CI and PRISM_STRICT_VERIFICATION so tests work
-  // correctly whether run locally (CI unset) or in GitHub Actions (CI=true).
-  let savedCI: string | undefined;
-  let savedStrict: string | undefined;
+  // Save/restore ALL env vars that isStrictVerificationEnv() checks:
+  // CI, GITHUB_ACTIONS, GITLAB_CI, PRISM_STRICT_VERIFICATION
+  const STRICT_ENV_KEYS = ['CI', 'GITHUB_ACTIONS', 'GITLAB_CI', 'PRISM_STRICT_VERIFICATION'];
+  const savedEnv: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    savedCI = process.env.CI;
-    savedStrict = process.env.PRISM_STRICT_VERIFICATION;
-    delete process.env.CI;
-    delete process.env.PRISM_STRICT_VERIFICATION;
+    for (const key of STRICT_ENV_KEYS) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     process.exitCode = 0;
-    // Restore original values (not just delete)
-    if (savedCI !== undefined) process.env.CI = savedCI; else delete process.env.CI;
-    if (savedStrict !== undefined) process.env.PRISM_STRICT_VERIFICATION = savedStrict; else delete process.env.PRISM_STRICT_VERIFICATION;
+    for (const key of STRICT_ENV_KEYS) {
+      if (savedEnv[key] !== undefined) process.env[key] = savedEnv[key];
+      else delete process.env[key];
+    }
   });
+
 
   it('returns no_runs=true when no runs found', async () => {
     const result = await computeVerifyStatus(makeStorage([]), 'proj');
@@ -378,26 +380,27 @@ describe('handleVerifyStatus', () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
   let stdoutSpy: ReturnType<typeof vi.spyOn>;
-  let savedCI: string | undefined;
-  let savedStrict: string | undefined;
+  const STRICT_ENV_KEYS2 = ['CI', 'GITHUB_ACTIONS', 'GITLAB_CI', 'PRISM_STRICT_VERIFICATION'];
+  const savedEnv2: Record<string, string | undefined> = {};
 
   beforeEach(() => {
     logSpy   = vi.spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     warnSpy  = vi.spyOn(console, 'warn').mockImplementation(() => {});
     stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    // Save and clear CI env so 'local dev' tests work under GitHub Actions
-    savedCI = process.env.CI;
-    savedStrict = process.env.PRISM_STRICT_VERIFICATION;
-    delete process.env.CI;
-    delete process.env.PRISM_STRICT_VERIFICATION;
+    for (const key of STRICT_ENV_KEYS2) {
+      savedEnv2[key] = process.env[key];
+      delete process.env[key];
+    }
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     process.exitCode = 0;
-    if (savedCI !== undefined) process.env.CI = savedCI; else delete process.env.CI;
-    if (savedStrict !== undefined) process.env.PRISM_STRICT_VERIFICATION = savedStrict; else delete process.env.PRISM_STRICT_VERIFICATION;
+    for (const key of STRICT_ENV_KEYS2) {
+      if (savedEnv2[key] !== undefined) process.env[key] = savedEnv2[key];
+      else delete process.env[key];
+    }
   });
 
   it('prints warning if no runs found', async () => {
