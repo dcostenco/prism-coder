@@ -74,7 +74,7 @@ export const RULE7_CLOUD = [
 /** VS Code LOCAL: AI HAS browser/terminal/git tools — execute immediately */
 export const RULE7_VSCODE = [
   '- TOOL EXECUTION (ZERO HESITATION): When user gives a CLEAR action command (e.g. "open browser"/"run terminal"/"git push") — you HAVE these tools. Execute the action IMMEDIATELY without explaining. HOWEVER, if the command is AMBIGUOUS (e.g. just "run" without a target), you MUST ask for clarification. Do NOT guess, auto-inspect files, or run random scripts without being explicitly instructed.',
-].join('\\n');
+].join('\n');
 
 // ─── Assemblers ─────────────────────────────────────────────────
 

@@ -37,23 +37,23 @@ TEST_CASES = [
 
 def parse_tool_call(response: str):
     """Extract tool name and arguments from response."""
-    # Try <tool_call> tags first
+    # Try <tool_call> tags first (highest priority)
     match = re.search(r'<tool_call>\s*(.*?)\s*</tool_call>', response, re.DOTALL)
     if match:
         try:
             call = json.loads(match.group(1))
             return call.get("name"), call.get("arguments", {})
         except json.JSONDecodeError:
-            pass
+            return "INVALID_JSON", None
 
-    # Try finding ANY JSON-like object with a "name" key
-    # This matches both <|im_start|> and bare JSON formats
-    json_matches = re.finditer(r'(\{.*?\})', response, re.DOTALL)
+    # Fallback: find JSON objects with a "name" key OUTSIDE of <think> blocks.
+    # Strip think blocks first to avoid false positives from reasoning text.
+    stripped = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+    json_matches = re.finditer(r'(\{[^{}]*"name"\s*:[^{}]*\})', stripped, re.DOTALL)
     for match in json_matches:
         try:
-            content = match.group(1)
-            if '"name":' in content:
-                call = json.loads(content)
+            call = json.loads(match.group(1))
+            if call.get("name"):
                 return call.get("name"), call.get("arguments", {})
         except json.JSONDecodeError:
             continue
