@@ -12,7 +12,7 @@
 
 **Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
-Prism v11.5.0 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.** With v11.5.0, the entire cognitive pipeline — including ledger compaction, task routing, semantic search, and the new **Deep Research Intelligence** — runs **100% on-device** or via secure clinical discovery (PubMed/ERIC), backed by `prism-coder:7b`, a HIPAA-hardened local LLM. No API keys for core features. No data leaves your machine.
+Prism v11.5.1 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.** With v11.5.1, the entire cognitive pipeline — including ledger compaction, task routing, semantic search, and the new **Deep Research Intelligence** — runs **100% on-device** or via secure clinical discovery (PubMed/ERIC), backed by `prism-coder:7b`, a HIPAA-hardened local LLM. No API keys for core features. No data leaves your machine.
 
 ```bash
 npx -y prism-mcp-server
@@ -24,7 +24,7 @@ https://github.com/dcostenco/prism-mcp/raw/main/docs/prism_mcp_demo.mp4
 
 ## 📖 Table of Contents
 
-- [🔬 v11.5.0 Deep Research Intelligence (Auto-Scholar)](#deep-research-intelligence)
+- [🔬 v11.5.1 Deep Research Intelligence (Auto-Scholar)](#deep-research-intelligence)
 - [⚡ Zero-Search Retrieval (HRR Architecture)](#zero-search)
 - [Why Prism?](#why-prism)
 - [Quick Start](#quick-start)
@@ -47,13 +47,13 @@ https://github.com/dcostenco/prism-mcp/raw/main/docs/prism_mcp_demo.mp4
 
 ---
 
-## 🔬 <a name="deep-research-intelligence"></a>v11.5.0 Deep Research Intelligence (Auto-Scholar)
+## 🔬 <a name="deep-research-intelligence"></a>v11.5.1 Deep Research Intelligence (Auto-Scholar)
 
-Prism v11.5.0 transforms your AI agent from a "Coder" into a "Clinical Scientist." It features a **Tavily-Enhanced Multi-Provider Discovery Pipeline** that grounds Gemini 2.5 Flash's thinking in real-world empirical data.
+Prism v11.5.1 transforms your AI agent from a "Coder" into a "Clinical Scientist." It features a **Tavily-Enhanced Multi-Provider Discovery Pipeline** that grounds Gemini 2.5 Flash's thinking in real-world empirical data.
 
 ### 🥊 The Global Benchmarks: Prism v11 vs. Standard RAG
 
-| Feature | **Standard AI Memory (Mem0/Zep)** | **Prism v11.5.0 (Elite Architecture)** |
+| Feature | **Standard AI Memory (Mem0/Zep)** | **Prism v11.5.1 (Elite Architecture)** |
 | :--- | :--- | :--- |
 | **Search Complexity** | $O(N)$ or $O(\log N)$ (Scales with data) | **$O(1)$ Zero-Search (Constant time via HRR) ** |
 | **Discovery Logic** | General Web Search (Snippets) | **Parallel Academic Discovery (PubMed, ERIC, S2)** |
@@ -88,7 +88,7 @@ Prism features a cutting-edge **Zero-Search Retrieval** system for its cognitive
 ---
 
 ### 🏥 Flagship Implementation: [Synalux](https://synalux.ai)
-**Synalux** is a high-compliance, local-first Practice Management System for ABA and Pediatrics. It is the flagship implementation of the Prism v11.5.0 engine, utilizing **Zero-Search Retrieval** and **Parallel Academic Discovery** to provide clinicians with real-time, evidence-based reasoning.
+**Synalux** is a high-compliance, local-first Practice Management System for ABA and Pediatrics. It is the flagship implementation of the Prism v11.5.1 engine, utilizing **Zero-Search Retrieval** and **Parallel Academic Discovery** to provide clinicians with real-time, evidence-based reasoning.
 
 ---
 
@@ -97,11 +97,11 @@ Prism features a cutting-edge **Zero-Search Retrieval** system for its cognitive
 
 #### Topic: Helping a child with tactile focus
 *   **Without Deep Research**: "I recommend using sensory toys and maintaining a calm environment to help the child focus during tasks."
-*   **With Deep Research (v11.5.0)**: "Recent clinical studies indicate that high-frequency sensory input can actually *decrease* focus in 40% of pediatric cases. I recommend a low-frequency, high-pressure 'weighted' approach which showed a 3.5x improvement in sustained attention during clinical trials."
+*   **With Deep Research (v11.5.1)**: "Recent clinical studies indicate that high-frequency sensory input can actually *decrease* focus in 40% of pediatric cases. I recommend a low-frequency, high-pressure 'weighted' approach which showed a 3.5x improvement in sustained attention during clinical trials."
 
 #### Topic: Behavior extinction vs. reinforcement
 *   **Without Deep Research**: "Extinction is a common way to stop a behavior. You should also reinforce good behaviors at the same time."
-*   **With Deep Research (v11.5.0)**: "Research shows that using extinction alone leads to an 'extinction burst' (a temporary spike in the bad behavior) in 62% of cases. However, combining it with an alternative reinforcement strategy (DRA) reduces this risk to under 20%."
+*   **With Deep Research (v11.5.1)**: "Research shows that using extinction alone leads to an 'extinction burst' (a temporary spike in the bad behavior) in 62% of cases. However, combining it with an alternative reinforcement strategy (DRA) reduces this risk to under 20%."
 
 </details>
 
@@ -924,11 +924,11 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## <a name="whats-new"></a>🆕 What's New
 
-> **Current release: v11.5.0 — Structural GRPO Alignment (100% Accuracy)**
+> **Current release: v11.5.1 — Structural GRPO Alignment (100% Accuracy)**
 
-- 🧠 **v11.5.0 — Structural GRPO Alignment:** Perfect 100% accuracy cross-validated on Synalux. → [Changelog](CHANGELOG.md#1150)
-- 🧪 **v11.5.0 — Zero-Search Field Testing:** Field-verified constant-time retrieval. → [Changelog](CHANGELOG.md#1101)
-- 🛡️ **v11.5.0 — HIPAA-Hardened Local LLM:** Your agent's memory now runs entirely on-device. Introducing `prism-coder:7b` for local compaction, task routing, and semantic search. Includes `PRISM_STRICT_LOCAL_MODE` to block cloud fallbacks, SSRF protection, URL credential redaction, and full XML escaping to prevent prompt injection. 22-finding adversarial audit completed. → [Changelog](CHANGELOG.md#1100)
+- 🧠 **v11.5.1 — Structural GRPO Alignment:** Perfect 100% accuracy cross-validated on Synalux. → [Changelog](CHANGELOG.md#1150)
+- 🧪 **v11.5.1 — Zero-Search Field Testing:** Field-verified constant-time retrieval. → [Changelog](CHANGELOG.md#1101)
+- 🛡️ **v11.5.1 — HIPAA-Hardened Local LLM:** Your agent's memory now runs entirely on-device. Introducing `prism-coder:7b` for local compaction, task routing, and semantic search. Includes `PRISM_STRICT_LOCAL_MODE` to block cloud fallbacks, SSRF protection, URL credential redaction, and full XML escaping to prevent prompt injection. 22-finding adversarial audit completed. → [Changelog](CHANGELOG.md#1100)
 
 - 🧬 **v9.14.0 — Dynamic Hardware Routing:** Platform-aware memory detection auto-selects optimal models (32b for ≥32GB RAM, 14b/7b for lighter hardware). Includes **Nomic Semantic Tool Pruning (RAG)** which embeds all 17 MCP tools into offline vectors, injecting only the Top-3 relevant schemas into context to maximize inference speed.
 - 🔬 **v9.13.0 — Local Embeddings & Zero-API-Key Setup:** `LocalEmbeddingAdapter` using `nomic-embed-text-v1.5` generates 768-dim embeddings entirely on-device. Full semantic search and session memory now work with **zero cloud API keys**. → [Changelog](CHANGELOG.md#9130)
@@ -1373,7 +1373,7 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 | **v9.2** | Typed Security Errors — `PrototypePollutionError` with `offendingKey` for forensic logging; null-byte path injection guard in SafetyController | Defense-in-depth (NIST), C-string truncation attack mitigation | ✅ Shipped |
 | **v9.3** | ResidualNorm Tiebreaker — within-ε candidates ranked by compression fidelity (`PRISM_TURBOQUANT_TIEBREAKER_EPSILON`); +2pp R@1, +1pp R@5 at ε=0.005 | Quantization confidence scoring, compression-aware retrieval | ✅ Shipped |
 | **v10.0** | HIPAA-Hardened Local LLM — `prism-coder:7b` manages ledger compaction, task routing, and semantic search 100% on-device | Air-gapped cognitive pipelines, secure PHI redaction | ✅ Shipped |
-| **v11.5.0** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations (HRR) | 🧪 [Field Testing (Synalux)](https://github.com/dcostenco/synalux-docs) |
+| **v11.5.1** | Zero-Search Retrieval — no index, no ANN, just ask the vector | Holographic Reduced Representations (HRR) | 🧪 [Field Testing (Synalux)](https://github.com/dcostenco/synalux-docs) |
 
 ---
 
@@ -1413,11 +1413,11 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 
 ## <a name="milestones-roadmap"></a>📦 Milestones & Roadmap
 
-> **Current: v11.5.0** — Structural GRPO Alignment (100% Accuracy) ([CHANGELOG](CHANGELOG.md))
+> **Current: v11.5.1** — Structural GRPO Alignment (100% Accuracy) ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|
-| **v11.5.0** | 🧠 **Structural GRPO Alignment** — Perfect 100% accuracy cross-validated on Synalux Elite platform. |
+| **v11.5.1** | 🧠 **Structural GRPO Alignment** — Perfect 100% accuracy cross-validated on Synalux Elite platform. |
 | **v11.0.1** | 🧪 **Production Stability** — Field-tested Zero-Search logic merge, local logic finalization, HIPAA-hardened security refinement. |
 | **v11.0** | 🧠 **Zero-Search Retrieval** — Holographic Reduced Representations (HRR) + Deep Research Intelligence [🧪 Field Testing - Synalux](https://synalux.ai/docs) |
 | **v10.0** | 🛡️ **HIPAA-Hardened Local LLM** — `prism-coder:7b` powers compaction + task routing 100% on-device. |

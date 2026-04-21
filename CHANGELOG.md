@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## <a name="1151"></a>[11.5.1] - 2026-04-22 — 🛡️ Cross-Platform Reliability & CI Recovery
+
+> **The Stability Patch.** This version fixes regressions in the CI pipeline and ensures the 100% precision release is fully compatible with Windows and macOS environments.
+
+### 🛡️ CI & Cross-Platform Fixes
+- **Cross-Platform Test Suite** — Replaced all hardcoded `/tmp` paths with `os.tmpdir()` across `imageCaptioner.test.ts`, `definitions.test.ts`, and `sessionExportMemory.test.ts`. This resolves test failures on Windows CI runners.
+- **CI Workflow Optimization** — Split unit tests and heavyweight CLI integration tests into separate serial steps. This reduces resource contention and parallel load on GitHub Action runners, ensuring stable pass rates for process-level drift checks.
+- **Broken Anchor Fix** — Corrected documentation links in README to point to the new v11.5.x changelog headers.
+
 ## <a name="1150"></a>[11.5.0] - 2026-04-22 — 🧠 Structural GRPO Alignment (100% Accuracy)
 
 > **The Precision Release.** This version marks the successful completion of the Structural GRPO (Group Relative Policy Optimization) alignment phase, achieving perfect tool-calling scores and hardening the response pipeline against reasoning tag drift.
