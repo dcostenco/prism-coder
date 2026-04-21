@@ -38,7 +38,7 @@ async function makeIsolatedStorage(label: string) {
   const dbPath = join(dir, "data.db");
 
   const storage = new SqliteStorage();
-  await storage.initialize(dbPath); // ← direct arg, no env vars
+  await storage.initialize(true, dbPath); // ← direct arg, no env vars
 
   const cleanup = () => {
     try { (storage as any).close?.(); } catch { /* non-fatal */ }

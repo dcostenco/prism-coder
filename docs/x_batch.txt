@@ -1,0 +1,3 @@
+{"action": "open", "url": "https://x.com/dcostenco"}
+{"action": "wait-for", "selector": "article"}
+{"action": "read-page"}

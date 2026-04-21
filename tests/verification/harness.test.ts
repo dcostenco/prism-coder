@@ -83,7 +83,7 @@ describe("Verification Harness & Runs", () => {
     beforeEach(async () => {
       if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
       storage = new SqliteStorage();
-      await storage.initialize(dbPath);
+      await storage.initialize(true, dbPath);
     });
 
     it("saves and retrieves VerificationHarness", async () => {

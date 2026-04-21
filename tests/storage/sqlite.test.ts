@@ -64,7 +64,7 @@ describe("Database Initialization", () => {
    * The key SQL pattern: CREATE TABLE IF NOT EXISTS
    */
   it("should survive re-initialization without errors", async () => {
-    await expect(storage.initialize()).resolves.not.toThrow();
+    await expect(storage.initialize(true, storage.dbPath)).resolves.not.toThrow();
   });
 
   /**

@@ -34,7 +34,7 @@ describe("Cross-Backend Handoff & Ledger Reconciliation", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "prism-reconcile-"));
     dbPath = path.join(tmpDir, "test.db");
     storage = new SqliteStorage();
-    await storage.initialize(dbPath);
+    await storage.initialize(true, dbPath);
     mockSupabaseGet.mockReset();
   });
 

@@ -24,6 +24,8 @@ https://github.com/dcostenco/prism-mcp/raw/main/docs/prism_mcp_demo.mp4
 
 ## 📖 Table of Contents
 
+- [🔬 v11.0 Deep Research Intelligence (Auto-Scholar)](#deep-research-intelligence)
+- [⚡ Zero-Search Retrieval (HRR Architecture)](#zero-search)
 - [Why Prism?](#why-prism)
 - [Quick Start](#quick-start)
 - [The Magic Moment](#the-magic-moment)
@@ -53,7 +55,7 @@ Prism v11.0 transforms your AI agent from a "Coder" into a "Clinical Scientist."
 
 | Feature | **Standard AI Memory (Mem0/Zep)** | **Prism v11.0 (Elite Architecture)** |
 | :--- | :--- | :--- |
-| **Search Complexity** | $O(N)$ or $O(\log N)$ (Scales with data) | **$O(1)$ Zero-Search (Constant time via HRR)** |
+| **Search Complexity** | $O(N)$ or $O(\log N)$ (Scales with data) | **$O(1)$ Zero-Search (Constant time via HRR) ** |
 | **Discovery Logic** | General Web Search (Snippets) | **Parallel Academic Discovery (PubMed, ERIC, S2)** |
 | **Reasoning Model** | Flat List (Simple Similarity) | **ACT-R Spreading Activation (Causal Graph)** |
 | **Privacy Mode** | Cloud-First (SaaS) | **Local-First (HIPAA-Hardened / Air-Gapped)** |
@@ -105,7 +107,7 @@ Prism features a cutting-edge **Zero-Search Retrieval** system for its cognitive
 
 ---
 
-## Why Prism?
+## <a name="why-prism"></a>Why Prism?
 
 Every time you start a new conversation with an AI coding assistant, it starts from scratch. You re-explain your architecture, re-describe your decisions, re-list your TODOs. Hours of context — gone.
 
@@ -650,7 +652,7 @@ OpenTelemetry spans for every MCP tool call, LLM hop, and background worker. Rou
 ### 🌐 Autonomous Web Scholar
 Prism researches while you sleep. A background pipeline searches the web, scrapes articles, synthesizes findings via LLM, and injects results directly into your semantic memory — fully searchable on your next session. Brave Search → Firecrawl scrape → LLM synthesis → Prism ledger. Task-aware, Hivemind-integrated, and zero-config when API keys are missing (falls back to Yahoo + Readability).
 
-### 🏭 Dark Factory — Adversarial Autonomous Pipelines
+### 🏭 <a name="dark-factory-adversarial-autonomous-pipelines"></a>Dark Factory — Adversarial Autonomous Pipelines
 When you trigger a Dark Factory pipeline, Prism doesn't just run your task — it fights itself to produce high-quality output. A `PLAN_CONTRACT` step locks a machine-parseable rubric before any code is written. After execution, an **Adversarial Evaluator** (in a fully isolated context) scores the output against the rubric. It cannot pass the Generator without providing exact file and line evidence for every failing criterion. Failed evaluations inject the critique directly into the Generator's retry prompt so it's never flying blind. The result: security issues, regressions, and lazy debug logs caught autonomously — before you ever see the PR. → [See it in action](examples/adversarial-eval-demo/README.md)
 
 ---
@@ -921,9 +923,10 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## <a name="whats-new"></a>🆕 What's New
 
-> **Current release: v10.0.1 — HIPAA-Hardened Local LLM Engine**
+> **Current release: v11.0.1 — Zero-Search Retrieval ($O(1)$)**
 
-- 🛡️ **v10.0.0 — HIPAA-Hardened Local LLM:** Your agent's memory now runs entirely on-device. Introducing `prism-coder:7b` for local compaction, task routing, and semantic search. Includes `PRISM_STRICT_LOCAL_MODE` to block cloud fallbacks, SSRF protection, URL credential redaction, and full XML escaping to prevent prompt injection. 22-finding adversarial audit completed. → [Changelog](CHANGELOG.md#1000)
+- 🧪 **v11.0.1 — Zero-Search Field Testing:** Field-verified constant-time retrieval. → [Changelog](CHANGELOG.md#1101)
+- 🛡️ **v11.0.0 — HIPAA-Hardened Local LLM:** Your agent's memory now runs entirely on-device. Introducing `prism-coder:7b` for local compaction, task routing, and semantic search. Includes `PRISM_STRICT_LOCAL_MODE` to block cloud fallbacks, SSRF protection, URL credential redaction, and full XML escaping to prevent prompt injection. 22-finding adversarial audit completed. → [Changelog](CHANGELOG.md#1100)
 - 🧬 **v9.14.0 — Dynamic Hardware Routing:** Platform-aware memory detection auto-selects optimal models (32b for ≥32GB RAM, 14b/7b for lighter hardware). Includes **Nomic Semantic Tool Pruning (RAG)** which embeds all 17 MCP tools into offline vectors, injecting only the Top-3 relevant schemas into context to maximize inference speed.
 - 🔬 **v9.13.0 — Local Embeddings & Zero-API-Key Setup:** `LocalEmbeddingAdapter` using `nomic-embed-text-v1.5` generates 768-dim embeddings entirely on-device. Full semantic search and session memory now work with **zero cloud API keys**. → [Changelog](CHANGELOG.md#9130)
 - 🔒 **v9.12.0 — Memory Security Hardening:** Prevents **stored prompt injection** — the AI equivalent of stored XSS. New `sanitizeMemoryInput()` strips 8 categories of dangerous XML tags from all text fields. Context output wrapped in `<prism_memory context="historical">` boundary tags. → [Changelog](CHANGELOG.md#9120)
@@ -1159,7 +1162,7 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 
 ---
 
-## Environment Variables
+## <a name="environment-variables"></a>Environment Variables
 
 > **🚦 TL;DR — Just want the best experience fast?** Two options:
 > ```
@@ -1224,7 +1227,7 @@ Some configurations are stored dynamically in SQLite (`system_settings` table) a
 
 ---
 
-## Architecture
+## <a name="architecture"></a>Architecture
 
 Prism is a **stdio-based MCP server** that manages persistent agent memory. Here's how the pieces fit together:
 
@@ -1386,10 +1389,11 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 
 ## <a name="milestones-roadmap"></a>📦 Milestones & Roadmap
 
-> **Current: v11.0.0** — Deep Research Intelligence + $O(1)$ HRR Memory Breakthrough ([CHANGELOG](CHANGELOG.md))
+> **Current: v11.0.1** — Production Stability + $O(1)$ HRR Memory Breakthrough ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|
+| **v11.0.1** | 🧪 **Production Stability** — Field-tested Zero-Search logic merge, local logic finalization, HIPAA-hardened security refinement. |
 | **v11.0** | 🧠 **Zero-Search Retrieval** — Holographic Reduced Representations (HRR) + Deep Research Intelligence [🧪 [Field Testing - Synalux](https://synalux.ai/docs)] |
 | **v10.0** | 🛡️ **HIPAA-Hardened Local LLM** — `prism-coder:7b` powers compaction + task routing 100% on-device. |
 | **v9.14** | 🧬 Dynamic Hardware Routing & Semantic Tool RAG — MLX SFT pipeline, Nomic pruning, GRPO alignment |

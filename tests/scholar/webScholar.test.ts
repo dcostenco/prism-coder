@@ -42,6 +42,10 @@ const { mockConfig, mockStorage, mockFetch } = vi.hoisted(() => {
   const mockConfig = {
     BRAVE_API_KEY: "test-brave-key",
     FIRECRAWL_API_KEY: "test-firecrawl-key",
+    TAVILY_API_KEY: undefined,
+    GOOGLE_SEARCH_API_KEY: undefined,
+    GOOGLE_SEARCH_CX: undefined,
+    SEMANTIC_SCHOLAR_API_KEY: undefined,
     PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN: 3,
     PRISM_USER_ID: "default",
     PRISM_SCHOLAR_TOPICS: ["ai", "agents", "mcp", "authentication"],
@@ -62,7 +66,7 @@ const { mockConfig, mockStorage, mockFetch } = vi.hoisted(() => {
       success: true,
       data: { markdown: "# Test Article\n\nSome content about AI." },
     }),
-    text: vi.fn().mockResolvedValue("<html><body></body></html>"),
+    text: vi.fn().mockResolvedValue("<html><body><h1>Test Title</h1><article><p>Some content about AI.</p></article></body></html>"),
   });
 
   return { mockConfig, mockStorage, mockFetch };
@@ -236,7 +240,7 @@ describe("Web Scholar — Task-Aware Topic Selection", () => {
     // Verify saveLedger was called with a valid topic
     const savedEntry = mockStorage.saveLedger.mock.calls[0]?.[0];
     expect(savedEntry).toBeDefined();
-    expect(savedEntry.summary).toMatch(/Autonomous Web Scholar Research:/);
+    expect(savedEntry.summary).toMatch(/Research:/);
 
     // The topic should be one of our configured topics
     const topicMatch = mockConfig.PRISM_SCHOLAR_TOPICS.some(

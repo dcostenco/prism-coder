@@ -78,7 +78,7 @@ export async function createTestDb(testName: string) {
   // again after initialize() returns, so no race is possible at any point.
   const { SqliteStorage } = await import("../../src/storage/sqlite.js");
   const storage = new SqliteStorage();
-  await storage.initialize(dbPath);
+  await storage.initialize(true, dbPath);
 
   return {
     storage,
