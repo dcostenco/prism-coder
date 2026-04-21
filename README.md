@@ -1412,7 +1412,7 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 |---------|----------|
 | **v11.4.0** | 🧠 **Structural GRPO Alignment** — Perfect 100% accuracy cross-validated on Synalux Elite platform. |
 | **v11.0.1** | 🧪 **Production Stability** — Field-tested Zero-Search logic merge, local logic finalization, HIPAA-hardened security refinement. |
-| **v11.0** | 🧠 **Zero-Search Retrieval** — Holographic Reduced Representations (HRR) + Deep Research Intelligence [🧪 [Field Testing - Synalux](https://synalux.ai/docs)] |
+| **v11.0** | 🧠 **Zero-Search Retrieval** — Holographic Reduced Representations (HRR) + Deep Research Intelligence [🧪 Field Testing - Synalux](https://synalux.ai/docs) |
 | **v10.0** | 🛡️ **HIPAA-Hardened Local LLM** — `prism-coder:7b` powers compaction + task routing 100% on-device. |
 | **v9.14** | 🧬 Dynamic Hardware Routing & Semantic Tool RAG — MLX SFT pipeline, Nomic pruning, GRPO alignment |
 | **v9.13** | 🔬 Local Embeddings & Zero-API-Key Semantic Search — `nomic-embed-text-v1.5` on-device |
