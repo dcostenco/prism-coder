@@ -10,7 +10,7 @@ const exec = promisify(execCb);
 // This test suite spans actual OS processes to verify the final binary contract.
 // Timeout: 30s per test — npx tsx cold-starts take 10-15s on Windows CI runners.
 describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000 }, () => {
-  const cliPath = path.resolve(__dirname, '../../src/cli.ts');
+  const cliPath = path.resolve(__dirname, '../../dist/cli.js');
   const dbPath = path.resolve(process.cwd(), 'prism-local.db');
   const harnessPath = './verification_harness.json';
   // Clear ALL CI-detection env vars to simulate local dev (isStrictVerificationEnv checks CI, GITHUB_ACTIONS, GITLAB_CI, PRISM_STRICT_VERIFICATION)
@@ -47,7 +47,7 @@ describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000
 
   it('verify status (text mode) outputs human readable text', async () => {
     // We expect 0 exit code because there is no run, but it should not crash
-    const { stdout, stderr } = await exec(`npx tsx "${cliPath}" verify status -p test-proj`, execOpts);
+    const { stdout, stderr } = await exec(`node "${cliPath}" verify status -p test-proj`, execOpts);
     
     expect(stdout).toContain('Checking verification status for project: test-proj');
     expect(stdout).toContain('No previous verification runs found');
@@ -55,7 +55,7 @@ describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000
   });
 
   it('verify status (--json mode) outputs schema-locked JSON', async () => {
-    const { stdout, stderr } = await exec(`npx tsx "${cliPath}" verify status -p test-proj --json`, execOpts);
+    const { stdout, stderr } = await exec(`node "${cliPath}" verify status -p test-proj --json`, execOpts);
     
     const parsed = JSON.parse(stdout.trim());
     
@@ -68,7 +68,7 @@ describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000
   });
 
   it('verify generate (--json mode) registers harness and emits JSON', async () => {
-    const { stdout, stderr } = await exec(`npx tsx "${cliPath}" verify generate -p test-proj --json`, execOpts);
+    const { stdout, stderr } = await exec(`node "${cliPath}" verify generate -p test-proj --json`, execOpts);
     
     const parsed = JSON.parse(stdout.trim());
     
@@ -112,7 +112,7 @@ describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000
     });
 
     it('Local Dev (CI=false, force=false) -> WARN, exit 0', async () => {
-      const { stdout, stderr } = await exec(`npx tsx "${cliPath}" verify status -p test-proj --json`, execOpts);
+      const { stdout, stderr } = await exec(`node "${cliPath}" verify status -p test-proj --json`, execOpts);
       
       const parsed = JSON.parse(stdout.trim());
       expect(parsed.drift.strict_env).toBe(false);
@@ -137,7 +137,7 @@ describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000
     });
 
     it('Local Dev (text mode) renders diff_counts summary line', async () => {
-      const { stdout } = await exec(`npx tsx "${cliPath}" verify status -p test-proj`, execOpts);
+      const { stdout } = await exec(`node "${cliPath}" verify status -p test-proj`, execOpts);
       
       // Diff Summary line should appear in human output
       expect(stdout).toContain('+1 added');
@@ -151,7 +151,7 @@ describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000
       const ciOpts = { env: { ...process.env, CI: 'true' } };
       let err: any;
       try {
-        await exec(`npx tsx "${cliPath}" verify status -p test-proj --json`, ciOpts);
+        await exec(`node "${cliPath}" verify status -p test-proj --json`, ciOpts);
       } catch (e: any) {
         err = e;
       }
@@ -168,12 +168,13 @@ describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000
 
     it('CI Environment + Force (CI=true, force=true) -> BYPASSED, exit 0', async () => {
       const ciOpts = { env: { ...process.env, CI: 'true' } };
-      const { stdout } = await exec(`npx tsx "${cliPath}" verify status -p test-proj --force --json`, ciOpts);
+      const { stdout } = await exec(`node "${cliPath}" verify status -p test-proj --force --json`, ciOpts);
       
       const parsed = JSON.parse(stdout.trim());
       expect(parsed.drift.strict_env).toBe(true);
       expect(parsed.drift.policy).toBe('bypassed');
       expect(parsed.exit_code).toBe(0);
     });
+
   });
 });
