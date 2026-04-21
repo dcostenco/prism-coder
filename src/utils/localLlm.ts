@@ -157,14 +157,19 @@ export async function callLocalLlm(
     // The Phase 6 model uses <|synalux_think|> ... <|tool_call|> tags.
     // We strip the thinking part and any outer tags to return the clean content.
     let content = rawContent;
-    if (content.includes("<|synalux_think|>")) {
-      content = content.split("</|synalux_think|>").pop()?.trim() || content;
+
+    // Strip <|synalux_think|>...</|synalux_think|> block via regex.
+    // Previous .split().pop() silently kept the thinking block on malformed
+    // closing tags and broke on multiple tag occurrences.
+    const thinkMatch = content.match(/<\|synalux_think\|>[\s\S]*?<\/\|synalux_think\|>\s*/);
+    if (thinkMatch) {
+      content = content.slice(thinkMatch.index! + thinkMatch[0].length).trim();
     }
-    
-    // If the response is wrapped in <|tool_call|> tags, strip them.
-    if (content.includes("<|tool_call|>")) {
-      const match = content.match(/<\|tool_call\|>([\s\S]*?)<\/\|tool_call\|>/);
-      if (match) content = match[1].trim();
+
+    // If the response is wrapped in <|tool_call|> tags, extract inner content.
+    const toolCallMatch = content.match(/<\|tool_call\|>([\s\S]*?)<\/\|tool_call\|>/);
+    if (toolCallMatch) {
+      content = toolCallMatch[1].trim();
     }
 
     debugLog(`[localLlm] Response received (${content.length} chars)`);

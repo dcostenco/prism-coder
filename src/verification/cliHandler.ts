@@ -5,7 +5,7 @@ import { computeRubricHash, VerificationHarness } from './schema.js';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /** H5 fix: Centralize the harness file path as a constant */
-const DEFAULT_HARNESS_PATH = './verification_harness.json';
+const DEFAULT_HARNESS_PATH = process.env.PRISM_HARNESS_PATH || './verification_harness.json';
 
 import { TestAssertion } from './schema.js';
 
