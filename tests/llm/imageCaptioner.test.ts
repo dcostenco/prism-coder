@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as nodePath from "path";
+import * as os from "os";
 
 // ─── Mock all external dependencies ──────────────────────────────────────────
 
@@ -43,7 +44,7 @@ function makeStorageMock() {
             id: "abc12345",
             description: "Login page screenshot",
             filename: "abc12345.png",
-            original_path: "/tmp/login.png",
+            original_path: nodePath.join(os.tmpdir(), "login.png"),
             timestamp: "2026-03-25T12:00:00.000Z",
           },
         ],
@@ -87,8 +88,8 @@ function makeTextOnlyProvider() {
 let tmpFile: string;
 
 beforeEach(() => {
-  // Create a tiny fake PNG in /tmp for file-read tests
-  tmpFile = nodePath.join("/tmp", `test-prism-img-${Date.now()}.png`);
+  // Create a tiny fake PNG in tmp dir for file-read tests
+  tmpFile = nodePath.join(os.tmpdir(), `test-prism-img-${Date.now()}.png`);
   // 1x1 transparent PNG (89 bytes) — valid enough to not fail fs.existsSync
   const minimalPng = Buffer.from(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489" +
@@ -188,7 +189,7 @@ describe("ImageCaptioner — fireCaptionAsync pipeline", () => {
     mockGetStorage.mockResolvedValue(storage as any);
 
     // Write a fake 6MB file (over 5MB Anthropic limit)
-    const bigFile = "/tmp/prism-bigtest.png";
+    const bigFile = nodePath.join(os.tmpdir(), "prism-bigtest.png");
     fs.writeFileSync(bigFile, Buffer.alloc(6 * 1024 * 1024, 0));
     try {
       fireCaptionAsync("prism", "abc12345", bigFile, "large image");

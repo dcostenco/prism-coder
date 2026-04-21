@@ -736,7 +736,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
     });
 
     it("args is a plain string → isError=true", async () => {
-      expect((await sessionExportMemoryHandler("/tmp/exports")).isError).toBe(true);
+      expect((await sessionExportMemoryHandler(join(tmpdir(), "exports"))).isError).toBe(true);
     });
 
     it("output_dir is a number, not a string → isError=true", async () => {
