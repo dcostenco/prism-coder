@@ -30,6 +30,12 @@ jobs:
       - name: Build TypeScript
         run: npm run build
         
-      - name: Run All Tests
-        # Execute the full test suite including dashboard, SDM engine, and storage
-        run: npm test
+      - name: Run Unit Tests
+        # Skip the heavyweight CLI integration tests to keep parallel load low
+        run: npx vitest run --exclude tests/verification/cli-integration.test.ts
+
+      - name: Process-Level CLI Tests
+        # Specifically runs the OS-level integration tests to ensure
+        # drift policies and JSON exit codes are honored physically.
+        # Run sequentially after unit tests pass.
+        run: npx vitest run tests/verification/cli-integration.test.ts

@@ -25,6 +25,8 @@
  */
 
 import { describe, it, expect } from "vitest";
+import os from "node:os";
+import path from "node:path";
 import {
   isSessionSaveLedgerArgs,
   isSessionSaveHandoffArgs,
@@ -335,7 +337,7 @@ describe("isSessionExportMemoryArgs", () => {
    */
 
   it("accepts minimal valid args (output_dir only)", () => {
-    expect(isSessionExportMemoryArgs({ output_dir: "/tmp/exports" })).toBe(true);
+    expect(isSessionExportMemoryArgs({ output_dir: path.join(os.tmpdir(), "exports") })).toBe(true);
   });
 
   it("accepts full args (project + format + output_dir)", () => {
@@ -349,7 +351,7 @@ describe("isSessionExportMemoryArgs", () => {
   it("accepts markdown format", () => {
     expect(isSessionExportMemoryArgs({
       format:     "markdown",
-      output_dir: "/tmp/exports",
+      output_dir: path.join(os.tmpdir(), "exports"),
     })).toBe(true);
   });
 
@@ -376,15 +378,15 @@ describe("isSessionExportMemoryArgs", () => {
 
   it("rejects a plain string (the path itself, not an args object)", () => {
     // Common mistake: LLM passes the path directly instead of { output_dir: path }
-    expect(isSessionExportMemoryArgs("/tmp/exports")).toBe(false);
+    expect(isSessionExportMemoryArgs(path.join(os.tmpdir(), "exports"))).toBe(false);
   });
 
   it("allows project to be omitted (exports all projects when absent)", () => {
     // project is OPTIONAL in the schema — omitting it is valid
-    const args: unknown = { output_dir: "/tmp/exports" };
+    const args: unknown = { output_dir: path.join(os.tmpdir(), "exports") };
     if (isSessionExportMemoryArgs(args)) {
       // project should be accessible but undefined
-      expect(args.output_dir).toBe("/tmp/exports");
+      expect(args.output_dir).toBe(path.join(os.tmpdir(), "exports"));
       expect(args.project).toBeUndefined();
     } else {
       expect.unreachable("Guard should accept args without project");

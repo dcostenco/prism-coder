@@ -11,6 +11,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import os from 'node:os';
+import path from 'node:path';
 import { parseExecuteOutput } from '../../src/darkfactory/runner.js';
 import { SafetyController } from '../../src/darkfactory/safetyController.js';
 import type { PipelineSpec, ActionPayload } from '../../src/darkfactory/schema.js';
@@ -368,7 +370,7 @@ describe('validateActionsInScope — path resolution edge cases', () => {
 
   it('should reject absolute path outside workspace', () => {
     const spec = makeSpec('/app/workspace');
-    const actions: ActionPayload[] = [{ type: 'READ_FILE', targetPath: '/tmp/evil.ts' }];
+    const actions: ActionPayload[] = [{ type: 'READ_FILE', targetPath: path.join(os.tmpdir(), 'evil.ts') }];
     const result = SafetyController.validateActionsInScope(actions, spec);
     expect(result).toContain('resolves outside permitted scope');
   });
