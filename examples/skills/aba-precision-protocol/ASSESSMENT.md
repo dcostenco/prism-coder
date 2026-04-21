@@ -81,7 +81,8 @@ async function generateSOAPWithABA(dictation: string) {
 
 ### Domain 3: ABC Data Collection (Sessions Page)
 
-**Current state**: The sessions page ([sessions/page.tsx](../../../../synalux-private/portal/src/app/app/sessions/page.tsx)) has ABC buttons but NO validation. RBTs/Medical Technicians can select any combination without behavioral constraints.
+**Current state**: The sessions page has ABC buttons but NO validation.
+ RBTs/Medical Technicians can select any combination without behavioral constraints.
 
 | ABA Rule | Current Problem | Proposed Improvement |
 |----------|----------------|---------------------|

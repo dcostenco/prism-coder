@@ -828,7 +828,7 @@ describe("Output Guardrail: Deterministic Post-Generation Filter", () => {
     [
       "https://vercel.com/dcostencos-projects/portal/deployments",
       "https://synalux.ai/dashboard",
-      "https://github.com/dcostenco/synalux-private",
+      "https://github.com/dcostenco/synalux-docs",
       "\`npm run build\`",
       "\`git push origin main\`",
       "3 patients found matching that criteria.",
@@ -965,7 +965,7 @@ describe("URL Domain Whitelist", () => {
   const safe = [
     "https://vercel.com/deployments",
     "https://vercel.com/dcostencos-projects/portal/deployments",
-    "https://github.com/dcostenco/synalux-private",
+    "https://github.com/dcostenco/synalux-docs",
     "https://synalux.ai/dashboard",
     "https://app.synalux.ai/patient-portal",
     "https://supabase.co/dashboard",
@@ -1096,7 +1096,7 @@ describe("Edge: URL Whitelist Bypass Attempts", () => {
 
   describe("path traversal", () => {
     it("ALLOWED: vercel with deep path", () => expect(isSafe("https://vercel.com/dcostencos-projects/portal/deployments")).toBe(true));
-    it("ALLOWED: github with repo path", () => expect(isSafe("https://github.com/dcostenco/synalux-private/issues")).toBe(true));
+    it("ALLOWED: github with repo path", () => expect(isSafe("https://github.com/dcostenco/synalux-docs/issues")).toBe(true));
   });
 
   describe("empty inputs", () => {

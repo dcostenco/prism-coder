@@ -60,7 +60,7 @@ export const RULE7_CLOUD = [
   '  THEN respond: https://vercel.com/dcostencos-projects/portal/deployments',
   '',
   'IF user says "open github" or "check github":',
-  '  THEN respond: https://github.com/dcostenco/synalux-private',
+  '  THEN respond: https://github.com/dcostenco/synalux-docs',
   '',
   'IF user says "open browser" with no specific target:',
   '  THEN respond: https://synalux.ai/dashboard',

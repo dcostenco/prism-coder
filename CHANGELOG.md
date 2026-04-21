@@ -30,7 +30,7 @@ All notable changes to this project will be documented in this file.
 ### 🔬 Zero-Search Retrieval (Field Testing)
 - **Synalux Integration** — Verified the core mathematical unbinding engine (Circular Convolution + Superposition) in high-compliance clinical workflows.
 - **O(1) Retrieval Performance** — Proved constant-time fact recovery regardless of working memory size. Synalux benchmarks show 1.17x speed advantage over traditional linear scans at 100+ facts.
-- **Cognitive Suit Verification** — Full linkage to verified [math](https://github.com/dcostenco/synalux-private/blob/main/portal/src/lib/cognitive/hrr.ts) and [tests](https://github.com/dcostenco/synalux-private/blob/main/portal/src/lib/cognitive/__tests__/hrr.test.ts).
+- **Cognitive Suit Verification** — Full linkage to verified [math](./src/sdm/hdc.ts) and [tests](./tests/verification/cli-integration.test.ts).
 
 ### 🔒 HIPAA-Hardened Local LLM (Logic Merge)
 - **Local Logic Finalization** — Complete merge of `prism-coder:7b` task routing and ledger compaction logic.

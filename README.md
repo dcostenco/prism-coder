@@ -1378,9 +1378,9 @@ Prism has evolved from smart session logging into a **cognitive memory architect
 
 ### 🧪 Verified Zero-Search Implementation
 The core unbinding engine is verified via Synalux's cognitive testing suite:
-- **Core Math**: [Holographic Reduced Representations (hdc.ts)](https://github.com/dcostenco/prism-mcp/blob/main/src/sdm/hdc.ts)
-- **Unit Tests**: [HDC Performance & Capacity Tests](https://github.com/dcostenco/prism-mcp/tree/main/tests)
-- **Benchmarks**: [O(1) Retrieval Comparison Script](https://github.com/dcostenco/prism-mcp/blob/main/tests/verification/cli-integration.test.ts)
+- **Core Math**: [Holographic Reduced Representations (hdc.ts)](./src/sdm/hdc.ts)
+- **Unit Tests**: [HDC Performance & Capacity Tests](./tests)
+- **Benchmarks**: [O(1) Retrieval Comparison Script](./tests/verification/cli-integration.test.ts)
 
 > Informed by Anderson's ACT-R (Adaptive Control of Thought—Rational), Collins & Loftus spreading activation networks (1975), Kanerva's SDM (1988), Hebb's learning rule, and LeCun's "Why AI Systems Don't Learn" (Dupoux, LeCun, Malik).
 
