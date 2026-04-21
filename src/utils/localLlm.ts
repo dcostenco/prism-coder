@@ -147,10 +147,24 @@ export async function callLocalLlm(
       return null;
     }
 
-    const content = data.message?.content?.trim() ?? null;
-    if (!content) {
+    const rawContent = data.message?.content?.trim() ?? null;
+    if (!rawContent) {
       debugLog("[localLlm] Empty content in Ollama response");
       return null;
+    }
+
+    // ── v11.4 Structural Processing ──────────────────────────
+    // The Phase 6 model uses <|synalux_think|> ... <|tool_call|> tags.
+    // We strip the thinking part and any outer tags to return the clean content.
+    let content = rawContent;
+    if (content.includes("<|synalux_think|>")) {
+      content = content.split("</|synalux_think|>").pop()?.trim() || content;
+    }
+    
+    // If the response is wrapped in <|tool_call|> tags, strip them.
+    if (content.includes("<|tool_call|>")) {
+      const match = content.match(/<\|tool_call\|>([\s\S]*?)<\/\|tool_call\|>/);
+      if (match) content = match[1].trim();
     }
 
     debugLog(`[localLlm] Response received (${content.length} chars)`);
