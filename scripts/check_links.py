@@ -13,8 +13,9 @@ def check_markdown_links(root_dir):
             if f.endswith('.md'):
                 md_files.append(os.path.join(root, f))
     
-    # regex to find links but NOT those preceded or followed by `
-    link_pattern = re.compile(r'(?<!`)\[([^\]]+)\]\(([^)]+)\)(?!`)')
+    # regex to find standard markdown links: [text](link)
+    # excludes [text] alone or [[wikilinks]]
+    link_pattern = re.compile(r'\[([^\[\]]+)\]\(([^)]+)\)')
     broken_links = []
 
     for md_file in md_files:
@@ -43,8 +44,11 @@ def check_markdown_links(root_dir):
                 # Resolve relative path
                 target_path = os.path.normpath(os.path.join(os.path.dirname(md_file), link_path))
                 
-                # Check file existence
-                if not os.path.exists(target_path):
+                # Check file existence (must be a file or dir)
+                # But links to directories should usually have a trailing slash or be handled
+                exists = os.path.exists(target_path)
+                print(f"  Path: {target_path} -> Exists: {exists}")
+                if not exists:
                     broken_links.append((md_file, link, "Broken Path"))
                 elif anchor:
                     # Verify anchor exists in target file
