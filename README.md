@@ -997,7 +997,9 @@ Prism's local engine (`prism-coder:7b`) is optimized for low-latency, high-valid
 | **Generation Speed** | **47.0 Tok/sec** | Apple M4 Max, 36GB |
 | **Avg Latency** | **1.6s** | Per-prompt inference time |
 
-#### 🔬 How Prism-Coder Compares to Cloud Giants
+---
+
+### 🔬 How Prism-Coder Compares to Cloud Giants
 
 | Metric | 🧠 Prism-Coder 7B | GPT-4o | Claude 3.5 Sonnet | Gemini 2.0 Flash |
 |:-------|:---:|:---:|:---:|:---:|
