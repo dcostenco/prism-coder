@@ -1006,6 +1006,7 @@ Prism's local engine (`prism-coder:7b`) is optimized for low-latency, high-valid
 | **Retrieval Accuracy** | **100.0%** | ~95% | ~96% | ~92% |
 | **Parameter Accuracy** | **80.0%** | ~90% | ~92% | ~88% |
 | **Latency** | **1.6s** | 2-5s | 2-4s | 1-3s |
+| **Memory Used** | **8.1 GB** (on-device) | N/A (cloud) | N/A (cloud) | N/A (cloud) |
 | **Token Cost** | **$0 (local)** | $5/1M tokens | $3/1M tokens | $0.40/1M tokens |
 | **Privacy** | **100% on-device** | ❌ Cloud | ❌ Cloud | ❌ Cloud |
 | **Parameters** | **7B** | ~200B+ | ~175B+ | ~100B+ |
