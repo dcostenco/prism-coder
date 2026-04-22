@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## <a name="1160"></a>[11.6.0] - 2026-04-22 — 🏗️ Agent Infrastructure Resilience
+
+> **The Multi-Agent Stability Release.** Prism v11.6.0 introduces production-grade infrastructure for running multiple AI agents concurrently without resource exhaustion, deadlocks, or zombie processes. Every component is cross-platform (macOS/Linux) with zero GNU dependencies.
+
+### 🏗️ Agent Infrastructure
+
+- **Serialized Execution Queue (`agent_queue.sh` v2.0)** — Complete rewrite replacing GNU `flock` with Python `fcntl.flock` for macOS-native file locking. Ensures strict mutual exclusion when loading Ollama models, preventing OOM crashes from concurrent model loads. Includes PID tracking and automatic cleanup on exit.
+- **Memory Guardian Daemon (`memory_guardian.sh`)** — Background watchdog that proactively monitors RAM pressure via `vm_stat` page-out rate. Auto-evicts idle Ollama models before swap exhaustion occurs. Configurable thresholds with graceful degradation. Logs to `/tmp/memory_guardian.log`.
+- **Queue Watchdog (`queue_watchdog.sh`)** — Detects and auto-drains hung queue entries based on PID file age (>10 min). Prevents deadlocks in long-running pipelines. Non-destructive: only removes entries whose owning process has exited.
+- **Unified Status Dashboard (`agent_status.sh`)** — Color-coded CLI providing real-time visibility into queue depth, guardian health, Ollama model status, and system memory. Supports `--json` mode for programmatic consumption by other tools and CI/CD pipelines.
+
+### 🧪 Testing & Verification
+
+- **115/115 Tests Passing** across 5 test suites:
+  - **Unit tests** (60) — Core `claw_agent_lite.py` logic: model selection, hardware detection, streaming buffer, error handling
+  - **Concurrent tests** (17) — File lock contention, parallel agent serialization, race condition guards
+  - **Shell integration tests** (21) — `agent_queue.sh`, `memory_guardian.sh`, `ollama_warmup.sh` lifecycle and interaction
+  - **Mock Ollama integration** (8) — Self-contained HTTP mock server for deterministic pipeline testing without live models
+  - **Live stress tests** (9) — Real Ollama integration under concurrent load with status dashboard verification
+
+### 🔧 Codebase Hardening
+
+- **Bash `set -e` Arithmetic Fix** — Resolved `((x++))` pitfall where zero-result arithmetic causes script exit under strict mode. Applied across all shell scripts.
+- **macOS Compatibility** — Eliminated all GNU-specific dependencies (`flock`, `timeout`, `readlink -f`). All scripts work out-of-the-box on macOS and Linux.
+- **10 Bug Fixes in `claw_agent_lite.py`** — JSON parsing resilience, null pointer guards, connection failure handling, streaming buffer for split `<think>` tags, and proper error propagation for programmatic integration.
+
+### Engineering
+- New files: `agent_queue.sh` (v2.0), `memory_guardian.sh`, `queue_watchdog.sh`, `agent_status.sh`, `test_integration_pipeline.py`, `test_shell_scripts.sh`, `test_live_stress.sh`
+- Modified: `claw_agent_lite.py`, `ollama_warmup.sh`
+- All changes verified on Apple M4 Max (36GB) and compatible with M3 (18GB)
+
+---
+
 ## <a name="1151"></a>[11.5.1] - 2026-04-22 — 🛡️ Cross-Platform Reliability & CI Recovery
 
 > **The Stability Patch.** This version fixes regressions in the CI pipeline and ensures the 100% precision release is fully compatible with Windows and macOS environments.

@@ -8,11 +8,11 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-![Prism Mind Palace Dashboard](docs/v6_cognitive_load_dashboard.png)
+![Prism Hivemind Multi-Agent Dashboard](docs/v11_hivemind_multi_agent_dashboard.png)
 
 **Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
-Prism v11.5.1 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.** With v11.5.1, the entire cognitive pipeline — including ledger compaction, task routing, semantic search, and the new **Deep Research Intelligence** — runs **100% on-device** or via secure clinical discovery (PubMed/ERIC), backed by `prism-coder:7b`, a HIPAA-hardened local LLM. No API keys for core features. No data leaves your machine.
+Prism v11.6.0 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.** With v11.6.0, the entire cognitive pipeline — including ledger compaction, task routing, semantic search, and the new **Agent Infrastructure Resilience** — runs **100% on-device** or via secure clinical discovery (PubMed/ERIC), backed by `prism-coder:7b`, a HIPAA-hardened local LLM. No API keys for core features. No data leaves your machine.
 
 ```bash
 npx -y prism-mcp-server
@@ -24,6 +24,7 @@ https://github.com/dcostenco/prism-mcp/raw/main/docs/prism_mcp_demo.mp4
 
 ## 📖 Table of Contents
 
+- [🏗️ v11.6.0 Agent Infrastructure Resilience](#agent-infrastructure)
 - [🔬 v11.5.1 Deep Research Intelligence (Auto-Scholar)](#deep-research-intelligence)
 - [⚡ Zero-Search Retrieval (HRR Architecture)](#zero-search)
 - [Why Prism?](#why-prism)
@@ -44,6 +45,26 @@ https://github.com/dcostenco/prism-mcp/raw/main/docs/prism_mcp_demo.mp4
 - [Scientific Foundation](#scientific-foundation)
 - [Milestones & Roadmap](#milestones-roadmap)
 - [Troubleshooting FAQ](#troubleshooting-faq)
+
+---
+
+## 🏗️ <a name="agent-infrastructure"></a>v11.6.0 Agent Infrastructure Resilience
+
+Prism v11.6.0 introduces **production-grade agent infrastructure** for running multiple AI agents concurrently without resource exhaustion or deadlocks. The new resilience layer includes:
+
+- **Serialized Execution Queue** (`agent_queue.sh` v2.0) — Cross-platform file locking via Python `fcntl.flock` (no GNU dependencies) ensures strict mutual exclusion when loading Ollama models, preventing OOM crashes from concurrent model loads.
+- **Memory Guardian Daemon** — Background watchdog that proactively monitors RAM pressure and auto-evicts idle models before swap exhaustion occurs.
+- **Queue Watchdog** — Detects and auto-drains hung queue entries (>10 min PID age) to prevent deadlocks in long-running pipelines.
+- **Unified Status Dashboard** (`agent_status.sh`) — Color-coded CLI providing real-time visibility into queue depth, guardian health, and Ollama status with `--json` mode for programmatic consumption.
+
+| Component | What It Prevents |
+| :--- | :--- |
+| **Serialized Queue** | OOM from concurrent model loading |
+| **Memory Guardian** | Swap exhaustion under high memory pressure |
+| **Queue Watchdog** | Deadlocks from zombie queue entries |
+| **Status Dashboard** | Blind spots in infrastructure health |
+
+> 🧪 **Verified:** 115/115 tests passing across unit, concurrent, shell integration, mock Ollama, and live stress test suites.
 
 ---
 
@@ -923,18 +944,15 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## <a name="whats-new"></a>🆕 What's New
 
-> **Current release: v11.5.1 — Structural GRPO Alignment & Held-Out Benchmarking**
+> **Current release: v11.6.0 — Agent Infrastructure Resilience**
 
+- 🏗️ **v11.6.0 — Agent Infrastructure Resilience:** Production-grade concurrent agent execution with serialized queue (Python `fcntl`), memory guardian daemon, queue watchdog, and unified status dashboard. 115/115 tests verified across 5 suites. → [Changelog](CHANGELOG.md#1160)
 - 🧠 **v11.5.1 — Structural GRPO Alignment:** GRPO-aligned local engine with held-out benchmark suite (N=15). 100% JSON validity, 100% retrieval accuracy. → [Changelog](CHANGELOG.md#1150)
-- 🧪 **v11.5.1 — Zero-Search Field Testing:** Field-verified constant-time retrieval. → [Changelog](CHANGELOG.md#1101)
-- 🛡️ **v11.5.1 — HIPAA-Hardened Local LLM:** Your agent's memory now runs entirely on-device. Introducing `prism-coder:7b` for local compaction, task routing, and semantic search. Includes `PRISM_STRICT_LOCAL_MODE` to block cloud fallbacks, SSRF protection, URL credential redaction, and full XML escaping to prevent prompt injection. 22-finding adversarial audit completed. → [Changelog](CHANGELOG.md#1100)
+- 🛡️ **v11.0.0 — HIPAA-Hardened Local LLM:** `prism-coder:7b` for local compaction, task routing, and semantic search. `PRISM_STRICT_LOCAL_MODE`, SSRF protection, full XML escaping. 22-finding adversarial audit. → [Changelog](CHANGELOG.md#1100)
 
 - 🧬 **v9.14.0 — Dynamic Hardware Routing:** Platform-aware memory detection auto-selects optimal models (32b for ≥32GB RAM, 14b/7b for lighter hardware). Includes **Nomic Semantic Tool Pruning (RAG)** which embeds all 17 MCP tools into offline vectors, injecting only the Top-3 relevant schemas into context to maximize inference speed.
 - 🔬 **v9.13.0 — Local Embeddings & Zero-API-Key Setup:** `LocalEmbeddingAdapter` using `nomic-embed-text-v1.5` generates 768-dim embeddings entirely on-device. Full semantic search and session memory now work with **zero cloud API keys**. → [Changelog](CHANGELOG.md#9130)
 - 🔒 **v9.12.0 — Memory Security Hardening:** Prevents **stored prompt injection** — the AI equivalent of stored XSS. New `sanitizeMemoryInput()` strips 8 categories of dangerous XML tags from all text fields. Context output wrapped in `<prism_memory context="historical">` boundary tags. → [Changelog](CHANGELOG.md#9120)
-- 🧠 **v9.4.7 — ABA Precision Protocol:** Foundational behavioral engine with 5 core rules (Observable goals, Stop-fix-verify, No reinforcement of wrong patterns, Help first, Fix bugs without asking). 83-test behavioral verification suite.
-- 🕵️ **v9.4.6 — Stealth Browser Automation:** `browse.py` HIPAA-hardened CLI for local Playwright-based browser automation with 6-layer anti-detection. **100% pass rate on bot.sannysoft.com**.
-- 🔄 **v9.2.4 — Cross-Backend Reconciliation:** Automatic sync from Supabase → SQLite on startup. Reality drift detection warns when backend versions diverge.
 - 🧠 **v9.0.0 — Autonomous Cognitive OS:** Token-Economic Reinforcement Learning (Surprisal Gate + Cognitive Budget), Affect-Tagged Memory, and Episodic→Semantic Consolidation.
 - 🧠 **v7.8.0 — Cognitive Architecture:** Episodic-to-Semantic memory consolidation (Hebbian learning), ACT-R Spreading Activation with multi-hop causal reasoning, Uncertainty-Aware Rejection Gate, and Dynamic Fast Weight Decay. → [Cognitive Architecture](#cognitive-architecture-v78)
 - 🌐 **v7.7.0 — Cloud-Native SSE Transport:** Full Server-Sent Events MCP support for seamless network deployments.
@@ -1414,10 +1432,11 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 
 ## <a name="milestones-roadmap"></a>📦 Milestones & Roadmap
 
-> **Current: v11.5.1** — Structural GRPO Alignment (100% Accuracy) ([CHANGELOG](CHANGELOG.md))
+> **Current: v11.6.0** — Agent Infrastructure Resilience ([CHANGELOG](CHANGELOG.md))
 
 | Release | Headline |
 |---------|----------|
+| **v11.6.0** | 🏗️ **Agent Infrastructure Resilience** — Production-grade serialized queue, memory guardian, queue watchdog, status dashboard. 115/115 tests. |
 | **v11.5.1** | 🧠 **Structural GRPO Alignment** — Perfect 100% accuracy cross-validated on Synalux Elite platform. |
 | **v11.0.1** | 🧪 **Production Stability** — Field-tested Zero-Search logic merge, local logic finalization, HIPAA-hardened security refinement. |
 | **v11.0** | 🧠 **Zero-Search Retrieval** — Holographic Reduced Representations (HRR) + Deep Research Intelligence [🧪 Field Testing - Synalux](https://synalux.ai/docs) |
@@ -1431,9 +1450,8 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 | **v7.0** | 🧬 ACT-R Activation Memory |
 
 ### Future Tracks
-- **v11.1: Multi-Graph Causal Layer** — Intent-aware retrieval routing traversing an LLM-inferred causal `because` edge-type layer for deep reasoning.
-- **v11.2: Federated Memory Mesh** — Hierarchical memory namespaces with role-based access control for enterprise agent teams.
-- **v11.3: Predictive Prefetch** — ACT-R based predictive models prefetch likely-needed memories before the agent asks.
+- **v12.0: Distal Memory** — Semantic clustering of long-term history with Active-Prism background maintenance.
+- **v13.0: Team Handoff** — Encrypted peer-to-peer session syncing with multi-agent task routing and verifiable memory.
 
 👉 **[Full ROADMAP.md →](ROADMAP.md)**
 
