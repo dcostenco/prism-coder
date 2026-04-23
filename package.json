@@ -14,6 +14,12 @@
   "files": [
     "dist"
   ],
+  "pkg": {
+    "assets": [
+      "dist/**/*"
+    ],
+    "outputPath": "release"
+  },
   "scripts": {
     "build": "tsc",
     "lint:dashboard": "node scripts/lint-dashboard-es5.cjs",
@@ -23,7 +29,13 @@
     "test:load": "vitest run tests/load/",
     "test:ci": "vitest run --reporter=junit --outputFile=test-results.xml",
     "test:mcp": "node ./test_cross_mcp.js",
-    "import": "node dist/utils/universalImporter.js"
+    "import": "node dist/utils/universalImporter.js",
+    "release:build": "npm run build && node scripts/release-build.mjs",
+    "release:win": "npm run build && npx -y @yao-pkg/pkg dist/cli.js --targets node20-win-x64 --output release/prism-win-x64.exe --compress Brotli",
+    "release:mac": "npm run build && npx -y @yao-pkg/pkg dist/cli.js --targets node20-macos-x64 --output release/prism-macos-x64 --compress Brotli",
+    "release:mac-arm": "npm run build && npx -y @yao-pkg/pkg dist/cli.js --targets node20-macos-arm64 --output release/prism-macos-arm64 --compress Brotli",
+    "release:linux": "npm run build && npx -y @yao-pkg/pkg dist/cli.js --targets node20-linux-x64 --output release/prism-linux-x64 --compress Brotli",
+    "release:all": "npm run build && node scripts/release-build.mjs"
   },
   "keywords": [
     "mcp",

@@ -52,6 +52,9 @@ undefined-wal
 # Repomix (code review packs)
 repomix*
 
+# Release builds (standalone executables)
+release/
+
 # Local Build / DB
 *.tgz
 *.db

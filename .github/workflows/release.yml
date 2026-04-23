@@ -1,0 +1,91 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 12.1.0)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: node20-linux-x64
+            artifact: prism-linux-x64
+          - os: windows-latest
+            target: node20-win-x64
+            artifact: prism-win-x64.exe
+          - os: macos-latest
+            target: node20-macos-arm64
+            artifact: prism-macos-arm64
+          - os: macos-13
+            target: node20-macos-x64
+            artifact: prism-macos-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Package standalone binary
+        run: |
+          mkdir -p release
+          npx -y @yao-pkg/pkg dist/cli.js --target ${{ matrix.target }} --output release/${{ matrix.artifact }} --compress Brotli
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Prism ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            release/prism-win-x64.exe
+            release/prism-macos-x64
+            release/prism-macos-arm64
+            release/prism-linux-x64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
