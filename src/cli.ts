@@ -1279,13 +1279,80 @@ Guidelines:
         if (input.startsWith('/voice')) {
           const parts = input.split(/\s+/);
           const duration = parseInt(parts[1]) || 5;
-          const { avlistenPath: getAvlistenPath } = await import('./agent/platformUtils.js');
+          const { avlistenPath: getAvlistenPath, audioRecordCommand, voiceInstallInstructions, tempPath } = await import('./agent/platformUtils.js');
           const voiceBinPath = getAvlistenPath();
           const fsm = await import('fs');
 
-          if (!fsm.existsSync(voiceBinPath)) {
-            console.log(formatWarning(`Voice engine (avlisten) not found at ${voiceBinPath}`));
-            console.log(`  ${c.dim}Install via Synalux extension or compile manually.${c.reset}\n`);
+          const hasAvlisten = fsm.existsSync(voiceBinPath);
+
+          if (!hasAvlisten) {
+            // ── Fallback: record WAV via SoX/ffmpeg/arecord, transcribe via Gemini ──
+            const recorder = audioRecordCommand(duration);
+            if (!recorder.available) {
+              console.log(formatWarning(`No voice recording tool found.`));
+              console.log(`  ${c.dim}${voiceInstallInstructions()}${c.reset}\n`);
+              rl.prompt();
+              return;
+            }
+
+            console.log(`\n  ${c.cyan}🎙️  Recording for ${duration}s...${c.reset} (speak now)`);
+            try {
+              const { execSync } = await import('child_process');
+
+              // Special case: Windows System.Speech returns text directly
+              if (recorder.format === 'text') {
+                const stdout = execSync(recorder.cmd, {
+                  timeout: (duration + 5) * 1000,
+                  shell: 'powershell.exe',
+                  stdio: 'pipe',
+                }).toString().trim();
+
+                if (stdout && stdout !== '(no speech detected)') {
+                  console.log(`  ${c.green}✓${c.reset} "${stdout}"\n`);
+                  printThinking();
+                  const result = await chat.sendMessage(stdout);
+                  clearThinking();
+                  const responseText = result.response.text();
+                  if (responseText) console.log(formatResponse(responseText));
+                } else {
+                  console.log(`  ${c.yellow}⚠${c.reset} No speech detected.\n`);
+                }
+              } else {
+                // Record WAV file, then send to Gemini multimodal for transcription
+                execSync(recorder.cmd, { timeout: (duration + 5) * 1000, stdio: 'pipe' });
+
+                if (fsm.existsSync(recorder.outputPath)) {
+                  const audioData = fsm.readFileSync(recorder.outputPath);
+                  const base64Audio = audioData.toString('base64');
+                  console.log(`  ${c.dim}Transcribing...${c.reset}`);
+
+                  const result = await chat.sendMessage([
+                    { inlineData: { data: base64Audio, mimeType: recorder.format } },
+                    'Transcribe this audio recording exactly. Return only the spoken text, nothing else.',
+                  ]);
+                  const transcription = result.response.text().trim();
+
+                  if (transcription) {
+                    console.log(`  ${c.green}✓${c.reset} "${transcription}"\n`);
+                    // Send transcription as follow-up
+                    printThinking();
+                    const followUp = await chat.sendMessage(transcription);
+                    clearThinking();
+                    const responseText = followUp.response.text();
+                    if (responseText) console.log(formatResponse(responseText));
+                  } else {
+                    console.log(`  ${c.yellow}⚠${c.reset} No speech detected.\n`);
+                  }
+
+                  // Cleanup
+                  try { fsm.unlinkSync(recorder.outputPath); } catch { /* ok */ }
+                } else {
+                  console.log(`  ${c.yellow}⚠${c.reset} Recording failed — no audio file produced.\n`);
+                }
+              }
+            } catch (e) {
+              console.log(formatError(`Voice error: ${e instanceof Error ? e.message : String(e)}`));
+            }
             rl.prompt();
             return;
           }
@@ -1340,7 +1407,8 @@ Guidelines:
         // ─── /camera — capture photo via imagesnap/ffmpeg ──
         if (input.startsWith('/camera')) {
           const question = input.substring(7).trim() || 'What do you see in this photo? Describe in detail.';
-          const tmpPath = '/tmp/prism-camera-capture.jpg';
+          const { tempPath } = await import('./agent/platformUtils.js');
+          const tmpPath = tempPath('prism-camera-capture.jpg');
 
           console.log(`\n  ${c.cyan}📷 Capturing photo...${c.reset}`);
           try {
@@ -1400,7 +1468,8 @@ Guidelines:
         // ─── /paste — clipboard image ──────────────────────
         if (input.startsWith('/paste')) {
           const question = input.substring(6).trim() || 'Describe this image in detail.';
-          const tmpPath = '/tmp/prism-clipboard.png';
+          const { tempPath: getTempPath } = await import('./agent/platformUtils.js');
+          const tmpPath = getTempPath('prism-clipboard.png');
 
           try {
             const { execSync } = await import('child_process');
