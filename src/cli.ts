@@ -1105,6 +1105,7 @@ Guidelines:
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const { GOOGLE_API_KEY } = await import('./config.js');
       const { AGENT_TOOL_DECLARATIONS, executeAgentTool } = await import('./agent/agentTools.js');
+      const { McpBridge, discoverMcpConfigs } = await import('./agent/mcpBridge.js');
 
       if (!GOOGLE_API_KEY) {
         console.error('❌ GEMINI_API_KEY required for agent mode.');
@@ -1113,11 +1114,34 @@ Guidelines:
         return;
       }
 
+      // ─── MCP Server Discovery & Connection ──────────────────
+      const mcpBridge = new McpBridge();
+      const mcpConfigs = discoverMcpConfigs(process.cwd());
+      const mcpServerNames = Object.keys(mcpConfigs);
+
+      if (mcpServerNames.length > 0) {
+        console.log(`\n🔌 Found ${mcpServerNames.length} MCP server(s):`);
+        for (const [name, config] of Object.entries(mcpConfigs)) {
+          try {
+            const tools = await mcpBridge.connect(name, config);
+            console.log(`  ✅ ${name} — ${tools.length} tool(s): ${tools.map(t => t.name).join(', ')}`);
+          } catch (e) {
+            console.log(`  ❌ ${name} — failed: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+      }
+
+      // Merge built-in + MCP tools
+      const allToolDeclarations = [
+        ...AGENT_TOOL_DECLARATIONS,
+        ...mcpBridge.getGeminiFunctionDeclarations(),
+      ];
+
       const ai = new GoogleGenerativeAI(GOOGLE_API_KEY);
       const model = ai.getGenerativeModel({
         model: 'gemini-2.5-flash',
         systemInstruction: systemContext,
-        tools: [{ functionDeclarations: AGENT_TOOL_DECLARATIONS }],
+        tools: [{ functionDeclarations: allToolDeclarations }],
       });
 
       // Start a multi-turn chat
@@ -1241,11 +1265,13 @@ Guidelines:
             for (const call of calls) {
               console.log(`  🔧 ${call.name}(${JSON.stringify(call.args).substring(0, 80)}...)`);
               try {
-                const toolOutput = await executeAgentTool(
-                  call.name,
-                  call.args as Record<string, unknown>,
-                  project,
-                );
+                const toolOutput = mcpBridge.hasToolName(call.name)
+                  ? await mcpBridge.callTool(call.name, call.args as Record<string, unknown>)
+                  : await executeAgentTool(
+                    call.name,
+                    call.args as Record<string, unknown>,
+                    project,
+                  );
                 toolResults.push({
                   functionResponse: {
                     name: call.name,
@@ -1281,6 +1307,7 @@ Guidelines:
 
       rl.on('close', async () => {
         console.log('\n👋 Session ended.');
+        await mcpBridge.disconnectAll();
         await closeStorage();
         process.exit(0);
       });
