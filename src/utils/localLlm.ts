@@ -48,26 +48,63 @@ function redactUrl(rawUrl: string): string {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface OllamaToolCall {
+  function: { name: string; arguments: Record<string, unknown> };
+}
+
+interface OllamaToolDef {
+  type: "function";
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+}
+
 interface OllamaChatMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  tool_calls?: OllamaToolCall[];
 }
 
 interface OllamaChatRequest {
   model: string;
   messages: OllamaChatMessage[];
-  stream: false;  // always non-streaming for background ops
-  options?: {
-    num_ctx?: number;
-    temperature?: number;
-    top_p?: number;
-  };
+  stream: false;
+  tools?: OllamaToolDef[];
+  format?: Record<string, unknown>;
+  options?: { num_ctx?: number; temperature?: number; top_p?: number };
 }
 
 interface OllamaChatResponse {
-  message?: { content?: string };
+  message?: { content?: string; tool_calls?: OllamaToolCall[] };
   done?: boolean;
   error?: string;
+}
+
+// ─── Tool Schema Loader ──────────────────────────────────────────────────────
+
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
+
+let _cachedTools: OllamaToolDef[] | null = null;
+
+function loadToolDefinitions(): OllamaToolDef[] {
+  if (_cachedTools) return _cachedTools;
+  try {
+    const thisDir = path.dirname(fileURLToPath(import.meta.url));
+    const schemaPath = path.resolve(thisDir, "../../training/data/tool_schema.json");
+    if (fs.existsSync(schemaPath)) {
+      const schema = JSON.parse(fs.readFileSync(schemaPath, "utf-8"));
+      _cachedTools = (schema.tools || []).map((t: any) => ({
+        type: "function" as const,
+        function: { name: t.name, description: t.description, parameters: t.parameters },
+      }));
+      debugLog(`[localLlm] Loaded ${_cachedTools!.length} tool definitions`);
+      return _cachedTools!;
+    }
+  } catch (err) {
+    debugLog(`[localLlm] Failed to load tool schema: ${err}`);
+  }
+  _cachedTools = [];
+  return _cachedTools;
 }
 
 // ─── Core Function ────────────────────────────────────────────────────────────
@@ -108,12 +145,14 @@ export async function callLocalLlm(
     model,
     messages,
     stream: false,
-    options: {
-      num_ctx: 8192,    // match Modelfile context window
-      temperature: 0.3, // match Modelfile temperature
-      top_p: 0.9,       // match Modelfile top_p
-    },
+    options: { num_ctx: 8192, temperature: 0.3, top_p: 0.9 },
   };
+
+  // Phase A: Pass tool definitions for native Ollama tool calling
+  const tools = loadToolDefinitions();
+  if (tools.length > 0) {
+    payload.tools = tools;
+  }
 
   // ── HTTP request ──────────────────────────────────────────────────────────
   const url = `${PRISM_LOCAL_LLM_URL}/api/chat`;
@@ -147,6 +186,18 @@ export async function callLocalLlm(
       return null;
     }
 
+    // Phase A: Check for native tool_calls FIRST (structured, no regex)
+    if (data.message?.tool_calls && data.message.tool_calls.length > 0) {
+      const tc = data.message.tool_calls[0];
+      const toolCallJson = JSON.stringify({
+        name: tc.function.name,
+        arguments: tc.function.arguments,
+      });
+      debugLog(`[localLlm] Native tool_call: ${tc.function.name}`);
+      return toolCallJson;
+    }
+
+    // Fallback: parse text content (legacy format support)
     const rawContent = data.message?.content?.trim() ?? null;
     if (!rawContent) {
       debugLog("[localLlm] Empty content in Ollama response");

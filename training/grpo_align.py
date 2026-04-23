@@ -37,128 +37,204 @@ with open(TOOL_SCHEMA) as f:
         }
 
 
-def compute_reward(response_text: str) -> float:
+def compute_reward(response_text: str, expected_tool: str = None) -> dict:
     """
-    Deterministic reward function for tool-use accuracy.
-    Rewards <think> + <tool_call> structure with normalized output in [-1.0, +1.0].
+    Decomposed 4-component reward function for GRPO (v3.0).
 
-    Scoring (raw, then normalized):
-      Structure:
-        +3.0  if response starts with <think>
-        -1.0  if missing <think> opener
-        +4.0  if <tool_call> + </tool_call> tags present
-      Reasoning:
-        +1.0  if <think> block >50 chars (substantive thought)
-        +0.5  if think mentions "tool"/"requires" (strategy-oriented)
-        -0.2  if <think> block >1000 chars (anti-thought-farming)
-      Tool correctness:
-        +1.0  if JSON parses correctly
-        +2.0  if tool_name is valid
-        -4.0  if tool_name is hallucinated
-        +2.0  if all required params present
-        -2.0  per missing required param
-      No tool needed:
-        +0.0  if response is >20 chars (reasonable prose)
-        -0.5  if response is very short (<20 chars)
+    Components (each normalized to [-0.25, +0.25], total range [-1.0, +1.0]):
+      1. FORMAT:     Structural compliance (<think> + <tool_call> tags)
+      2. TOOL:       Correct tool selection vs hallucination
+      3. PARAMS:     Required/optional param accuracy, hallucinated param penalty
+      4. ABSTENTION: Correct non-tool response vs unnecessary tool invocation
 
-    Max raw = +13.5, min raw = -7.0. Normalized to [-1.0, +1.0].
+    Returns dict with component scores and total.
     """
-    RAW_MAX = 13.5
-    RAW_MIN = -7.0
+    scores = {"format": 0.0, "tool": 0.0, "params": 0.0, "abstention": 0.0}
 
-    reward = 0.0
-
-    # ── Structural Reward ──
-    if response_text.strip().startswith('<think>'):
-        reward += 3.0
-    else:
-        reward -= 1.0
-
-    if '<tool_call>' in response_text and '</tool_call>' in response_text:
-        reward += 4.0
-
-    # ── CoT reasoning reward ──
+    # ── Parse response structure ──
+    has_think = response_text.strip().startswith('<think>')
     think_match = re.search(r'<think>(.*?)</think>', response_text, re.DOTALL)
-    if think_match:
-        think_text = think_match.group(1).strip()
-        if len(think_text) > 50:
-            reward += 1.0  # Substantive reasoning
-        if "tool" in think_text.lower() or "requires" in think_text.lower():
-            reward += 0.5  # Strategy-oriented thought
-        if len(think_text) > 1000:
-            reward -= 0.2  # Anti-thought-farming
+    think_text = think_match.group(1).strip() if think_match else ""
 
-    # Check if response contains a tool call (multiple format support)
     tool_content = None
-    # 1. <tool_call> tags (canonical)
     tool_match = re.search(r'<tool_call>\s*(.*?)\s*</tool_call>', response_text, re.DOTALL)
     if tool_match:
         tool_content = tool_match.group(1)
-    # 2. <|im_start|>...<|im_end|> (Qwen native)
     if not tool_content:
         im_match = re.search(r'<\|im_start\|>\s*(\{.*?\})\s*<\|im_end\|>', response_text, re.DOTALL)
         if im_match:
             tool_content = im_match.group(1)
 
-    if not tool_content:
-        # No tool call — acceptable for reasoning-only prompts
-        reward += (0.0 if len(response_text) > 20 else -0.5)
-        return max(-1.0, min(1.0, (reward - RAW_MIN) / (RAW_MAX - RAW_MIN) * 2 - 1))
+    has_tool_call = tool_content is not None
+    should_tool = expected_tool is not None
 
-    try:
-        tool_call = json.loads(tool_content)
-        reward += 1.0  # Valid JSON
-    except json.JSONDecodeError:
-        reward -= 3.0
-        return max(-1.0, min(1.0, (reward - RAW_MIN) / (RAW_MAX - RAW_MIN) * 2 - 1))
-
-    tool_name = tool_call.get("name", "")
-    if tool_name in VALID_TOOLS:
-        reward += 2.0
+    # ── Component 1: FORMAT (structural compliance) ──
+    if has_think:
+        scores["format"] += 0.10
+        if len(think_text) > 30:
+            scores["format"] += 0.05  # Substantive reasoning
+        if len(think_text) > 1000:
+            scores["format"] -= 0.03  # Anti-thought-farming
     else:
-        reward -= 4.0
-        return max(-1.0, min(1.0, (reward - RAW_MIN) / (RAW_MAX - RAW_MIN) * 2 - 1))
+        scores["format"] -= 0.10
 
-    args = tool_call.get("arguments", {})
-    params = TOOL_PARAMS.get(tool_name, {"required": set(), "optional": set()})
+    if has_tool_call:
+        if '<tool_call>' in response_text and '</tool_call>' in response_text:
+            scores["format"] += 0.10  # Proper tag wrapping
+        else:
+            scores["format"] += 0.03  # Partial format
 
-    missing_required = params["required"] - set(args.keys())
-    if not missing_required:
-        reward += 2.0
+    scores["format"] = max(-0.25, min(0.25, scores["format"]))
+
+    # ── Component 2: TOOL SELECTION ──
+    if has_tool_call:
+        try:
+            tool_call = json.loads(tool_content)
+            tool_name = tool_call.get("name", "")
+        except json.JSONDecodeError:
+            scores["tool"] = -0.20  # Invalid JSON = critical failure
+            scores["format"] -= 0.05
+            total = sum(scores.values())
+            return {"format": scores["format"], "tool": scores["tool"],
+                    "params": scores["params"], "abstention": scores["abstention"],
+                    "total": max(-1.0, min(1.0, total))}
+
+        if tool_name in VALID_TOOLS:
+            if expected_tool and tool_name == expected_tool:
+                scores["tool"] = 0.25   # Perfect tool selection
+            elif tool_name in VALID_TOOLS:
+                scores["tool"] = 0.10   # Valid but possibly wrong tool
+        else:
+            scores["tool"] = -0.25      # Hallucinated tool name
     else:
-        reward -= 2.0 * len(missing_required)
+        scores["tool"] = 0.0  # No tool call — scored by abstention instead
 
-    # Normalize to [-1.0, +1.0]
-    return max(-1.0, min(1.0, (reward - RAW_MIN) / (RAW_MAX - RAW_MIN) * 2 - 1))
+    # ── Component 3: PARAMETER ACCURACY ──
+    if has_tool_call and tool_content:
+        try:
+            tool_call = json.loads(tool_content)
+            tool_name = tool_call.get("name", "")
+            args = tool_call.get("arguments", {})
+            params = TOOL_PARAMS.get(tool_name, {"required": set(), "optional": set()})
+
+            required = params["required"]
+            optional = params["optional"]
+            all_valid = required | optional
+            provided = set(args.keys())
+
+            # Required params present
+            missing = required - provided
+            if not missing:
+                scores["params"] += 0.15
+            else:
+                scores["params"] -= 0.08 * len(missing)
+
+            # Hallucinated params (not in schema at all)
+            hallucinated = provided - all_valid
+            if hallucinated:
+                scores["params"] -= 0.05 * len(hallucinated)
+
+            # Bonus for optional params correctly used
+            correct_optional = provided & optional
+            if correct_optional:
+                scores["params"] += 0.02 * len(correct_optional)
+
+        except (json.JSONDecodeError, KeyError):
+            scores["params"] = -0.15
+
+    scores["params"] = max(-0.25, min(0.25, scores["params"]))
+
+    # ── Component 4: ABSTENTION (asymmetric) ──
+    if should_tool and not has_tool_call:
+        # Should have called a tool but didn't — moderate penalty
+        scores["abstention"] = -0.20
+    elif not should_tool and has_tool_call:
+        # Called a tool when none was needed — strong penalty
+        scores["abstention"] = -0.25
+    elif not should_tool and not has_tool_call:
+        # Correctly abstained from tool use
+        if len(response_text.strip()) > 30:
+            scores["abstention"] = 0.25  # Substantive prose response
+        else:
+            scores["abstention"] = 0.10  # Too short but correct decision
+    elif should_tool and has_tool_call:
+        scores["abstention"] = 0.15  # Correct decision to use tool
+
+    total = sum(scores.values())
+    return {
+        "format": scores["format"],
+        "tool": scores["tool"],
+        "params": scores["params"],
+        "abstention": scores["abstention"],
+        "total": max(-1.0, min(1.0, total)),
+    }
 
 
 def generate_grpo_prompts():
-    """Generate prompts for GRPO training."""
+    """Generate 50 prompts for GRPO training with expected tool metadata."""
     prompts = [
-        "Load the full context for the prism-mcp project",
-        "Save this session: implemented RBAC roles",
-        "Explain how React Server Components work",
-        "Search for sessions about JWT authentication in synalux-private",
-        "List all sessions for project bcba-private",
-        "Delete the session from yesterday about the billing bug",
-        "What do we know about the 'Zero-Search' architecture in prism?",
-        "Store this knowledge: The ACT-R decay rate is 0.5 for rollup nodes",
-        "Search for patterns about memory consolidation",
-        "Hand off the billing task from dev to security: payment logic is ready",
-        "Initialize a deep session for project synalux-docs",
-        "Write a hello world in Python",
-        "Find work related to the schema migration in v9.4",
-        "What is the status of the HIPAA security audit?",
-        "Log work: fixed the abortPipeline syntax error in dashboard",
+        # ── Tool-call prompts (should invoke a tool) ──
+        {"text": "Load the full context for the prism-mcp project", "expected_tool": "session_load_context"},
+        {"text": "Save this session: implemented RBAC roles", "expected_tool": "session_save"},
+        {"text": "Search for sessions about JWT authentication in synalux-private", "expected_tool": "session_search"},
+        {"text": "List all sessions for project bcba-private", "expected_tool": "session_search"},
+        {"text": "Delete the session from yesterday about the billing bug", "expected_tool": "session_delete"},
+        {"text": "What do we know about the 'Zero-Search' architecture in prism?", "expected_tool": "knowledge_search"},
+        {"text": "Store this knowledge: The ACT-R decay rate is 0.5 for rollup nodes", "expected_tool": "knowledge_save"},
+        {"text": "Search for patterns about memory consolidation", "expected_tool": "knowledge_search"},
+        {"text": "Hand off the billing task from dev to security: payment logic is ready", "expected_tool": "session_save"},
+        {"text": "Initialize a deep session for project synalux-docs", "expected_tool": "session_load_context"},
+        {"text": "Find work related to the schema migration in v9.4", "expected_tool": "session_search"},
+        {"text": "What is the status of the HIPAA security audit?", "expected_tool": "session_search"},
+        {"text": "Log work: fixed the abortPipeline syntax error in dashboard", "expected_tool": "session_save"},
+        {"text": "Show me context for synalux-portal project at deep level", "expected_tool": "session_load_context"},
+        {"text": "Search for all previous sessions related to database migrations", "expected_tool": "session_search"},
+        {"text": "Save a new knowledge item about TypeScript best practices for ESM", "expected_tool": "knowledge_save"},
+        {"text": "What tools did we use in the last session for prism-mcp?", "expected_tool": "session_load_context"},
+        {"text": "Find all work on the video panel implementation", "expected_tool": "session_search"},
+        {"text": "Store knowledge: React Server Components require 'use server' directive", "expected_tool": "knowledge_save"},
+        {"text": "Load the latest context for bcba-private project", "expected_tool": "session_load_context"},
+        {"text": "Search knowledge for GRPO training best practices", "expected_tool": "knowledge_search"},
+        {"text": "Save session: deployed v11.6.0 with serialized execution queue", "expected_tool": "session_save"},
+        {"text": "Find sessions about Supabase RLS policies", "expected_tool": "session_search"},
+        {"text": "What knowledge do we have about Ollama tool calling?", "expected_tool": "knowledge_search"},
+        {"text": "Load context for synalux-private at shallow level", "expected_tool": "session_load_context"},
+        # ── Reasoning prompts (should NOT invoke a tool) ──
+        {"text": "Explain how React Server Components work", "expected_tool": None},
+        {"text": "Write a hello world in Python", "expected_tool": None},
+        {"text": "What is the difference between gRPC and REST?", "expected_tool": None},
+        {"text": "How does garbage collection work in Go?", "expected_tool": None},
+        {"text": "Explain the CAP theorem in distributed systems", "expected_tool": None},
+        {"text": "What are the pros and cons of microservices?", "expected_tool": None},
+        {"text": "Write a bash one-liner to find large files", "expected_tool": None},
+        {"text": "How do I set up a PostgreSQL database on Docker?", "expected_tool": None},
+        {"text": "What is the time complexity of quicksort?", "expected_tool": None},
+        {"text": "Explain how JWT tokens work for authentication", "expected_tool": None},
+        {"text": "Write a Python function to reverse a linked list", "expected_tool": None},
+        {"text": "What is the difference between TCP and UDP?", "expected_tool": None},
+        {"text": "Explain the Observer pattern in object-oriented design", "expected_tool": None},
+        {"text": "How do I optimize a slow SQL query?", "expected_tool": None},
+        {"text": "What is CORS and why does it exist?", "expected_tool": None},
+        {"text": "Write a TypeScript generic function for array filtering", "expected_tool": None},
+        {"text": "Explain the difference between let, const, and var in JavaScript", "expected_tool": None},
+        {"text": "How does WebSocket differ from HTTP long polling?", "expected_tool": None},
+        {"text": "What is dependency injection and why is it useful?", "expected_tool": None},
+        {"text": "Explain the concept of eventual consistency", "expected_tool": None},
+        {"text": "Write a regex to validate email addresses", "expected_tool": None},
+        {"text": "What are the SOLID principles in software engineering?", "expected_tool": None},
+        {"text": "How do I implement rate limiting in an API?", "expected_tool": None},
+        {"text": "What is the difference between authentication and authorization?", "expected_tool": None},
+        {"text": "Explain how a B-tree index works in databases", "expected_tool": None},
     ]
 
     with open(GRPO_DATA, "w") as f:
-        for prompt in prompts:
+        for p in prompts:
             f.write(json.dumps({
                 "messages": [
                     {"role": "system", "content": "You are Prism, an AI coding assistant with persistent memory. Use MCP tools when appropriate."},
-                    {"role": "user", "content": prompt}
-                ]
+                    {"role": "user", "content": p["text"]}
+                ],
+                "expected_tool": p["expected_tool"]
             }) + "\n")
     return prompts
 
@@ -177,47 +253,48 @@ def generate_synthetic_chosen(prompt: str) -> str:
 
 
 def verify_reward_function():
-    """Self-test the reward function with known inputs."""
+    """Self-test the decomposed reward function with known inputs."""
     print("\n" + "=" * 60)
-    print("Reward Function Verification:")
+    print("Decomposed Reward Function Verification (v3.0):")
     print("=" * 60)
 
     test_cases = [
-        ('<think>The user wants to save a session for project prism-mcp. This is a write operation. The correct tool is session_save which requires project and summary parameters. I have both values from the request.</think>\n\nI\'ll save this.\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "test", "summary": "test"}}\n</tool_call>', "Valid save WITH think (best case)"),
-        ('I\'ll save this.\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "test", "summary": "test"}}\n</tool_call>', "Valid save (no think)"),
-        ('<tool_call>\n{"name": "fake_tool", "arguments": {}}\n</tool_call>', "Hallucinated tool"),
-        ('<tool_call>\n{invalid json}\n</tool_call>', "Invalid JSON"),
-        ('Python is a programming language used for web development and data science.', "No tool (correct for reasoning)"),
-        ('<tool_call>\n{"name": "session_save", "arguments": {}}\n</tool_call>', "Missing required params"),
-        ('<think>Short.</think>\n\nJust explaining code.', "Short think + no tool (neutral)"),
-        ('<think>Let me think about this question. ' + 'I need to reason carefully. ' * 80 + '</think>\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "test", "summary": "test"}}\n</tool_call>', "Thought farming (>1000 chars)"),
+        ('<think>The user wants to save a session for project prism-mcp. This is a write operation. The correct tool is session_save which requires project and summary parameters. I have both values from the request.</think>\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "test", "summary": "test"}}\n</tool_call>', "session_save", "Perfect: think + correct tool + all params"),
+        ('<tool_call>\n{"name": "session_save", "arguments": {"project": "test", "summary": "test"}}\n</tool_call>', "session_save", "No think, correct tool"),
+        ('<tool_call>\n{"name": "fake_tool", "arguments": {}}\n</tool_call>', "session_save", "Hallucinated tool name"),
+        ('<tool_call>\n{invalid json}\n</tool_call>', "session_save", "Invalid JSON"),
+        ('Python is a programming language used for web development and data science. It has a large ecosystem of libraries including NumPy and pandas.', None, "Correct abstention (reasoning)"),
+        ('<think>Let me search for this.</think>\n\n<tool_call>\n{"name": "session_search", "arguments": {"query": "test"}}\n</tool_call>', None, "False positive: tool used unnecessarily"),
+        ('<tool_call>\n{"name": "session_save", "arguments": {}}\n</tool_call>', "session_save", "Missing required params"),
+        ('ok', None, "Short abstention"),
     ]
 
-    for response, desc in test_cases:
-        reward = compute_reward(response)
-        print(f"  [{reward:+.3f}] {desc}")
+    for response, expected, desc in test_cases:
+        result = compute_reward(response, expected)
+        components = f"fmt={result['format']:+.2f} tool={result['tool']:+.2f} prm={result['params']:+.2f} abs={result['abstention']:+.2f}"
+        print(f"  [{result['total']:+.3f}] {desc}")
+        print(f"          {components}")
 
     print("=" * 60)
 
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="GRPO Alignment for Tool-Use Accuracy")
-    parser.add_argument("--synthetic", action="store_true", help="Inject synthetic gold-standard responses as chosen side")
+    parser = argparse.ArgumentParser(description="GRPO Alignment v3.0 — Decomposed Rewards")
+    parser.add_argument("--synthetic", action="store_true", help="Inject synthetic gold-standard responses")
     parser.add_argument("--repeat", type=int, default=5, help="Data repetition factor (default: 5)")
     parser.add_argument("--iters", type=int, default=300, help="Training iterations (default: 300)")
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate (default: 1e-5)")
-    parser.add_argument("--verify-only", action="store_true", help="Only run reward function verification, no training")
+    parser.add_argument("--verify-only", action="store_true", help="Only run reward function verification")
     args = parser.parse_args()
 
-    # Always verify reward function first
     verify_reward_function()
 
     if args.verify_only:
         return
 
     print("\n" + "=" * 60)
-    print("GRPO Alignment for Tool-Use Accuracy")
+    print("GRPO Alignment v3.0 — Decomposed 4-Component Rewards")
     print(f"  Synthetic injection: {'ON' if args.synthetic else 'OFF (true GRPO)'}")
     print(f"  Data repetition: {args.repeat}x")
     print(f"  Iterations: {args.iters}")
@@ -232,17 +309,18 @@ def main():
         print("\nLoading SFT model + adapter...")
         model, tokenizer = load(MODEL_PATH, adapter_path=SFT_ADAPTER)
 
-        for i, prompt in enumerate(prompts):
+        for i, p in enumerate(prompts):
             sys_msg = "You are Prism, an AI coding assistant with persistent memory. Use MCP tools when appropriate."
-            full_prompt = f"<|im_start|>system\n{sys_msg}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+            full_prompt = f"<|im_start|>system\n{sys_msg}<|im_end|>\n<|im_start|>user\n{p['text']}<|im_end|>\n<|im_start|>assistant\n"
 
             completions = []
             for j in range(4):
                 try:
                     response = generate(model, tokenizer, prompt=full_prompt, max_tokens=256)
-                    reward = compute_reward(response)
-                    print(f"    [Prompt {i+1} Gen {j+1}] Reward: {reward:+.3f} | Response: {response[:60].replace(chr(10), ' ')}...")
-                    completions.append((response, reward))
+                    result = compute_reward(response, p.get("expected_tool"))
+                    reward_val = result["total"]
+                    print(f"    [Prompt {i+1} Gen {j+1}] R={reward_val:+.3f} fmt={result['format']:+.2f} tool={result['tool']:+.2f} prm={result['params']:+.2f} abs={result['abstention']:+.2f}")
+                    completions.append((response, reward_val))
                 except Exception as e:
                     print(f"  Warning: Generation failed: {e}")
                     continue
@@ -253,20 +331,18 @@ def main():
                 worst = completions[-1]
 
                 if args.synthetic:
-                    # Synthetic injection mode: use handcrafted "perfect" responses
-                    synthetic_chosen = generate_synthetic_chosen(prompt)
+                    synthetic_chosen = generate_synthetic_chosen(p["text"])
                     if synthetic_chosen:
                         dpo_data.append({
-                            "prompt": prompt,
+                            "prompt": p["text"],
                             "chosen": synthetic_chosen,
                             "rejected": worst[0],
                         })
                         continue
 
-                # True GRPO: use model's own best vs worst
                 if best[1] > worst[1]:
                     dpo_data.append({
-                        "prompt": prompt,
+                        "prompt": p["text"],
                         "chosen": best[0],
                         "rejected": worst[0],
                     })
