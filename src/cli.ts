@@ -1045,7 +1045,7 @@ program
       const auth = await getAuthStatus();
 
       // ─── Terminal UI ────────────────────────────────────────
-      const { printBanner, buildPromptStr, printActionLegend, formatToolCall, formatToolResult, formatResponse, formatError, formatWarning, printHelp, formatMcpConnect, formatContextLoaded, printThinking, clearThinking, c } = await import('./agent/terminalUI.js');
+      const { printBanner, buildPromptStr, printActionBar, enableMouseTracking, disableMouseTracking, installMouseHandler, formatToolCall, formatToolResult, formatResponse, formatError, formatWarning, printHelp, formatMcpConnect, formatContextLoaded, printThinking, clearThinking, c } = await import('./agent/terminalUI.js');
 
       // ─── Load project context ───────────────────────────────
       // Auto-detect Supabase backend if credentials exist
@@ -1165,7 +1165,7 @@ Guidelines:
       let ttsEnabled = false;
 
       // ─── Action buttons legend ──────────────────────────────
-      printActionLegend();
+      printActionBar();
 
       // ─── REPL with VS Code-style prompt ─────────────────────
       const readline = await import('readline');
