@@ -1045,12 +1045,12 @@ program
   });
 
 // ─── prism prompt [project] ──────────────────────────────────
-// Interactive terminal mode — like Gemini CLI.
-// Loads project memory, then opens a REPL for natural language queries.
+// Interactive AI agent terminal — like Gemini CLI.
+// Uses Gemini function calling with local workspace tools.
 
 program
   .command('prompt')
-  .description('Interactive AI prompt mode — ask questions grounded in your Prism memory')
+  .description('Interactive AI agent terminal — chat, read files, run commands, search memory')
   .argument('[project]', 'Project to load context for', 'prism-mcp')
   .option('-s, --storage <backend>', 'Storage backend: local or supabase')
   .action(async (project: string, options: { storage?: string }) => {
@@ -1063,17 +1063,28 @@ program
       const { getAuthStatus } = await import('./auth.js');
       const auth = await getAuthStatus();
 
-      console.log(`\n🧠 Prism v${SERVER_CONFIG.version} — Interactive Mode`);
+      // ─── Banner ─────────────────────────────────────────────
+      console.log(`\n🧠 Prism v${SERVER_CONFIG.version} — Agent Terminal`);
       if (auth.loggedIn) {
         console.log(`👤 ${auth.email}  ·  📋 ${auth.plan || 'Free'} plan`);
       }
-      console.log(`📂 Project: ${project}`);
+      console.log(`📂 Project: ${project}  ·  📁 ${process.cwd()}`);
 
-      // Load project context
+      // ─── Load project context ───────────────────────────────
       const storage = await getStorage();
       const contextData = await storage.loadContext(project, 'standard', PRISM_USER_ID) as any;
 
-      let systemContext = `You are Prism, an AI assistant with access to the user's memory and project history. Answer questions helpfully and concisely.\n\nProject: ${project}\n`;
+      let systemContext = `You are Prism, a powerful AI agent running in the user's terminal. You have access to tools for reading/writing files, running shell commands, and searching the user's memory.
+
+Current project: ${project}
+Working directory: ${process.cwd()}
+
+Guidelines:
+- Use tools proactively — read files, run commands, search memory when needed.
+- Be concise and helpful. Show relevant code snippets.
+- For shell commands, prefer non-destructive reads. Ask before destructive operations.
+- When editing files, explain what you're changing and why.
+`;
 
       if (contextData) {
         if (contextData.last_summary) {
@@ -1085,29 +1096,36 @@ program
         if (contextData.key_context) {
           systemContext += `\nKey context: ${contextData.key_context}`;
         }
-        if (contextData.keywords?.length) {
-          systemContext += `\nKeywords: ${contextData.keywords.join(', ')}`;
-        }
         console.log(`✅ Loaded ${contextData.pending_todo?.length || 0} TODOs, ${contextData.keywords?.length || 0} keywords`);
       } else {
         console.log('⚠️  No session context found — starting fresh');
       }
 
-      console.log('\nType your questions below. Press Ctrl+C to exit.\n');
+      // ─── Initialize Gemini with function calling ────────────
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const { GOOGLE_API_KEY } = await import('./config.js');
+      const { AGENT_TOOL_DECLARATIONS, executeAgentTool } = await import('./agent/agentTools.js');
 
-      // Get LLM provider
-      const { getLLMProvider } = await import('./utils/llm/factory.js');
-      let llm: ReturnType<typeof getLLMProvider>;
-      try {
-        llm = getLLMProvider();
-      } catch {
-        console.error('❌ No LLM provider configured. Set GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.');
+      if (!GOOGLE_API_KEY) {
+        console.error('❌ GEMINI_API_KEY required for agent mode.');
         await closeStorage();
         process.exit(1);
         return;
       }
 
-      // Interactive REPL
+      const ai = new GoogleGenerativeAI(GOOGLE_API_KEY);
+      const model = ai.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        systemInstruction: systemContext,
+        tools: [{ functionDeclarations: AGENT_TOOL_DECLARATIONS }],
+      });
+
+      // Start a multi-turn chat
+      const chat = model.startChat({ history: [] });
+
+      console.log('\nType your questions below. Use /help for commands. Ctrl+C to exit.\n');
+
+      // ─── REPL ───────────────────────────────────────────────
       const readline = await import('readline');
       const rl = readline.createInterface({
         input: process.stdin,
@@ -1115,21 +1133,19 @@ program
         prompt: '🧠 › ',
       });
 
-      const history: string[] = [];
-
       rl.prompt();
 
       rl.on('line', async (line: string) => {
         const input = line.trim();
         if (!input) { rl.prompt(); return; }
 
-        // Built-in commands
+        // ─── Slash commands ─────────────────────────────────
         if (input === '/help') {
-          console.log('\n  /search <query>  — search memory');
-          console.log('  /todos           — show open TODOs');
-          console.log('  /context         — show loaded context');
-          console.log('  /clear           — clear conversation history');
-          console.log('  /exit            — quit\n');
+          console.log('\n  /image <path> [question]  — analyze an image');
+          console.log('  /search <query>          — search Prism memory');
+          console.log('  /todos                   — show open TODOs');
+          console.log('  /context                 — show loaded context');
+          console.log('  /exit                    — quit\n');
           rl.prompt();
           return;
         }
@@ -1137,20 +1153,14 @@ program
           rl.close();
           return;
         }
-        if (input === '/clear') {
-          history.length = 0;
-          console.log('🗑️  Conversation cleared.\n');
-          rl.prompt();
-          return;
-        }
         if (input === '/todos') {
           if (contextData?.pending_todo?.length) {
             console.log('\n📋 Open TODOs:');
             contextData.pending_todo.forEach((t: string, i: number) => console.log(`  ${i + 1}. ${t}`));
-            console.log('');
           } else {
-            console.log('\n✅ No open TODOs.\n');
+            console.log('\n✅ No open TODOs.');
           }
+          console.log('');
           rl.prompt();
           return;
         }
@@ -1177,22 +1187,93 @@ program
           return;
         }
 
-        // Build conversation prompt with history
-        history.push(`User: ${input}`);
-        const conversationPrompt = history.join('\n') + '\nAssistant:';
+        // ─── /image command — multimodal ───────────────────
+        if (input.startsWith('/image ')) {
+          const parts = input.substring(7).trim().split(/\s+/);
+          const imgPath = parts[0];
+          const question = parts.slice(1).join(' ') || 'Describe this image in detail.';
 
+          try {
+            const fs = await import('fs');
+            const resolvedPath = imgPath.startsWith('/') ? imgPath : (await import('path')).resolve(process.cwd(), imgPath);
+            if (!fs.existsSync(resolvedPath)) {
+              console.log(`\n❌ File not found: ${resolvedPath}\n`);
+              rl.prompt();
+              return;
+            }
+
+            const data = fs.readFileSync(resolvedPath);
+            const base64 = data.toString('base64');
+            const ext = resolvedPath.split('.').pop()?.toLowerCase() || 'png';
+            const mimeMap: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+            const mimeType = mimeMap[ext] || 'image/png';
+
+            console.log(`\n📸 Analyzing ${imgPath}...`);
+            const result = await chat.sendMessage([
+              { inlineData: { data: base64, mimeType } },
+              question,
+            ]);
+            console.log(`\n${result.response.text()}\n`);
+          } catch (e) {
+            console.log(`\n❌ Image error: ${e instanceof Error ? e.message : String(e)}\n`);
+          }
+          rl.prompt();
+          return;
+        }
+
+        // ─── Normal message — send to Gemini with tool calling loop ──
         try {
-          process.stdout.write('\n');
-          const response = await llm.generateText(conversationPrompt, systemContext);
-          const answer = response.trim();
-          history.push(`Assistant: ${answer}`);
+          let result = await chat.sendMessage(input);
+          let response = result.response;
 
-          // Keep history bounded (last 20 exchanges)
-          if (history.length > 40) history.splice(0, history.length - 40);
+          // Function calling loop — execute tools until model is done
+          let loopCount = 0;
+          const MAX_TOOL_LOOPS = 10;
 
-          console.log(`${answer}\n`);
+          while (loopCount < MAX_TOOL_LOOPS) {
+            const calls = response.functionCalls();
+            if (!calls || calls.length === 0) break;
+
+            loopCount++;
+
+            // Execute all tool calls
+            const toolResults = [];
+            for (const call of calls) {
+              console.log(`  🔧 ${call.name}(${JSON.stringify(call.args).substring(0, 80)}...)`);
+              try {
+                const toolOutput = await executeAgentTool(
+                  call.name,
+                  call.args as Record<string, unknown>,
+                  project,
+                );
+                toolResults.push({
+                  functionResponse: {
+                    name: call.name,
+                    response: { result: toolOutput },
+                  },
+                });
+              } catch (e) {
+                toolResults.push({
+                  functionResponse: {
+                    name: call.name,
+                    response: { error: e instanceof Error ? e.message : String(e) },
+                  },
+                });
+              }
+            }
+
+            // Send tool results back to model
+            result = await chat.sendMessage(toolResults);
+            response = result.response;
+          }
+
+          // Print final text response
+          const text = response.text();
+          if (text) {
+            console.log(`\n${text}\n`);
+          }
         } catch (e) {
-          console.log(`\n❌ LLM error: ${e instanceof Error ? e.message : String(e)}\n`);
+          console.log(`\n❌ Error: ${e instanceof Error ? e.message : String(e)}\n`);
         }
 
         rl.prompt();
