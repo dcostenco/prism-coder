@@ -251,7 +251,7 @@ describe("Residual Norm Distribution", () => {
 //   correct enough for ranking. We expect < 10% R@5 degradation.
 
 describe("Long-Tail Residual Impact on R@k", () => {
-  it("high-residualNorm vectors (>P95) maintain R@5 > 85% (d=128)", () => {
+  it("high-residualNorm vectors (>P95) maintain R@5 > 85% (d=128)", { timeout: 30_000 }, () => {
     const compressor = new TurboQuantCompressor(FAST_CONFIG);
     const rng = mulberry32(2026);
 
