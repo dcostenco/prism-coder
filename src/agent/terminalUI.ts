@@ -100,15 +100,86 @@ export function printBanner(opts: {
 
 /** Build the input prompt string with action buttons — VS Code-style bottom bar */
 export function buildPromptStr(): string {
-    // Action buttons: [+] [📎] [🎤] [💬]
-    const btn = (icon: string) => `${c.dim}[${c.reset}${icon}${c.dim}]${c.reset}`;
-    return `${btn('+')} ${btn('📎')} ${btn('🎤')} ${btn('💬')}  ${c.purple}${c.bold}❯${c.reset} `;
+    return `${c.purple}${c.bold}❯${c.reset} `;
 }
 
 /** Print action buttons legend */
 export function printActionLegend() {
-    console.log(`  ${c.dim}[+] 1 /image  [📎] 2 /paste  [🎤] 3 /voice  [💬] 4 /speak  — Tab to autocomplete${c.reset}`);
+    console.log(`  ${c.dim}Press Enter on empty line to open action menu · / + Tab for commands${c.reset}`);
     console.log('');
+}
+
+/** Interactive action menu items */
+const ACTION_MENU = [
+    { icon: '📂', label: 'Image', desc: 'Attach an image file', cmd: '/image' },
+    { icon: '📎', label: 'Paste', desc: 'Paste clipboard image', cmd: '/paste' },
+    { icon: '🎤', label: 'Voice', desc: 'Voice input', cmd: '/voice' },
+    { icon: '💬', label: 'Speak', desc: 'Toggle text-to-speech', cmd: '/speak' },
+    { icon: '🔍', label: 'Search', desc: 'Search memory', cmd: '/search' },
+    { icon: '📋', label: 'TODOs', desc: 'Show open TODOs', cmd: '/todos' },
+];
+
+/**
+ * Show an interactive arrow-key action picker menu.
+ * Returns the selected slash command string, or null if cancelled.
+ */
+export function showActionMenu(): Promise<string | null> {
+    return new Promise((resolve) => {
+        let selected = 0;
+        const items = ACTION_MENU;
+        const menuHeight = items.length;
+
+        // Render the menu
+        const render = (initial = false) => {
+            if (!initial) {
+                // Move cursor up to re-render
+                process.stdout.write(`\x1b[${menuHeight}A`);
+            }
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (i === selected) {
+                    process.stdout.write(`\x1b[2K  ${c.cyan}❯${c.reset} ${item.icon}  ${c.bold}${item.label}${c.reset}  ${c.dim}${item.desc}${c.reset}\n`);
+                } else {
+                    process.stdout.write(`\x1b[2K    ${item.icon}  ${c.dim}${item.label}  ${item.desc}${c.reset}\n`);
+                }
+            }
+            process.stdout.write(`\x1b[2K  ${c.dim}↑↓ navigate · Enter select · Esc cancel${c.reset}`);
+        };
+
+        console.log(`\n  ${c.bold}${c.purple}⚡ Actions${c.reset}`);
+        render(true);
+
+        const stdin = process.stdin;
+        const wasRaw = stdin.isRaw;
+        stdin.setRawMode(true);
+        stdin.resume();
+
+        const cleanup = () => {
+            stdin.removeListener('data', handler);
+            stdin.setRawMode(wasRaw ?? false);
+            // Clear the hint line
+            process.stdout.write('\x1b[2K\n');
+        };
+
+        const handler = (data: Buffer) => {
+            const key = data.toString();
+            if (key === '\x1b[A') { // Up
+                selected = (selected - 1 + items.length) % items.length;
+                render();
+            } else if (key === '\x1b[B') { // Down
+                selected = (selected + 1) % items.length;
+                render();
+            } else if (key === '\r' || key === '\n') { // Enter
+                cleanup();
+                resolve(items[selected].cmd);
+            } else if (key === '\x1b' || key === '\x03' || key === 'q') { // Esc, Ctrl+C, q
+                cleanup();
+                resolve(null);
+            }
+        };
+
+        stdin.on('data', handler);
+    });
 }
 
 /** Format a tool call for display */
