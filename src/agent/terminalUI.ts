@@ -284,12 +284,12 @@ export function formatContextLoaded(todoCount: number, keywordCount: number): st
     return formatSuccess(`Loaded ${c.bold}${todoCount}${c.reset} TODOs, ${c.bold}${keywordCount}${c.reset} keywords`);
 }
 
-/** Print thinking indicator */
+/** Print thinking indicator on its own line */
 export function printThinking(): void {
-    process.stdout.write(`${c.dim}${c.italic}  thinking...${c.reset}`);
+    console.log(`${c.dim}${c.italic}  thinking...${c.reset}`);
 }
 
-/** Clear thinking indicator */
+/** Clear thinking indicator — move cursor up one line and erase it */
 export function clearThinking(): void {
-    process.stdout.write('\r\x1b[K');
+    process.stdout.write('\x1b[1A\x1b[2K');
 }

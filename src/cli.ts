@@ -1164,25 +1164,8 @@ Guidelines:
       const chat = model.startChat({ history: [] });
       let ttsEnabled = false;
 
-      // ─── Clickable action buttons (OSC 8 + localhost handler) ─
-      const { startActionServer } = await import('./agent/terminalUI.js');
-      const actionServer = await startActionServer();
-
-      // Register action handler — when a button is Cmd+Clicked,
-      // the HTTP server dispatches the command back here
-      actionServer.onAction((cmd: string) => {
-        if (cmd === '/image') {
-          console.log(`\n  ${c.cyan}📂 Usage: /image <path> [question]${c.reset}`);
-          rl.prompt();
-        } else if (cmd === '/search') {
-          console.log(`\n  ${c.cyan}🔍 Usage: /search <query>${c.reset}`);
-          rl.prompt();
-        } else {
-          rl.emit('line', cmd);
-        }
-      });
-
-      printActionBar(actionServer.port);
+      // ─── Action buttons bar ────────────────────────────────
+      printActionBar();
 
       // ─── REPL with VS Code-style prompt ─────────────────────
       const readline = await import('readline');
@@ -1205,14 +1188,20 @@ Guidelines:
         completer,
       });
 
+      let isProcessing = false;  // Guard against concurrent input
+
       rl.prompt();
 
       rl.on('line', async (line: string) => {
+        if (isProcessing) return;  // Drop input while processing
+
         const input = line.trim();
         if (!input) {
           // Empty Enter → show interactive action menu
+          isProcessing = true;
           const { showActionMenu } = await import('./agent/terminalUI.js');
           const cmd = await showActionMenu(rl);
+          isProcessing = false;
           if (cmd) {
             if (cmd === '/image') {
               console.log(`  ${c.cyan}📂 Usage: /image <path> [question]${c.reset}`);
@@ -1567,6 +1556,7 @@ Guidelines:
         }
 
         // ─── Normal message — send to Gemini with tool calling loop ──
+        isProcessing = true;
         try {
           printThinking();
           let result = await chat.sendMessage(input);
@@ -1651,6 +1641,7 @@ Guidelines:
           console.log(formatError(e instanceof Error ? e.message : String(e)));
         }
 
+        isProcessing = false;
         rl.prompt();
       });
 
