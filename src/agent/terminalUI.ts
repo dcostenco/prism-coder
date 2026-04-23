@@ -73,7 +73,7 @@ export function printBanner(opts: {
     version: string;
     project: string;
     cwd: string;
-    email?: string;
+    name?: string;
     plan?: string;
     toolCount: number;
     mcpServers?: number;
@@ -81,14 +81,6 @@ export function printBanner(opts: {
 }) {
     const W = 54; // inner content width (between │ markers)
     const line = '─'.repeat(W);
-
-    // Extract first name from email for greeting
-    const firstName = opts.email
-        ? opts.email.split('@')[0].replace(/[._]/g, ' ').split(' ')[0]
-        : null;
-    const displayName = firstName
-        ? firstName.charAt(0).toUpperCase() + firstName.slice(1)
-        : null;
 
     console.log('');
     console.log(`${c.purple}╭${line}╮${c.reset}`);
@@ -100,23 +92,17 @@ export function printBanner(opts: {
     // Separator
     console.log(`${c.purple}│${c.reset}${' '.repeat(W)}${c.purple}│${c.reset}`);
 
-    // Greeting line
-    if (displayName) {
-        const greetContent = `  ${c.white}${c.bold}Welcome back, ${displayName}${c.reset}`;
-        console.log(`${c.purple}│${c.reset}${padLine(greetContent, W)}${c.purple}│${c.reset}`);
+    // Name + Plan line
+    if (opts.name) {
+        const planStr = opts.plan ? `  ${c.dim}·${c.reset}  ${c.green}📋${c.reset} ${opts.plan}` : '';
+        const nameContent = `  ${c.green}👤${c.reset} ${c.white}${c.bold}${opts.name}${c.reset}${planStr}`;
+        console.log(`${c.purple}│${c.reset}${padLine(nameContent, W)}${c.purple}│${c.reset}`);
     }
 
     // Project + CWD
     const cwdShort = opts.cwd.length > 25 ? '...' + opts.cwd.slice(-22) : opts.cwd;
     const projContent = `  ${c.cyan}📂${c.reset} ${opts.project}  ${c.dim}·${c.reset}  ${c.cyan}📁${c.reset} ${cwdShort}`;
     console.log(`${c.purple}│${c.reset}${padLine(projContent, W)}${c.purple}│${c.reset}`);
-
-    // Email + Plan
-    if (opts.email) {
-        const planStr = opts.plan || 'Free';
-        const authContent = `  ${c.green}👤${c.reset} ${opts.email}  ${c.dim}·${c.reset}  ${c.green}📋${c.reset} ${planStr}`;
-        console.log(`${c.purple}│${c.reset}${padLine(authContent, W)}${c.purple}│${c.reset}`);
-    }
 
     // Model
     if (opts.model) {

@@ -28,6 +28,7 @@ const AUTH_CALLBACK_PATH = '/auth/callback';
 const KEY_AUTH_TOKEN = 'prism_auth_token';
 const KEY_REFRESH_TOKEN = 'prism_refresh_token';
 const KEY_AUTH_EMAIL = 'prism_auth_email';
+const KEY_AUTH_NAME = 'prism_auth_name';
 const KEY_AUTH_PLAN = 'prism_auth_plan';
 const KEY_AUTH_EXPIRES = 'prism_auth_expires';
 
@@ -239,6 +240,7 @@ export async function logout(): Promise<void> {
 export interface AuthStatus {
     loggedIn: boolean;
     email?: string;
+    name?: string;
     plan?: string;
     expiresAt?: Date;
 }
@@ -248,12 +250,14 @@ export async function getAuthStatus(): Promise<AuthStatus> {
     if (!token) return { loggedIn: false };
 
     const email = await getSetting(KEY_AUTH_EMAIL);
+    const name = await getSetting(KEY_AUTH_NAME);
     const plan = await getSetting(KEY_AUTH_PLAN);
     const expiresStr = await getSetting(KEY_AUTH_EXPIRES);
 
     return {
         loggedIn: true,
         email: email || undefined,
+        name: name || undefined,
         plan: plan || undefined,
         expiresAt: expiresStr ? new Date(parseInt(expiresStr, 10) * 1000) : undefined,
     };
