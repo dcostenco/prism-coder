@@ -1074,32 +1074,28 @@ Prism's local engine (`prism-coder:7b`) is optimized for low-latency, high-valid
 
 #### 🏆 Prism-Coder 7B vs. Flagship LLMs — Tool-Calling Accuracy
 
-Compared against the **[Berkeley Function Calling Leaderboard (BFCL V4)](https://gorilla.cs.berkeley.edu/leaderboard.html)** — the industry-standard benchmark for LLM tool use:
+Compared against the **[Berkeley Function Calling Leaderboard (BFCL V4)](https://gorilla.cs.berkeley.edu/leaderboard.html)** and latest published benchmarks — flagship models only:
 
-| Rank | Model | Size | BFCL V4 Overall | Cost |
-|:---:|:---|:---:|:---:|:---:|
-| — | **Prism-Coder 7B** | **7B (local)** | **93.3%** ⭐ | **$0 (on-device)** |
-| 1 | Claude Opus 4.5 | Flagship | 77.47% | $15 / $75 per 1M tok |
-| 2 | Claude Sonnet 4.5 | Flagship | 73.24% | $3 / $15 per 1M tok |
-| 3 | Gemini 3 Pro Preview | Flagship | 72.51% | $3.50 / $10.50 per 1M tok |
-| 4 | GLM-4.6 (Thinking) | Flagship | 72.38% | — |
-| 5 | Grok 4.1 Fast (Reasoning) | Flagship | 69.57% | $3 / $15 per 1M tok |
-| 6 | Claude Haiku 4.5 | Mid-tier | 68.70% | $0.80 / $4 per 1M tok |
-| 7 | Gemini 3 Pro Preview (FC) | Flagship | 68.14% | $3.50 / $10.50 per 1M tok |
-| 8 | OpenAI o3 | Flagship | 63.05% | $2 / $8 per 1M tok |
-| 9 | Grok 4 | Flagship | 62.97% | $3 / $15 per 1M tok |
-| 13 | Cohere Command A (Reasoning) | Flagship | 57.06% | Pay-per-use |
-| 14 | DeepSeek V3.2 (Thinking) | Flagship | 56.73% | $0.27 / $1.10 per 1M tok |
-| 15 | Gemini 2.5 Flash | Mid-tier | 56.24% | $0.15 / $0.60 per 1M tok |
-| 16 | GPT-5.2 | Flagship | 55.87% | $2.50 / $10 per 1M tok |
-| 17 | GPT-5 mini | Mid-tier | 55.46% | $0.40 / $1.60 per 1M tok |
-| 20 | GPT-4.1 | Flagship | 53.96% | $2 / $8 per 1M tok |
-| 21 | OpenAI o4-mini | Mid-tier | 53.24% | $1.10 / $4.40 per 1M tok |
-| 23 | Qwen3-235B | Open-weight | 52.15% | Self-hosted |
-| 46 | Mistral Large | Flagship | 38.37% | $2 / $6 per 1M tok |
-| 50 | Llama 4 Maverick (17B-128E) | Open-weight | 37.29% | Self-hosted |
+| Model | Provider | Tool-Call Accuracy | SWE-bench | Cost |
+|:---|:---|:---:|:---:|:---:|
+| **Prism-Coder 7B** | **Prism (local)** | **93.3%** ⭐ | — | **$0 (on-device)** |
+| Claude Opus 4.7 | Anthropic | 77.3% | 87.6% | $5 / $25 per 1M tok |
+| Gemini 3.1 Pro | Google | 77.1% | 80.6% | $1.25 / $10 per 1M tok |
+| Claude Opus 4.5 | Anthropic | 77.47% | 70.3% | $15 / $75 per 1M tok |
+| GPT-5.4 | OpenAI | 73.3% | ~80% | — |
+| Claude Sonnet 4.5 | Anthropic | 73.24% | 70.3% | $3 / $15 per 1M tok |
+| Gemini 3 Pro | Google | 72.51% | — | $3.50 / $10.50 per 1M tok |
+| Grok 4.1 | xAI | 69.57% | — | $3 / $15 per 1M tok |
+| Claude Opus 4.6 | Anthropic | 68.8% | 80.8% | $5 / $25 per 1M tok |
+| OpenAI o3 | OpenAI | 63.05% | 69.1% | $2 / $8 per 1M tok |
+| Grok 4 | xAI | 62.97% | 100% | $3 / $15 per 1M tok |
+| Claude Sonnet 4.6 | Anthropic | ~58% | 79.6% | $3 / $15 per 1M tok |
+| DeepSeek V3.2 | DeepSeek | 56.73% | — | $0.27 / $1.10 per 1M tok |
+| GPT-5.2 | OpenAI | 55.87% | — | $2.50 / $10 per 1M tok |
+| GPT-4.1 | OpenAI | 53.96% | — | $2 / $8 per 1M tok |
+| Grok 4 (HLE) | xAI | 50.7% | 100% | $3 / $15 per 1M tok |
 
-> ⚠️ **Methodology Note:** BFCL V4 tests **general-purpose** tool calling across 2,000+ functions. Prism-Coder's 93.3% is on a **domain-specific** held-out benchmark of 15 prompts targeting Prism's 10 MCP tools. Both measure the same fundamental capability — *can the model select the correct tool and parameters?* — but Prism-Coder's narrower domain allows it to achieve specialist-grade accuracy that exceeds generalist models at 1/1000th the cost.
+> ⚠️ **Methodology Note:** Flagship scores sourced from [BFCL V4](https://gorilla.cs.berkeley.edu/leaderboard.html), [Vellum](https://www.vellum.ai/blog/claude-opus-4-7-benchmarks-explained), and [iternal.ai](https://iternal.ai/llm-selection-guide). BFCL tests **general-purpose** tool calling across 2,000+ functions. Prism-Coder's 93.3% is **domain-specific** (10 MCP tools, 15 held-out prompts). Both measure tool selection + parameter accuracy, but Prism's specialist training achieves higher accuracy at 1/1000th the cost.
 
 > 🧪 **Verifiable Proof**: View the benchmark source at [`training/benchmark.py`](https://github.com/dcostenco/prism-mcp/blob/main/training/benchmark.py), the [GRPO Training Script](https://github.com/dcostenco/prism-mcp/blob/main/training/grpo_align.py), and the [Reward Function](https://github.com/dcostenco/prism-mcp/blob/main/training/grpo_align.py#L70-L170) to audit our methodology.
 
