@@ -624,6 +624,10 @@ A gorgeous glassmorphism UI at `localhost:3000` that lets you see exactly what y
 
 ![Time Travel Timeline — browse and restore any historical memory version with diff comparison](docs/time-travel-timeline.png)
 
+![Hivemind Radar — real-time multi-agent monitoring with heartbeat, task status, and activity feed](docs/hivemind-radar.png)
+
+![Session Ledger — immutable audit trail of every agent decision across all projects](docs/session-ledger.png)
+
 ### 🛡️ ABA Precision Security Protocol
 Inspired by Applied Behavior Analysis (ABA) structures in the Synalux platform, Prism incorporates rigorous behavioral safety constraints directly into the MCP connection layer. Advanced output sanitization (`sanitizeMcpOutput`) and behavior-guided guardrails eliminate prompt injection, constrain the generator, and enforce strict, hallucination-free outputs for clinical precision.
 
