@@ -1279,13 +1279,12 @@ Guidelines:
         if (input.startsWith('/voice')) {
           const parts = input.split(/\s+/);
           const duration = parseInt(parts[1]) || 5;
-          const avlistenPath = (await import('path')).join(
-            (await import('os')).homedir(), '.cache', 'synalux', 'avlisten',
-          );
+          const { avlistenPath: getAvlistenPath } = await import('./agent/platformUtils.js');
+          const voiceBinPath = getAvlistenPath();
           const fsm = await import('fs');
 
-          if (!fsm.existsSync(avlistenPath)) {
-            console.log(formatWarning('Voice engine (avlisten) not found at ~/.cache/synalux/avlisten'));
+          if (!fsm.existsSync(voiceBinPath)) {
+            console.log(formatWarning(`Voice engine (avlisten) not found at ${voiceBinPath}`));
             console.log(`  ${c.dim}Install via Synalux extension or compile manually.${c.reset}\n`);
             rl.prompt();
             return;
@@ -1296,7 +1295,7 @@ Guidelines:
             const { spawn } = await import('child_process');
             const readlineM = await import('readline');
             const text = await new Promise<string | null>((resolve) => {
-              const proc = spawn(avlistenPath, ['en', '1500'], { stdio: ['pipe', 'pipe', 'pipe'] });
+              const proc = spawn(voiceBinPath, ['en', '1500'], { stdio: ['pipe', 'pipe', 'pipe'] });
               let resolved = false;
               const rlVoice = readlineM.createInterface({ input: proc.stdout! });
               const timeout = setTimeout(() => {
@@ -1338,7 +1337,7 @@ Guidelines:
           return;
         }
 
-        // ─── /camera — capture photo via imagesnap ─────────
+        // ─── /camera — capture photo via imagesnap/ffmpeg ──
         if (input.startsWith('/camera')) {
           const question = input.substring(7).trim() || 'What do you see in this photo? Describe in detail.';
           const tmpPath = '/tmp/prism-camera-capture.jpg';
@@ -1346,13 +1345,23 @@ Guidelines:
           console.log(`\n  ${c.cyan}📷 Capturing photo...${c.reset}`);
           try {
             const { execSync } = await import('child_process');
-            // Check for imagesnap
-            try { execSync('which imagesnap', { stdio: 'pipe' }); } catch {
-              console.log(formatWarning('imagesnap not found. Install: brew install imagesnap'));
+            const { cameraCaptureCommand } = await import('./agent/platformUtils.js');
+            const camCmd = cameraCaptureCommand(tmpPath);
+
+            if (!camCmd.available) {
+              const { IS_MAC, IS_WINDOWS } = await import('./agent/platformUtils.js');
+              if (IS_MAC) {
+                console.log(formatWarning('imagesnap not found. Install: brew install imagesnap'));
+              } else if (IS_WINDOWS) {
+                console.log(formatWarning('ffmpeg not found. Install: choco install ffmpeg or winget install ffmpeg'));
+              } else {
+                console.log(formatWarning('ffmpeg not found. Install: sudo apt install ffmpeg'));
+              }
               rl.prompt();
               return;
             }
-            execSync(`imagesnap -w 1 ${tmpPath}`, { timeout: 10000, stdio: 'pipe' });
+
+            execSync(camCmd.cmd, { timeout: camCmd.waitMs + 7000, stdio: 'pipe' });
 
             const fsm = await import('fs');
             if (!fsm.existsSync(tmpPath)) {
@@ -1395,13 +1404,22 @@ Guidelines:
 
           try {
             const { execSync } = await import('child_process');
-            // Use pngpaste to save clipboard image (macOS)
-            try { execSync('which pngpaste', { stdio: 'pipe' }); } catch {
-              console.log(formatWarning('pngpaste not found. Install: brew install pngpaste'));
+            const { clipboardImageCommand } = await import('./agent/platformUtils.js');
+            const clipCmd = clipboardImageCommand(tmpPath);
+
+            if (!clipCmd.available) {
+              const { IS_MAC, IS_WINDOWS } = await import('./agent/platformUtils.js');
+              if (IS_MAC) {
+                console.log(formatWarning('pngpaste not found. Install: brew install pngpaste'));
+              } else if (IS_WINDOWS) {
+                console.log(formatWarning('Clipboard image capture not available on this system.'));
+              } else {
+                console.log(formatWarning('xclip not found. Install: sudo apt install xclip'));
+              }
               rl.prompt();
               return;
             }
-            execSync(`pngpaste ${tmpPath}`, { timeout: 5000, stdio: 'pipe' });
+            execSync(clipCmd.cmd, { timeout: 5000, stdio: 'pipe' });
 
             const fsm = await import('fs');
             if (!fsm.existsSync(tmpPath)) {
@@ -1501,7 +1519,8 @@ Guidelines:
                   .slice(0, 3000);
                 if (cleanText) {
                   const { exec: execCmd } = await import('child_process');
-                  execCmd(`say -r 190 "${cleanText.replace(/"/g, '\\"')}"`, { timeout: 60000 }, () => { /* fire and forget */ });
+                  const { ttsCommand } = await import('./agent/platformUtils.js');
+                  execCmd(ttsCommand(cleanText, 190), { timeout: 60000 }, () => { /* fire and forget */ });
                 }
               } catch { /* TTS error — ignore */ }
             }

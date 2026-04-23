@@ -16,6 +16,14 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import type { FunctionDeclaration } from "@google/generative-ai";
 import { SchemaType } from "@google/generative-ai";
+import {
+    openUrlCommand,
+    fetchUrlCommand,
+    listFilesCommand,
+    searchFilesCommand,
+    resolveCli,
+    IS_WINDOWS,
+} from "./platformUtils.js";
 
 const execAsync = promisify(exec);
 
@@ -289,19 +297,14 @@ export async function executeAgentTool(
             const maxDepth = (args.max_depth as number) || 3;
             const pattern = args.pattern as string | undefined;
 
-            // Use find command for better performance
-            let cmd = `find "${dir}" -maxdepth ${maxDepth} -not -path '*/node_modules/*' -not -path '*/.git/*'`;
-            if (pattern) {
-                cmd += ` -name "${pattern}"`;
-            }
-            cmd += " | head -100 | sort";
+            const cmd = listFilesCommand(dir, maxDepth, pattern);
 
             try {
-                const { stdout } = await execAsync(cmd, { timeout: 10000 });
+                const { stdout } = await execAsync(cmd, { timeout: 10000, shell: IS_WINDOWS ? "powershell.exe" : undefined });
                 const entries = stdout.trim().split("\n").filter(Boolean);
                 return `Directory: ${dir}\n${entries.length} items found:\n\n${entries.join("\n")}`;
             } catch {
-                // Fallback to readdir
+                // Fallback to Node.js readdir
                 const entries = fs.readdirSync(dir, { withFileTypes: true });
                 const lines = entries
                     .slice(0, 50)
@@ -317,10 +320,7 @@ export async function executeAgentTool(
             const maxResults = (args.max_results as number) || 20;
             const filePattern = args.file_pattern as string | undefined;
 
-            let cmd = `rg --no-heading --line-number --max-count=${maxResults}`;
-            if (filePattern) cmd += ` -g "${filePattern}"`;
-            cmd += ` "${query.replace(/"/g, '\\"')}" "${dir}"`;
-            cmd += " 2>/dev/null | head -50";
+            const cmd = searchFilesCommand(query, dir, maxResults, filePattern);
 
             try {
                 const { stdout } = await execAsync(cmd, { timeout: 15000 });
@@ -416,7 +416,7 @@ export async function executeAgentTool(
         case "open_url": {
             const url = args.url as string;
             try {
-                await execAsync(`open "${url}"`);
+                await execAsync(openUrlCommand(url));
                 return `✅ Opened ${url} in default browser`;
             } catch {
                 return `Error: Failed to open ${url}`;
@@ -430,17 +430,14 @@ export async function executeAgentTool(
                 return "Error: Invalid URL. Must start with http:// or https://";
             }
             try {
-                const safeUrl = fetchUrl.replace(/"/g, '\\"');
+                const cmd = fetchUrlCommand(fetchUrl);
                 const { stdout } = await execAsync(
-                    `curl -sL --max-time 15 --max-filesize 1048576 ` +
-                    `-H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" ` +
-                    `"${safeUrl}" | ` +
-                    `sed 's/<script[^>]*>.*<\\/script>//gi' | ` +
-                    `sed 's/<style[^>]*>.*<\\/style>//gi' | ` +
-                    `sed 's/<[^>]*>//g' | ` +
-                    `tr -s '[:space:]' '\\n' | ` +
-                    `sed '/^$/d' | head -300`,
-                    { timeout: 20000, maxBuffer: 1024 * 1024 },
+                    cmd,
+                    {
+                        timeout: 20000,
+                        maxBuffer: 1024 * 1024,
+                        shell: IS_WINDOWS ? "powershell.exe" : undefined,
+                    },
                 );
                 const text = stdout.trim().slice(0, 8000);
                 return `Content from ${fetchUrl}:\n\n${text}${text.length >= 8000 ? "\n\n... (truncated)" : ""}`;
@@ -453,8 +450,9 @@ export async function executeAgentTool(
         // ─── supabase_cli ──────────────────────────────────────────
         case "supabase_cli": {
             const sbArgs = args.args as string;
+            const sbBin = resolveCli("supabase");
             try {
-                const { stdout } = await execAsync(`/opt/homebrew/bin/supabase ${sbArgs}`, {
+                const { stdout } = await execAsync(`${sbBin} ${sbArgs}`, {
                     cwd: process.cwd(),
                     timeout: 60000,
                     maxBuffer: 1024 * 512,
@@ -473,8 +471,9 @@ export async function executeAgentTool(
         // ─── stripe_cli ───────────────────────────────────────────
         case "stripe_cli": {
             const stripeArgs = args.args as string;
+            const stripeBin = resolveCli("stripe");
             try {
-                const { stdout } = await execAsync(`/opt/homebrew/bin/stripe ${stripeArgs}`, {
+                const { stdout } = await execAsync(`${stripeBin} ${stripeArgs}`, {
                     cwd: process.cwd(),
                     timeout: 60000,
                     maxBuffer: 1024 * 512,
