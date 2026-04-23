@@ -68,54 +68,46 @@ function padLine(visible: string, targetWidth: number): string {
     return visible + ' '.repeat(padding);
 }
 
-/** Print the startup banner */
+/** Print the startup header — compact VS Code-style top bar */
 export function printBanner(opts: {
     version: string;
     project: string;
     cwd: string;
     name?: string;
+    email?: string;
     plan?: string;
     toolCount: number;
     mcpServers?: number;
     model?: string;
 }) {
-    const W = 54; // inner content width (between │ markers)
-    const line = '─'.repeat(W);
-
     console.log('');
-    console.log(`${c.purple}╭${line}╮${c.reset}`);
 
-    // Title line
-    const titleContent = `  ${c.bold}${c.purple}🧠 Prism Agent${c.reset}  ${c.dim}v${opts.version}${c.reset}`;
-    console.log(`${c.purple}│${c.reset}${padLine(titleContent, W)}${c.purple}│${c.reset}`);
+    // ─── Top bar: Prism Agent  CLOUD  ✨ Model  👤 user  PLAN ──
+    const cloudBadge = `${c.bgCyan}${c.bold} CLOUD ${c.reset}`;
+    const modelChip = opts.model ? `${c.bgDim} ✨ ${c.bold}${opts.model} ${c.reset}` : '';
+    const userStr = opts.name || opts.email || '';
+    const userChip = userStr ? `  ${c.dim}👤${c.reset} ${userStr}` : '';
+    const planBadge = opts.plan ? `  ${c.bgPurple}${c.bold} ${opts.plan.toUpperCase()} ${c.reset}` : '';
 
-    // Separator
-    console.log(`${c.purple}│${c.reset}${' '.repeat(W)}${c.purple}│${c.reset}`);
+    console.log(`  ${c.bold}${c.purple}Prism Agent${c.reset}  ${cloudBadge}  ${modelChip}${userChip}${planBadge}`);
 
-    // Name + Plan line
-    if (opts.name) {
-        const planStr = opts.plan ? `  ${c.dim}·${c.reset}  ${c.green}📋${c.reset} ${opts.plan}` : '';
-        const nameContent = `  ${c.green}👤${c.reset} ${c.white}${c.bold}${opts.name}${c.reset}${planStr}`;
-        console.log(`${c.purple}│${c.reset}${padLine(nameContent, W)}${c.purple}│${c.reset}`);
-    }
+    // ─── Sub-bar: project · cwd · tools ───────────────────────
+    const cwdShort = opts.cwd.length > 30 ? '...' + opts.cwd.slice(-27) : opts.cwd;
+    const mcpStr = opts.mcpServers ? `  ${c.dim}·${c.reset}  ${opts.mcpServers} MCP` : '';
+    console.log(`  ${c.dim}📂 ${opts.project}  ·  📁 ${cwdShort}  ·  🔧 ${opts.toolCount} tools${mcpStr}${c.reset}`);
+    console.log('');
+}
 
-    // Project + CWD
-    const cwdShort = opts.cwd.length > 25 ? '...' + opts.cwd.slice(-22) : opts.cwd;
-    const projContent = `  ${c.cyan}📂${c.reset} ${opts.project}  ${c.dim}·${c.reset}  ${c.cyan}📁${c.reset} ${cwdShort}`;
-    console.log(`${c.purple}│${c.reset}${padLine(projContent, W)}${c.purple}│${c.reset}`);
+/** Build the input prompt string with action buttons — VS Code-style bottom bar */
+export function buildPromptStr(): string {
+    // Action buttons: [+] [📎] [🎤] [💬]
+    const btn = (icon: string) => `${c.dim}[${c.reset}${icon}${c.dim}]${c.reset}`;
+    return `${btn('+')} ${btn('📎')} ${btn('🎤')} ${btn('💬')}  ${c.purple}${c.bold}❯${c.reset} `;
+}
 
-    // Model
-    if (opts.model) {
-        const modelContent = `  ${c.blue}🤖${c.reset} ${opts.model}`;
-        console.log(`${c.purple}│${c.reset}${padLine(modelContent, W)}${c.purple}│${c.reset}`);
-    }
-
-    // Tools + MCP
-    const mcpStr = opts.mcpServers ? `${opts.mcpServers} MCP servers  ·  ` : '';
-    const toolContent = `  ${c.orange}🔧${c.reset} ${mcpStr}${opts.toolCount} tools`;
-    console.log(`${c.purple}│${c.reset}${padLine(toolContent, W)}${c.purple}│${c.reset}`);
-
-    console.log(`${c.purple}╰${line}╯${c.reset}`);
+/** Print action buttons legend */
+export function printActionLegend() {
+    console.log(`  ${c.dim}[+] /image  [📎] /paste  [🎤] /voice  [💬] /speak  — /help for all${c.reset}`);
     console.log('');
 }
 

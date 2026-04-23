@@ -1045,7 +1045,7 @@ program
       const auth = await getAuthStatus();
 
       // ─── Terminal UI ────────────────────────────────────────
-      const { printBanner, formatToolCall, formatToolResult, formatResponse, formatError, formatWarning, printHelp, formatMcpConnect, formatContextLoaded, printThinking, clearThinking, c } = await import('./agent/terminalUI.js');
+      const { printBanner, buildPromptStr, printActionLegend, formatToolCall, formatToolResult, formatResponse, formatError, formatWarning, printHelp, formatMcpConnect, formatContextLoaded, printThinking, clearThinking, c } = await import('./agent/terminalUI.js');
 
       // ─── Load project context ───────────────────────────────
       // Auto-detect Supabase backend if credentials exist
@@ -1130,18 +1130,17 @@ Guidelines:
       ];
 
       // ─── Tiered Model Selection ─────────────────────────────
-      // Enterprise: gemini-3.1-pro (most advanced, agentic)
-      // Free/Advanced: gemini-2.5-flash (branded as Prism Coder)
       const isEnterprise = auth.plan?.toLowerCase() === 'enterprise';
       const modelId = isEnterprise ? 'gemini-3.1-pro-preview' : 'gemini-2.5-flash';
       const modelDisplay = isEnterprise ? 'Gemini 3.1 Pro' : 'Prism Coder';
 
-      // ─── Print Banner ───────────────────────────────────────
+      // ─── Print VS Code-style Header ─────────────────────────
       printBanner({
         version: SERVER_CONFIG.version,
         project,
         cwd: process.cwd(),
         name: auth.loggedIn ? auth.name : undefined,
+        email: auth.loggedIn ? auth.email : undefined,
         plan: auth.plan,
         toolCount: allToolDeclarations.length,
         mcpServers: connectedMcpCount > 0 ? connectedMcpCount : undefined,
@@ -1165,12 +1164,12 @@ Guidelines:
       const chat = model.startChat({ history: [] });
       let ttsEnabled = false;
 
-      // ─── Shortcuts hint (compact, one line) ─────────────────
-      console.log(`\n  ${c.dim}Shortcuts: ${c.cyan}^R${c.dim} voice  ${c.cyan}^E${c.dim} camera  ${c.cyan}^T${c.dim} paste  ${c.cyan}/help${c.dim} commands${c.reset}\n`);
+      // ─── Action buttons legend ──────────────────────────────
+      printActionLegend();
 
-      // ─── REPL with rich prompt ──────────────────────────────
+      // ─── REPL with VS Code-style prompt ─────────────────────
       const readline = await import('readline');
-      const promptStr = `${c.dim}${modelDisplay}${c.reset} ${c.purple}${c.bold}❯${c.reset} `;
+      const promptStr = buildPromptStr();
       const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
