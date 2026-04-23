@@ -1195,7 +1195,7 @@ Guidelines:
         if (!input) {
           // Empty Enter → show interactive action menu
           const { showActionMenu } = await import('./agent/terminalUI.js');
-          const cmd = await showActionMenu();
+          const cmd = await showActionMenu(rl);
           if (cmd) {
             if (cmd === '/image') {
               console.log(`  ${c.cyan}📂 Usage: /image <path> [question]${c.reset}`);
