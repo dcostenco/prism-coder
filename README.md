@@ -8,11 +8,48 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
+<!-- 🌐 Auto-Translate: Click any language to view this README translated on-the-fly via Google Translate -->
+🌐 **Translate:** [English](#-prism-coder-ide--ship-not-just-code) · [Español](https://translate.google.com/translate?sl=en&tl=es&u=https://github.com/dcostenco/prism-mcp/blob/main/README.md) · [Français](https://translate.google.com/translate?sl=en&tl=fr&u=https://github.com/dcostenco/prism-mcp/blob/main/README.md) · [Português](https://translate.google.com/translate?sl=en&tl=pt&u=https://github.com/dcostenco/prism-mcp/blob/main/README.md) · [Română](https://translate.google.com/translate?sl=en&tl=ro&u=https://github.com/dcostenco/prism-mcp/blob/main/README.md) · [Українська](https://translate.google.com/translate?sl=en&tl=uk&u=https://github.com/dcostenco/prism-mcp/blob/main/README.md) · [Русский](https://translate.google.com/translate?sl=en&tl=ru&u=https://github.com/dcostenco/prism-mcp/blob/main/README.md) · [Deutsch](https://translate.google.com/translate?sl=en&tl=de&u=https://github.com/dcostenco/prism-mcp/blob/main/README.md) · [日本語](https://translate.google.com/translate?sl=en&tl=ja&u=https://github.com/dcostenco/prism-mcp/blob/main/README.md) · [한국어](https://translate.google.com/translate?sl=en&tl=ko&u=https://github.com/dcostenco/prism-mcp/blob/main/README.md) · [中文](https://translate.google.com/translate?sl=en&tl=zh-CN&u=https://github.com/dcostenco/prism-mcp/blob/main/README.md) · [العربية](https://translate.google.com/translate?sl=en&tl=ar&u=https://github.com/dcostenco/prism-mcp/blob/main/README.md)
+
+---
+
+## ◈ Prism Coder IDE — Ship, Not Just Code
+
+> **NEW:** The full-stack AI-native desktop IDE that combines coding, building, and deploying in one tool. No competitor offers all of this.
+
+| What You Get | Time Saved vs. Traditional |
+|---|:---:|
+| 🤖 **Agent Mode** — autonomous multi-step task execution with diff previews | ~95% |
+| 🏗️ **Website Builder** — 6 templates, section editor, export to HTML/ZIP | ~90% |
+| 🎨 **Visual Drag & Drop** — 11 component types, canvas drop zone, live property editor | ~85% |
+| 🔑 **Auth & Database** — 6 auth providers, table CRUD, RLS, storage buckets | ~90% |
+| 🐳 **DevContainers** — 8 base images, port forwarding, resource limits, Codespaces export | ~80% |
+| 📋 **Customer Board (HIPAA)** — 12-pattern PHI scanner, moderator controls, ticket lifecycle | ~70% |
+| 🎨 **Media Studio** — AI image/video/3D generation, tier-gated quality | ~98% |
+| 🚀 **One-Click Deploy** — Vercel, Netlify, Synalux Cloud, custom server | ~98% |
+| 👥 **Real-Time Collaboration** — multiplayer editing with cursor presence | ~60% |
+| 📊 **SEO + Analytics** — 8-category audit + traffic dashboard | ~99% |
+| 🏪 **Marketplace** — 10-category extension registry, install with one click | ~90% |
+| 📋 **Workflow Engine** — natural language → structured project workflows | ~90% |
+| 🔀 **Git Integration** — branch, stage, commit, push without leaving IDE | ~60% |
+| 🌐 **12-Language i18n** — full UI translation including Arabic RTL | ~100% |
+
+**27/27 features** — more than any competitor (Cursor: 9, Windsurf: 9, Replit: 12, Bolt: 9).
+
+👉 **[Full IDE README with screenshots, architecture, and technical details →](https://github.com/nicecode-dev/prism-coder-ide/blob/main/README.md)**
+
+---
+
 ![Prism Hivemind Multi-Agent Dashboard](docs/v11_hivemind_multi_agent_dashboard.png)
 
 **Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
+<details>
+<summary>Cognitive Architecture Deep Dive (v11.6.0)</summary>
+
 Prism v11.6.0 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.** With v11.6.0, the entire cognitive pipeline — including ledger compaction, task routing, semantic search, and the new **Agent Infrastructure Resilience** — runs **100% on-device** or via secure clinical discovery (PubMed/ERIC), backed by `prism-coder:7b`, a HIPAA-hardened local LLM. No API keys for core features. No data leaves your machine.
+
+</details>
 
 ```bash
 npx -y prism-mcp-server
@@ -958,6 +995,43 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 - 🌐 **v7.7.0 — Cloud-Native SSE Transport:** Full Server-Sent Events MCP support for seamless network deployments.
 
 👉 **[Full release history → CHANGELOG.md](CHANGELOG.md)** · **[ROADMAP →](ROADMAP.md)**
+
+---
+
+## <a name="prism-coder-ide"></a>🖥️ Prism Coder IDE — Standalone Desktop App
+
+> **Available on ALL Prism plans** — Free tier included. 14-day trial for paid features.
+
+A VS Code-like standalone desktop IDE purpose-built for Prism Coder. Ships as `.dmg` (macOS) and `.exe` (Windows).
+
+| Feature | Details |
+| :--- | :--- |
+| **Monaco Editor** | Same code editor engine as VS Code — syntax highlighting, IntelliSense, bracket colorization, minimap |
+| **AI Chat Panel** | Real-time SSE streaming from Prism Coder 7B (local via Ollama) with markdown + code block rendering |
+| **Integrated Terminal** | Full PTY terminal (`xterm.js` + `node-pty`) — not a web simulation |
+| **File Explorer** | Recursive file tree with extension-aware icons, context menus, and live file watching |
+| **Dark Theme** | Catppuccin Mocha base with Prism violet accent, JetBrains Mono typography |
+| **Zero Cloud** | 100% local — models run on your hardware, no API keys required for core features |
+| **Cross-Platform** | macOS (`.dmg`, Apple Silicon + Intel) and Windows (`.exe` NSIS installer) |
+
+### 💳 Subscription Plans
+
+| Feature | **Free** | **Advanced ($12/mo)** | **Enterprise ($29/mo)** |
+| :--- | :---: | :---: | :---: |
+| MCP Tools (30+) | ✅ | ✅ | ✅ |
+| Local Memory (SQLite) | ✅ | ✅ | ✅ |
+| CLI (`prism load/sync`) | ✅ | ✅ | ✅ |
+| Mind Palace Dashboard | ✅ | ✅ | ✅ |
+| **Prism Coder IDE** | ✅ | ✅ | ✅ |
+| **Desktop Packages** | ✅ | ✅ | ✅ |
+| Synalux Drive | ❌ | ✅ | ✅ |
+| Cloud Sync (Supabase) | ❌ | ✅ | ✅ |
+| Cloud Models (Gemini/Claude) | ❌ | ✅ | ✅ |
+| Multi-Agent Hivemind | ❌ | ❌ | ✅ |
+| Dark Factory Pipelines | ❌ | ❌ | ✅ |
+| Priority Support | ❌ | ❌ | ✅ |
+
+> 🆓 **Free tier is fully functional** — all 30+ MCP tools, local memory, CLI, IDE, and desktop packages work forever with zero API keys. Paid plans unlock cloud sync, Synalux Drive, cloud models, and enterprise features. **14-day free trial** on all paid plans.
 
 ---
 
