@@ -1064,20 +1064,21 @@ Prism's local engine (`prism-coder:7b`) is optimized for low-latency, high-valid
 | Metric | Score | Details |
 |:-------|:---:|:---|
 | **JSON Validity** | **100.0%** | Every model output parses as valid JSON |
-| **Tool-Call Accuracy** | **40.0%** (N=15 held-out) | Correct tool selection on unseen prompts |
-| **Retrieval Accuracy** | **100.0%** (3/3) | `session_search`, `session_list`, `knowledge_search` |
-| **Reasoning Accuracy** | **60.0%** (3/5) | Correctly avoids tool calls on pure reasoning |
-| **Parameter Accuracy** | **80.0%** | Required params present when tool is correct |
-| **Generation Speed** | **47.0 Tok/sec** | Apple M4 Max, 36GB |
-| **Avg Latency** | **1.6s** | Per-prompt inference time |
+| **Tool-Call Accuracy** | **66.7%** (N=15 held-out) | Correct tool selection on unseen prompts |
+| **Retrieval Accuracy** | **66.7%** (2/3) | `session_search`, `session_list`, `knowledge_search` |
+| **Reasoning Accuracy** | **80.0%** (4/5) | Correctly avoids tool calls on pure reasoning |
+| **Parameter Accuracy** | **66.7%** | Required params present when tool is correct |
+| **Generation Speed** | **17.0 Tok/sec** | Apple M4 Max, 36GB (LoRA adapter active) |
+| **Avg Latency** | **4.2s** | Per-prompt inference time |
 
 > 🧪 **Verifiable Proof**: These results are produced by our held-out benchmark suite at [`training/benchmark.py`](training/benchmark.py) using 15 non-overlapping test prompts. View the [Benchmark Source](https://github.com/dcostenco/prism-mcp/blob/main/training/benchmark.py), [GRPO Training Script](https://github.com/dcostenco/prism-mcp/blob/main/training/grpo_align.py), and [Protocol Verification Harness](https://github.com/dcostenco/prism-mcp/blob/main/src/verification/gatekeeper.ts) to audit our methodology.
 
 #### 🛡️ The Case for Structural GRPO
-Prism achieves high-validity tool orchestration through **Structural GRPO (Group Relative Policy Optimization)**.
-1. **Deterministic Structural Rewards:** Unlike cloud models that use fuzzy LLM-based reward models, we use a code-based validator that strictly rewards the `<think> → <tool_call>` sequence and penalizes any deviation.
-2. **Synthetic Preference Injection:** We anchor the model with synthetic preference samples during alignment, mapping correct tool-name and parameter schemas for the specific project registry.
-3. **Specialized Adapter Tuning:** While general models (GPT-4o) must handle millions of tasks, our 7B adapter is hyper-specialized for the Prism MCP tool registry, eliminating the "jack-of-all-trades" tax.
+Prism achieves high-validity tool orchestration through **Structural GRPO (Group Relative Policy Optimization)** with a decomposed 4-component reward function:
+1. **Format Reward (0.10):** Validates `<think>` tag compliance for chain-of-thought reasoning.
+2. **Tool Reward (0.25):** Grades tool name accuracy against the expected MCP tool registry.
+3. **Parameter Reward (0.25):** Validates required parameters and JSON schema compliance.
+4. **Abstention Reward (0.40):** The heaviest component — teaches the model when *not* to call tools, preventing false-positive hallucinations on general reasoning questions. Trained on 35 gold abstention responses including 10 hard negatives (prompts containing "session", "knowledge", "search", "context" that should NOT trigger tool calls).
 
 
 ### 🏆 Where Prism Crushes the Giants
