@@ -8,11 +8,11 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-![Prism Hivemind Multi-Agent Dashboard](docs/v11_hivemind_multi_agent_dashboard.png)
+![Prism Cloud Dashboard — Mind Palace with Subscription Tiers](docs/v12_cloud_dashboard.png)
 
 **Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
-Prism v11.6.0 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.** With v11.6.0, the entire cognitive pipeline — including ledger compaction, task routing, semantic search, and the new **Agent Infrastructure Resilience** — runs **100% on-device** or via secure clinical discovery (PubMed/ERIC), backed by `prism-coder:7b`, a HIPAA-hardened local LLM. No API keys for core features. No data leaves your machine.
+Prism v12.0 is a true **Cognitive Architecture** inspired by human brain mechanics. Beyond flat vector search, your agent now forms principles from experience, follows causal trains of thought, and possesses the self-awareness to know when it lacks information. **Your agents don't just remember; they learn.** With v12.0, the entire cognitive pipeline — including ledger compaction, task routing, semantic search, **Prism Cloud** subscription tiers, and the **Visual App Builder** — runs **100% on-device** or via secure cloud infrastructure, backed by `prism-coder:7b`, a HIPAA-hardened local LLM. **Zero API keys for paid plans** — authenticate once with your Synalux JWT and go.
 
 ```bash
 npx -y prism-mcp-server
@@ -68,19 +68,22 @@ Prism v11.6.0 introduces **production-grade agent infrastructure** for running m
 
 ---
 
-## 🔬 <a name="deep-research-intelligence"></a>v11.5.1 Deep Research Intelligence (Auto-Scholar)
+## 🔬 <a name="deep-research-intelligence"></a>v12.0 Deep Research Intelligence (Auto-Scholar)
 
-Prism v11.5.1 transforms your AI agent from a "Coder" into a "Clinical Scientist." It features a **Tavily-Enhanced Multi-Provider Discovery Pipeline** that grounds Gemini 2.5 Flash's thinking in real-world empirical data.
+Prism v12.0 transforms your AI agent from a "Coder" into a "Clinical Scientist." It features a **Multi-Provider Discovery Pipeline** powered by **Firecrawl** (deep web scraping), **Tavily AI** (native search), and **academic databases** — grounding Gemini's thinking in real-world empirical data.
 
-### 🥊 The Global Benchmarks: Prism v11 vs. Standard RAG
+### 🥊 The Global Benchmarks: Prism v12 vs. Standard RAG
 
-| Feature | **Standard AI Memory (Mem0/Zep)** | **Prism v11.5.1 (Elite Architecture)** |
+| Feature | **Standard AI Memory (Mem0/Zep)** | **Prism v12.0 (Cloud Architecture)** |
 | :--- | :--- | :--- |
-| **Search Complexity** | $O(N)$ or $O(\log N)$ (Scales with data) | **$O(1)$ Zero-Search (Constant time via HRR) ** |
-| **Discovery Logic** | General Web Search (Snippets) | **Parallel Academic Discovery (PubMed, ERIC, S2)** |
+| **Search Complexity** | $O(N)$ or $O(\log N)$ (Scales with data) | **$O(1)$ Zero-Search (Constant time via HRR)** |
+| **Discovery Engines** | General Web Search (Snippets) | **Firecrawl + Tavily + PubMed + ERIC + S2** |
 | **Reasoning Model** | Flat List (Simple Similarity) | **ACT-R Spreading Activation (Causal Graph)** |
 | **Privacy Mode** | Cloud-First (SaaS) | **Local-First (HIPAA-Hardened / Air-Gapped)** |
 | **Intelligence Floor** | Generic GPT-4 Advice | **Data-Driven Clinical Evidence (62% CI Warnings)** |
+| **Auth Model** | API Key per service | **JWT (zero keys for paid plans)** |
+| **Team Collaboration** | ❌ None | **Hivemind + RBAC + Project Scoping** |
+| **Visual Builder** | ❌ None | **14-component drag-and-drop App Builder** |
 
 ---
 
@@ -100,16 +103,22 @@ Prism features a cutting-edge **Zero-Search Retrieval** system for its cognitive
 
 ### 🔍 Supported Discovery Engines & Databases
 
-1.  **Tavily AI** (Elite): Primary discovery engine for AI-native deep crawling and PDF/Abstract extraction.
-2.  **PubMed (NCBI)** (Clinical): The world's largest biomedical database for clinical citations.
-3.  **ERIC (Education Research)** (Behavioral): The definitive database for ABA and pediatric interventions.
-4.  **Semantic Scholar** (Academic): AI-powered research tool providing "TLDR" summaries of 200M+ papers.
-5.  **DuckDuckGo Lite** (Fallback): Privacy-focused web discovery for general context.
+| Engine | Type | Tier | Description |
+|:-------|:-----|:-----|:------------|
+| **Firecrawl** | 🔥 Deep Web Scraping | ⚡ Standard+ | AI-native web scraping, JavaScript rendering, structured extraction from any URL |
+| **Tavily AI** | 🔎 AI Search | ⚡ Standard+ | Real-time AI-native search with PDF/Abstract extraction and source grounding |
+| **PubMed (NCBI)** | 🏥 Clinical | 🆓 All tiers | World's largest biomedical database — 36M+ clinical citations |
+| **ERIC (Education)** | 📚 Behavioral | 🆓 All tiers | Definitive database for ABA, pediatric interventions, and education research |
+| **Semantic Scholar** | 🎓 Academic | 🆓 All tiers | AI-powered summaries of 200M+ papers with TLDR and citation graphs |
+| **Brave Search** | 🌐 Web | 🆓 All tiers | Privacy-focused web search with instant answers and discussion forums |
+| **DuckDuckGo Lite** | 🌐 Fallback | 🆓 All tiers | Zero-config fallback when no API keys are configured |
+
+> 🔥 **Firecrawl & Tavily are native for paid plans** — Standard, Advanced, and Enterprise subscribers get Firecrawl deep scraping and Tavily AI search built-in with zero configuration. Free tier users can still provide their own API keys.
 
 ---
 
 ### 🏥 Flagship Implementation: [Synalux](https://synalux.ai)
-**[Synalux](https://synalux.ai)** is a high-compliance, local-first Practice Management System for ABA and Pediatrics. It is the flagship implementation of the Prism v11.6.0 engine, utilizing **Zero-Search Retrieval** and **Parallel Academic Discovery** to provide clinicians with real-time, evidence-based reasoning.
+**[Synalux](https://synalux.ai)** is a high-compliance, local-first Practice Management System for ABA and Pediatrics. It is the flagship implementation of the Prism v12.0 engine, utilizing **Zero-Search Retrieval**, **Firecrawl/Tavily Discovery**, and **Parallel Academic Research** to provide clinicians with real-time, evidence-based reasoning.
 
 ---
 
@@ -143,6 +152,62 @@ Prism has three pillars:
 2. **🔗 Multi-Hop Causal Reasoning** — Prism doesn't just find "similar" things. Spreading activation traverses the causal graph and brings back context connected to your current problem through logical "trains of thought."
 
 3. **🏭 Autonomous Execution (Dark Factory)** — When you're ready, Prism can run coding tasks end-to-end with a fail-closed pipeline where an adversarial evaluator catches bugs the generator missed — before you ever see the PR. *(See [Dark Factory](#dark-factory-adversarial-autonomous-pipelines).)*
+
+---
+
+## ☁️ Prism Cloud — Subscription Tiers
+
+![Prism Cloud Pricing Comparison](docs/prism_cloud_tiers.png)
+
+Prism Cloud extends the open-source Mind Palace with hosted infrastructure. **All tiers include Prism-Coder 7B (local)** — Cloud tiers add hosted inference, team collaboration, and enterprise compliance.
+
+| Feature | 🆓 Free | ⚡ Standard ($19/mo) | 🚀 Advanced ($49/mo) | 🏢 Enterprise ($99/seat) |
+|:--------|:---:|:---:|:---:|:---:|
+| **Prism-Coder 7B (Local)** | ✅ | ✅ | ✅ | ✅ |
+| **MCP Tools** | 5 | All 17 | All 17 | All 17 |
+| **API Calls / Day** | 100 | 500 | 2,000 | Unlimited |
+| **Cloud Coder** | ❌ | 100/day | 1,000/day | Unlimited |
+| **Cloud Memory Sync** | ❌ | ✅ | ✅ | ✅ |
+| **Projects** | 1 | 3 | Unlimited | Unlimited |
+| **Teams** | ❌ | 3 teams / 5 members | 10 teams / 25 members | Unlimited |
+| **Visual Builder** | Layout + UI | Layout + UI | + Data Tables, Charts | + Webhooks, Full |
+| **RBAC & Role Hierarchy** | ❌ | ✅ | ✅ | ✅ |
+| **Hivemind / Dark Factory** | ❌ | ✅ | ✅ | ✅ |
+| **SSO / HIPAA / On-Prem** | ❌ | ❌ | ❌ | ✅ |
+| **Auth Method** | API Key | **JWT (zero keys)** | **JWT (zero keys)** | **JWT (zero keys)** |
+| **Gemini Access** | ❌ | 2.5 Flash | 3.1 Pro | 3.1 Pro Ultra |
+
+> 🔑 **Zero API Keys for Paid Plans** — Standard, Advanced, and Enterprise authenticate via **Supabase JWT OAuth**. Run `prism login`, sign in with your Synalux account, and you're done. No `GOOGLE_API_KEY`, no `BRAVE_API_KEY`, no configuration files. Your subscription tier is your identity.
+
+---
+
+## 🖥️ Cloud Platform Screenshots
+
+### 👥 Team Dashboard
+
+![Prism Cloud Teams — Role-Based Team Management](docs/prism_team_dashboard.png)
+
+Manage teams with **role-based access control** (Admin / Editor / Viewer). Each team supports up to 25 members on Advanced, unlimited on Enterprise. Team admins can assign members to specific projects, manage invitations, and track project progress across the organization. Tier-enforced limits: Standard = 3 teams / 5 members, Advanced = 10 teams / 25 members, Enterprise = unlimited.
+
+### 🤝 Collaboration Center
+
+![Prism Cloud Collaboration — Activity Feed & Team Discussion](docs/prism_collaboration_center.png)
+
+Real-time **activity feed** shows deployments, form submissions, builder updates, and project milestones across all team members. Integrated **team discussion** threads keep conversations contextual to specific projects. Online/offline presence indicators and notification badges (🔔) ensure your team stays in sync. Powered by Supabase Realtime under the hood.
+
+### 🎨 Visual App Builder
+
+![Prism Cloud Builder — 3-Panel Drag & Drop Interface](docs/prism_visual_builder.png)
+
+The **Visual App Builder** is a 3-panel drag-and-drop interface for building data-driven applications:
+
+| Panel | Purpose | Components |
+|:------|:--------|:-----------|
+| **Component Palette** (left) | Browse & search 14 components | Layout (Container, Grid, Flex), UI (Button, Input, Card, Badge), Data (Table, Chart, Webhook) |
+| **Canvas** (center) | Live preview with drag-and-drop | Renders components in real-time with `{{ table.field }}` data binding |
+| **Properties Panel** (right) | Edit component props | Text inputs, color pickers, padding sliders, data source selectors |
+
+> ⚙️ **Tier Gating:** Layout and UI components are available on all plans. **Data components** (Table, Chart, Webhook) require Advanced or Enterprise — marked with `ADV` / `ENT` badges in the palette.
 
 ---
 
@@ -1485,18 +1550,38 @@ A: Run `npm run build && npm test`, then open the Mind Palace dashboard (`localh
 
 ---
 
+### 🛡️ Security & Compliance
+
+Prism v12.0 is designed for clinical and enterprise environments with defense-in-depth security:
+
+| Defense Layer | What It Protects | Details |
+|:-------------|:-----------------|:--------|
+| **Supabase JWT OAuth** | Authentication | Zero API keys for paid plans — JWT tokens carry tier, role, and project scope |
+| **Row-Level Security (RLS)** | Data Isolation | Every table enforces tenant isolation — users can only access their own data |
+| **HIPAA Strict Mode** | PHI Protection | `PRISM_STRICT_LOCAL_MODE=true` ensures zero data leaves the device |
+| **SSRF Protection** | Network Security | Redirect blocking (`redirect: "error"`), URL credential redaction, internal IP guards |
+| **XML Sanitization** | Prompt Injection | Full XML entity escaping on all user-controlled fields — prevents stored prompt injection |
+| **Rate Limiting** | Abuse Prevention | Atomic Postgres RPC (`check_prism_usage`) enforces per-tier daily limits |
+| **Audit Logging** | Compliance | `withAudit()` wrapper logs every API call with user ID, action, and timestamp |
+| **Memory Sanitization** | Injection Defense | `sanitizeMemoryInput()` strips 8 categories of dangerous tags from all text fields |
+| **WebCrypto (ESAQ)** | Offline PHI | Emergency Session Auto-Quarantine encrypts offline data via RSA keys on idle timeout |
+
+> 🔒 **HIPAA Deployment:** Set `PRISM_LOCAL_LLM_ENABLED=true` + `PRISM_STRICT_LOCAL_MODE=true`. Session data will **never** leave the device — even if Ollama crashes. Prism underwent **3 rounds of adversarial security review** with 22 findings identified and closed.
+
+---
+
 ### 💡 Known Limitations & Quirks
 
-- **Some advanced text features may still benefit from a cloud API key.** While `prism-coder:7b` handles core compaction and routing, high-level features like Morning Briefings and complex VLM captioning are optimized for cloud providers (`GOOGLE_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`). Semantic search and basic compaction work 100% offline with `embedding_provider=local`.
-- **Auto-load is model- and client-dependent.** Session auto-loading relies on both the LLM following system prompt instructions *and* the MCP client completing tool registration before the model's first turn. Prism provides platform-specific [Setup Guides](#setup-guides) and a server-side fallback (v5.2.1) that auto-pushes context after 10 seconds.
-- **MCP client race conditions.** Some MCP clients may not finish tool enumeration before the model generates its first response, causing transient `unknown_tool` errors. This is a client-side timing issue — Prism's server completes the MCP handshake in ~60ms. Workaround: the server-side auto-push fallback and the startup skill's retry logic.
-- **No real-time sync without Supabase.** Local SQLite mode is single-machine only. Multi-device or team sync requires a Supabase backend.
-- **Embedding quality varies by provider.** Gemini `text-embedding-004` and OpenAI `text-embedding-3-small` produce high-quality 768-dim vectors. Prism passes `dimensions: 768` via the Matryoshka API for OpenAI models (native output is 1536-dim; this truncation is lossless and outperforms ada-002 at full 1536 dims). Local embeddings (`nomic-embed-text-v1.5` via `@huggingface/transformers`) provide good quality with zero API cost. Ollama embeddings are usable but may reduce retrieval accuracy.
-- **Dashboard is HTTP-only.** The Mind Palace dashboard at `localhost:3000` does not support HTTPS. For remote access, use a reverse proxy (nginx/Caddy) or SSH tunnel. Basic auth is available via `PRISM_DASHBOARD_USER` / `PRISM_DASHBOARD_PASS`. JWKS JWT auth is available via `PRISM_JWKS_URI` for agent-native authentication (works with Auth0, AgentLair ([llms.txt](https://agentlair.com/llms.txt)), Keycloak, Cognito, or any standard JWKS endpoint).
-- **Long-lived clients can accumulate zombie processes.** MCP clients that run for extended periods (e.g., Claude CLI) may leave orphaned Prism server processes. The lifecycle manager detects true orphans (PPID=1) but allows coexistence for active parent processes. Use `PRISM_INSTANCE` to isolate instances across clients.
-- **Migration is one-way.** Universal Import ingests sessions *into* Prism but does not export back to Claude/Gemini/OpenAI formats. Use `session_export_memory` for portable JSON/Markdown export, or the `vault` format for Obsidian/Logseq-compatible `.zip` archives.
-- **Export ceiling at 10,000 ledger entries.** The `session_export_memory` tool and the dashboard export button cap vault/JSON exports at 10,000 entries per project as an OOM guard. Projects exceeding this limit should use per-project exports and time-based filtering to stay within the ceiling. This limit does not affect search or context loading.
-- **No Windows CI testing.** Prism is developed and tested on macOS/Linux. It should work on Windows via Node.js, but edge cases (file paths, PID locks) may surface.
+| Limitation | Impact | Workaround |
+|:-----------|:-------|:-----------|
+| **Free tier requires API keys** | Cloud features (Firecrawl, Tavily, Gemini) need manual key config on Free | Upgrade to Standard ($19/mo) for zero-key experience |
+| **Auto-load is client-dependent** | Some MCP clients don't finish tool registration before first turn | Server-side auto-push fallback (v5.2.1) activates after 10s |
+| **No real-time sync without Supabase** | Local SQLite mode is single-machine only | Configure Supabase for multi-device or team sync |
+| **Dashboard is HTTP-only** | Mind Palace at localhost:3000 doesn't support HTTPS natively | Use nginx/Caddy reverse proxy or SSH tunnel |
+| **Export ceiling at 10K entries** | `session_export_memory` caps at 10,000 per project | Use per-project exports with time-based filtering |
+| **No Windows CI testing** | macOS/Linux primary — Windows edge cases possible | Node.js compatibility expected; file path quirks may surface |
+| **Embedding quality varies** | Local embeddings (nomic-embed) are good but not optimal | Use Gemini `text-embedding-004` for best quality |
+| **Migration is one-way** | Universal Import ingests into Prism only | Use `vault` format for Obsidian/Logseq-compatible export |
 
 ---
 

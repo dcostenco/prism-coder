@@ -141,7 +141,7 @@ program
       await closeStorage();
     } catch (err) {
       console.error(`Error loading context: ${err instanceof Error ? err.message : String(err)}`);
-      await closeStorage().catch(() => {});
+      await closeStorage().catch(() => { });
       process.exit(1);
     }
   });
@@ -244,7 +244,7 @@ saveCmd
       await closeStorage();
     } catch (err) {
       console.error(`Error saving ledger: ${err instanceof Error ? err.message : String(err)}`);
-      await closeStorage().catch(() => {});
+      await closeStorage().catch(() => { });
       process.exit(1);
     }
   });
@@ -310,7 +310,7 @@ saveCmd
       await closeStorage();
     } catch (err) {
       console.error(`Error saving handoff: ${err instanceof Error ? err.message : String(err)}`);
-      await closeStorage().catch(() => {});
+      await closeStorage().catch(() => { });
       process.exit(1);
     }
   });
@@ -414,9 +414,100 @@ syncCmd
       await closeStorage();
     } catch (err) {
       console.error(`Error during sync push: ${err instanceof Error ? err.message : String(err)}`);
-      await closeStorage().catch(() => {});
+      await closeStorage().catch(() => { });
       process.exit(1);
     }
   });
 
+// ─── prism login ─────────────────────────────────────────────
+// OAuth login flow — opens browser for Synalux authentication.
+// Replaces legacy `prism trial` (license key-based).
+
+program
+  .command('login')
+  .description('Authenticate with Synalux Cloud via OAuth (opens browser)')
+  .action(async () => {
+    try {
+      const { initConfigStorage } = await import('./storage/configStorage.js');
+      await initConfigStorage();
+
+      const { login } = await import('./auth.js');
+      const result = await login();
+
+      if (result.success) {
+        console.log(`\n✅ Logged in as ${result.email} (${result.plan} plan)`);
+        console.log('   Prism Cloud features are now active.\n');
+      } else {
+        console.error(`\n❌ Login failed: ${result.error}\n`);
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(`❌ Login error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+// ─── prism logout ────────────────────────────────────────────
+
+program
+  .command('logout')
+  .description('Sign out of Synalux Cloud and clear stored tokens')
+  .action(async () => {
+    try {
+      const { initConfigStorage } = await import('./storage/configStorage.js');
+      await initConfigStorage();
+
+      const { logout } = await import('./auth.js');
+      await logout();
+
+      console.log('✅ Logged out of Synalux Cloud. Operating in Free tier.');
+    } catch (err) {
+      console.error(`❌ Logout error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+// ─── prism status ────────────────────────────────────────────
+
+program
+  .command('status')
+  .description('Show current authentication state and cloud tier')
+  .option('--json', 'Emit machine-readable JSON output')
+  .action(async (options) => {
+    try {
+      const { initConfigStorage } = await import('./storage/configStorage.js');
+      await initConfigStorage();
+
+      const { getAuthStatus } = await import('./auth.js');
+      const authStatus = await getAuthStatus();
+
+      if (options.json) {
+        console.log(JSON.stringify(authStatus, null, 2));
+      } else if (authStatus.loggedIn) {
+        console.log(`🔐 Logged in as: ${authStatus.email}`);
+        console.log(`📋 Plan: ${authStatus.plan}`);
+        if (authStatus.expiresAt) {
+          console.log(`⏰ Token expires: ${authStatus.expiresAt.toLocaleString()}`);
+        }
+      } else {
+        console.log('🔓 Not logged in. Run `prism login` to authenticate with Synalux Cloud.');
+      }
+    } catch (err) {
+      console.error(`❌ Status error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+// ─── Legacy: prism trial (deprecated) ────────────────────────
+program
+  .command('trial')
+  .description('[DEPRECATED] Use `prism login` instead')
+  .action(() => {
+    console.log('⚠️  `prism trial` is deprecated. Use `prism login` for OAuth-based authentication.');
+    console.log('   This gives you the same 30-day trial via Synalux Cloud.\n');
+    console.log('   Run: prism login');
+    process.exit(0);
+  });
+
 program.parse(process.argv);
+

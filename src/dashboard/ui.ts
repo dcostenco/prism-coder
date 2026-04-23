@@ -15,7 +15,7 @@
  */
 
 export function renderDashboardHTML(version: string): string {
-  return `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -604,6 +604,7 @@ export function renderDashboardHTML(version: string): string {
       <button class="s-tab active" id="mtab-project" onclick="switchMainTab('project')" style="font-size: 1rem;">📁 Project View</button>
       <button class="s-tab" id="mtab-search" onclick="switchMainTab('search')" style="font-size: 1rem;">🔍 Vector Search</button>
       <button class="s-tab" id="mtab-factory" onclick="switchMainTab('factory')" style="font-size: 1rem;">🏭 Factory</button>
+      <button class="s-tab" id="mtab-cloud" onclick="switchMainTab('cloud')" style="font-size: 1rem; color: var(--accent-amber);">☁️ Cloud Pro</button>
     </div>
 
     <div id="welcome" class="empty">
@@ -787,8 +788,133 @@ export function renderDashboardHTML(version: string): string {
         </div>
       </div>
 
-      <!-- Right Column -->
-      <div class="grid" style="align-content: start;">
+      <!-- Cloud Pro Content -->
+      <div id="cloud-content" style="display:none;" class="fade-in">
+        <!-- Auth Status Banner -->
+        <div class="card" style="margin-bottom: 1rem;">
+          <div class="card-title">
+            <span class="dot" style="background:var(--accent-green)"></span>
+            <span id="cloud-auth-status">Authentication</span>
+          </div>
+          <div id="cloud-auth-detail" class="summary-text">
+            Checking auth status...
+          </div>
+        </div>
+
+        <!-- Usage Quotas Dashboard -->
+        <div class="card" id="cloud-usage-card" style="margin-bottom: 1.5rem; display:none;">
+          <div class="card-title">
+            <span class="dot" style="background:var(--accent-cyan)"></span>
+            Daily Usage Quotas 📊
+          </div>
+          <div class="analytics-stats" style="grid-template-columns: repeat(4, 1fr);">
+            <div class="astat">
+              <div class="astat-val" id="usage-coder">—</div>
+              <div class="astat-label">🧠 Coder</div>
+              <div style="height:4px;background:rgba(139,92,246,0.2);border-radius:2px;margin-top:0.3rem;overflow:hidden">
+                <div id="usage-coder-bar" style="height:100%;background:var(--accent-purple);width:0%;border-radius:2px;transition:width 0.5s"></div>
+              </div>
+            </div>
+            <div class="astat">
+              <div class="astat-val" id="usage-llm">—</div>
+              <div class="astat-label">☁️ LLM</div>
+              <div style="height:4px;background:rgba(59,130,246,0.2);border-radius:2px;margin-top:0.3rem;overflow:hidden">
+                <div id="usage-llm-bar" style="height:100%;background:var(--accent-blue);width:0%;border-radius:2px;transition:width 0.5s"></div>
+              </div>
+            </div>
+            <div class="astat">
+              <div class="astat-val" id="usage-search">—</div>
+              <div class="astat-label">🔍 Search</div>
+              <div style="height:4px;background:rgba(16,185,129,0.2);border-radius:2px;margin-top:0.3rem;overflow:hidden">
+                <div id="usage-search-bar" style="height:100%;background:var(--accent-green);width:0%;border-radius:2px;transition:width 0.5s"></div>
+              </div>
+            </div>
+            <div class="astat">
+              <div class="astat-val" id="usage-memory">—</div>
+              <div class="astat-label">💾 Memory</div>
+              <div style="height:4px;background:rgba(245,158,11,0.2);border-radius:2px;margin-top:0.3rem;overflow:hidden">
+                <div id="usage-memory-bar" style="height:100%;background:var(--accent-amber);width:0%;border-radius:2px;transition:width 0.5s"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dual-Engine Architecture Header -->
+        <div class="card" style="margin-bottom: 1.5rem;">
+          <div class="card-title">
+            <span class="dot" style="background:var(--accent-amber)"></span>
+            Prism Cloud — Dual-Engine Architecture
+          </div>
+          <p class="summary-text" style="margin-bottom:0.5rem">
+            <strong style="color:var(--text-primary)">🧠 Tool-Calling:</strong> Prism-Coder 7B runs locally via Ollama with grammar-constrained JSON (100% validity). Cloud Coder fallback for Standard+ tiers.
+          </p>
+          <p class="summary-text">
+            <strong style="color:var(--text-primary)">☁️ General LLM:</strong> Gemini handles translation, summarization, code generation, and creative tasks. Model tier depends on your plan.
+          </p>
+        </div>
+
+        <!-- Tier Cards -->
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+          <!-- Free -->
+          <div class="card" style="background: rgba(15,23,42,0.4); border-color: rgba(255,255,255,0.1);">
+            <h3 style="font-size: 1.1rem; margin-bottom: 0.5rem;">🆓 Free</h3>
+            <div style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.75rem;">$0<span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">/mo</span></div>
+            <ul class="todo-list" style="margin-bottom: 1rem; font-size: 0.8rem;">
+              <li>🧠 Prism-Coder 7B (local)</li>
+              <li>☁️ Gemini 2.5 Flash</li>
+              <li>100 LLM calls/day</li>
+              <li style="color: var(--text-muted); text-decoration: line-through;">No Cloud Coder</li>
+              <li style="color: var(--text-muted); text-decoration: line-through;">No Cloud Memory</li>
+            </ul>
+            <button class="lc-btn compact" id="cloud-btn-free" style="width: 100%; cursor: default;">Current Plan</button>
+          </div>
+          
+          <!-- Standard -->
+          <div class="card" style="background: rgba(16,185,129,0.04); border-color: rgba(16,185,129,0.3);">
+            <h3 style="font-size: 1.1rem; margin-bottom: 0.5rem; color: var(--accent-green);">⚡ Standard</h3>
+            <div style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.75rem;">$19<span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">/mo</span></div>
+            <ul class="todo-list" style="margin-bottom: 1rem; font-size: 0.8rem;">
+              <li>🧠 Prism-Coder 7B (local)</li>
+              <li><strong style="color:var(--accent-green)">☁️ Cloud Coder (100/day)</strong></li>
+              <li><strong style="color:var(--text-primary)">☁️ Gemini 3.1 Pro</strong></li>
+              <li>2,000 LLM calls/day</li>
+              <li>Cloud Memory Sync</li>
+            </ul>
+            <button class="lc-btn" style="width: 100%; background: var(--accent-green); color: #fff;" onclick="startCheckout('standard')">Upgrade to Standard</button>
+          </div>
+
+          <!-- Advanced -->
+          <div class="card" style="background: rgba(59,130,246,0.05); border-color: rgba(59,130,246,0.3);">
+            <h3 style="font-size: 1.1rem; margin-bottom: 0.5rem; color: var(--accent-blue);">🚀 Advanced</h3>
+            <div style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.75rem;">$49<span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">/mo</span></div>
+            <ul class="todo-list" style="margin-bottom: 1rem; font-size: 0.8rem;">
+              <li>🧠 Prism-Coder 7B (local)</li>
+              <li><strong style="color:var(--accent-blue)">☁️ Cloud Coder (1,000/day)</strong></li>
+              <li><strong style="color:var(--text-primary)">☁️ Gemini 3.1 Pro</strong></li>
+              <li>5,000 LLM calls/day</li>
+              <li>RBAC + Team Chat</li>
+            </ul>
+            <button class="lc-btn" style="width: 100%; background: var(--accent-blue); color: #fff;" onclick="startCheckout('advanced')">Upgrade to Advanced</button>
+          </div>
+          
+          <!-- Enterprise -->
+          <div class="card" style="background: rgba(139,92,246,0.05); border-color: rgba(139,92,246,0.4); box-shadow: 0 0 20px rgba(139,92,246,0.1);">
+            <h3 style="font-size: 1.1rem; margin-bottom: 0.5rem; color: var(--accent-purple);">🏢 Enterprise</h3>
+            <div style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.75rem;">$99<span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">/seat</span></div>
+            <ul class="todo-list" style="margin-bottom: 1rem; font-size: 0.8rem;">
+              <li>🧠 Prism-Coder 7B (local)</li>
+              <li><strong style="color:var(--accent-purple)">☁️ Cloud Coder (Unlimited)</strong></li>
+              <li><strong style="color:var(--text-primary)">☁️ Gemini 3.1 Pro</strong></li>
+              <li>100,000 LLM calls/day</li>
+              <li>HIPAA + SSO + On-Prem</li>
+            </ul>
+            <button class="lc-btn" style="width: 100%; background: var(--accent-purple); color: #fff;" onclick="startCheckout('enterprise')">Contact Sales</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Right Column (Empty for Cloud tab, visible for Project tab) -->
+      <div id="right-column" class="grid" style="align-content: start;">
 
         <!-- Neural Graph (v2.3.0 / v5.1) -->
         <div class="card">
@@ -1369,6 +1495,9 @@ Example:\n## Dev Rules\n- Always write tests first\n- Use TypeScript strict mode
   <!-- Fixed toast for cleanup feedback -->
   <div class="toast-fixed" id="fixedToast"></div>
 
+  <!-- Google Identity Services for OAuth -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
   <script>
 // ═══════════════════════════════════════════════════════════════════
 // COMPATIBILITY RULE: This entire <script> block MUST use ES5 only.
@@ -1423,22 +1552,46 @@ function switchMainTab(tabId) {
     document.getElementById('mtab-project').classList.toggle('active', tabId === 'project');
     document.getElementById('mtab-search').classList.toggle('active', tabId === 'search');
     document.getElementById('mtab-factory').classList.toggle('active', tabId === 'factory');
-    // Fix 2: restore correct visibility when switching back to project tab;
-    // setting display='' would let CSS display:none win, hiding loaded content.
-    // Also hide welcome div when on non-project tabs so it doesn't bleed through.
+    document.getElementById('mtab-cloud').classList.toggle('active', tabId === 'cloud');
+    
+    // Manage visibility of main content sections
     if (tabId === 'project') {
         document.getElementById('welcome').style.display = projectLoaded ? 'none' : '';
         document.getElementById('content').style.display = projectLoaded ? 'grid' : 'none';
+        var rightCol = document.getElementById('right-column');
+        if (rightCol) rightCol.style.display = 'grid';
     } else {
         document.getElementById('welcome').style.display = 'none';
         document.getElementById('content').style.display = 'none';
     }
+    
+    // Feature sections outside the main grid
     document.getElementById('search-content').style.display = tabId === 'search' ? 'block' : 'none';
     document.getElementById('factory-content').style.display = tabId === 'factory' ? 'block' : 'none';
+    
+    // Cloud tab inside content
+    var cloudContent = document.getElementById('cloud-content');
+    if (cloudContent) {
+        if (tabId === 'cloud') {
+            document.getElementById('content').style.display = 'grid';
+            cloudContent.style.display = 'block';
+            var rightCol = document.getElementById('right-column');
+            if (rightCol) rightCol.style.display = 'none'; // Hide right col on cloud page
+            
+            // Re-hide the project columns since they use inline style in JS
+            var ArrayFrom = Array.prototype.slice.call(document.querySelectorAll('.grid-main > .grid:not(#right-column)'));
+            if(ArrayFrom[0]) ArrayFrom[0].style.display = 'none';
+        } else {
+            cloudContent.style.display = 'none';
+            var ArrayFrom = Array.prototype.slice.call(document.querySelectorAll('.grid-main > .grid:not(#right-column)'));
+            if(ArrayFrom[0]) ArrayFrom[0].style.display = 'grid';
+        }
+    }
+    
     if (tabId === 'search') {
         document.getElementById('searchInput').focus();
     }
-    if (tabId === 'factory') {
+}    if (tabId === 'factory') {
         loadPipelines();
     }
 }
@@ -4165,6 +4318,14 @@ function renderIntentHealthCard(data) {
         '</div>';
 
     container.innerHTML = html;
+}
+// ─── CLOUD PRO SUBSCRIPTION (v6.0) ───
+function startCheckout(plan) {
+    var prettyName = plan === 'advanced' ? 'Cloud Advanced ($12/mo)' : 'Cloud Enterprise ($29/mo)';
+    if (confirm("You will be redirected to the secure Synalux Cloud portal to complete your upgrade to " + prettyName + ".\n\nAfter checkout, you will receive a PRISM_LICENSE_KEY to unlock these features in this dashboard.")) {
+        var base = window.location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://synalux.ai';
+        window.open(base + '/pricing?plan=' + plan + '&source=prism_dashboard', '_blank');
+    }
 }
 
 </script>

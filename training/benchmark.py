@@ -53,51 +53,96 @@ TEST_CASES = [
     {"prompt": "Write a bash one-liner to find large files", "expected_tool": None, "category": "reasoning"},
 ]
 
+def _find_json_with_name(text: str):
+    """Find the first valid JSON object containing a 'name' key using brace-depth tracking."""
+    for i, ch in enumerate(text):
+        if ch == '{':
+            depth = 0
+            for j in range(i, len(text)):
+                if text[j] == '{': depth += 1
+                elif text[j] == '}': depth -= 1
+                if depth == 0:
+                    try:
+                        call = json.loads(text[i:j+1])
+                        if isinstance(call, dict) and call.get("name"):
+                            return call
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                    break
+    return None
 
 def parse_tool_call(response: str):
     """Extract tool name and arguments from response.
     
     Sanitizes the response first (strips \\ufffd EOS replacement chars),
     then tries multiple formats:
-    Accepts multiple formats:
       1. <tool_call>{...}</tool_call>     — Prism canonical format
       2. <|im_start|>{...}<|im_end|>      — Qwen native ChatML format
-      3. Bare JSON with "name" key        — fallback
+      3. <tool_name>{...}</tool_name>      — Custom tag format (e.g. <knowledge_save>)
+      4. Bare JSON with "name" key        — fallback with nested brace support
     """
     # Sanitize: Qwen tokenizer replaces <|im_end|> EOS with \ufffd
     response = response.replace('\ufffd', '').strip()
 
     # 1. Try <tool_call> tags (canonical Prism format)
-    match = re.search(r'<tool_call>\s*(.*?)\s*</tool_call>', response, re.DOTALL)
+    match = re.search(r'<tool_call>\s*([\s\S]*?)\s*</tool_call>', response)
     if match:
+        inner = match.group(1)
         try:
-            call = json.loads(match.group(1))
+            call = json.loads(inner)
             return call.get("name"), call.get("arguments", {})
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, ValueError):
+            call = _find_json_with_name(inner)
+            if call:
+                return call.get("name"), call.get("arguments", {})
             return "INVALID_JSON", None
 
     # 2. Try <|im_start|>...<|im_end|> (Qwen native tool format)
-    #    Note: the Qwen tokenizer strips <|im_end|> as the EOS token,
-    #    so the model output often has <|im_start|>{JSON} with no closer.
-    im_match = re.search(r'<\|im_start\|>\s*(\{[\s\S]*\})\s*(?:<\|im_end\|>|$)', response, re.DOTALL)
+    im_match = re.search(r'<\|im_start\|>\s*([\s\S]*?)\s*(?:<\|im_end\|>|$)', response)
     if im_match:
-        try:
-            call = json.loads(im_match.group(1))
-            if call.get("name"):
-                return call.get("name"), call.get("arguments", {})
-        except json.JSONDecodeError:
-            return "INVALID_JSON", None
+        call = _find_json_with_name(im_match.group(1))
+        if call:
+            return call.get("name"), call.get("arguments", {})
 
-    # 3. Fallback: bare JSON with "name" key, outside <think> blocks
-    stripped = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
-    json_matches = re.finditer(r'(\{[^{}]*"name"\s*:[^{}]*\})', stripped, re.DOTALL)
-    for match in json_matches:
-        try:
-            call = json.loads(match.group(1))
-            if call.get("name"):
+    # 3. <search>{...}</search> — recover JSON from search tags
+    search_match = re.search(r'<search>\s*([\s\S]*?)\s*</search>', response)
+    if search_match:
+        call = _find_json_with_name(search_match.group(1))
+        if call:
+            return call.get("name"), call.get("arguments", {})
+
+    # 4. Custom tags like <knowledge_save>{...}</knowledge_save>
+    custom_match = re.search(r'<(\w+)>\s*([\s\S]*?)\s*</\1>', response)
+    if custom_match:
+        tag_name = custom_match.group(1)
+        if tag_name not in ('think', 'search', 'response', 'result', 'script', 'code'):
+            inner = custom_match.group(2)
+            call = _find_json_with_name(inner)
+            if call:
                 return call.get("name"), call.get("arguments", {})
-        except json.JSONDecodeError:
-            continue
+            try:
+                args = json.loads(inner)
+                if isinstance(args, dict):
+                    return tag_name, args
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    # 5. XML self-closing tags like <session_list project="x" />
+    xml_match = re.search(r'<(\w+)\s+([^>]*?)\s*/>', response)
+    if xml_match:
+        tag = xml_match.group(1)
+        if tag in VALID_TOOLS:
+            attrs = dict(re.findall(r'(\w+)=["\']([^"\']*)["\']', xml_match.group(2)))
+            attrs.update(dict(re.findall(r'(\w+)=(\S+)', xml_match.group(2))))
+            return tag, attrs
+
+    # 6. Bare JSON with "name" key — use helper function
+    stripped = re.sub(r'<think>[\s\S]*?</think>', '', response)
+    stripped = re.sub(r'<search>[\s\S]*?</search>', '', stripped)
+    stripped = stripped.strip()
+    call = _find_json_with_name(stripped)
+    if call:
+        return call.get("name"), call.get("arguments", {})
 
     return None, None
 

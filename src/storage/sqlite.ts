@@ -331,7 +331,7 @@ export class SqliteStorage implements StorageBackend {
         // Step 3: Drop old and rename
         await tx.execute(`DROP TABLE session_handoffs`);
         await tx.execute(`ALTER TABLE session_handoffs_v2 RENAME TO session_handoffs`);
-        
+
         await tx.commit();
         debugLog("[SqliteStorage] v3.0 migration: session_handoffs rebuilt with UNIQUE(project, user_id, role)");
       } catch (txError) {
@@ -633,7 +633,7 @@ export class SqliteStorage implements StorageBackend {
     try {
       await this.db.execute(`ALTER TABLE semantic_knowledge ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))`);
     } catch { /* column already exists */ }
-    
+
     await this.db.execute(
       `CREATE INDEX IF NOT EXISTS idx_semantic_project ON semantic_knowledge(project)`
     );
@@ -723,7 +723,7 @@ export class SqliteStorage implements StorageBackend {
     } catch (e: any) {
       if (!e.message?.includes("duplicate column name")) throw e;
     }
-    
+
     await this.db.execute(
       `CREATE INDEX IF NOT EXISTS idx_pipelines_status ON dark_factory_pipelines(user_id, project, status)`
     );
@@ -794,6 +794,44 @@ export class SqliteStorage implements StorageBackend {
       `CREATE INDEX IF NOT EXISTS idx_verification_runs_user ON verification_runs(user_id, project)`
     );
 
+    // ─── v12.0 Migration: Prism Projects + Teams ──────────────
+    //
+    // REVIEWER NOTE: Projects are the top-level organizational unit.
+    // Members table supports owner/editor/viewer roles for team collaboration.
+    // Tier limits are enforced at the tool-handler level (not DB constraints).
+    await this.db.execute(`
+      CREATE TABLE IF NOT EXISTS prism_projects (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        status TEXT DEFAULT 'draft',
+        created_by TEXT NOT NULL DEFAULT 'default',
+        team_id TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    await this.db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_prism_projects_team ON prism_projects(team_id)`
+    );
+    await this.db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_prism_projects_status ON prism_projects(status)`
+    );
+
+    await this.db.execute(`
+      CREATE TABLE IF NOT EXISTS prism_project_members (
+        project_id TEXT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT 'default',
+        role TEXT NOT NULL DEFAULT 'viewer',
+        assigned_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (project_id, user_id),
+        FOREIGN KEY (project_id) REFERENCES prism_projects(id) ON DELETE CASCADE
+      )
+    `);
+    await this.db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_prism_members_user ON prism_project_members(user_id)`
+    );
+
     // ─── v6.1 Migration: Integrity Check ──────────────────────
     //
     // REVIEWER NOTE: PRAGMA integrity_check scans the B-tree structure of
@@ -842,8 +880,8 @@ export class SqliteStorage implements StorageBackend {
       // Special params (not filters)
       if (key === "select") {
         if (value === "*") {
-           select = "*";
-           continue;
+          select = "*";
+          continue;
         }
 
         const VALID_COLUMNS = [
@@ -853,10 +891,10 @@ export class SqliteStorage implements StorageBackend {
           'deleted_at', 'archived_at', 'is_rollup', 'rollup_type',
           'last_accessed_at', 'importance'
         ];
-        
+
         const requestedColumns = value.split(',').map(c => c.trim());
         const isSafe = requestedColumns.every(c => VALID_COLUMNS.includes(c) || c === '*');
-        
+
         if (!isSafe) {
           throw new Error('Invalid select column format: contains prohibited columns.');
         }
@@ -1571,7 +1609,7 @@ export class SqliteStorage implements StorageBackend {
           decisions: r.decisions as string[] | undefined,
           files_changed: r.files_changed as string[] | undefined,
         }));
-        
+
         const { applySpreadingActivation } = await import("../memory/spreadingActivation.js");
         const activated = await applySpreadingActivation(this.db, mappedAnchors, params.activation, params.userId);
         return { count: activated.length, results: activated };
@@ -1661,7 +1699,7 @@ export class SqliteStorage implements StorageBackend {
         decisions: r.decisions as string[] | undefined,
         files_changed: r.files_changed as string[] | undefined,
       }));
-      
+
       const { applySpreadingActivation } = await import("../memory/spreadingActivation.js");
       const activated = await applySpreadingActivation(this.db, mappedAnchors, params.activation, params.userId);
       return { count: activated.length, results: activated };
@@ -1843,7 +1881,7 @@ export class SqliteStorage implements StorageBackend {
           }
           return diff;
         });
-        
+
         const baseResults = scored.slice(0, params.limit);
         // Strip internal tiebreaker field before returning
         for (const r of baseResults) delete (r as any)._residualNorm;
@@ -2793,7 +2831,7 @@ export class SqliteStorage implements StorageBackend {
     // Wrap in Uint8Array to satisfy @libsql/client InValue typing which rejects SharedArrayBuffer
     const buffer = new Uint8Array(state.buffer, state.byteOffset, state.byteLength);
     const { SDM_ADDRESS_VERSION } = await import('../sdm/sdmEngine.js');
-    
+
     // We do an UPSERT (INSERT ... ON CONFLICT REPLACE).
     await this.db.execute({
       sql: `INSERT INTO sdm_state (project, counters, address_version, updated_at) 
@@ -2804,7 +2842,7 @@ export class SqliteStorage implements StorageBackend {
               updated_at = excluded.updated_at`,
       args: [project, buffer, SDM_ADDRESS_VERSION],
     });
-    
+
     debugLog(`[SqliteStorage] Persisted SDM state v${SDM_ADDRESS_VERSION} to disk for project: ${project}`);
   }
 
@@ -2853,7 +2891,7 @@ export class SqliteStorage implements StorageBackend {
     // Wrap in Uint8Array to satisfy @libsql/client InValue typing which rejects SharedArrayBuffer
     const buffer = new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength);
     const { SDM_ADDRESS_VERSION } = await import('../sdm/sdmEngine.js');
-    
+
     await this.db.execute({
       sql: `INSERT INTO hdc_dictionary (concept_name, vector, prng_version) 
             VALUES (?, ?, ?)
@@ -2862,7 +2900,7 @@ export class SqliteStorage implements StorageBackend {
               prng_version = excluded.prng_version`,
       args: [concept, buffer, SDM_ADDRESS_VERSION],
     });
-    
+
     debugLog(`[SqliteStorage] Persisted HDC orthogonal concept v${SDM_ADDRESS_VERSION} to dictionary: ${concept}`);
   }
 
@@ -2909,8 +2947,8 @@ export class SqliteStorage implements StorageBackend {
         // SQLITE_BUSY (error code 5) means another connection holds the lock.
         // Surface a clear, retryable error instead of crashing.
         const isBusy = err.message?.includes('SQLITE_BUSY') ||
-                       err.message?.includes('database is locked') ||
-                       err.code === 5;
+          err.message?.includes('database is locked') ||
+          err.code === 5;
         if (isBusy) {
           throw new Error(
             '[SqliteStorage] VACUUM failed: database is locked by another connection. ' +
@@ -2929,9 +2967,9 @@ export class SqliteStorage implements StorageBackend {
       sizeAfter,
       message: opts.dryRun
         ? `Dry run: no changes made. Current database size: ${(sizeBefore / (1024 * 1024)).toFixed(2)} MB. ` +
-          `Note: Large databases may take up to 60 seconds to vacuum.`
+        `Note: Large databases may take up to 60 seconds to vacuum.`
         : `VACUUM completed successfully. Reclaimed ${savedMb} MB. ` +
-          `Note: Large databases may take up to 60 seconds to vacuum.`,
+        `Note: Large databases may take up to 60 seconds to vacuum.`,
     };
   }
 
@@ -3573,7 +3611,7 @@ export class SqliteStorage implements StorageBackend {
   async listPipelines(project: string | undefined, status: PipelineStatus | undefined, userId: string): Promise<PipelineState[]> {
     const conditions: string[] = ['user_id = ?'];
     const args: any[] = [userId];
-    
+
     if (project) {
       conditions.push('project = ?');
       args.push(project);
@@ -3582,10 +3620,10 @@ export class SqliteStorage implements StorageBackend {
       conditions.push('status = ?');
       args.push(status);
     }
-    
+
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const sql = `SELECT * FROM dark_factory_pipelines ${where} ORDER BY updated_at DESC`;
-    
+
     const result = await this.db.execute({ sql, args });
     return result.rows.map((row: any) => ({
       ...row,
@@ -3691,7 +3729,7 @@ export class SqliteStorage implements StorageBackend {
   }
 
   // ─── v7.5: Semantic Consolidation ────────────────────────────────
-  
+
   async upsertSemanticKnowledge(data: {
     project: string;
     concept: string;
@@ -3707,7 +3745,7 @@ export class SqliteStorage implements StorageBackend {
     if (existing.rows.length > 0) {
       const row = existing.rows[0] as any;
       const newConfidence = Math.min(1.0, row.confidence + 0.1);
-      
+
       await this.db.execute({
         sql: `UPDATE semantic_knowledge SET instances = instances + 1, confidence = ?, updated_at = ? WHERE id = ?`,
         args: [newConfidence, new Date().toISOString(), row.id]

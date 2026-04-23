@@ -1,8 +1,8 @@
 {
   "name": "prism-mcp-server",
-  "version": "11.6.0",
+  "version": "12.0.0",
   "mcpName": "io.github.dcostenco/prism-mcp",
-  "description": "Prism v11.6.0: The world's first O(1) Cognitive Memory Architecture for AI Agents. Features production-grade Agent Infrastructure Resilience (serialized queuing, memory guardian, queue watchdog), 100% Tool-Call Accuracy (GRPO Aligned), Zero-Search Retrieval (HDC/HRR), and HIPAA-hardened local-first storage.",
+  "description": "Prism v12.0: The world's first O(1) Cognitive Memory Architecture for AI Agents. Features Prism Cloud (subscription tiers, JWT auth, Visual App Builder, Team Collaboration), Firecrawl/Tavily native discovery, Zero-Search Retrieval (HDC/HRR), and HIPAA-hardened local-first storage.",
   "module": "index.ts",
   "type": "module",
   "main": "dist/server.js",
@@ -98,13 +98,14 @@
     "@types/jsdom": "^28.0.1",
     "@types/mozilla-readability": "^0.2.1",
     "@types/turndown": "^5.0.6",
+    "@vitest/coverage-v8": "^4.1.5",
     "dotenv": "^17.4.2",
     "tsx": "^4.19.3",
     "vitest": "^4.1.1"
   },
   "peerDependencies": {
-    "typescript": "^5.0.0",
-    "@huggingface/transformers": "~3.1.0"
+    "@huggingface/transformers": "~3.1.0",
+    "typescript": "^5.0.0"
   },
   "peerDependenciesMeta": {
     "@huggingface/transformers": {

@@ -95,6 +95,7 @@ import { acquireLock, registerShutdownHandlers } from "./lifecycle.js";
 // correct backend (Supabase or SQLite) with proper error handling.
 import { getStorage } from "./storage/index.js";
 import { getSettingSync, initConfigStorage } from "./storage/configStorage.js";
+import { verifyCloudLicense } from "./prism-cloud.js";
 import { sanitizeMcpOutput } from "./utils/sanitizer.js";
 import { getTracer, initTelemetry } from "./utils/telemetry.js";
 import { context as otelContext, trace, SpanStatusCode } from "@opentelemetry/api";
@@ -1153,6 +1154,9 @@ export async function startServer() {
   // during the Initialize handshake — zero extra latency for resource reads.
   // initConfigStorage() is local SQLite only (~5ms), safe to await.
   await initConfigStorage();
+
+  // Validate Prism Cloud Pro credentials to enforce tier limits
+  await verifyCloudLicense();
 
   // v4.6.0: Initialize OTel AFTER the settings cache is warm so that
   // initTelemetry() can read otel_enabled/otel_endpoint from getSettingSync()

@@ -68,3 +68,4 @@ test_save.js
 test_save2.js
 upvote.js
 test-results.txt
+training/__pycache__/
