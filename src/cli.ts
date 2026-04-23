@@ -1063,18 +1063,14 @@ program
       const { getAuthStatus } = await import('./auth.js');
       const auth = await getAuthStatus();
 
-      // ─── Banner ─────────────────────────────────────────────
-      console.log(`\n🧠 Prism v${SERVER_CONFIG.version} — Agent Terminal`);
-      if (auth.loggedIn) {
-        console.log(`👤 ${auth.email}  ·  📋 ${auth.plan || 'Free'} plan`);
-      }
-      console.log(`📂 Project: ${project}  ·  📁 ${process.cwd()}`);
+      // ─── Terminal UI ────────────────────────────────────────
+      const { printBanner, formatToolCall, formatToolResult, formatResponse, formatError, formatWarning, printHelp, formatMcpConnect, formatContextLoaded, printThinking, clearThinking, c } = await import('./agent/terminalUI.js');
 
       // ─── Load project context ───────────────────────────────
       const storage = await getStorage();
       const contextData = await storage.loadContext(project, 'standard', PRISM_USER_ID) as any;
 
-      let systemContext = `You are Prism, a powerful AI agent running in the user's terminal. You have access to tools for reading/writing files, running shell commands, and searching the user's memory.
+      let systemContext = `You are Prism, a powerful AI agent running in the user's terminal. You have access to tools for reading/writing files, running shell commands, fetching web pages, running Supabase/Stripe CLIs, and searching the user's memory.
 
 Current project: ${project}
 Working directory: ${process.cwd()}
@@ -1084,6 +1080,7 @@ Guidelines:
 - Be concise and helpful. Show relevant code snippets.
 - For shell commands, prefer non-destructive reads. Ask before destructive operations.
 - When editing files, explain what you're changing and why.
+- Use fetch_url to read web pages, supabase_cli for database ops, stripe_cli for billing.
 `;
 
       if (contextData) {
@@ -1096,9 +1093,6 @@ Guidelines:
         if (contextData.key_context) {
           systemContext += `\nKey context: ${contextData.key_context}`;
         }
-        console.log(`✅ Loaded ${contextData.pending_todo?.length || 0} TODOs, ${contextData.keywords?.length || 0} keywords`);
-      } else {
-        console.log('⚠️  No session context found — starting fresh');
       }
 
       // ─── Initialize Gemini with function calling ────────────
@@ -1108,7 +1102,7 @@ Guidelines:
       const { McpBridge, discoverMcpConfigs } = await import('./agent/mcpBridge.js');
 
       if (!GOOGLE_API_KEY) {
-        console.error('❌ GEMINI_API_KEY required for agent mode.');
+        console.error(formatError('GEMINI_API_KEY required for agent mode.'));
         await closeStorage();
         process.exit(1);
         return;
@@ -1118,15 +1112,17 @@ Guidelines:
       const mcpBridge = new McpBridge();
       const mcpConfigs = discoverMcpConfigs(process.cwd());
       const mcpServerNames = Object.keys(mcpConfigs);
+      let connectedMcpCount = 0;
 
       if (mcpServerNames.length > 0) {
-        console.log(`\n🔌 Found ${mcpServerNames.length} MCP server(s):`);
+        console.log(`\n${c.dim}  Connecting to ${mcpServerNames.length} MCP server(s)...${c.reset}`);
         for (const [name, config] of Object.entries(mcpConfigs)) {
           try {
             const tools = await mcpBridge.connect(name, config);
-            console.log(`  ✅ ${name} — ${tools.length} tool(s): ${tools.map(t => t.name).join(', ')}`);
+            console.log(formatMcpConnect(name, tools.map(t => t.name), true));
+            connectedMcpCount++;
           } catch (e) {
-            console.log(`  ❌ ${name} — failed: ${e instanceof Error ? e.message : String(e)}`);
+            console.log(formatMcpConnect(name, [], false));
           }
         }
       }
@@ -1137,6 +1133,23 @@ Guidelines:
         ...mcpBridge.getGeminiFunctionDeclarations(),
       ];
 
+      // ─── Print Banner ───────────────────────────────────────
+      printBanner({
+        version: SERVER_CONFIG.version,
+        project,
+        cwd: process.cwd(),
+        email: auth.loggedIn ? auth.email : undefined,
+        plan: auth.plan,
+        toolCount: allToolDeclarations.length,
+        mcpServers: connectedMcpCount > 0 ? connectedMcpCount : undefined,
+      });
+
+      if (contextData) {
+        console.log(`  ${formatContextLoaded(contextData.pending_todo?.length || 0, contextData.keywords?.length || 0)}`);
+      } else {
+        console.log(`  ${formatWarning('No session context found — starting fresh')}`);
+      }
+
       const ai = new GoogleGenerativeAI(GOOGLE_API_KEY);
       const model = ai.getGenerativeModel({
         model: 'gemini-2.5-flash',
@@ -1146,15 +1159,16 @@ Guidelines:
 
       // Start a multi-turn chat
       const chat = model.startChat({ history: [] });
+      let ttsEnabled = false;
 
-      console.log('\nType your questions below. Use /help for commands. Ctrl+C to exit.\n');
+      console.log(`\n  ${c.dim}Type your questions below. Use ${c.cyan}/help${c.dim} for commands. ${c.cyan}Ctrl+C${c.dim} to exit.${c.reset}\n`);
 
       // ─── REPL ───────────────────────────────────────────────
       const readline = await import('readline');
       const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
-        prompt: '🧠 › ',
+        prompt: `${c.purple}${c.bold}❯${c.reset} `,
       });
 
       rl.prompt();
@@ -1165,11 +1179,7 @@ Guidelines:
 
         // ─── Slash commands ─────────────────────────────────
         if (input === '/help') {
-          console.log('\n  /image <path> [question]  — analyze an image');
-          console.log('  /search <query>          — search Prism memory');
-          console.log('  /todos                   — show open TODOs');
-          console.log('  /context                 — show loaded context');
-          console.log('  /exit                    — quit\n');
+          printHelp();
           rl.prompt();
           return;
         }
@@ -1179,20 +1189,39 @@ Guidelines:
         }
         if (input === '/todos') {
           if (contextData?.pending_todo?.length) {
-            console.log('\n📋 Open TODOs:');
-            contextData.pending_todo.forEach((t: string, i: number) => console.log(`  ${i + 1}. ${t}`));
+            console.log(`\n  ${c.bold}${c.purple}📋 Open TODOs:${c.reset}`);
+            contextData.pending_todo.forEach((t: string, i: number) =>
+              console.log(`  ${c.cyan}${i + 1}.${c.reset} ${t}`));
           } else {
-            console.log('\n✅ No open TODOs.');
+            console.log(`\n  ${c.green}✓${c.reset} No open TODOs.`);
           }
           console.log('');
           rl.prompt();
           return;
         }
         if (input === '/context') {
-          console.log(`\n📂 Project: ${project}`);
-          if (contextData?.last_summary) console.log(`📝 Last: ${contextData.last_summary}`);
-          if (contextData?.active_branch) console.log(`🌿 Branch: ${contextData.active_branch}`);
-          if (contextData?.keywords?.length) console.log(`🏷️  Keywords: ${contextData.keywords.join(', ')}`);
+          console.log(`\n  ${c.bold}${c.purple}📂 Project:${c.reset} ${project}`);
+          if (contextData?.last_summary) console.log(`  ${c.cyan}📝${c.reset} ${contextData.last_summary}`);
+          if (contextData?.active_branch) console.log(`  ${c.green}🌿${c.reset} ${contextData.active_branch}`);
+          if (contextData?.keywords?.length) console.log(`  ${c.blue}🏷️${c.reset}  ${contextData.keywords.join(', ')}`);
+          console.log('');
+          rl.prompt();
+          return;
+        }
+        if (input === '/tools') {
+          console.log(`\n  ${c.bold}${c.purple}🔧 Available Tools (${allToolDeclarations.length}):${c.reset}`);
+          const builtIn = AGENT_TOOL_DECLARATIONS;
+          console.log(`\n  ${c.dim}Built-in (${builtIn.length}):${c.reset}`);
+          for (const t of builtIn) {
+            console.log(`    ${c.cyan}${t.name}${c.reset} ${c.dim}— ${t.description?.substring(0, 60)}${c.reset}`);
+          }
+          const mcpTools = mcpBridge.getGeminiFunctionDeclarations();
+          if (mcpTools.length > 0) {
+            console.log(`\n  ${c.dim}MCP (${mcpTools.length}):${c.reset}`);
+            for (const t of mcpTools) {
+              console.log(`    ${c.cyan}${t.name}${c.reset} ${c.dim}— ${t.description?.substring(0, 60)}${c.reset}`);
+            }
+          }
           console.log('');
           rl.prompt();
           return;
@@ -1203,9 +1232,9 @@ Guidelines:
             const { knowledgeSearchHandler } = await import('./tools/graphHandlers.js');
             const result = await knowledgeSearchHandler({ query, project, limit: 5 });
             const text = result.content?.[0] && 'text' in result.content[0] ? result.content[0].text : 'No results';
-            console.log(`\n${text}\n`);
+            console.log(formatResponse(text));
           } catch (e) {
-            console.log(`\n❌ Search error: ${e instanceof Error ? e.message : String(e)}\n`);
+            console.log(formatError(`Search error: ${e instanceof Error ? e.message : String(e)}`));
           }
           rl.prompt();
           return;
@@ -1218,28 +1247,181 @@ Guidelines:
           const question = parts.slice(1).join(' ') || 'Describe this image in detail.';
 
           try {
-            const fs = await import('fs');
-            const resolvedPath = imgPath.startsWith('/') ? imgPath : (await import('path')).resolve(process.cwd(), imgPath);
-            if (!fs.existsSync(resolvedPath)) {
-              console.log(`\n❌ File not found: ${resolvedPath}\n`);
+            const fsm = await import('fs');
+            const pathm = await import('path');
+            const resolvedPath = imgPath.startsWith('/') ? imgPath : pathm.resolve(process.cwd(), imgPath);
+            if (!fsm.existsSync(resolvedPath)) {
+              console.log(formatError(`File not found: ${resolvedPath}`));
               rl.prompt();
               return;
             }
 
-            const data = fs.readFileSync(resolvedPath);
+            const data = fsm.readFileSync(resolvedPath);
             const base64 = data.toString('base64');
             const ext = resolvedPath.split('.').pop()?.toLowerCase() || 'png';
             const mimeMap: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
             const mimeType = mimeMap[ext] || 'image/png';
 
-            console.log(`\n📸 Analyzing ${imgPath}...`);
+            console.log(`\n  ${c.dim}📸 Analyzing image...${c.reset}`);
             const result = await chat.sendMessage([
               { inlineData: { data: base64, mimeType } },
               question,
             ]);
-            console.log(`\n${result.response.text()}\n`);
+            console.log(formatResponse(result.response.text()));
           } catch (e) {
-            console.log(`\n❌ Image error: ${e instanceof Error ? e.message : String(e)}\n`);
+            console.log(formatError(`Image error: ${e instanceof Error ? e.message : String(e)}`));
+          }
+          rl.prompt();
+          return;
+        }
+
+        // ─── /voice — record audio via avlisten ────────────
+        if (input.startsWith('/voice')) {
+          const parts = input.split(/\s+/);
+          const duration = parseInt(parts[1]) || 5;
+          const avlistenPath = (await import('path')).join(
+            (await import('os')).homedir(), '.cache', 'synalux', 'avlisten',
+          );
+          const fsm = await import('fs');
+
+          if (!fsm.existsSync(avlistenPath)) {
+            console.log(formatWarning('Voice engine (avlisten) not found at ~/.cache/synalux/avlisten'));
+            console.log(`  ${c.dim}Install via Synalux extension or compile manually.${c.reset}\n`);
+            rl.prompt();
+            return;
+          }
+
+          console.log(`\n  ${c.cyan}🎙️  Listening for ${duration}s...${c.reset} (speak now)`);
+          try {
+            const { spawn } = await import('child_process');
+            const readlineM = await import('readline');
+            const text = await new Promise<string | null>((resolve) => {
+              const proc = spawn(avlistenPath, ['en', '1500'], { stdio: ['pipe', 'pipe', 'pipe'] });
+              let resolved = false;
+              const rlVoice = readlineM.createInterface({ input: proc.stdout! });
+              const timeout = setTimeout(() => {
+                if (!resolved) { resolved = true; proc.kill('SIGTERM'); resolve(null); }
+              }, (duration + 3) * 1000);
+
+              rlVoice.on('line', (vLine: string) => {
+                try {
+                  const msg = JSON.parse(vLine);
+                  if (msg.type === 'partial') {
+                    process.stdout.write(`\r  ${c.dim}${c.italic}${msg.text}${c.reset}\x1b[K`);
+                  } else if (msg.type === 'final' && msg.text && !resolved) {
+                    resolved = true; clearTimeout(timeout); proc.kill('SIGTERM'); resolve(msg.text);
+                  } else if (msg.type === 'error' && !resolved) {
+                    resolved = true; clearTimeout(timeout); proc.kill('SIGTERM'); resolve(null);
+                  }
+                } catch { /* skip malformed */ }
+              });
+              proc.on('error', () => { if (!resolved) { resolved = true; clearTimeout(timeout); resolve(null); } });
+              proc.on('close', () => { if (!resolved) { resolved = true; clearTimeout(timeout); resolve(null); } });
+            });
+
+            process.stdout.write('\r\x1b[K'); // clear partial line
+            if (text) {
+              console.log(`  ${c.green}✓${c.reset} "${text}"\n`);
+              // Send transcription as chat message
+              printThinking();
+              const result = await chat.sendMessage(text);
+              clearThinking();
+              const responseText = result.response.text();
+              if (responseText) console.log(formatResponse(responseText));
+            } else {
+              console.log(`  ${c.yellow}⚠${c.reset} No speech detected.\n`);
+            }
+          } catch (e) {
+            console.log(formatError(`Voice error: ${e instanceof Error ? e.message : String(e)}`));
+          }
+          rl.prompt();
+          return;
+        }
+
+        // ─── /camera — capture photo via imagesnap ─────────
+        if (input.startsWith('/camera')) {
+          const question = input.substring(7).trim() || 'What do you see in this photo? Describe in detail.';
+          const tmpPath = '/tmp/prism-camera-capture.jpg';
+
+          console.log(`\n  ${c.cyan}📷 Capturing photo...${c.reset}`);
+          try {
+            const { execSync } = await import('child_process');
+            // Check for imagesnap
+            try { execSync('which imagesnap', { stdio: 'pipe' }); } catch {
+              console.log(formatWarning('imagesnap not found. Install: brew install imagesnap'));
+              rl.prompt();
+              return;
+            }
+            execSync(`imagesnap -w 1 ${tmpPath}`, { timeout: 10000, stdio: 'pipe' });
+
+            const fsm = await import('fs');
+            if (!fsm.existsSync(tmpPath)) {
+              console.log(formatError('Camera capture failed — no image produced.'));
+              rl.prompt();
+              return;
+            }
+
+            const data = fsm.readFileSync(tmpPath);
+            const base64 = data.toString('base64');
+            console.log(`  ${c.dim}Analyzing...${c.reset}`);
+
+            const result = await chat.sendMessage([
+              { inlineData: { data: base64, mimeType: 'image/jpeg' } },
+              question,
+            ]);
+            console.log(formatResponse(result.response.text()));
+
+            // Cleanup
+            try { fsm.unlinkSync(tmpPath); } catch { /* ok */ }
+          } catch (e) {
+            console.log(formatError(`Camera error: ${e instanceof Error ? e.message : String(e)}`));
+          }
+          rl.prompt();
+          return;
+        }
+
+        // ─── /speak — toggle TTS ───────────────────────────
+        if (input === '/speak') {
+          ttsEnabled = !ttsEnabled;
+          console.log(`\n  ${ttsEnabled ? `${c.green}🔊 TTS enabled${c.reset} — AI responses will be read aloud` : `${c.dim}🔇 TTS disabled${c.reset}`}\n`);
+          rl.prompt();
+          return;
+        }
+
+        // ─── /paste — clipboard image ──────────────────────
+        if (input.startsWith('/paste')) {
+          const question = input.substring(6).trim() || 'Describe this image in detail.';
+          const tmpPath = '/tmp/prism-clipboard.png';
+
+          try {
+            const { execSync } = await import('child_process');
+            // Use pngpaste to save clipboard image (macOS)
+            try { execSync('which pngpaste', { stdio: 'pipe' }); } catch {
+              console.log(formatWarning('pngpaste not found. Install: brew install pngpaste'));
+              rl.prompt();
+              return;
+            }
+            execSync(`pngpaste ${tmpPath}`, { timeout: 5000, stdio: 'pipe' });
+
+            const fsm = await import('fs');
+            if (!fsm.existsSync(tmpPath)) {
+              console.log(formatWarning('No image found in clipboard.'));
+              rl.prompt();
+              return;
+            }
+
+            const data = fsm.readFileSync(tmpPath);
+            const base64 = data.toString('base64');
+            console.log(`\n  ${c.dim}📋 Analyzing clipboard image...${c.reset}`);
+
+            const result = await chat.sendMessage([
+              { inlineData: { data: base64, mimeType: 'image/png' } },
+              question,
+            ]);
+            console.log(formatResponse(result.response.text()));
+            try { fsm.unlinkSync(tmpPath); } catch { /* ok */ }
+          } catch (e) {
+            console.log(formatError(`Paste error: ${e instanceof Error ? e.message : String(e)}`));
           }
           rl.prompt();
           return;
@@ -1247,7 +1429,9 @@ Guidelines:
 
         // ─── Normal message — send to Gemini with tool calling loop ──
         try {
+          printThinking();
           let result = await chat.sendMessage(input);
+          clearThinking();
           let response = result.response;
 
           // Function calling loop — execute tools until model is done
@@ -1263,7 +1447,7 @@ Guidelines:
             // Execute all tool calls
             const toolResults = [];
             for (const call of calls) {
-              console.log(`  🔧 ${call.name}(${JSON.stringify(call.args).substring(0, 80)}...)`);
+              console.log(formatToolCall(call.name, call.args as Record<string, unknown>));
               try {
                 const toolOutput = mcpBridge.hasToolName(call.name)
                   ? await mcpBridge.callTool(call.name, call.args as Record<string, unknown>)
@@ -1272,6 +1456,7 @@ Guidelines:
                     call.args as Record<string, unknown>,
                     project,
                   );
+                console.log(formatToolResult(call.name, true));
                 toolResults.push({
                   functionResponse: {
                     name: call.name,
@@ -1279,6 +1464,7 @@ Guidelines:
                   },
                 });
               } catch (e) {
+                console.log(formatToolResult(call.name, false));
                 toolResults.push({
                   functionResponse: {
                     name: call.name,
@@ -1289,24 +1475,47 @@ Guidelines:
             }
 
             // Send tool results back to model
+            printThinking();
             result = await chat.sendMessage(toolResults);
+            clearThinking();
             response = result.response;
           }
 
           // Print final text response
           const text = response.text();
           if (text) {
-            console.log(`\n${text}\n`);
+            console.log(formatResponse(text));
+
+            // TTS: read aloud if enabled
+            if (ttsEnabled && text.length > 0) {
+              try {
+                const cleanText = text
+                  .replace(/```[\s\S]*?```/g, ' code block omitted ')
+                  .replace(/`([^`]+)`/g, '$1')
+                  .replace(/\*\*([^*]+)\*\*/g, '$1')
+                  .replace(/\*([^*]+)\*/g, '$1')
+                  .replace(/^#{1,6}\s+/gm, '')
+                  .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+                  .replace(/[\n\r]+/g, '. ')
+                  .trim()
+                  .slice(0, 3000);
+                if (cleanText) {
+                  const { exec: execCmd } = await import('child_process');
+                  execCmd(`say -r 190 "${cleanText.replace(/"/g, '\\"')}"`, { timeout: 60000 }, () => { /* fire and forget */ });
+                }
+              } catch { /* TTS error — ignore */ }
+            }
           }
         } catch (e) {
-          console.log(`\n❌ Error: ${e instanceof Error ? e.message : String(e)}\n`);
+          clearThinking();
+          console.log(formatError(e instanceof Error ? e.message : String(e)));
         }
 
         rl.prompt();
       });
 
       rl.on('close', async () => {
-        console.log('\n👋 Session ended.');
+        console.log(`\n${c.purple}👋 Session ended.${c.reset}`);
         await mcpBridge.disconnectAll();
         await closeStorage();
         process.exit(0);
@@ -1315,7 +1524,7 @@ Guidelines:
       // Keep running
       await new Promise(() => { });
     } catch (err) {
-      console.error(`❌ Error: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`\x1b[38;5;203m✗ Error: ${err instanceof Error ? err.message : String(err)}\x1b[0m`);
       process.exit(1);
     }
   });

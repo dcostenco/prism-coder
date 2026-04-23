@@ -196,6 +196,51 @@ export const AGENT_TOOL_DECLARATIONS: FunctionDeclaration[] = [
             required: ["url"],
         },
     },
+    {
+        name: "fetch_url",
+        description:
+            "Fetch the text content of a web page and return it. Use when the user wants you to read, summarize, or analyze a web page.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                url: {
+                    type: SchemaType.STRING,
+                    description: "The URL to fetch content from",
+                },
+            },
+            required: ["url"],
+        },
+    },
+    {
+        name: "supabase_cli",
+        description:
+            "Execute Supabase CLI commands (e.g., status, diff, push, db pull). Always use this for Supabase database management.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                args: {
+                    type: SchemaType.STRING,
+                    description: 'The arguments to pass to the supabase CLI (e.g., "db pull", "status")',
+                },
+            },
+            required: ["args"],
+        },
+    },
+    {
+        name: "stripe_cli",
+        description:
+            "Execute Stripe CLI commands (e.g., listen, trigger, login). Always use this for Stripe operations.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                args: {
+                    type: SchemaType.STRING,
+                    description: 'The arguments to pass to the stripe CLI (e.g., "listen --forward-to localhost:3000/api/webhook")',
+                },
+            },
+            required: ["args"],
+        },
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -378,7 +423,74 @@ export async function executeAgentTool(
             }
         }
 
+        // ─── fetch_url ─────────────────────────────────────────────
+        case "fetch_url": {
+            const fetchUrl = args.url as string;
+            if (!fetchUrl?.match(/^https?:\/\//i)) {
+                return "Error: Invalid URL. Must start with http:// or https://";
+            }
+            try {
+                const safeUrl = fetchUrl.replace(/"/g, '\\"');
+                const { stdout } = await execAsync(
+                    `curl -sL --max-time 15 --max-filesize 1048576 ` +
+                    `-H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" ` +
+                    `"${safeUrl}" | ` +
+                    `sed 's/<script[^>]*>.*<\\/script>//gi' | ` +
+                    `sed 's/<style[^>]*>.*<\\/style>//gi' | ` +
+                    `sed 's/<[^>]*>//g' | ` +
+                    `tr -s '[:space:]' '\\n' | ` +
+                    `sed '/^$/d' | head -300`,
+                    { timeout: 20000, maxBuffer: 1024 * 1024 },
+                );
+                const text = stdout.trim().slice(0, 8000);
+                return `Content from ${fetchUrl}:\n\n${text}${text.length >= 8000 ? "\n\n... (truncated)" : ""}`;
+            } catch (err: unknown) {
+                const e = err as { message?: string };
+                return `Error: Failed to fetch ${fetchUrl} — ${e.message?.slice(0, 200) || "unknown error"}`;
+            }
+        }
+
+        // ─── supabase_cli ──────────────────────────────────────────
+        case "supabase_cli": {
+            const sbArgs = args.args as string;
+            try {
+                const { stdout } = await execAsync(`/opt/homebrew/bin/supabase ${sbArgs}`, {
+                    cwd: process.cwd(),
+                    timeout: 60000,
+                    maxBuffer: 1024 * 512,
+                    env: { ...process.env, PAGER: "cat" },
+                });
+                return `supabase ${sbArgs}:\n${stdout.trim().slice(0, 5000)}`;
+            } catch (err: unknown) {
+                const e = err as { stdout?: string; stderr?: string };
+                let msg = `supabase ${sbArgs} failed:\n`;
+                if (e.stdout) msg += e.stdout.slice(0, 3000);
+                if (e.stderr) msg += `\nstderr: ${e.stderr.slice(0, 1000)}`;
+                return msg;
+            }
+        }
+
+        // ─── stripe_cli ───────────────────────────────────────────
+        case "stripe_cli": {
+            const stripeArgs = args.args as string;
+            try {
+                const { stdout } = await execAsync(`/opt/homebrew/bin/stripe ${stripeArgs}`, {
+                    cwd: process.cwd(),
+                    timeout: 60000,
+                    maxBuffer: 1024 * 512,
+                    env: { ...process.env, PAGER: "cat" },
+                });
+                return `stripe ${stripeArgs}:\n${stdout.trim().slice(0, 5000)}`;
+            } catch (err: unknown) {
+                const e = err as { stdout?: string; stderr?: string };
+                let msg = `stripe ${stripeArgs} failed:\n`;
+                if (e.stdout) msg += e.stdout.slice(0, 3000);
+                if (e.stderr) msg += `\nstderr: ${e.stderr.slice(0, 1000)}`;
+                return msg;
+            }
+        }
+
         default:
-            return `Error: Unknown tool "${toolName}"`;
+            return `Error: Unknown tool \"${toolName}\"`;
     }
 }
