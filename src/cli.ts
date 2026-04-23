@@ -1114,7 +1114,12 @@ Guidelines:
         ...mcpBridge.getGeminiFunctionDeclarations(),
       ];
 
-      const modelName = 'gemini-2.5-flash';
+      // ─── Tiered Model Selection ─────────────────────────────
+      // Enterprise: gemini-3.1-pro-preview (most advanced)
+      // Free/Advanced: gemini-2.5-flash (branded as Prism Coder)
+      const isEnterprise = auth.plan?.toLowerCase() === 'enterprise';
+      const modelId = isEnterprise ? 'gemini-3.1-pro-preview' : 'gemini-2.5-flash';
+      const modelDisplay = isEnterprise ? 'Gemini 3.1 Pro' : 'Prism Coder';
 
       // ─── Print Banner ───────────────────────────────────────
       printBanner({
@@ -1125,7 +1130,7 @@ Guidelines:
         plan: auth.plan,
         toolCount: allToolDeclarations.length,
         mcpServers: connectedMcpCount > 0 ? connectedMcpCount : undefined,
-        model: modelName,
+        model: modelDisplay,
       });
 
       if (contextData) {
@@ -1136,7 +1141,7 @@ Guidelines:
 
       const ai = new GoogleGenerativeAI(GOOGLE_API_KEY);
       const model = ai.getGenerativeModel({
-        model: modelName,
+        model: modelId,
         systemInstruction: systemContext,
         tools: [{ functionDeclarations: allToolDeclarations }],
       });
