@@ -1130,7 +1130,7 @@ Guidelines:
       ];
 
       // ─── Tiered Model Selection ─────────────────────────────
-      // Enterprise: gemini-3.1-pro-preview (most advanced)
+      // Enterprise: gemini-3.1-pro (most advanced, agentic)
       // Free/Advanced: gemini-2.5-flash (branded as Prism Coder)
       const isEnterprise = auth.plan?.toLowerCase() === 'enterprise';
       const modelId = isEnterprise ? 'gemini-3.1-pro-preview' : 'gemini-2.5-flash';
@@ -1141,7 +1141,7 @@ Guidelines:
         version: SERVER_CONFIG.version,
         project,
         cwd: process.cwd(),
-        email: auth.loggedIn ? auth.email : undefined,
+        name: auth.loggedIn ? auth.name : undefined,
         plan: auth.plan,
         toolCount: allToolDeclarations.length,
         mcpServers: connectedMcpCount > 0 ? connectedMcpCount : undefined,
