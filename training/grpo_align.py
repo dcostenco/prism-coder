@@ -240,15 +240,79 @@ def generate_grpo_prompts():
 
 
 def generate_synthetic_chosen(prompt: str) -> str:
-    """Generate a perfect response for a given prompt (used with --synthetic flag)."""
-    if "Load" in prompt and "prism-mcp" in prompt:
-        return '<think>The user wants to load project context for "prism-mcp". This is a read operation. I should use session_load_context with the project name.</think>\n\n<tool_call>\n{"name": "session_load_context", "arguments": {"project": "prism-mcp", "level": "shallow"}}\n</tool_call>'
-    if "Save" in prompt and "RBAC" in prompt:
-        return '<think>The user wants to save a work session about RBAC. This is a write operation to the session ledger. I should use session_save.</think>\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "prism-mcp", "summary": "implemented RBAC roles"}}\n</tool_call>'
-    if "Search" in prompt and "JWT" in prompt:
-        return '<think>The user is asking about JWT authentication work. I should use session_search to find relevant history.</think>\n\n<tool_call>\n{"name": "session_search", "arguments": {"query": "JWT authentication", "project": "synalux-private"}}\n</tool_call>'
-    if "Store this knowledge" in prompt:
-        return '<think>The user wants to store a principle about memory decay. I should use knowledge_save for permanent storage.</think>\n\n<tool_call>\n{"name": "knowledge_save", "arguments": {"project": "prism", "concept": "ACT-R Decay Rate", "description": "The ACT-R decay rate is 0.5 for rollup nodes", "confidence": 1.0}}\n</tool_call>'
+    """Generate gold-standard responses for all tool-calling prompts.
+    Maps prompt keywords to perfect <think> + <tool_call> responses.
+    Returns None for reasoning prompts (they don't need synthetic injection)."""
+
+    # Map keyword patterns to tool call responses
+    SYNTHETIC_MAP = [
+        # session_load_context prompts
+        (["Load", "context", "prism-mcp"], "session_load_context",
+         '<think>The user wants to load project context for "prism-mcp". I should use session_load_context with the project name.</think>\n\n<tool_call>\n{"name": "session_load_context", "arguments": {"project": "prism-mcp", "level": "deep"}}\n</tool_call>'),
+        (["context", "synalux-portal", "deep"], "session_load_context",
+         '<think>The user is requesting deep context for synalux-portal. I\'ll use session_load_context with deep level.</think>\n\n<tool_call>\n{"name": "session_load_context", "arguments": {"project": "synalux-portal", "level": "deep"}}\n</tool_call>'),
+        (["context", "bcba-private"], "session_load_context",
+         '<think>Loading context for bcba-private project. This requires session_load_context.</think>\n\n<tool_call>\n{"name": "session_load_context", "arguments": {"project": "bcba-private"}}\n</tool_call>'),
+        (["context", "synalux-private", "shallow"], "session_load_context",
+         '<think>The user wants shallow context for synalux-private. I\'ll use session_load_context with shallow level.</think>\n\n<tool_call>\n{"name": "session_load_context", "arguments": {"project": "synalux-private", "level": "shallow"}}\n</tool_call>'),
+        (["tools", "last session", "prism-mcp"], "session_load_context",
+         '<think>The user wants to know what tools were used. I need to load context for prism-mcp to find this information.</think>\n\n<tool_call>\n{"name": "session_load_context", "arguments": {"project": "prism-mcp", "level": "deep"}}\n</tool_call>'),
+        (["Initialize", "deep", "synalux-docs"], "session_load_context",
+         '<think>The user wants to initialize a deep session for synalux-docs. I should load deep context.</think>\n\n<tool_call>\n{"name": "session_load_context", "arguments": {"project": "synalux-docs", "level": "deep"}}\n</tool_call>'),
+
+        # session_save prompts
+        (["Save", "session", "RBAC"], "session_save",
+         '<think>The user wants to save a session about implementing RBAC roles. I should use session_save with the project and summary.</think>\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "prism-mcp", "summary": "Implemented RBAC roles"}}\n</tool_call>'),
+        (["Log work", "abortPipeline"], "session_save",
+         '<think>The user wants to log work about fixing the abortPipeline syntax error. I\'ll use session_save.</think>\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "prism-mcp", "summary": "Fixed the abortPipeline syntax error in dashboard"}}\n</tool_call>'),
+        (["Hand off", "billing", "security"], "session_save",
+         '<think>The user wants to hand off the billing task. I should save this transition using session_save.</think>\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "prism-mcp", "summary": "Hand off billing task from dev to security: payment logic is ready"}}\n</tool_call>'),
+        (["Save session", "v11.6.0"], "session_save",
+         '<think>The user wants to save a session about deploying v11.6.0. I\'ll use session_save.</think>\n\n<tool_call>\n{"name": "session_save", "arguments": {"project": "prism-mcp", "summary": "Deployed v11.6.0 with serialized execution queue"}}\n</tool_call>'),
+
+        # session_search prompts
+        (["Search", "sessions", "JWT"], "session_search",
+         '<think>The user wants to search for sessions about JWT authentication. I should use session_search with the query and project.</think>\n\n<tool_call>\n{"name": "session_search", "arguments": {"query": "JWT authentication", "project": "synalux-private"}}\n</tool_call>'),
+        (["List", "sessions", "bcba-private"], "session_search",
+         '<think>The user wants to list sessions for bcba-private. I\'ll use session_search to find them.</think>\n\n<tool_call>\n{"name": "session_search", "arguments": {"query": "*", "project": "bcba-private"}}\n</tool_call>'),
+        (["status", "HIPAA", "security audit"], "session_search",
+         '<think>The user is asking about the HIPAA security audit status. I should search for relevant sessions.</think>\n\n<tool_call>\n{"name": "session_search", "arguments": {"query": "HIPAA security audit"}}\n</tool_call>'),
+        (["Find", "schema migration", "v9.4"], "session_search",
+         '<think>The user wants to find work related to the schema migration in v9.4. I\'ll search for it.</think>\n\n<tool_call>\n{"name": "session_search", "arguments": {"query": "schema migration v9.4"}}\n</tool_call>'),
+        (["Search", "database migrations"], "session_search",
+         '<think>The user wants to find sessions about database migrations. I\'ll use session_search.</think>\n\n<tool_call>\n{"name": "session_search", "arguments": {"query": "database migrations"}}\n</tool_call>'),
+        (["Find", "video panel"], "session_search",
+         '<think>The user wants to find work on the video panel. I\'ll search for it.</think>\n\n<tool_call>\n{"name": "session_search", "arguments": {"query": "video panel implementation"}}\n</tool_call>'),
+        (["sessions", "Supabase", "RLS"], "session_search",
+         '<think>The user wants to find sessions about Supabase RLS policies. I\'ll search for them.</think>\n\n<tool_call>\n{"name": "session_search", "arguments": {"query": "Supabase RLS policies"}}\n</tool_call>'),
+
+        # session_delete prompts
+        (["Delete", "session", "billing bug"], "session_delete",
+         '<think>The user wants to delete a session about the billing bug. I should use session_delete.</think>\n\n<tool_call>\n{"name": "session_delete", "arguments": {"query": "billing bug"}}\n</tool_call>'),
+
+        # knowledge_search prompts
+        (["Zero-Search", "architecture"], "knowledge_search",
+         '<think>The user is asking about the Zero-Search architecture. I should search the knowledge base.</think>\n\n<tool_call>\n{"name": "knowledge_search", "arguments": {"query": "Zero-Search architecture", "project": "prism"}}\n</tool_call>'),
+        (["patterns", "memory consolidation"], "knowledge_search",
+         '<think>The user wants to search for patterns about memory consolidation. I\'ll use knowledge_search.</think>\n\n<tool_call>\n{"name": "knowledge_search", "arguments": {"query": "memory consolidation patterns"}}\n</tool_call>'),
+        (["knowledge", "GRPO", "training"], "knowledge_search",
+         '<think>The user wants to search knowledge about GRPO training best practices.</think>\n\n<tool_call>\n{"name": "knowledge_search", "arguments": {"query": "GRPO training best practices"}}\n</tool_call>'),
+        (["knowledge", "Ollama", "tool calling"], "knowledge_search",
+         '<think>The user wants to search for knowledge about Ollama tool calling.</think>\n\n<tool_call>\n{"name": "knowledge_search", "arguments": {"query": "Ollama tool calling"}}\n</tool_call>'),
+
+        # knowledge_save prompts
+        (["Store", "knowledge", "ACT-R"], "knowledge_save",
+         '<think>The user wants to store knowledge about the ACT-R decay rate. I should use knowledge_save.</think>\n\n<tool_call>\n{"name": "knowledge_save", "arguments": {"project": "prism", "concept": "ACT-R Decay Rate", "description": "The ACT-R decay rate is 0.5 for rollup nodes", "confidence": 1.0}}\n</tool_call>'),
+        (["Save", "knowledge", "TypeScript", "ESM"], "knowledge_save",
+         '<think>The user wants to save knowledge about TypeScript ESM best practices.</think>\n\n<tool_call>\n{"name": "knowledge_save", "arguments": {"project": "prism", "concept": "TypeScript ESM Best Practices", "description": "TypeScript best practices for ESM module compatibility"}}\n</tool_call>'),
+        (["Store knowledge", "React Server Components"], "knowledge_save",
+         '<think>The user wants to store knowledge about React Server Components requiring use server directive.</think>\n\n<tool_call>\n{"name": "knowledge_save", "arguments": {"project": "prism", "concept": "React Server Components", "description": "React Server Components require use server directive"}}\n</tool_call>'),
+    ]
+
+    for keywords, tool_name, response in SYNTHETIC_MAP:
+        if all(kw.lower() in prompt.lower() for kw in keywords):
+            return response
+
     return None
 
 
@@ -286,6 +350,7 @@ def main():
     parser.add_argument("--iters", type=int, default=300, help="Training iterations (default: 300)")
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate (default: 1e-5)")
     parser.add_argument("--verify-only", action="store_true", help="Only run reward function verification")
+    parser.add_argument("--dpo-only", action="store_true", help="Skip generation, run DPO on existing data")
     args = parser.parse_args()
 
     verify_reward_function()
@@ -353,39 +418,51 @@ def main():
         print(f"\nGenerated {len(dpo_data)} preference pairs")
 
         if len(dpo_data) >= 1:
-            dpo_train_path = "/Users/admin/prism/training/data/dpo_train.jsonl"
-            with open(dpo_train_path, "w") as f:
-                for _ in range(args.repeat):
-                    for d in dpo_data:
-                        entry = {
-                            "chosen": [
-                                {"role": "user", "content": d["prompt"]},
-                                {"role": "assistant", "content": d["chosen"]}
-                            ],
-                            "rejected": [
-                                {"role": "user", "content": d["prompt"]},
-                                {"role": "assistant", "content": d["rejected"]}
-                            ]
-                        }
-                        f.write(json.dumps(entry) + "\n")
+            # mlx_lm supports SFT only (chat/completions/text), not native DPO.
+            # Convert gold preference pairs to SFT chat format:
+            # {messages: [system, user, assistant(chosen)]}
+            import random
+            random.shuffle(dpo_data)
+            split = max(2, int(len(dpo_data) * 0.9))
+            train_data = dpo_data[:split]
+            valid_data = dpo_data[split:] if split < len(dpo_data) else dpo_data[-2:]
 
-            total_examples = len(dpo_data) * args.repeat
-            print(f"  Training data: {len(dpo_data)} unique pairs × {args.repeat} = {total_examples} examples")
+            sys_msg = "You are Prism, an AI coding assistant with persistent memory. Use MCP tools when appropriate."
 
-            print(f"\nRunning DPO alignment training...")
+            for split_name, split_data in [("train", train_data), ("valid", valid_data)]:
+                path = f"/Users/admin/prism/training/data/{split_name}.jsonl"
+                with open(path, "w") as f:
+                    for _ in range(args.repeat):
+                        for d in split_data:
+                            entry = {
+                                "messages": [
+                                    {"role": "system", "content": sys_msg},
+                                    {"role": "user", "content": d["prompt"]},
+                                    {"role": "assistant", "content": d["chosen"]}
+                                ]
+                            }
+                            f.write(json.dumps(entry) + "\n")
+
+            total_train = len(train_data) * args.repeat
+            total_valid = len(valid_data) * args.repeat
+            print(f"  Train: {len(train_data)} unique × {args.repeat} = {total_train} examples (SFT on gold chosen)")
+            print(f"  Valid: {len(valid_data)} unique × {args.repeat} = {total_valid} examples")
+
+            print(f"\nRunning SFT alignment on gold responses...")
+            data_dir = "/Users/admin/prism/training/data"
             cmd = [
-                sys.executable, "-m", "mlx_lm.lora",
+                sys.executable, "-m", "mlx_lm", "lora",
                 "--model", MODEL_PATH,
                 "--train",
-                "--data", os.path.dirname(dpo_train_path),
+                "--data", data_dir,
                 "--adapter-path", OUTPUT_ADAPTER,
-                "--num-layers", "12",
-                "--batch-size", "1",
+                "--num-layers", "16",
+                "--batch-size", "2",
                 "--iters", str(args.iters),
-                "--max-seq-length", "1024",
+                "--max-seq-length", "2048",
                 "--learning-rate", str(args.lr),
-                "--steps-per-report", "50",
-                "--save-every", "150",
+                "--steps-per-report", "25",
+                "--save-every", "100",
                 "--resume-adapter-file", os.path.join(SFT_ADAPTER, "adapters.safetensors"),
             ]
 

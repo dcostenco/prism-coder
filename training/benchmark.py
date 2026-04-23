@@ -89,15 +89,30 @@ def parse_tool_call(response: str):
             return "INVALID_JSON", None
 
     # 3. Fallback: bare JSON with "name" key, outside <think> blocks
+    #    Use a balanced-brace extractor to handle nested arguments
     stripped = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
-    json_matches = re.finditer(r'(\{[^{}]*"name"\s*:[^{}]*\})', stripped, re.DOTALL)
-    for match in json_matches:
-        try:
-            call = json.loads(match.group(1))
-            if call.get("name"):
-                return call.get("name"), call.get("arguments", {})
-        except json.JSONDecodeError:
-            continue
+    
+    # Find all potential JSON objects using balanced brace matching
+    i = 0
+    while i < len(stripped):
+        if stripped[i] == '{':
+            depth = 0
+            start = i
+            for j in range(i, len(stripped)):
+                if stripped[j] == '{':
+                    depth += 1
+                elif stripped[j] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        candidate = stripped[start:j+1]
+                        try:
+                            call = json.loads(candidate)
+                            if isinstance(call, dict) and call.get("name"):
+                                return call.get("name"), call.get("arguments", {})
+                        except json.JSONDecodeError:
+                            pass
+                        break
+        i += 1
 
     return None, None
 
