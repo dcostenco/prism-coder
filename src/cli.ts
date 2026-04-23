@@ -15,7 +15,26 @@ const program = new Command();
 program
   .name('prism')
   .description('Prism — The Mind Palace for AI Agents')
-  .version(SERVER_CONFIG.version);
+  .version(SERVER_CONFIG.version)
+  .action(async () => {
+    // Default action: show greeting with auth info
+    try {
+      const { initConfigStorage } = await import('./storage/configStorage.js');
+      await initConfigStorage();
+      const { getAuthStatus } = await import('./auth.js');
+      const auth = await getAuthStatus();
+
+      console.log(`\n🧠 Prism v${SERVER_CONFIG.version} — The Mind Palace for AI Agents`);
+      if (auth.loggedIn) {
+        console.log(`👤 ${auth.email}  ·  📋 ${auth.plan || 'Free'} plan`);
+      } else {
+        console.log('👤 Not logged in  ·  Run \`prism login\` to authenticate');
+      }
+      console.log(`\nRun \`prism --help\` for all commands.\n`);
+    } catch {
+      console.log(`\n🧠 Prism v${SERVER_CONFIG.version}\nRun \`prism --help\` for all commands.\n`);
+    }
+  });
 
 // ─── prism load <project> ─────────────────────────────────────
 // Loads session context using the same storage layer as the MCP
@@ -421,16 +440,30 @@ syncCmd
 
 // ─── prism login ─────────────────────────────────────────────
 // OAuth login flow — opens browser for Synalux authentication.
-// Replaces legacy `prism trial` (license key-based).
+// Also supports --email/--plan flags for manual setup.
 
 program
   .command('login')
-  .description('Authenticate with Synalux Cloud via OAuth (opens browser)')
-  .action(async () => {
+  .description('Authenticate with Synalux Cloud via OAuth, or set identity manually')
+  .option('-e, --email <email>', 'Set email directly (skips OAuth)')
+  .option('-p, --plan <plan>', 'Set subscription plan: Free, Advanced, Enterprise', 'Enterprise')
+  .action(async (options: { email?: string; plan?: string }) => {
     try {
-      const { initConfigStorage } = await import('./storage/configStorage.js');
+      const { initConfigStorage, setSetting: setSettingLocal } = await import('./storage/configStorage.js');
       await initConfigStorage();
 
+      if (options.email) {
+        // Manual identity setup — no OAuth needed
+        await setSettingLocal('prism_auth_email', options.email);
+        await setSettingLocal('prism_auth_plan', options.plan || 'Enterprise');
+        await setSettingLocal('prism_auth_token', 'manual');
+        await setSettingLocal('prism_auth_expires', String(Math.floor(Date.now() / 1000) + 365 * 24 * 3600));
+        console.log(`\n✅ Logged in as ${options.email} (${options.plan || 'Enterprise'} plan)`);
+        console.log('   Prism Cloud features are now active.\n');
+        return;
+      }
+
+      // Full OAuth flow
       const { login } = await import('./auth.js');
       const result = await login();
 
@@ -507,6 +540,508 @@ program
     console.log('   This gives you the same 30-day trial via Synalux Cloud.\n');
     console.log('   Run: prism login');
     process.exit(0);
+  });
+
+// ═══════════════════════════════════════════════════════════════
+// ─── SEARCH COMMANDS ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
+program
+  .command('search <query>')
+  .description('Search session memory by keywords or semantically')
+  .option('--semantic', 'Use vector/semantic search instead of keyword search')
+  .option('-p, --project <name>', 'Limit search to a specific project')
+  .option('-c, --category <cat>', 'Filter by category (debugging, architecture, etc.)')
+  .option('-l, --limit <n>', 'Max results to return', '10')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .option('--json', 'Emit machine-readable JSON output')
+  .action(async (query: string, options: {
+    semantic?: boolean; project?: string; category?: string;
+    limit?: string; storage?: string; json?: boolean;
+  }) => {
+    try {
+      if (options.storage) {
+        process.env.PRISM_STORAGE = options.storage;
+      }
+
+      let result: any;
+      if (options.semantic) {
+        const { sessionSearchMemoryHandler } = await import('./tools/graphHandlers.js');
+        result = await sessionSearchMemoryHandler({
+          query,
+          project: options.project,
+          limit: parseInt(options.limit || '5'),
+        });
+      } else {
+        const { knowledgeSearchHandler } = await import('./tools/graphHandlers.js');
+        result = await knowledgeSearchHandler({
+          query,
+          project: options.project,
+          category: options.category,
+          limit: parseInt(options.limit || '10'),
+        });
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: !result.isError,
+          text: (result.content[0] as any)?.text || '',
+        }, null, 2));
+      } else {
+        console.log((result.content[0] as any)?.text || 'No results found.');
+      }
+
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+// ═══════════════════════════════════════════════════════════════
+// ─── MEMORY MANAGEMENT COMMANDS ──────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
+program
+  .command('history <project>')
+  .description('View the timeline of past memory states (versions)')
+  .option('-l, --limit <n>', 'Max entries to return', '10')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .option('--json', 'Emit machine-readable JSON output')
+  .action(async (project: string, options: { limit?: string; storage?: string; json?: boolean }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { memoryHistoryHandler } = await import('./tools/ledgerHandlers.js');
+      const result = await memoryHistoryHandler({ project, limit: parseInt(options.limit || '10') });
+
+      if (options.json) {
+        console.log(JSON.stringify({ success: !result.isError, text: (result.content[0] as any)?.text || '' }, null, 2));
+      } else {
+        console.log((result.content[0] as any)?.text || 'No history found.');
+      }
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('checkout <project> <version>')
+  .description('Time-travel: restore memory to a specific past version')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (project: string, version: string, options: { storage?: string }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { memoryCheckoutHandler } = await import('./tools/ledgerHandlers.js');
+      const result = await memoryCheckoutHandler({ project, target_version: parseInt(version) });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('forget <memory_id>')
+  .description('Delete a specific memory entry by ID')
+  .option('--hard', 'Permanently delete (irreversible). Default is soft-delete.')
+  .option('--reason <text>', 'Justification for deletion (GDPR audit trail)')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (memoryId: string, options: { hard?: boolean; reason?: string; storage?: string }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { sessionForgetMemoryHandler } = await import('./tools/ledgerHandlers.js');
+      const result = await sessionForgetMemoryHandler({
+        memory_id: memoryId,
+        hard_delete: !!options.hard,
+        reason: options.reason,
+      });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('forget-bulk')
+  .description('Bulk forget entries by project, category, or age')
+  .option('-p, --project <name>', 'Project to forget entries for')
+  .option('-c, --category <cat>', 'Only forget entries in this category')
+  .option('--older-than <days>', 'Only forget entries older than N days', parseInt)
+  .option('--confirm-all', 'Confirm wiping ALL entries (safety flag)')
+  .option('--clear-handoff', 'Also clear the handoff state')
+  .option('--dry-run', 'Preview what would be deleted without executing')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .option('--json', 'Emit machine-readable JSON output')
+  .action(async (options: {
+    project?: string; category?: string; olderThan?: number;
+    confirmAll?: boolean; clearHandoff?: boolean; dryRun?: boolean;
+    storage?: string; json?: boolean;
+  }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { knowledgeForgetHandler } = await import('./tools/graphHandlers.js');
+      const result = await knowledgeForgetHandler({
+        project: options.project,
+        category: options.category,
+        older_than_days: options.olderThan,
+        confirm_all: options.confirmAll,
+        clear_handoff: options.clearHandoff,
+        dry_run: options.dryRun,
+      });
+      if (options.json) {
+        console.log(JSON.stringify({ success: !result.isError, text: (result.content[0] as any)?.text || '' }, null, 2));
+      } else {
+        console.log((result.content[0] as any)?.text || 'Done');
+      }
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('export')
+  .description("Export a project's memory to a local file (JSON, Markdown, or Obsidian Vault)")
+  .option('-p, --project <name>', 'Project to export (omit for all)')
+  .requiredOption('-o, --output-dir <path>', 'Output directory (must exist)')
+  .option('-f, --format <fmt>', 'Export format: json, markdown, or vault', 'json')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (options: { project?: string; outputDir: string; format?: string; storage?: string }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { sessionExportMemoryHandler } = await import('./tools/ledgerHandlers.js');
+      const result = await sessionExportMemoryHandler({
+        project: options.project,
+        output_dir: options.outputDir,
+        format: options.format || 'json',
+      });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+// ═══════════════════════════════════════════════════════════════
+// ─── KNOWLEDGE CURATION COMMANDS ─────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
+program
+  .command('upvote <id>')
+  .description('Increase a memory entry\'s importance (graduation at ≥ 7)')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (id: string, options: { storage?: string }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { knowledgeUpvoteHandler } = await import('./tools/graphHandlers.js');
+      const result = await knowledgeUpvoteHandler({ id });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('downvote <id>')
+  .description('Decrease a memory entry\'s importance')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (id: string, options: { storage?: string }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { knowledgeDownvoteHandler } = await import('./tools/graphHandlers.js');
+      const result = await knowledgeDownvoteHandler({ id });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('sync-rules <project>')
+  .description('Sync graduated insights (importance ≥ 7) to IDE rules file')
+  .option('--target <file>', 'Target rules file', '.cursorrules')
+  .option('--dry-run', 'Preview rules block without writing')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (project: string, options: { target?: string; dryRun?: boolean; storage?: string }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { knowledgeSyncRulesHandler } = await import('./tools/graphHandlers.js');
+      const result = await knowledgeSyncRulesHandler({
+        project,
+        target_file: options.target || '.cursorrules',
+        dry_run: options.dryRun,
+      });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+// ═══════════════════════════════════════════════════════════════
+// ─── MAINTENANCE COMMANDS ────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
+program
+  .command('compact')
+  .description('Auto-compact old session entries into AI-generated summaries')
+  .option('-p, --project <name>', 'Project to compact (omit for auto-detect)')
+  .option('--threshold <n>', 'Min entries before compaction triggers', '50')
+  .option('--keep-recent <n>', 'Recent entries to keep intact', '10')
+  .option('--dry-run', 'Preview what would be compacted without executing')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .option('--json', 'Emit machine-readable JSON output')
+  .action(async (options: {
+    project?: string; threshold?: string; keepRecent?: string;
+    dryRun?: boolean; storage?: string; json?: boolean;
+  }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { compactLedgerHandler } = await import('./tools/compactionHandler.js');
+      const result = await compactLedgerHandler({
+        project: options.project,
+        threshold: parseInt(options.threshold || '50'),
+        keep_recent: parseInt(options.keepRecent || '10'),
+        dry_run: options.dryRun,
+      });
+      if (options.json) {
+        console.log(JSON.stringify({ success: !result.isError, text: (result.content[0] as any)?.text || '' }, null, 2));
+      } else {
+        console.log((result.content[0] as any)?.text || 'Done');
+      }
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('health')
+  .description('Run integrity checks on memory DB (missing embeddings, duplicates, orphans)')
+  .option('--auto-fix', 'Automatically repair issues')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .option('--json', 'Emit machine-readable JSON output')
+  .action(async (options: { autoFix?: boolean; storage?: string; json?: boolean }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { sessionHealthCheckHandler } = await import('./tools/hygieneHandlers.js');
+      const result = await sessionHealthCheckHandler({ auto_fix: options.autoFix });
+      if (options.json) {
+        console.log(JSON.stringify({ success: !result.isError, text: (result.content[0] as any)?.text || '' }, null, 2));
+      } else {
+        console.log((result.content[0] as any)?.text || 'Done');
+      }
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('vacuum')
+  .description('Reclaim disk space by running VACUUM on the SQLite database')
+  .option('--dry-run', 'Report DB size without vacuuming')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (options: { dryRun?: boolean; storage?: string }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { maintenanceVacuumHandler } = await import('./tools/hygieneHandlers.js');
+      const result = await maintenanceVacuumHandler({ dry_run: options.dryRun });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('purge')
+  .description('Purge old float32 embedding vectors to reclaim ~90% storage')
+  .option('--older-than <days>', 'Only purge entries older than N days', '30')
+  .option('-p, --project <name>', 'Limit to a specific project')
+  .option('--dry-run', 'Preview impact without purging')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (options: { olderThan?: string; project?: string; dryRun?: boolean; storage?: string }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { deepStoragePurgeHandler } = await import('./tools/hygieneHandlers.js');
+      const result = await deepStoragePurgeHandler({
+        older_than_days: parseInt(options.olderThan || '30'),
+        project: options.project,
+        dry_run: options.dryRun,
+      });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('retention <project> <days>')
+  .description('Set auto-expiry TTL policy for a project (0 to disable)')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (project: string, days: string, options: { storage?: string }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { knowledgeSetRetentionHandler } = await import('./tools/hygieneHandlers.js');
+      const result = await knowledgeSetRetentionHandler({ project, ttl_days: parseInt(days) });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+// ═══════════════════════════════════════════════════════════════
+// ─── GRAPH COMMANDS ──────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
+program
+  .command('backfill-links <project>')
+  .description('Build associative memory graph edges for existing entries')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (project: string, options: { storage?: string }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { sessionBackfillLinksHandler } = await import('./tools/hygieneHandlers.js');
+      const result = await sessionBackfillLinksHandler({ project });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('backfill-embeddings')
+  .description('Backfill TurboQuant compressed embedding blobs for existing entries')
+  .option('-p, --project <name>', 'Limit to a specific project')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (options: { project?: string; storage?: string }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { backfillEmbeddingsHandler } = await import('./tools/hygieneHandlers.js');
+      const result = await backfillEmbeddingsHandler({ project: options.project });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+program
+  .command('synthesize <project>')
+  .description('Discover and create semantic relationship edges between memories')
+  .option('--threshold <n>', 'Min cosine similarity (0-1)', '0.7')
+  .option('--max-entries <n>', 'Max entries to scan', '50')
+  .option('--randomize', 'Randomly sample instead of newest entries')
+  .option('-s, --storage <backend>', 'Storage backend: local or supabase')
+  .action(async (project: string, options: {
+    threshold?: string; maxEntries?: string; randomize?: boolean; storage?: string;
+  }) => {
+    try {
+      if (options.storage) process.env.PRISM_STORAGE = options.storage;
+      const { sessionSynthesizeEdgesHandler } = await import('./tools/graphHandlers.js');
+      const result = await sessionSynthesizeEdgesHandler({
+        project,
+        similarity_threshold: parseFloat(options.threshold || '0.7'),
+        max_entries: parseInt(options.maxEntries || '50'),
+        randomize_selection: options.randomize,
+      });
+      console.log((result.content[0] as any)?.text || 'Done');
+      if (result.isError) process.exit(1);
+      await closeStorage();
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await closeStorage().catch(() => { });
+      process.exit(1);
+    }
+  });
+
+// ═══════════════════════════════════════════════════════════════
+// ─── DASHBOARD COMMAND ───────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
+program
+  .command('dashboard')
+  .description('Launch the Prism web dashboard in your browser')
+  .option('--port <n>', 'Port to run dashboard on', '9315')
+  .action(async (options: { port?: string }) => {
+    try {
+      const port = parseInt(options.port || '9315');
+      console.log(`🚀 Starting Prism Dashboard on http://localhost:${port}`);
+      console.log('   Press Ctrl+C to stop.\n');
+
+      const { initConfigStorage } = await import('./storage/configStorage.js');
+      await initConfigStorage();
+
+      // The dashboard is served via the MCP server's built-in HTTP handler
+      const { createServer } = await import('./server.js');
+      const server = await createServer();
+
+      // Keep the process alive
+      process.on('SIGINT', async () => {
+        console.log('\n👋 Dashboard stopped.');
+        await closeStorage();
+        process.exit(0);
+      });
+
+      // Dashboard runs until interrupted
+      await new Promise(() => { }); // hang forever
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
   });
 
 program.parse(process.argv);
