@@ -1154,6 +1154,11 @@ Guidelines:
         console.log(`  ${formatWarning('No session context found — starting fresh')}`);
       }
 
+      // ─── Controls Bar ───────────────────────────────────────
+      console.log(`  ${c.dim}─────────────────────────────────────────────${c.reset}`);
+      console.log(`  ${c.cyan}🎤${c.reset} ${c.dim}/voice${c.reset}   ${c.cyan}📷${c.reset} ${c.dim}/camera${c.reset}   ${c.cyan}🖼️${c.reset}  ${c.dim}/image${c.reset}   ${c.cyan}📋${c.reset} ${c.dim}/paste${c.reset}`);
+      console.log(`  ${c.green}🔊${c.reset} ${c.dim}/speak${c.reset}   ${c.green}🔍${c.reset} ${c.dim}/search${c.reset}  ${c.green}🛠️${c.reset}  ${c.dim}/tools${c.reset}   ${c.green}❓${c.reset} ${c.dim}/help${c.reset}`);
+
       const ai = new GoogleGenerativeAI(GOOGLE_API_KEY);
       const model = ai.getGenerativeModel({
         model: modelId,
