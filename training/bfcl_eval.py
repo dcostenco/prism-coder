@@ -19,6 +19,7 @@ Usage:
   python3 bfcl_eval.py --verbose          # Show all model outputs
 """
 import json
+import os
 import re
 import sys
 import time
@@ -614,6 +615,154 @@ def call_ollama(prompt: str, use_json_format: bool = True) -> tuple:
         return all_calls[0][0], all_calls[0][1], response_text, elapsed, all_calls
     
     return "NO_TOOL", {}, response_text, elapsed, []
+
+
+# =============================================================================
+# Enhancement 1: Best-of-N Schema Validator (Test-Time Compute Scaling)
+# =============================================================================
+BEST_OF_N = int(os.environ.get("BFCL_BEST_OF_N", "5"))  # Default 5 candidates
+
+
+def validate_tool_call_against_schema(tool_name: str, tool_args: dict, 
+                                       available_tools: list) -> tuple:
+    """Validate a tool call against its JSON schema definition.
+    
+    Returns (is_valid, error_reason).
+    """
+    # Find matching tool schema
+    schema = None
+    for tool in available_tools:
+        if tool.get("name") == tool_name:
+            schema = tool
+            break
+    
+    if schema is None:
+        return False, f"tool '{tool_name}' not in available tools"
+    
+    params = schema.get("parameters", {})
+    props = params.get("properties", {})
+    required = set(params.get("required", []))
+    
+    # Check required params present
+    for req_param in required:
+        if req_param not in tool_args:
+            return False, f"missing required param: {req_param}"
+    
+    # Check no hallucinated params
+    for arg_name in tool_args:
+        if arg_name not in props:
+            return False, f"hallucinated param: {arg_name}"
+    
+    # Check data types
+    for arg_name, arg_val in tool_args.items():
+        if arg_name not in props:
+            continue
+        expected_type = props[arg_name].get("type", "string")
+        
+        if expected_type == "integer" and not isinstance(arg_val, int):
+            return False, f"{arg_name} should be int, got {type(arg_val).__name__}"
+        elif expected_type == "number" and not isinstance(arg_val, (int, float)):
+            return False, f"{arg_name} should be number, got {type(arg_val).__name__}"
+        elif expected_type == "boolean" and not isinstance(arg_val, bool):
+            return False, f"{arg_name} should be bool, got {type(arg_val).__name__}"
+        elif expected_type == "object" and not isinstance(arg_val, dict):
+            return False, f"{arg_name} should be object, got {type(arg_val).__name__}"
+        elif expected_type == "array" and not isinstance(arg_val, list):
+            return False, f"{arg_name} should be array, got {type(arg_val).__name__}"
+    
+    # Check enum constraints
+    for arg_name, arg_val in tool_args.items():
+        if arg_name in props and "enum" in props[arg_name]:
+            if arg_val not in props[arg_name]["enum"]:
+                return False, f"{arg_name} value '{arg_val}' not in enum"
+    
+    return True, "valid"
+
+
+def call_ollama_best_of_n(prompt: str, available_tools: list = None,
+                           n: int = None) -> tuple:
+    """Best-of-N inference with schema validation (Test-Time Compute Scaling).
+    
+    Generates N responses at higher temperature, validates each against
+    the tool schemas, and returns the first valid one. Falls back to
+    standard greedy decoding if no candidate passes validation.
+    
+    Args:
+        prompt: Full prompt including system instructions
+        available_tools: List of tool schema dicts for validation
+        n: Number of candidates to generate (default: BEST_OF_N env var)
+    
+    Returns: Same tuple as call_ollama
+    """
+    from config import OLLAMA_KEEP_ALIVE, OLLAMA_NUM_CTX
+    
+    if n is None:
+        n = BEST_OF_N
+    
+    if not available_tools or n <= 1:
+        # No schemas to validate against, or single shot
+        return call_ollama(prompt)
+    
+    candidates = []
+    
+    for i in range(n):
+        payload_dict = {
+            "model": MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
+            "options": {
+                "temperature": 0.6,  # Higher temp for diversity
+                "num_predict": 512,
+                "num_ctx": OLLAMA_NUM_CTX,
+                "seed": random.randint(0, 2**31),  # Different seed each time
+            }
+        }
+        
+        try:
+            payload = json.dumps(payload_dict).encode()
+            req = urllib.request.Request(OLLAMA_API, data=payload,
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                result = json.loads(resp.read().decode())
+        except Exception:
+            continue
+        
+        response_text = result.get("response", "")
+        elapsed = result.get("total_duration", 0) / 1e9
+        
+        all_calls = parse_all_tool_calls(response_text)
+        if not all_calls:
+            all_calls = _repair_and_extract(response_text)
+        
+        if not all_calls:
+            candidates.append((
+                "NO_TOOL", {}, response_text, elapsed, [], True, "no tool call"
+            ))
+            continue
+        
+        # Validate first call against schema
+        tool_name, tool_args = all_calls[0]
+        is_valid, reason = validate_tool_call_against_schema(
+            tool_name, tool_args, available_tools
+        )
+        
+        candidates.append((
+            tool_name, tool_args, response_text, elapsed, all_calls,
+            is_valid, reason
+        ))
+        
+        # Early exit: first valid candidate wins
+        if is_valid:
+            break
+    
+    # Return first valid candidate, or best invalid one
+    for c in candidates:
+        if c[5]:  # is_valid
+            return c[0], c[1], c[2], c[3], c[4]
+    
+    # No valid candidate — fall back to greedy single-shot
+    return call_ollama(prompt)
 
 
 def _repair_and_extract(text: str) -> list:
