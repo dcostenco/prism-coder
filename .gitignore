@@ -69,3 +69,13 @@ test_save2.js
 upvote.js
 test-results.txt
 training/grpo_v3_train.log
+
+# Training artifacts (logs, caches, deprecated, repomix)
+training/*.log
+training/__pycache__/
+training/*.deprecated
+training/bfcl_repomix_*.txt
+training/repomix-output.txt
+training/data/
+training/output/
+training/models/
