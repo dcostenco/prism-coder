@@ -419,8 +419,11 @@ def generate_multiturn_examples(output_path: Path, collections: dict, num_exampl
         
         messages = [{"role": "system", "content": format_system_prompt(tools)}]
         
-        # Randomly select 2-3 turns from the scenario
-        num_turns = random.randint(2, min(3, len(scenario["turns"])))
+        # Randomly select turns from the scenario (min 1, max 3)
+        max_turns = min(3, len(scenario["turns"]))
+        if max_turns == 0:
+            continue  # Skip empty scenarios
+        num_turns = random.randint(1, max_turns)
         selected_turns = scenario["turns"][:num_turns]
         
         inject_interruption = len(selected_turns) >= 2 and random.random() < 0.15
