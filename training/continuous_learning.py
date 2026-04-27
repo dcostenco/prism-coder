@@ -69,25 +69,63 @@ def extract_preference_pairs(db_path: str, since_days: int = 7) -> list[dict]:
 
     conn.close()
 
+    # R10/R11-fix: Include system prompt WITH tool schemas
+    try:
+        from config import format_system_prompt
+        _schema_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "tool_schema.json")
+        try:
+            with open(_schema_path) as _f:
+                _tools = json.load(_f).get("tools", [])
+        except (FileNotFoundError, json.JSONDecodeError):
+            _tools = []
+        _sys_prompt = format_system_prompt(_tools)
+    except ImportError:
+        _sys_prompt = None
+
     # Format upvoted entries as chosen completions
+    # R13-fix: Wrap in mandatory XML tags to prevent formatting drift
     for entry in upvoted:
+        msgs = []
+        if _sys_prompt:
+            msgs.append({"role": "system", "content": _sys_prompt})
+        wrapped = (
+            f"<|synalux_think|>\nContinuing work on {entry['project']}.\n</|synalux_think|>\n"
+            f"<|synalux_answer|>{entry['summary']}</|synalux_answer|>"
+        )
+        msgs.extend([
+            {"role": "user", "content": f"[Project: {entry['project']}] Continue work."},
+            {"role": "assistant", "content": wrapped},
+        ])
         pairs.append({
-            "messages": [
-                {"role": "user", "content": f"[Project: {entry['project']}] Continue work."},
-                {"role": "assistant", "content": entry["summary"]},
-            ],
+            "messages": msgs,
             "category": "upvoted",
             "source": "continuous_learning",
         })
 
     # Format corrections as preference pairs (chosen=correction, rejected=action)
+    # R13-fix: Wrap correction content in mandatory XML tags
     for corr in corrections:
         if corr["correction"]:
+            msgs = []
+            if _sys_prompt:
+                msgs.append({"role": "system", "content": _sys_prompt})
+            # R21-fix: Conditionally wrap corrections — tool_call corrections stay native
+            if "<|tool_call|>" in corr['correction']:
+                wrapped_corr = (
+                    f"<|synalux_think|>\nApplying correction: {corr['context']}\n</|synalux_think|>\n"
+                    f"{corr['correction']}"
+                )
+            else:
+                wrapped_corr = (
+                    f"<|synalux_think|>\nApplying correction: {corr['context']}\n</|synalux_think|>\n"
+                    f"<|synalux_answer|>{corr['correction']}</|synalux_answer|>"
+                )
+            msgs.extend([
+                {"role": "user", "content": corr["context"]},
+                {"role": "assistant", "content": wrapped_corr},
+            ])
             pairs.append({
-                "messages": [
-                    {"role": "user", "content": corr["context"]},
-                    {"role": "assistant", "content": corr["correction"]},  # What SHOULD have been done
-                ],
+                "messages": msgs,
                 "rejected": corr["action"],  # What was actually done (wrong)
                 "category": "correction",
                 "source": "continuous_learning",
@@ -103,11 +141,8 @@ def write_training_data(pairs: list[dict], output_dir: Path):
     # Split corrections into DPO format, upvotes into SFT format
     sft_examples = []
     for pair in pairs:
-        # Format as ChatML messages (SFT on chosen completions)
-        text_parts = []
-        for msg in pair["messages"]:
-            text_parts.append(f"<|im_start|>{msg['role']}\n{msg['content']}<|im_end|>")
-        sft_examples.append({"text": "\n".join(text_parts)})
+        # R9-fix: Preserve native messages format for --mask-prompt compatibility
+        sft_examples.append({"messages": pair["messages"]})
 
     if not sft_examples:
         print("No training data extracted. Skipping.")
@@ -151,6 +186,7 @@ def run_training(data_dir: Path, base_model: str, adapter_out: str,
         "--learning-rate", str(lr),
         "--max-seq-length", "4096", # Short sequences for corrections
         "--grad-checkpoint",
+        "--mask-prompt",  # R13-fix: Must mask prompt to avoid learning user/system tokens
     ]
 
     print(f"\n{'='*60}")

@@ -101,17 +101,9 @@ IRRELEVANT_QUERIES = [
     "Explain the difference between RAM and ROM.",
 ]
 
-# Abstention response templates
-ABSTENTION_RESPONSES = [
-    "<|synalux_answer|>I don't have a suitable function to help with that query. The available tools are not relevant to your request.</|synalux_answer|>",
-    "<|synalux_answer|>None of the available tools can assist with this question. I can only help with tasks related to the provided functions.</|synalux_answer|>",
-    "<|synalux_answer|>This query is outside the scope of the available tools. I cannot call any function to address this request.</|synalux_answer|>",
-    "<|synalux_answer|>The provided functions don't cover this topic. I'm unable to assist with this query using the available tools.</|synalux_answer|>",
-    "<|synalux_answer|>I don't have the right tools for this request. The available functions are designed for different purposes.</|synalux_answer|>",
-    "<|synalux_answer|>There are no relevant functions available to answer your question. Let me know if you need help with something the available tools can handle.</|synalux_answer|>",
-    "<|synalux_answer|>The available tools cannot help with this kind of request. This falls outside their intended functionality.</|synalux_answer|>",
-    "<|synalux_answer|>I appreciate the question, but none of the provided functions are applicable here. I can only assist with function-specific tasks.</|synalux_answer|>",
-]
+# Abstention response templates — defined after config imports (need TOKEN constants)
+# Placeholder until config imports below
+ABSTENTION_RESPONSES = None
 
 
 from config import (  # R4-3 + R5: Single source of truth
@@ -126,6 +118,19 @@ from config import (  # R4-3 + R5: Single source of truth
     TOKEN_ANSWER_CLOSE,
     DESTRUCTIVE_TOOLS,
 )
+
+# R16-fix: Abstention responses MUST include CoT to match system prompt mandate
+# "Think step-by-step before answering. Use <|synalux_think|> for reasoning"
+ABSTENTION_RESPONSES = [
+    f"{TOKEN_THINK_OPEN}\nI need to check if any available tools match this request. After reviewing the tool schemas, none of them are relevant to this query. I should abstain.\n{TOKEN_THINK_CLOSE}\n{TOKEN_ANSWER_OPEN}I don't have a suitable function to help with that query. The available tools are not relevant to your request.{TOKEN_ANSWER_CLOSE}",
+    f"{TOKEN_THINK_OPEN}\nLet me evaluate the available functions against the user's intent. None of the provided tools can assist with this question.\n{TOKEN_THINK_CLOSE}\n{TOKEN_ANSWER_OPEN}None of the available tools can assist with this question. I can only help with tasks related to the provided functions.{TOKEN_ANSWER_CLOSE}",
+    f"{TOKEN_THINK_OPEN}\nThis query is about a general topic outside the scope of my tool capabilities. I should answer directly without calling any tools.\n{TOKEN_THINK_CLOSE}\n{TOKEN_ANSWER_OPEN}This query is outside the scope of the available tools. I cannot call any function to address this request.{TOKEN_ANSWER_CLOSE}",
+    f"{TOKEN_THINK_OPEN}\nReviewing the tool schemas: none of them are designed to handle this type of request. I will respond without tool use.\n{TOKEN_THINK_CLOSE}\n{TOKEN_ANSWER_OPEN}The provided functions don't cover this topic. I'm unable to assist with this query using the available tools.{TOKEN_ANSWER_CLOSE}",
+    f"{TOKEN_THINK_OPEN}\nThe user is asking about a topic that doesn't map to any of my available tools. I should provide a direct response.\n{TOKEN_THINK_CLOSE}\n{TOKEN_ANSWER_OPEN}I don't have the right tools for this request. The available functions are designed for different purposes.{TOKEN_ANSWER_CLOSE}",
+    f"{TOKEN_THINK_OPEN}\nAfter checking all available function schemas, none are applicable to this request. I will abstain from tool calling.\n{TOKEN_THINK_CLOSE}\n{TOKEN_ANSWER_OPEN}There are no relevant functions available to answer your question. Let me know if you need help with something the available tools can handle.{TOKEN_ANSWER_CLOSE}",
+    f"{TOKEN_THINK_OPEN}\nThis falls outside the intended functionality of my available tools. No function call is appropriate here.\n{TOKEN_THINK_CLOSE}\n{TOKEN_ANSWER_OPEN}The available tools cannot help with this kind of request. This falls outside their intended functionality.{TOKEN_ANSWER_CLOSE}",
+    f"{TOKEN_THINK_OPEN}\nI need to determine if any tool applies here. After analysis, none of the provided functions are applicable. I should respond directly.\n{TOKEN_THINK_CLOSE}\n{TOKEN_ANSWER_OPEN}I appreciate the question, but none of the provided functions are applicable here. I can only assist with function-specific tasks.{TOKEN_ANSWER_CLOSE}",
+]
 
 
 def format_as_raw_text(messages: list, tools: list) -> str:
@@ -208,9 +213,9 @@ INTERRUPTION_QUESTIONS = [
 ]
 
 INTERRUPTION_RESPONSES = [
-    "I don't have a function available to answer that question. Based on what we've done so far: {summary}",
-    "That question is outside the scope of the available tools. Let me know if you'd like to continue with the previous task.",
-    "I can't help with that specific request using the available functions. Would you like to continue where we left off?",
+    f"{TOKEN_THINK_OPEN}\nThe user interrupted with an off-topic question. I should inform them I cannot answer and refocus on the task.\n{TOKEN_THINK_CLOSE}\n{TOKEN_ANSWER_OPEN}I don't have a function available to answer that question. Based on what we've done so far: {{summary}}{TOKEN_ANSWER_CLOSE}",
+    f"{TOKEN_THINK_OPEN}\nThe user asked something outside my tools. I will steer the conversation back.\n{TOKEN_THINK_CLOSE}\n{TOKEN_ANSWER_OPEN}That question is outside the scope of the available tools. Let me know if you'd like to continue with the previous task.{TOKEN_ANSWER_CLOSE}",
+    f"{TOKEN_THINK_OPEN}\nThis request is not supported by my tools. I should abstain and ask to resume.\n{TOKEN_THINK_CLOSE}\n{TOKEN_ANSWER_OPEN}I can't help with that specific request using the available functions. Would you like to continue where we left off?{TOKEN_ANSWER_CLOSE}",
 ]
 
 # Tool-switching interruption templates (model must call a DIFFERENT tool, not just refuse)
@@ -443,9 +448,11 @@ def generate_multiturn_examples(output_path: Path, collections: dict, num_exampl
                     tool_calls_meta.append({"function": {"name": call["func"], "arguments": call["args"]}})
                 
                 tc_text = '\n'.join(tc_parts)
+                # R12-fix: Add CoT reasoning before parallel calls (matches R9 fix in v4_agentic)
+                think_text = f"<|synalux_think|>\nThe user wants to {turn['query'].lower().rstrip('.')}. I will execute these operations in parallel.\n</|synalux_think|>\n"
                 messages.append({
                     "role": "assistant",
-                    "content": tc_text,
+                    "content": think_text + tc_text,
                     "tool_calls": tool_calls_meta,
                 })
                 
@@ -472,7 +479,22 @@ def generate_multiturn_examples(output_path: Path, collections: dict, num_exampl
                 # 50% chance: tool-switching (model calls a different tool)
                 # 50% chance: verbal refusal (model recognizes out-of-scope question)
                 if random.random() < 0.5 and TOOL_SWITCH_INTERRUPTIONS:
-                    switch = random.choice(TOOL_SWITCH_INTERRUPTIONS)
+                    # R20-fix: Only allow switches to tools that exist in the active schema
+                    # to prevent training the model to hallucinate non-existent tools
+                    tool_names_in_schema = {t.get("name", "") for t in tools}
+                    valid_switches = [s for s in TOOL_SWITCH_INTERRUPTIONS if s["func"] in tool_names_in_schema]
+                    if valid_switches:
+                        switch = random.choice(valid_switches)
+                    else:
+                        # Fall back to verbal refusal if no valid switch exists
+                        template = random.choice(INTERRUPTION_TEMPLATES)
+                        question = random.choice(INTERRUPTION_QUESTIONS)
+                        interrupt_query = template.format(question=question)
+                        messages.append({"role": "user", "content": interrupt_query})
+                        summary = "the previous operations completed successfully"
+                        response = random.choice(INTERRUPTION_RESPONSES).format(summary=summary)
+                        messages.append({"role": "assistant", "content": response})
+                        continue
                     messages.append({"role": "user", "content": switch["query"]})
                     tc_json = json.dumps({"name": switch["func"], "arguments": switch["args"]})
                     think_text = f'<|synalux_think|>\nThe user changed their request. I should call {switch["func"]}.\n</|synalux_think|>\n'
@@ -583,13 +605,18 @@ def generate_grpo_pairs(output_path: Path, collections: dict, num_pairs: int = 8
         # Chosen: correct abstention
         chosen_response = random.choice(ABSTENTION_RESPONSES)
         
-        # Rejected: hallucinated tool call
+        # Rejected: hallucinated tool call (R22-fix: include CoT to prevent DPO reasoning penalty)
         random_tool = random.choice(tools)
         tool_name = random_tool.get("name", "unknown_func")
-        rejected_response = f'<|tool_call|>\n{{"name": "{tool_name}", "arguments": {{"query": "{query}"}}}}\n</|tool_call|>'
+        # R25-fix: Use json.dumps to properly escape special chars in query
+        args_json = json.dumps({"query": query})
+        rejected_response = f'{TOKEN_THINK_OPEN}\nI think I should call a function to handle this.\n{TOKEN_THINK_CLOSE}\n{TOKEN_TOOL_CALL_OPEN}\n{{"name": "{tool_name}", "arguments": {args_json}}}\n{TOKEN_TOOL_CALL_CLOSE}'
         
         pair = {
-            "prompt": format_system_prompt(tools) + f"\n\nUser: {query}",
+            "prompt": [
+                {"role": "system", "content": format_system_prompt(tools)},
+                {"role": "user", "content": query},
+            ],
             "chosen": chosen_response,
             "rejected": rejected_response,
             "category": "irrelevance_grpo",
@@ -1049,30 +1076,51 @@ def generate_v4_agentic_examples(output_path: Path, num_examples: int = 600):
         think = f"{TOKEN_THINK_OPEN}\n{scenario['think']}\n{TOKEN_THINK_CLOSE}\n"
         
         if "steps" in scenario:
-            # Multi-step: generate parallel tool calls
-            tool_blocks = []
-            for step in scenario["steps"]:
-                tc = json.dumps({"name": step["tool"], "arguments": step["args"]})
-                tool_blocks.append(f"{TOKEN_TOOL_CALL_OPEN}\n{tc}\n{TOKEN_TOOL_CALL_CLOSE}")
-            completion = f"{think}\n".join([""] + tool_blocks).strip()
-            cat = category_map.get(scenario["steps"][0]["tool"], "v4_agentic")
+            # R21-fix: Process dependent steps as sequential multi-turn conversations
+            # instead of parallel tool blocks — prevents hallucinating unknown URLs/data
+            primary_tool = scenario["steps"][0]["tool"]
+            cat = category_map.get(primary_tool, "v4_agentic")
+            api_key = "web_search" if "web" in primary_tool else (
+                "memory_kv" if "memory" in primary_tool else "memory_vector"
+            )
+            tools = V4_API_SCHEMAS.get(api_key, [])
+            
+            msgs = [{"role": "system", "content": format_system_prompt(tools)}]
+            msgs.append({"role": "user", "content": scenario["query"]})
+            
+            for idx, step in enumerate(scenario["steps"]):
+                tc_json = json.dumps({"name": step["tool"], "arguments": step["args"]})
+                if idx == 0:
+                    step_think = think
+                else:
+                    step_think = f"{TOKEN_THINK_OPEN}\nI received the results from the previous step. Now I will proceed to {step['tool']}.\n{TOKEN_THINK_CLOSE}\n"
+                step_completion = f"{step_think}{TOKEN_TOOL_CALL_OPEN}\n{tc_json}\n{TOKEN_TOOL_CALL_CLOSE}"
+                msgs.append({"role": "assistant", "content": step_completion})
+                
+                if idx < len(scenario["steps"]) - 1:
+                    # Inject simulated tool response so next step is causally valid
+                    msgs.append({"role": "tool", "content": json.dumps({"status": "success", "data": f"Result from {step['tool']}"})})
+            
+            examples.append({"messages": msgs, "category": cat})
         else:
             tc = json.dumps({"name": scenario["tool"], "arguments": scenario["args"]})
             completion = f"{think}{TOKEN_TOOL_CALL_OPEN}\n{tc}\n{TOKEN_TOOL_CALL_CLOSE}"
             cat = category_map.get(scenario["tool"], "v4_agentic")
         
-        # Determine tools for system prompt
-        api_key = "web_search" if "web" in scenario.get("tool", "") else (
-            "memory_kv" if "memory" in scenario.get("tool", "") else "memory_vector"
+        # R10-fix: Multi-step scenarios have "steps" not "tool" — extract primary tool correctly
+        primary_tool = scenario["steps"][0]["tool"] if "steps" in scenario else scenario.get("tool", "")
+        api_key = "web_search" if "web" in primary_tool else (
+            "memory_kv" if "memory" in primary_tool else "memory_vector"
         )
         tools = V4_API_SCHEMAS.get(api_key, [])
         
-        msgs = [
-            {"role": "system", "content": format_system_prompt(tools)},
-            {"role": "user", "content": scenario["query"]},
-            {"role": "assistant", "content": completion},
-        ]
-        examples.append({"messages": msgs, "category": cat})
+        if "steps" not in scenario:
+            msgs = [
+                {"role": "system", "content": format_system_prompt(tools)},
+                {"role": "user", "content": scenario["query"]},
+                {"role": "assistant", "content": completion},
+            ]
+            examples.append({"messages": msgs, "category": cat})
     
     output_file = output_path / "v4_agentic_train.jsonl"
     with open(output_file, "w") as f:
@@ -1597,15 +1645,17 @@ def _messify_prompt(clean_prompt: str, param_values: list = None) -> str:
         """Lowercase text while preserving exact casing of protected values."""
         if not protected_values:
             return text.lower()
-        # Replace protected values with placeholders using word boundaries, then restore
+        # Replace protected values with placeholders using negative lookaround, then restore
+        # R6.4-fix: Use (?<!\w)...(?!\w) instead of \b to handle non-word chars
+        # (e.g. file paths "/tmp/backup", extensions "config.json")
         placeholders = {}
         for i, val in enumerate(protected_values):
             sval = str(val)
             if len(sval) < 2:
-                continue  # Skip single-char values — too collision-prone even with \b
+                continue  # Skip single-char values — too collision-prone
             ph = f"__PARAM_{i}__"
             placeholders[ph] = sval
-            text = re.sub(r'\b' + re.escape(sval) + r'\b', ph, text)
+            text = re.sub(r'(?<!\w)' + re.escape(sval) + r'(?!\w)', ph, text)
         text = text.lower()
         for ph, original in placeholders.items():
             text = text.replace(ph.lower(), original)
@@ -1693,7 +1743,9 @@ def generate_evol_instruct_examples(output_path: Path, collections: dict, num_ex
         messy_prompt = _messify_prompt(scenario["clean"], param_values=param_vals)
         
         tc_json = json.dumps({"name": scenario["func"], "arguments": scenario["args"]})
-        tc_text = f'{TOKEN_TOOL_CALL_OPEN}\n{tc_json}\n{TOKEN_TOOL_CALL_CLOSE}'
+        # R9-fix: Include CoT reasoning block (was missing, violating system prompt Rule 3)
+        think_text = f'{TOKEN_THINK_OPEN}\nThe user intent matches {scenario["func"]}. I will call it now.\n{TOKEN_THINK_CLOSE}\n'
+        tc_text = f'{think_text}{TOKEN_TOOL_CALL_OPEN}\n{tc_json}\n{TOKEN_TOOL_CALL_CLOSE}'
         
         # R6.3-fix: Train/eval distribution alignment
         # 30% of examples use RAG-retrieved heterogeneous tool pools to match

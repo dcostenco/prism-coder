@@ -116,8 +116,12 @@ def parse_tool_call(response: str):
     # Sanitize: Qwen tokenizer replaces <|im_end|> EOS with \ufffd
     response = response.replace('\ufffd', '').strip()
 
+    # R17-fix: Globally strip CoT block to protect all regex strategies
+    # R19-fix: Handle unclosed think blocks via (?:</\|synalux_think\|>|$) fallback
+    clean_response = re.sub(r'<\|synalux_think\|>.*?(?:</\|synalux_think\|>|$)', '', response, flags=re.DOTALL)
+
     # 1. Try <|tool_call|> tags (canonical Prism format)
-    match = re.search(r'<|tool_call|>\s*(.*?)\s*</|tool_call|>', response, re.DOTALL)
+    match = re.search(r'<\|tool_call\|>\s*(.*?)\s*</\|tool_call\|>', clean_response, re.DOTALL)
     if match:
         try:
             call = json.loads(match.group(1))
@@ -126,7 +130,7 @@ def parse_tool_call(response: str):
             return "INVALID_JSON", None
 
     # 1b. Try <|tool_call|> tags (Synalux native format)
-    synalux_match = re.search(r'<\|tool_call\|>\s*(.*?)\s*(?:</\|tool_call\|>|$)', response, re.DOTALL)
+    synalux_match = re.search(r'<\|tool_call\|>\s*(.*?)\s*(?:</\|tool_call\|>|$)', clean_response, re.DOTALL)
     if synalux_match:
         try:
             call = json.loads(synalux_match.group(1))
@@ -137,7 +141,7 @@ def parse_tool_call(response: str):
     # 2. Try <|im_start|>...<|im_end|> (Qwen native tool format)
     #    Note: the Qwen tokenizer strips <|im_end|> as the EOS token,
     #    so the model output often has <|im_start|>{JSON} with no closer.
-    im_match = re.search(r'<\|im_start\|>\s*(\{[\s\S]*\})\s*(?:<\|im_end\|>|$)', response, re.DOTALL)
+    im_match = re.search(r'<\|im_start\|>\s*(\{[\s\S]*\})\s*(?:<\|im_end\|>|$)', clean_response, re.DOTALL)
     if im_match:
         try:
             call = json.loads(im_match.group(1))
@@ -147,9 +151,9 @@ def parse_tool_call(response: str):
         except json.JSONDecodeError:
             return "INVALID_JSON", None
 
-    # 3. Fallback: bare JSON with "name" or "tool" key, outside <|synalux_think|> blocks
-    #    Use a balanced-brace extractor to handle nested arguments
-    stripped = re.sub(r'<|synalux_think|>.*?</|synalux_think|>', '', response, flags=re.DOTALL)
+    # 3. Fallback: bare JSON with "name" or "tool" key
+    #    CoT already stripped at top via clean_response
+    stripped = clean_response
     
     # Find all potential JSON objects using balanced brace matching
     i = 0
@@ -194,15 +198,17 @@ def evaluate_response(response: str, expected_tool: str):
     }
     
     # Check for <|synalux_think|> CoT block
-    think_match = re.search(r'<|synalux_think|>(.*?)</|synalux_think|>', response, re.DOTALL)
+    # R20-fix: Handle unclosed think blocks via (?:</\|synalux_think\|>|$) fallback
+    think_match = re.search(r'<\|synalux_think\|>(.*?)(?:</\|synalux_think\|>|$)', response, re.DOTALL)
     if think_match:
         result["has_think"] = True
         result["think_length"] = len(think_match.group(1).strip())
     
     # Check reasoning (text before tool call, excluding <|synalux_think|> blocks)
     if '<|tool_call|>' in response:
-        pre = response[:response.index('<|tool_call|>')].strip()
-        pre_clean = re.sub(r'<|synalux_think|>.*?</|synalux_think|>', '', pre, flags=re.DOTALL).strip()
+        pre = response.split('<|tool_call|>')[0].strip()
+        # R20-fix: Handle unclosed think blocks
+        pre_clean = re.sub(r'<\|synalux_think\|>.*?(?:</\|synalux_think\|>|$)', '', pre, flags=re.DOTALL).strip()
         result["has_reasoning"] = len(pre_clean) > 10 or result["has_think"]
     elif expected_tool is None:
         result["has_reasoning"] = len(response.strip()) > 20 or result["has_think"]
@@ -214,7 +220,8 @@ def evaluate_response(response: str, expected_tool: str):
         result["correct_tool"] = tool_name == expected_tool
     
     # Check params
-    if tool_name and tool_name in TOOL_PARAMS and tool_args:
+    # R14-fix: Use `is not None` — empty dict {} is falsy but valid for zero-arg tools
+    if tool_name and tool_name in TOOL_PARAMS and tool_args is not None and isinstance(tool_args, dict):
         required = TOOL_PARAMS[tool_name]["required"]
         result["params_valid"] = required.issubset(set(tool_args.keys()))
     elif expected_tool is None and tool_name is None:
@@ -250,7 +257,14 @@ def run_benchmark(requested_adapter=None):
     total_tokens = 0
     total_time = 0
     
-    sys_prompt = "You are a reasoning model for memory-augmented coding and clinical workflows. You MUST use the following format for tool calls:\n<|synalux_think|>\n[reasoning about which tool to use]\n</|synalux_think|>\n\n<|tool_call|>\n{\"name\": \"tool_name\", \"arguments\": {...}}\n</|tool_call|>\n\nAvailable tools: session_load_context, session_save_ledger, session_save_handoff, session_search_memory, session_save_experience, session_task_route, knowledge_search, knowledge_upvote, knowledge_downvote, knowledge_forget, session_compact_ledger, session_health_check, session_forget_memory, session_export_memory, session_backfill_links, session_synthesize_edges, memory_history, memory_checkout, session_cognitive_route"
+    # R8-fix: Use full XML tool schemas instead of name-only list
+    from config import format_system_prompt
+    try:
+        with open(TOOL_SCHEMA) as f:
+            _tools = json.load(f).get("tools", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        _tools = []
+    sys_prompt = format_system_prompt(_tools)
     
     for i, test in enumerate(TEST_CASES):
         prompt_text = f"<|im_start|>system\n{sys_prompt}<|im_end|>\n<|im_start|>user\n{test['prompt']}<|im_end|>\n<|im_start|>assistant\n"

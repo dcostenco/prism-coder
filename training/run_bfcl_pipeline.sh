@@ -30,6 +30,8 @@ set -euo pipefail
 TRAINING_DIR="$(cd "$(dirname "$0")" && pwd)"
 DATA_DIR="$TRAINING_DIR/data/bfcl"
 AUX_DATA_DIR="$TRAINING_DIR/data/aux_sft"
+# R15-fix: Export so config.py and Python scripts use the same path
+export PRISM_AUX_DATA_DIR="$AUX_DATA_DIR"
 OUTPUT_DIR="$TRAINING_DIR/output/bfcl-32b"
 BFCL_DIR="${PRISM_BFCL_DIR:-$HOME/gorilla-bfcl/berkeley-function-call-leaderboard}"
 
@@ -99,6 +101,12 @@ if [ -f "$DATA_DIR/train.jsonl" ] && [ "$FORCE_REGEN" != true ]; then
     EXISTING_COUNT=$(wc -l < "$DATA_DIR/train.jsonl")
     echo "BFCL data exists: $EXISTING_COUNT examples (use --force-regen to regenerate)"
 else
+    echo "Building tool schema registry (includes V4 Agentic tools)..."
+    python build_tool_schema.py
+    
+    echo "Generating HyDE embeddings for RAG-aligned training..."
+    python semantic_rag.py hyde || echo "⚠️ HyDE generation failed — training will use API-grouped pools only"
+    
     echo "Generating BFCL V4 training data (with R5 optimizations)..."
     python generate_bfcl_training_data.py \
         --output-dir "$DATA_DIR" \
@@ -228,7 +236,7 @@ echo "Config: rank=64, iters=800, lr=5e-6, layers=16, seq=8192, batch=1"
 echo "Estimated: ~4 hours"
 
 GRPO_DIR="$OUTPUT_DIR/grpo"
-GRPO_ADAPTER="$GRPO_DIR/adapter"
+GRPO_ADAPTER="$GRPO_DIR/adapters"  # R27-fix: matches bfcl_grpo_align.py output_dir / "adapters"
 GRPO_FUSED="$GRPO_DIR/fused_aligned"
 
 if [ -d "$SFT_FUSED" ]; then
@@ -241,12 +249,14 @@ if [ -d "$SFT_FUSED" ]; then
             WATCHDOG_PID=$!
         fi
 
+        # R13-fix: Explicitly pass --lora-layers 24 to match SFT
         python bfcl_grpo_align.py \
             --model "$SFT_FUSED" \
             --data "$DATA_DIR" \
             --output-dir "$GRPO_DIR" \
             --iters 800 \
             --lora-rank 64 \
+            --lora-layers 24 \
             --lr 5e-6
 
         if [ -n "${WATCHDOG_PID:-}" ]; then
@@ -269,13 +279,13 @@ SOUPED_MODEL="$OUTPUT_DIR/souped_model"
 if [ -d "$SOUPED_MODEL" ]; then
     echo "Souped model already exists. Skipping."
 elif [ -d "$SFT_FUSED" ] && [ -d "$GRPO_FUSED" ]; then
-    echo "Merging SFT + RS-SFT with SLERP interpolation (t=0.3)..."
+    echo "Applying GRPO alignment adapter onto SFT-fused model..."
+    # R26-fix: GRPO adapter is a delta relative to $SFT_FUSED — apply directly, no SLERP.
+    # SLERP with SFT_FUSED as base would double-apply SFT weights (1.7x SFT + 0.3x GRPO).
     python merge_adapters.py \
-        --base-model "$MLX_MODEL" \
-        --sft-adapter "$SFT_ADAPTER" \
+        --base-model "$SFT_FUSED" \
         --align-adapter "$GRPO_ADAPTER" \
-        --output "$SOUPED_MODEL" \
-        --slerp-t 0.3
+        --output "$SOUPED_MODEL"
 else
     echo "WARNING: Need both SFT and RS-SFT models for souping."
     echo "  Using best available model instead."

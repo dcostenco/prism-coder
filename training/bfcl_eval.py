@@ -93,7 +93,7 @@ def validate_tool_call(prompt, tool_name, tool_args):
     RETENTION_TOOL = "knowledge_set_retention"
     IMAGE_SAVE_TOOL = "session_save_image"
     IMAGE_VIEW_TOOL = "session_view_image"
-    NO_REMAP = {RETENTION_TOOL, IMAGE_SAVE_TOOL, IMAGE_VIEW_TOOL, "NO_TOOL"}
+    NO_REMAP = {RETENTION_TOOL, IMAGE_SAVE_TOOL, IMAGE_VIEW_TOOL, "NO_TOOL", "ERROR"}
     
     if tool_name not in NO_REMAP:
         # Remap ANY tool → knowledge_set_retention
@@ -106,7 +106,7 @@ def validate_tool_call(prompt, tool_name, tool_args):
             r'\b\d+[\s-]day\s+retention\b',
         ]
         if any(re.search(p, prompt_lower) for p in retention_patterns):
-            tool_args_remap = dict(tool_args)
+            tool_args_remap = dict(tool_args) if isinstance(tool_args, dict) else {}
             # Extract ttl_days from prompt
             days_match = re.search(r'(\d+)[\s-]*day', prompt_lower)
             if days_match:
@@ -128,7 +128,7 @@ def validate_tool_call(prompt, tool_name, tool_args):
             r'\b(?:save|store|persist|archive)\b.*\.(?:png|jpg|jpeg|svg|webp|gif)\b',
         ]
         if any(re.search(p, prompt_lower) for p in image_save_patterns):
-            tool_args_remap = dict(tool_args)
+            tool_args_remap = dict(tool_args) if isinstance(tool_args, dict) else {}
             path_match = re.search(r'(/\S+\.(?:png|jpg|jpeg|svg|webp|gif))', prompt)
             if path_match:
                 tool_args_remap["file_path"] = path_match.group(1)
@@ -144,7 +144,7 @@ def validate_tool_call(prompt, tool_name, tool_args):
             r'\bdisplay\s+image\b',
         ]
         if any(re.search(p, prompt_lower) for p in image_view_patterns):
-            return IMAGE_VIEW_TOOL, dict(tool_args)
+            return IMAGE_VIEW_TOOL, dict(tool_args) if isinstance(tool_args, dict) else {}
     
     # --- Layer 3b: False-positive rejection (existing behavior) ---
     if tool_name == "NO_TOOL":
@@ -507,12 +507,17 @@ def parse_all_tool_calls(response_text: str) -> list:
     """
     results = []
     
+    # R17-fix: Strip CoT blocks to prevent extracting JSON from reasoning
+    # R19-fix: Handle unclosed think blocks via (?:</\|synalux_think\|>|$) fallback
+    clean_text = re.sub(r'<\|synalux_think\|>.*?(?:</\|synalux_think\|>|$)', '', response_text, flags=re.DOTALL)
+    
     # Strategy 1: Find ALL <|tool_call|> JSON blocks using findall
-    json_blocks = re.findall(r'<\|tool_call\|>\s*(\{.*?\})\s*(?:</\|tool_call\|>|<\|tool_call\|>|$)', 
-                              response_text, re.DOTALL)
+    # R16-fix: Use lookahead (?=<\|tool_call\|>) to avoid consuming boundary token on parallel calls
+    json_blocks = re.findall(r'<\|tool_call\|>\s*(\{.*?\})\s*(?:</\|tool_call\|>|(?=<\|tool_call\|>)|$)', 
+                              clean_text, re.DOTALL)
     if not json_blocks:
         # Fallback: try greedy per-block extraction
-        json_blocks = re.findall(r'<\|tool_call\|>\s*(\{[^}]*\})', response_text)
+        json_blocks = re.findall(r'<\|tool_call\|>\s*(\{[^}]*\})', clean_text)
     
     for raw_json in json_blocks:
         try:
@@ -527,12 +532,18 @@ def parse_all_tool_calls(response_text: str) -> list:
                     break
             clean_json = raw_json[:end_idx] if end_idx > 0 else raw_json
             parsed = json.loads(clean_json)
+            # R11-fix: Guard against hallucinated JSON arrays
+            if not isinstance(parsed, dict):
+                continue
             tool_name = parsed.get("name", "")
             tool_args = parsed.get("arguments", {})
             # Normalize int values
-            for k, v in tool_args.items():
-                if isinstance(v, str) and v.isdigit():
-                    tool_args[k] = int(v)
+            if isinstance(tool_args, dict):
+                for k, v in tool_args.items():
+                    if isinstance(v, str) and v.isdigit():
+                        tool_args[k] = int(v)
+            else:
+                tool_args = {}
             results.append((tool_name, tool_args))
         except (json.JSONDecodeError, IndexError):
             continue
@@ -541,7 +552,7 @@ def parse_all_tool_calls(response_text: str) -> list:
         return results
     
     # Strategy 2: Function-call style: <|tool_call|> tool_name(key=val, ...)
-    func_matches = re.findall(r'<\|tool_call\|>\s*(\w+)\s*\((.*?)\)', response_text, re.DOTALL)
+    func_matches = re.findall(r'<\|tool_call\|>\s*(\w+)\s*\((.*?)\)', clean_text, re.DOTALL)
     for tool_name, args_str in func_matches:
         tool_args = {}
         args_str = args_str.strip()
@@ -558,18 +569,19 @@ def parse_all_tool_calls(response_text: str) -> list:
         return results
     
     # Strategy 3: Bare JSON with name field (no <|tool_call|> prefix)
-    bare_matches = re.findall(r'\{\s*"name"\s*:\s*"(\w+)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})', response_text)
+    bare_matches = re.findall(r'\{\s*"name"\s*:\s*"(\w+)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})', clean_text)
     for tool_name, args_json in bare_matches:
         try:
             tool_args = json.loads(args_json)
             results.append((tool_name, tool_args))
         except json.JSONDecodeError:
-            results.append((tool_name, {}))
+            # R13-fix: Do not append empty dicts; allow _repair_and_extract to handle nested JSON
+            pass
     
     return results
 
 
-def call_ollama(prompt: str, use_json_format: bool = True) -> tuple:
+def call_ollama(prompt: str, use_json_format: bool = False) -> tuple:  # R24-fix: False — JSON mode blocks XML CoT tags
     """Call Ollama API and parse tool call response.
     
     R5-3: Constrained decoding via Ollama JSON format mode.
@@ -579,10 +591,11 @@ def call_ollama(prompt: str, use_json_format: bool = True) -> tuple:
         all_calls: list of (name, args) for parallel tool evaluation
     """
     from config import OLLAMA_KEEP_ALIVE, OLLAMA_NUM_CTX, OLLAMA_TEMPERATURE
-    
+
     payload_dict = {
         "model": MODEL,
         "prompt": prompt,
+        "raw": True,
         "stream": False,
         "keep_alive": OLLAMA_KEEP_ALIVE,  # R5-5: Keep model loaded for prefix caching
         "options": {
@@ -627,7 +640,10 @@ _TOOL_SCHEMA_PATH = os.path.join(_TRAINING_DIR, "data", "tool_schema.json")
 try:
     with open(_TOOL_SCHEMA_PATH) as _f:
         _TOOL_SCHEMAS = json.load(_f).get("tools", [])
-    print(f"Loaded {len(_TOOL_SCHEMAS)} tool schemas for Best-of-N validation")
+    # R14-fix: Dynamically sync VALID_TOOLS with schema registry (includes V4 Agentic tools)
+    if _TOOL_SCHEMAS:
+        VALID_TOOLS.update(t["name"] for t in _TOOL_SCHEMAS)
+    print(f"Loaded {len(_TOOL_SCHEMAS)} tool schemas for Best-of-N validation (VALID_TOOLS: {len(VALID_TOOLS)})")
 except (FileNotFoundError, json.JSONDecodeError, PermissionError) as e:
     _TOOL_SCHEMAS = []
     print(f"WARNING: Failed to load {_TOOL_SCHEMA_PATH}: {e} — Best-of-N validation disabled")
@@ -657,6 +673,10 @@ def validate_tool_call_against_schema(tool_name: str, tool_args: dict,
     props = params.get("properties", {})
     required = set(params.get("required", []))
     
+    # R9-fix: Guard against hallucinated non-dict arguments (e.g., arrays)
+    if not isinstance(tool_args, dict):
+        return False, f"arguments must be an object, got {type(tool_args).__name__}"
+    
     # Check required params present
     for req_param in required:
         if req_param not in tool_args:
@@ -678,9 +698,9 @@ def validate_tool_call_against_schema(tool_name: str, tool_args: dict,
             continue
         expected_type = props[arg_name].get("type", "string")
         
-        if expected_type == "integer" and not isinstance(arg_val, int):
+        if expected_type == "integer" and (not isinstance(arg_val, int) or isinstance(arg_val, bool)):
             return False, f"{arg_name} should be int, got {type(arg_val).__name__}"
-        elif expected_type == "number" and not isinstance(arg_val, (int, float)):
+        elif expected_type == "number" and (not isinstance(arg_val, (int, float)) or isinstance(arg_val, bool)):
             return False, f"{arg_name} should be number, got {type(arg_val).__name__}"
         elif expected_type == "boolean" and not isinstance(arg_val, bool):
             return False, f"{arg_name} should be bool, got {type(arg_val).__name__}"
@@ -728,6 +748,7 @@ def call_ollama_best_of_n(prompt: str, available_tools: list = None,
         payload_dict = {
             "model": MODEL,
             "prompt": prompt,
+            "raw": True,
             "stream": False,
             "keep_alive": OLLAMA_KEEP_ALIVE,
             "options": {
@@ -755,9 +776,13 @@ def call_ollama_best_of_n(prompt: str, available_tools: list = None,
             all_calls = _repair_and_extract(response_text)
         
         if not all_calls:
+            # R13-fix: If model correctly abstained (plain text response), mark as valid
+            has_answer = "<|synalux_answer|>" in response_text
             candidates.append((
-                "NO_TOOL", {}, response_text, elapsed, [], True, "no tool call"
+                "NO_TOOL", {}, response_text, elapsed, [], has_answer, "no tool call"
             ))
+            if has_answer:
+                break  # Valid abstention — stop generating more candidates
             continue
         
         # Validate first call against schema
@@ -792,8 +817,12 @@ def _repair_and_extract(text: str) -> list:
     """
     import re as _re
     
+    # R17-fix: Strip CoT blocks before attempting repair
+    # R19-fix: Handle unclosed think blocks via (?:</\|synalux_think\|>|$) fallback
+    clean_text = _re.sub(r'<\|synalux_think\|>.*?(?:</\|synalux_think\|>|$)', '', text, flags=_re.DOTALL)
+    
     # Find anything that looks like a JSON tool call
-    candidates = _re.findall(r'\{\s*"name"\s*:.*?(?:\}\s*\}|\})', text, _re.DOTALL)
+    candidates = _re.findall(r'\{\s*"name"\s*:.*?(?:\}\s*\}|\})', clean_text, _re.DOTALL)
     
     results = []
     for raw in candidates:
@@ -837,12 +866,13 @@ def evaluate_test(test: dict, verbose: bool = False) -> dict:
     # R6.1-fix: Use RAG system prompt for context-limited tool injection
     try:
         from semantic_rag import build_rag_system_prompt
-        sys_prompt = build_rag_system_prompt(prompt)
+        sys_prompt = build_rag_system_prompt(prompt, bfcl_eval_mode=True)
     except (ImportError, urllib.error.URLError, ConnectionError, OSError) as e:
         # R6.3-fix: Narrow exception + explicit fallback with _TOOL_SCHEMAS
         print(f"\n\u26a0\ufe0f RAG OFFLINE: {e} - Falling back to full tool schemas", file=sys.stderr)
         sys_prompt = format_system_prompt(_TOOL_SCHEMAS, bfcl_eval_mode=True)
-    full_prompt = f"{sys_prompt}\n\nUser: {prompt}"
+    # R8-fix: Format as proper ChatML so Ollama raw mode sends it correctly
+    full_prompt = f"<|im_start|>system\n{sys_prompt}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
     
     # R6-1: Use Best-of-N when enabled (validates candidates against tool schemas)
     if BEST_OF_N > 1:
@@ -889,6 +919,9 @@ def evaluate_test(test: dict, verbose: bool = False) -> dict:
         else:
             # Check parameters
             if ast_strict and required_params:
+                # R21-fix: Guard against non-dict arguments (e.g. hallucinated arrays)
+                if not isinstance(actual_args, dict):
+                    actual_args = {}
                 # AST-level: check exact parameter values
                 params_ok = True
                 mismatches = []
@@ -940,6 +973,37 @@ def evaluate_test(test: dict, verbose: bool = False) -> dict:
         if not result["correct"]:
             print(f"     Prompt: {prompt[:80]}...")
             print(f"     Raw: {raw_response[:120]}...")
+    
+    # R11-fix: Multi-turn followup evaluation (was deferred, now implemented)
+    if result["correct"] and isinstance(test, dict) and "followup" in test:
+        followup = test["followup"]
+        # Build conversation history: original prompt + first response + tool response + new assistant turn
+        # R12-fix: Use native ChatML without <|tool_response|> tags to match training distribution
+        history = (
+            f"{full_prompt}{raw_response}<|im_end|>\n"
+            f"<|im_start|>tool\n{followup['tool_response']}<|im_end|>\n"
+            f"<|im_start|>assistant\n"
+        )
+        
+        if BEST_OF_N > 1:
+            next_tool, next_args, next_raw, next_latency, _ = call_ollama_best_of_n(
+                history, available_tools=_TOOL_SCHEMAS
+            )
+        else:
+            next_tool, next_args, next_raw, next_latency, _ = call_ollama(history)
+        
+        result["actual"] += f" -> {next_tool}"
+        result["latency"] += next_latency
+        expected_followup = followup.get("expected_tool", "NO_TOOL")
+        result["correct"] = (next_tool == expected_followup)
+        if not result["correct"]:
+            result["details"] += f" | ❌ Followup: expected {expected_followup}, got {next_tool}"
+        else:
+            result["details"] += f" | ✅ Followup: {next_tool}"
+        
+        if verbose:
+            status2 = "✅" if result["correct"] else "❌"
+            print(f"    {status2} Followup turn: expected={expected_followup}, got={next_tool}")
     
     return result
 

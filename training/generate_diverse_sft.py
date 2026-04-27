@@ -273,115 +273,115 @@ TOOL_PROMPTS = {
 
 # === REASONING PROMPTS (diverse, NO tool) ===
 REASONING_PROMPTS = [
-    # Standard technical questions
-    "What is the difference between TCP and UDP?",
-    "How does React's virtual DOM work?",
-    "Write a Python function to reverse a linked list",
-    "Explain JWT tokens and how they work in authentication",
-    "What are the pros and cons of microservices architecture?",
-    "How do I save state in React with useState?",
-    "Explain how session tokens work in web authentication",
-    "What is knowledge distillation in machine learning?",
-    "How do I save data to localStorage in the browser?",
-    "What is task routing in distributed systems like Celery?",
-    "How do I implement a session manager in Express.js?",
-    "Explain memory management in Rust — ownership and borrowing",
-    "What's the best way to save user preferences in React Native?",
-    "Write a function that searches through a knowledge graph using BFS",
-    "How does garbage collection work in Go?",
-    "Can you explain the compact representation of sparse matrices?",
-    "What is the health check endpoint pattern in microservices?",
-    "How do I export data from PostgreSQL to a CSV file?",
-    "Write a bash one-liner to find files larger than 100MB",
-    "How do you implement a search algorithm for a graph?",
-    "Explain how load balancing works across multiple servers",
-    "What is the difference between stack and heap memory?",
-    "How does session replication work in distributed systems?",
-    "What are database connection pooling strategies?",
-    "Explain the circuit breaker pattern in microservices",
-    "How do I implement WebSocket authentication?",
-    "What is the difference between SQL and NoSQL databases?",
-    "How do you implement pagination in a REST API?",
-    "Explain the concept of eventual consistency",
-    "What is the difference between monorepo and polyrepo?",
+    # Standard technical questions — R20-fix: all tuples with real answers
+    ("What is the difference between TCP and UDP?", "TCP is a connection-oriented protocol that guarantees reliable, ordered delivery of data using a three-way handshake and acknowledgment system. UDP is connectionless and unreliable but much faster, making it ideal for real-time applications like gaming, VoIP, and live streaming where occasional packet loss is acceptable."),
+    ("How does React's virtual DOM work?", "React maintains a lightweight in-memory representation of the actual DOM called the virtual DOM. When state changes, React creates a new virtual DOM tree, diffs it against the previous one (reconciliation), and then batches the minimal set of actual DOM mutations needed. This avoids expensive direct DOM manipulation and improves rendering performance."),
+    ("Write a Python function to reverse a linked list", "Here's an iterative approach:\n```python\ndef reverse_linked_list(head):\n    prev, current = None, head\n    while current:\n        next_node = current.next\n        current.next = prev\n        prev = current\n        current = next_node\n    return prev\n```\nThis runs in O(n) time and O(1) space by re-pointing each node's next pointer to the previous node."),
+    ("Explain JWT tokens and how they work in authentication", "JSON Web Tokens consist of three Base64-encoded parts: Header (algorithm + type), Payload (claims like user ID, expiry), and Signature (HMAC or RSA signed). The server creates a JWT on login, the client stores it (usually in httpOnly cookies), and sends it with each request. The server verifies the signature without needing a database lookup, making JWTs stateless and scalable."),
+    ("What are the pros and cons of microservices architecture?", "Pros: independent deployability, technology diversity, team autonomy, fault isolation, and horizontal scaling per service. Cons: distributed system complexity (network latency, partial failures), data consistency challenges, operational overhead (monitoring, logging, tracing), and the need for robust service discovery and API gateway infrastructure."),
+    ("How do I save state in React with useState?", "Call `const [value, setValue] = useState(initialValue)` inside a functional component. React preserves the state between re-renders. To update, call `setValue(newValue)` or use the functional form `setValue(prev => prev + 1)` when the update depends on previous state. For complex state, consider `useReducer` instead."),
+    ("Explain how session tokens work in web authentication", "After a user logs in, the server generates a unique session token (cryptographically random string), stores it server-side with a mapping to the user's data, and sends it to the client as a cookie. On subsequent requests, the browser automatically includes the cookie, allowing the server to look up the session and identify the user without re-authentication."),
+    ("What is knowledge distillation in machine learning?", "Knowledge distillation transfers learned representations from a large 'teacher' model to a smaller 'student' model. The student is trained not just on hard labels but on the teacher's soft probability distributions (softmax outputs with temperature scaling), which encode richer inter-class relationships. This produces compact models that retain most of the teacher's accuracy."),
+    ("How do I save data to localStorage in the browser?", "Use `localStorage.setItem('key', JSON.stringify(data))` to store and `JSON.parse(localStorage.getItem('key'))` to retrieve. localStorage persists across browser sessions (unlike sessionStorage), has a ~5MB limit per origin, is synchronous and blocking, and should never store sensitive data since it's accessible to any JavaScript on the same origin."),
+    ("What is task routing in distributed systems like Celery?", "Task routing in Celery directs tasks to specific worker queues based on task type, priority, or resource requirements. You configure routes in `task_routes` settings mapping task names to queue names, then start workers listening on specific queues with `celery -A app worker -Q queue_name`. This enables workload isolation and prioritization."),
+    ("How do I implement a session manager in Express.js?", "Install `express-session` and a store like `connect-redis`. Configure with `app.use(session({ store: new RedisStore({client}), secret: 'your-secret', resave: false, saveUninitialized: false, cookie: { secure: true, httpOnly: true, maxAge: 3600000 } }))`. Access session data via `req.session`. Redis provides persistence and multi-server session sharing."),
+    ("Explain memory management in Rust — ownership and borrowing", "Rust enforces memory safety at compile time through three rules: each value has exactly one owner, ownership transfers on assignment (move semantics), and values are dropped when the owner goes out of scope. Borrowing allows references (&T for shared, &mut T for exclusive) without transferring ownership. The borrow checker ensures no dangling pointers or data races."),
+    ("What's the best way to save user preferences in React Native?", "Use `@react-native-async-storage/async-storage` for simple key-value preferences: `await AsyncStorage.setItem('theme', 'dark')`. For complex or encrypted data, use `react-native-mmkv` which is significantly faster. For cross-device sync, consider storing preferences in your backend database and caching locally."),
+    ("Write a function that searches through a knowledge graph using BFS", "```python\nfrom collections import deque\ndef bfs_knowledge_graph(graph, start, target):\n    visited = set()\n    queue = deque([(start, [start])])\n    while queue:\n        node, path = queue.popleft()\n        if node == target:\n            return path\n        visited.add(node)\n        for neighbor in graph.get(node, []):\n            if neighbor not in visited:\n                queue.append((neighbor, path + [neighbor]))\n    return None\n```"),
+    ("How does garbage collection work in Go?", "Go uses a concurrent, tri-color mark-and-sweep garbage collector. It runs concurrently with the application using write barriers to track mutations during marking. Objects are colored white (unmarked), gray (marked but children unchecked), or black (fully scanned). The GC targets a configurable heap growth ratio (GOGC, default 100%) to balance throughput and latency."),
+    ("Can you explain the compact representation of sparse matrices?", "Common formats: CSR (Compressed Sparse Row) stores values, column indices, and row pointers — efficient for row slicing and matrix-vector multiplication. CSC (Compressed Sparse Column) is the column analog. COO (Coordinate) stores (row, col, value) triplets — easy to construct but slower for arithmetic. scipy.sparse provides all three."),
+    ("What is the health check endpoint pattern in microservices?", "A /health endpoint returns service status (HTTP 200 for healthy, 503 for unhealthy) checking dependencies like database connections, cache availability, and disk space. Liveness probes confirm the process is running; readiness probes confirm it can serve traffic. Kubernetes uses these to manage pod lifecycle and routing decisions automatically."),
+    ("How do I export data from PostgreSQL to a CSV file?", "Use `COPY (SELECT * FROM table) TO '/path/file.csv' WITH CSV HEADER;` for server-side export, or `\\copy table TO 'file.csv' WITH CSV HEADER` from psql for client-side. For programmatic export, use `psycopg2` with `copy_expert()`. Add WHERE clauses, column selection, and DELIMITER options as needed."),
+    ("Write a bash one-liner to find files larger than 100MB", "`find / -type f -size +100M -exec ls -lh {} \\; 2>/dev/null | sort -k5 -h` — uses find with -size +100M filter, lists with human-readable sizes, sorts by size, and suppresses permission errors. Add `-mtime -7` to limit to files modified in the last week."),
+    ("How do you implement a search algorithm for a graph?", "DFS uses a stack (or recursion) for depth-first exploration — good for pathfinding and cycle detection. BFS uses a queue for level-order exploration — guarantees shortest path in unweighted graphs. Dijkstra's extends BFS with a priority queue for weighted graphs. A* adds a heuristic estimate to Dijkstra's for faster goal-directed search."),
+    ("Explain how load balancing works across multiple servers", "A load balancer distributes incoming requests across backend servers using algorithms like round-robin, least connections, weighted, or IP hash. Layer 4 (TCP) balancers route at the transport level; Layer 7 (HTTP) balancers can inspect headers, cookies, and URLs for content-based routing. Health checks remove unhealthy servers from rotation automatically."),
+    ("What is the difference between stack and heap memory?", "The stack is LIFO, automatically managed, stores local variables and function frames, with fast allocation but fixed size (typically 1-8MB). The heap is dynamically allocated via malloc/new, stores objects with longer lifetimes, has virtually unlimited size but slower allocation and requires explicit or GC-based deallocation. Stack access is cache-friendly."),
+    ("How does session replication work in distributed systems?", "Session replication copies session state across multiple servers so any server can handle any request. Approaches: sticky sessions (route to same server), centralized store (Redis/Memcached), peer-to-peer replication (Hazelcast), or cookie-based (encrypted session in cookie). Trade-offs involve memory overhead, consistency guarantees, and failover speed."),
+    ("What are database connection pooling strategies?", "Connection pools maintain pre-established database connections for reuse, avoiding the overhead of creating new connections per request. Key parameters: min/max pool size, idle timeout, max lifetime, and connection validation queries. Libraries like HikariCP (Java), pgBouncer (PostgreSQL), and SQLAlchemy's pool provide configurable pooling with health checks."),
+    ("Explain the circuit breaker pattern in microservices", "The circuit breaker prevents cascading failures by tracking error rates to downstream services. States: Closed (normal flow), Open (requests fail-fast after threshold), Half-Open (allows test requests). When errors exceed a threshold (e.g., 50% in 10s), the breaker opens, returning fallback responses. After a timeout, it transitions to half-open to test recovery."),
+    ("How do I implement WebSocket authentication?", "Authenticate during the HTTP upgrade handshake: send a JWT or session cookie with the initial WebSocket connection request. The server validates the token in the `upgrade` event handler before accepting the connection. For ongoing auth, implement heartbeat messages with token refresh. Close connections with expired tokens using WebSocket close codes (4001 = unauthorized)."),
+    ("What is the difference between SQL and NoSQL databases?", "SQL databases (PostgreSQL, MySQL) use structured schemas, ACID transactions, and relational joins — ideal for complex queries and data integrity. NoSQL databases (MongoDB, DynamoDB, Redis) offer flexible schemas, horizontal scaling, and specialized data models (document, key-value, graph, columnar) — ideal for high-throughput, denormalized, or rapidly evolving data."),
+    ("How do you implement pagination in a REST API?", "Offset-based: `GET /items?page=2&limit=20` — simple but slow for large offsets (DB must skip N rows). Cursor-based: `GET /items?after=cursor_id&limit=20` — uses an indexed column as cursor, consistent performance regardless of page depth. Return metadata: `{data: [...], meta: {total, next_cursor, has_more}}`."),
+    ("Explain the concept of eventual consistency", "Eventual consistency guarantees that if no new updates are made to a data item, all replicas will eventually converge to the same value. It's a relaxation of strong consistency used in distributed systems (DynamoDB, Cassandra) to achieve higher availability and partition tolerance per the CAP theorem. Read-your-writes consistency and causal consistency are common stronger variants."),
+    ("What is the difference between monorepo and polyrepo?", "Monorepo stores all projects in a single repository — enables atomic cross-project changes, shared tooling, and easier dependency management. Polyrepo uses separate repositories per project — provides clear ownership boundaries, independent CI/CD, and simpler access control. Tools like Nx, Turborepo, and Bazel make monorepos scalable. Choice depends on team size and coupling."),
     # Targeted: meta-questions that should NOT trigger tools (false positive traps)
-    "What tools do you have available?",
-    "Tell me about yourself.",
-    "What can you do?",
-    "Who are you?",
-    "What are your capabilities?",
-    "Help me understand what you can do.",
-    "List your available features.",
-    "What kind of assistant are you?",
-    "Are you an AI?",
-    "What model are you based on?",
-    "Hi there, how are you?",
-    "Hello!",
-    "What's your name?",
-    "How does your memory system work?",
-    "Explain how Prism MCP tools work.",
-    "What is session memory?",
-    "What is the knowledge search feature?",
-    "How do I use the health check?",
-    "Describe the export functionality.",
-    "What tools are available for session management?",
+    ("What tools do you have available?", "I'm an AI assistant with access to various tools for session memory management, knowledge search, web research, and more. I can help with saving and loading session context, searching through past work, performing web searches, and analyzing research papers. Let me know what you'd like help with and I'll use the appropriate tool."),
+    ("Tell me about yourself.", "I'm Prism, an AI coding assistant with persistent memory capabilities. I can remember context across sessions, search through past work, and help with complex coding tasks. My memory system uses session ledgers for audit trails and handoff state for quick context recovery."),
+    ("What can you do?", "I can assist with coding, debugging, architecture design, and technical research. I also have persistent memory tools to save and recall session context, knowledge search for finding past work, and web search capabilities for current information. I'm optimized for developer workflows and technical problem-solving."),
+    ("Who are you?", "I'm an AI assistant designed for software development workflows. I have capabilities for code generation, debugging, technical analysis, and persistent memory management. I can maintain context across conversations and help with complex multi-session projects."),
+    ("What are your capabilities?", "My core capabilities include: code generation and review, debugging assistance, architecture design, technical documentation, persistent session memory (save/load/search), knowledge graph traversal, web research, and academic paper analysis. I'm designed for developer productivity."),
+    ("Help me understand what you can do.", "I help with software development tasks including writing code, debugging issues, designing architectures, and technical research. I also maintain persistent memory across sessions so I can recall past decisions, track TODOs, and build on previous work without losing context."),
+    ("List your available features.", "Key features: 1) Code generation and review, 2) Session memory with save/load/search, 3) Knowledge search across past sessions, 4) Web and local search, 5) Visual memory for screenshots, 6) Task routing for delegation, 7) Experience tracking for behavioral learning, 8) GDPR-compliant data export and deletion."),
+    ("What kind of assistant are you?", "I'm a developer-focused AI assistant with persistent memory. Unlike stateless chatbots, I can remember your project context across sessions, track decisions and TODOs, and build up domain knowledge over time. I'm particularly suited for complex, multi-session software projects."),
+    ("Are you an AI?", "Yes, I'm an AI assistant specialized in software development. I use large language models for reasoning and code generation, augmented with persistent memory tools that let me maintain context across conversations and learn from past interactions."),
+    ("What model are you based on?", "I'm built on top of a large language model, augmented with Prism's persistent memory system for cross-session continuity. My exact model architecture may vary, but I'm optimized for code generation, technical reasoning, and tool-use accuracy in developer workflows."),
+    ("Hi there, how are you?", "Hello! I'm doing well, thank you for asking. I'm ready to help with any coding, technical questions, or project work you have. What can I assist you with today?"),
+    ("Hello!", "Hi there! Welcome. I'm ready to help with coding, debugging, architecture questions, or any technical task. What would you like to work on?"),
+    ("What's your name?", "I'm Prism, an AI assistant designed for software development workflows with persistent memory capabilities. I can help with coding, technical research, and maintaining project context across sessions."),
+    ("How does your memory system work?", "Prism's memory system has two layers: session ledgers (append-only audit trail of work done per conversation) and handoff state (live project context for quick resume). Knowledge search uses both keyword and semantic embedding search. Entries can be upvoted to become graduated insights that always surface."),
+    ("Explain how Prism MCP tools work.", "Prism exposes its capabilities through the Model Context Protocol (MCP). Each tool is a function the agent can call — like session_save_ledger for logging work, session_load_context for recovering state, knowledge_search for finding past decisions, and session_save_experience for behavioral learning. The MCP server handles persistence and embedding generation."),
+    ("What is session memory?", "Session memory in Prism stores a structured log of each conversation: what was accomplished, decisions made, files changed, and remaining TODOs. It's persisted as immutable ledger entries and searchable via both keyword and semantic similarity. The handoff state provides a quick-resume snapshot of the current project context."),
+    ("What is the knowledge search feature?", "Knowledge search in Prism lets you find past work across all sessions using either keyword matching (FTS5) or semantic similarity (vector embeddings). Results include session summaries, decisions, and file changes. Spreading activation can discover structurally related memories beyond direct matches."),
+    ("How do I use the health check?", "The health check tool (`session_health_check`) scans for missing embeddings, duplicate entries, orphaned handoffs, and stale rollups. Run with `auto_fix=true` to automatically repair issues like backfilling missing embeddings and cleaning up orphans. It's like fsck for your memory database."),
+    ("Describe the export functionality.", "Prism's export tool (`session_export_memory`) supports three formats: JSON (machine-readable for import into another Prism instance), Markdown (human-readable for archiving), and Vault (Obsidian-compatible .zip with YAML frontmatter and wikilinks). It exports ledger entries, handoff state, and visual memory index."),
+    ("What tools are available for session management?", "Session management tools include: session_save_ledger (log work), session_save_handoff (preserve project state), session_load_context (resume from last session), session_search_memory (semantic search), session_compact_ledger (merge old entries), memory_history/memory_checkout (time travel), and session_forget_memory (delete entries)."),
     # More keyword traps
-    "Explain the CAP theorem in simple terms",
-    "What is knowledge representation in AI?",
-    "How do I handle session expiry in a web app?",
-    "What are the best practices for saving state in Redux?",
-    "How do you implement a health check endpoint in Express?",
-    "What is task routing in Apache Airflow?",
-    "How do I export modules in TypeScript?",
-    "What is memory-safe programming?",
-    "How do I compact a MongoDB collection?",
-    "Explain context switching in operating systems",
+    ("Explain the CAP theorem in simple terms", "The CAP theorem states that a distributed system can guarantee at most two of three properties: Consistency (all nodes see the same data), Availability (every request gets a response), and Partition tolerance (system works despite network splits). Since partitions are inevitable, you typically choose between CP (consistent but may reject requests) or AP (available but may serve stale data)."),
+    ("What is knowledge representation in AI?", "Knowledge representation is how AI systems encode real-world information for reasoning. Common approaches include semantic networks (graph-based), frames (structured records), ontologies (hierarchical taxonomies like OWL), first-order logic (formal predicates), and knowledge graphs (entities + relationships). Modern systems often use embedding vectors for neural knowledge representation."),
+    ("How do I handle session expiry in a web app?", "Implement server-side TTL on session records (e.g., Redis EXPIRE), set cookie maxAge/expires attributes, and handle expiry gracefully in middleware by redirecting to login. Use sliding expiration (reset TTL on activity) for UX. For SPAs, implement token refresh flows and show a 'session expired' modal before redirect."),
+    ("What are the best practices for saving state in Redux?", "Use Redux Toolkit's `createSlice` for reducer boilerplate. Normalize nested data with `createEntityAdapter`. Keep state minimal and serializable — derive computed values with `createSelector` (memoized). Use `redux-persist` for localStorage persistence. Split large stores into feature slices. Avoid storing UI-only state in Redux — keep it in component state."),
+    ("How do you implement a health check endpoint in Express?", "```javascript\napp.get('/health', async (req, res) => {\n  const checks = { db: false, cache: false };\n  try { await db.query('SELECT 1'); checks.db = true; } catch(e) {}\n  try { await redis.ping(); checks.cache = true; } catch(e) {}\n  const healthy = Object.values(checks).every(Boolean);\n  res.status(healthy ? 200 : 503).json({ status: healthy ? 'ok' : 'degraded', checks });\n});\n```"),
+    ("What is task routing in Apache Airflow?", "Airflow routes tasks to specific executor pools and queues. Use `queue='gpu'` on task decorator to route to GPU workers. Pools limit concurrent task slots: `pool='db_pool'` with `pool_slots=1` prevents DB overload. The CeleryExecutor distributes tasks across workers listening on specific queues. Task priority_weight controls scheduling order."),
+    ("How do I export modules in TypeScript?", "Use `export` for named exports: `export function foo() {}` or `export { foo, bar }`. Use `export default` for the primary export. Import with `import { foo } from './module'` or `import MyDefault from './module'`. Re-export with `export { foo } from './other'`. Use `export type` for type-only exports to enable tree-shaking."),
+    ("What is memory-safe programming?", "Memory-safe programming prevents bugs like buffer overflows, use-after-free, and null pointer dereferences. Languages achieve this through garbage collection (Java, Go, Python), ownership systems (Rust's borrow checker), or managed runtimes (.NET CLR). Memory-unsafe languages (C, C++) require manual management and are prone to security vulnerabilities (CVEs)."),
+    ("How do I compact a MongoDB collection?", "Run `db.runCommand({compact: 'collection_name'})` to defragment and reclaim disk space. This blocks the collection during compaction. For WiredTiger, it rewrites data files. In production, use `compact` during maintenance windows. For sharded clusters, run on each shard individually. Consider `--repair` for standalone instances."),
+    ("Explain context switching in operating systems", "Context switching saves the CPU state (registers, program counter, stack pointer) of the current process/thread and loads the state of the next one. Triggered by timer interrupts (preemptive), system calls, or I/O waits. Each switch costs 1-10 microseconds plus cache invalidation overhead. Threads switch faster than processes since they share address space."),
     # Targeted: "session manager" / "session" in framework context (FP fix)
-    "How do I implement a session manager in Express.js with Redis?",
-    "What is session management in Django?",
-    "How do I set up session middleware in Flask?",
-    "How do I create a session in PHP using session_start()?",
-    "What is session affinity in load balancing?",
-    "How do I manage user sessions in a microservices architecture?",
-    "What is the difference between session-based and token-based auth?",
-    # Targeted: conversational closings (FP fix) 
-    "Thanks, that's all for now.",
-    "Goodbye!",
-    "I'm done, thanks for the help.",
-    "That's it for today, thank you.",
-    "OK, we're finished.",
+    ("How do I implement a session manager in Express.js with Redis?", "Install express-session and connect-redis. Configure: `app.use(session({ store: new RedisStore({client: redisClient}), secret: process.env.SESSION_SECRET, resave: false, saveUninitialized: false, cookie: {secure: true, httpOnly: true, sameSite: 'strict', maxAge: 86400000} }))`. Use `req.session.userId = user.id` to set and `req.session.destroy()` to invalidate."),
+    ("What is session management in Django?", "Django's session framework stores data server-side (database, cache, or file) and sends a session ID cookie. Enable with `django.contrib.sessions` middleware. Access via `request.session['key'] = value`. Configure backend with SESSION_ENGINE (db, cache, cached_db, file). Set SESSION_COOKIE_AGE for expiry. Use `flush()` to clear on logout."),
+    ("How do I set up session middleware in Flask?", "Flask has built-in client-side sessions using signed cookies. Set `app.secret_key` for signing. Use `session['key'] = value` to store data. For server-side sessions, install Flask-Session: `Session(app)` with `SESSION_TYPE='redis'` or 'filesystem'. Server-side is more secure for sensitive data since cookies have size limits."),
+    ("How do I create a session in PHP using session_start()?", "Call `session_start()` at the beginning of every page before any output. Set values with `$_SESSION['key'] = 'value'`. Read with `$_SESSION['key']`. Destroy with `session_destroy()`. Configure in php.ini: session.gc_maxlifetime for TTL, session.cookie_httponly and session.cookie_secure for security. Use session_regenerate_id() after login to prevent fixation."),
+    ("What is session affinity in load balancing?", "Session affinity (sticky sessions) routes all requests from the same client to the same backend server, typically using source IP hash or a cookie. This ensures the server has the session data in local memory. Downsides: uneven load distribution, failover issues (session lost if server dies). Alternative: externalize sessions to Redis/Memcached for stateless backends."),
+    ("How do I manage user sessions in a microservices architecture?", "Externalize session state to a shared store (Redis, DynamoDB) accessible by all services. Use JWTs for stateless auth — embed claims in the token to avoid session lookups. For sensitive operations, combine JWTs with a server-side session blacklist. Use an API gateway for centralized auth, and propagate user context via request headers between services."),
+    ("What is the difference between session-based and token-based auth?", "Session-based: server stores state, sends session ID cookie, requires server-side lookup per request — simpler but harder to scale. Token-based (JWT): server signs a token, client stores and sends it, server verifies signature statelessly — scales well but tokens can't be revoked without a blacklist. Sessions are better for server-rendered apps; tokens for SPAs and APIs."),
+    # Targeted: conversational closings (FP fix)
+    ("Thanks, that's all for now.", "You're welcome! If you need help with anything else in the future, feel free to come back. Have a great day!"),
+    ("Goodbye!", "Goodbye! It was great helping you. Don't hesitate to reach out whenever you need assistance with coding or any technical questions. Take care!"),
+    ("I'm done, thanks for the help.", "Happy to help! Good luck with your project. If you run into any issues or need further assistance, I'm always here. See you next time!"),
+    ("That's it for today, thank you.", "You're welcome! Great work today. I'll remember the context from this session so we can pick up right where we left off next time. Have a good one!"),
+    ("OK, we're finished.", "Sounds good! Everything from this session is saved. When you're ready to continue, I'll have the full context ready to go. Take care!"),
     # Targeted: "context manager" / "context" in programming context (FP fix — HEAVY)
-    "Write me a Python context manager for database connections.",
-    "How do I create a context manager using __enter__ and __exit__?",
-    "Explain Python's contextlib module.",
-    "How does context switching work in operating systems?",
-    "What is execution context in JavaScript?",
-    "Write a Python context manager that handles file locking.",
-    "How do I use contextlib.contextmanager decorator?",
-    "Explain the difference between a context manager and a decorator in Python.",
-    "Write a context manager for managing database transactions.",
-    "How do I create an async context manager in Python?",
-    "What is a browser rendering context?",
-    "Explain React context API vs Redux for state management.",
-    "Write a context manager that times code execution.",
-    "How does OpenGL rendering context work?",
-    "What is the difference between context manager and try/finally in Python?",
+    ("Write me a Python context manager for database connections.", "```python\nimport contextlib\nimport psycopg2\n\n@contextlib.contextmanager\ndef db_connection(dsn):\n    conn = psycopg2.connect(dsn)\n    try:\n        yield conn\n        conn.commit()\n    except Exception:\n        conn.rollback()\n        raise\n    finally:\n        conn.close()\n```\nUsage: `with db_connection(DSN) as conn: conn.execute(query)`"),
+    ("How do I create a context manager using __enter__ and __exit__?", "Implement a class with `__enter__` (returns the resource) and `__exit__` (handles cleanup). `__exit__` receives exc_type, exc_val, exc_tb — return True to suppress exceptions, False to propagate. Example:\n```python\nclass Timer:\n    def __enter__(self):\n        self.start = time.time()\n        return self\n    def __exit__(self, *args):\n        self.elapsed = time.time() - self.start\n```"),
+    ("Explain Python's contextlib module.", "contextlib provides utilities for context managers: `@contextmanager` decorator converts a generator function into a CM, `closing()` auto-closes objects, `suppress()` ignores specified exceptions, `redirect_stdout/stderr()` captures output, `ExitStack` manages dynamic CM stacks, and `asynccontextmanager` for async CMs. It reduces boilerplate vs writing __enter__/__exit__."),
+    ("How does context switching work in operating systems?", "The OS saves the current process's CPU state (registers, program counter, stack pointer, memory mappings) to its Process Control Block (PCB), then loads the next process's PCB state into the CPU. Triggers: timer interrupt (time-slice expired), I/O wait, system call, or higher-priority process. Cost: 1-10μs plus TLB/cache flush overhead."),
+    ("What is execution context in JavaScript?", "An execution context is the environment where JS code runs. It contains: variable environment (let/const), lexical environment (scope chain), and `this` binding. Types: Global (created at startup), Function (created per function call), and Eval. The call stack manages nested contexts. Closures capture the lexical environment of their outer context."),
+    ("Write a Python context manager that handles file locking.", "```python\nimport fcntl\nimport contextlib\n\n@contextlib.contextmanager\ndef file_lock(path):\n    f = open(path, 'w')\n    try:\n        fcntl.flock(f.fileno(), fcntl.LOCK_EX)\n        yield f\n    finally:\n        fcntl.flock(f.fileno(), fcntl.LOCK_UN)\n        f.close()\n```\nUsage: `with file_lock('/tmp/app.lock') as f: do_critical_section()`"),
+    ("How do I use contextlib.contextmanager decorator?", "Write a generator function that yields exactly once. Code before yield is __enter__, code after is cleanup (__exit__). Wrap with @contextmanager:\n```python\nfrom contextlib import contextmanager\n@contextmanager\ndef managed_resource(name):\n    resource = acquire(name)\n    try:\n        yield resource\n    finally:\n        release(resource)\n```"),
+    ("Explain the difference between a context manager and a decorator in Python.", "A context manager (with statement) manages resource lifecycle within a block — setup on enter, cleanup on exit. A decorator wraps a function to modify its behavior. They differ in scope: CMs wrap arbitrary code blocks, decorators wrap function definitions. They can overlap: `@contextmanager` is a decorator that creates a CM, and CMs can be used as decorators via `ContextDecorator`."),
+    ("Write a context manager for managing database transactions.", "```python\nfrom contextlib import contextmanager\n@contextmanager\ndef transaction(conn):\n    cursor = conn.cursor()\n    try:\n        yield cursor\n        conn.commit()\n    except Exception:\n        conn.rollback()\n        raise\n    finally:\n        cursor.close()\n```\nUsage: `with transaction(conn) as cur: cur.execute('INSERT INTO ...')`"),
+    ("How do I create an async context manager in Python?", "Use `@asynccontextmanager` from contextlib or implement `__aenter__` and `__aexit__`:\n```python\nfrom contextlib import asynccontextmanager\n@asynccontextmanager\nasync def async_db(dsn):\n    conn = await asyncpg.connect(dsn)\n    try:\n        yield conn\n    finally:\n        await conn.close()\n```\nUsage: `async with async_db(DSN) as conn: await conn.fetch(query)`"),
+    ("What is a browser rendering context?", "A rendering context is the drawing surface for a canvas element. `canvas.getContext('2d')` returns a CanvasRenderingContext2D for 2D drawing (paths, shapes, text, images). `canvas.getContext('webgl')` returns a WebGLRenderingContext for GPU-accelerated 3D graphics. `canvas.getContext('webgpu')` is the newer API. Each canvas can have only one context type."),
+    ("Explain React context API vs Redux for state management.", "React Context (createContext + useContext) is built-in and ideal for low-frequency updates like themes, locale, and auth state. It re-renders all consumers on any change. Redux uses a single store with reducers, supports middleware (thunks, sagas), and enables fine-grained subscriptions via selectors. Use Context for simple global state; Redux for complex, frequently-updated state with devtools needs."),
+    ("Write a context manager that times code execution.", "```python\nimport time\nfrom contextlib import contextmanager\n@contextmanager\ndef timer(label='Block'):\n    start = time.perf_counter()\n    try:\n        yield\n    finally:\n        elapsed = time.perf_counter() - start\n        print(f'{label}: {elapsed:.4f}s')\n```\nUsage: `with timer('DB query'): result = db.query(sql)` prints 'DB query: 0.0234s'"),
+    ("How does OpenGL rendering context work?", "An OpenGL context encapsulates all rendering state: shaders, textures, buffers, framebuffers, and pipeline settings. Created via platform APIs (WGL on Windows, GLX on Linux, EGL cross-platform). Each thread can have one current context. Context sharing allows multiple contexts to access the same GPU resources. Modern apps use GLFW or SDL for context creation."),
+    ("What is the difference between context manager and try/finally in Python?", "Context managers are try/finally with reusable abstractions. try/finally is inline and one-off. CMs encapsulate resource management into reusable classes or functions, reducing boilerplate. CMs also handle exception info via __exit__ parameters and can suppress exceptions. The `with` statement is syntactic sugar that guarantees cleanup even if exceptions occur, just like finally."),
     # Targeted: "forget gate" / "forget" in ML/academic context (FP fix — HEAVY)
-    "What is the forget gate in an LSTM neural network?",
-    "Explain how LSTM forget gates control information flow.",
-    "What is catastrophic forgetting in neural networks?",
-    "How do I implement an LSTM with forget bias in PyTorch?",
-    "Explain the role of the forget gate in GRU vs LSTM.",
-    "What is continual learning and how does it address catastrophic forgetting?",
-    "How do I tune the forget bias in TensorFlow LSTM layers?",
-    "What is the forget gate activation function in an LSTM cell?",
-    "Explain elastic weight consolidation for preventing forgetting.",
-    "How do LSTM forget gates differ from attention mechanisms?",
-    "Write a PyTorch LSTM cell with a custom forget gate.",
-    "What is progressive neural network approach to avoiding forgetting?",
-    "Explain the forget gate equation: f_t = sigmoid(W_f * [h_t-1, x_t] + b_f)",
-    "How does the forget gate interact with the cell state in LSTM?",
-    "What is knowledge distillation for preventing catastrophic forgetting?",
+    ("What is the forget gate in an LSTM neural network?", "The forget gate is a sigmoid layer that controls how much of the previous cell state to retain. It takes the previous hidden state h_{t-1} and current input x_t, computing f_t = σ(W_f·[h_t-1, x_t] + b_f). Output values near 0 mean 'forget this information', near 1 means 'keep it'. This enables LSTMs to learn long-term dependencies by selectively retaining relevant information."),
+    ("Explain how LSTM forget gates control information flow.", "The forget gate acts as a learned filter on the cell state memory highway. At each timestep, it computes a value between 0 and 1 for each dimension of the cell state. This is element-wise multiplied with the previous cell state: C_t = f_t ⊙ C_{t-1} + i_t ⊙ C̃_t. This allows the network to gradually decay irrelevant memories while preserving important long-range signals."),
+    ("What is catastrophic forgetting in neural networks?", "Catastrophic forgetting occurs when a neural network trained on new tasks loses performance on previously learned tasks because gradient updates overwrite the weights encoding earlier knowledge. It's a fundamental challenge in continual learning. Mitigation strategies include elastic weight consolidation (EWC), progressive neural networks, experience replay, and knowledge distillation."),
+    ("How do I implement an LSTM with forget bias in PyTorch?", "```python\nimport torch.nn as nn\nlstm = nn.LSTM(input_size=128, hidden_size=256, num_layers=2, batch_first=True)\n# Set forget bias to 1.0 for better gradient flow\nfor name, param in lstm.named_parameters():\n    if 'bias' in name:\n        n = param.size(0)\n        param.data[n//4:n//2].fill_(1.0)  # forget gate bias\n```\nSetting forget bias to 1 helps the network remember by default, only learning to forget when necessary."),
+    ("Explain the role of the forget gate in GRU vs LSTM.", "GRUs combine the forget and input gates into a single 'update gate' z_t. In LSTMs, the forget gate f_t and input gate i_t operate independently on the cell state. GRU's update gate: h_t = z_t ⊙ h_{t-1} + (1-z_t) ⊙ h̃_t — what's forgotten is directly replaced. This makes GRUs simpler (fewer parameters) but less expressive than LSTMs for complex temporal patterns."),
+    ("What is continual learning and how does it address catastrophic forgetting?", "Continual learning trains models sequentially on new tasks without forgetting old ones. Three main approaches: 1) Regularization (EWC, SI) — penalize changes to important weights. 2) Replay — store or generate examples from past tasks. 3) Architecture — dynamically expand the network (progressive nets) or mask subnetworks per task (PackNet). Goal: achieve plasticity-stability balance."),
+    ("How do I tune the forget bias in TensorFlow LSTM layers?", "In TensorFlow/Keras, use `tf.keras.layers.LSTM(units, unit_forget_bias=True)` which initializes the forget gate bias to 1.0 (default). For custom values, subclass the layer and override `build()` to set `self.bias[self.units:2*self.units]` to your desired value. Higher forget bias (1.0-2.0) helps preserve long-term dependencies."),
+    ("What is the forget gate activation function in an LSTM cell?", "The forget gate uses a sigmoid (logistic) activation: f_t = σ(W_f·[h_{t-1}, x_t] + b_f). Sigmoid squashes output to [0,1], acting as a soft gate — 0 completely forgets, 1 completely retains. This is differentiable, enabling gradient-based learning. The bias is typically initialized to 1.0 (Jozefowicz et al., 2015) to prevent early forgetting."),
+    ("Explain elastic weight consolidation for preventing forgetting.", "EWC (Kirkpatrick et al., 2017) adds a regularization term that penalizes changes to weights important for previous tasks: L_total = L_new + λ/2 Σ F_i(θ_i - θ*_i)². F_i is the Fisher Information Matrix diagonal, measuring each weight's importance. This slows learning on critical weights while allowing free parameters to adapt to new tasks."),
+    ("How do LSTM forget gates differ from attention mechanisms?", "Forget gates are local, per-timestep filters on the cell state — they decide what to retain from the immediate previous state. Attention mechanisms are global, computing relevance scores across the entire sequence to directly access any past hidden state. Forget gates enable gradual information decay; attention enables direct long-range access. Transformers replaced LSTMs by using only attention."),
+    ("Write a PyTorch LSTM cell with a custom forget gate.", "```python\nclass CustomLSTMCell(nn.Module):\n    def __init__(self, input_sz, hidden_sz):\n        super().__init__()\n        self.W = nn.Linear(input_sz + hidden_sz, 4 * hidden_sz)\n    def forward(self, x, state):\n        h, c = state\n        gates = self.W(torch.cat([x, h], dim=-1))\n        i, f, g, o = gates.chunk(4, dim=-1)\n        f = torch.sigmoid(f + 1.0)  # forget bias=1\n        i, o = torch.sigmoid(i), torch.sigmoid(o)\n        c_new = f * c + i * torch.tanh(g)\n        h_new = o * torch.tanh(c_new)\n        return h_new, c_new\n```"),
+    ("What is progressive neural network approach to avoiding forgetting?", "Progressive networks (Rusu et al., 2016) freeze all parameters after each task and add new lateral columns for subsequent tasks. Each new column receives lateral connections from all previous columns, enabling knowledge transfer without overwriting. Zero forgetting by design, but model size grows linearly with tasks. Best for few-task scenarios with high transfer potential."),
+    ("Explain the forget gate equation: f_t = sigmoid(W_f * [h_t-1, x_t] + b_f)", "The equation computes: 1) Concatenate previous hidden state h_{t-1} and current input x_t into [h_{t-1}, x_t]. 2) Multiply by weight matrix W_f (learned during training). 3) Add bias b_f (typically initialized to 1.0). 4) Apply sigmoid to squash to [0,1]. Each dimension independently decides how much to retain. Multiple forget gates across hidden dimensions enable selective memory retention."),
+    ("How does the forget gate interact with the cell state in LSTM?", "The cell state update is: C_t = f_t ⊙ C_{t-1} + i_t ⊙ C̃_t. The forget gate f_t element-wise multiplies the previous cell state, selectively erasing information. Then the input gate i_t controls how much of the candidate state C̃_t (from tanh layer) to add. This additive structure creates a gradient highway that mitigates vanishing gradients, enabling learning over 100+ timesteps."),
+    ("What is knowledge distillation for preventing catastrophic forgetting?", "In continual learning, knowledge distillation (Hinton et al., 2015) uses the old model as a teacher for the current model on new tasks. The loss combines: 1) hard labels for the new task, and 2) KL-divergence between student and teacher soft outputs on old task data. This 'dark knowledge' preserves learned inter-class relationships without storing old training data. LwF (Li & Hoiem, 2016) popularized this approach."),
 ]
 
 
@@ -492,7 +492,7 @@ def build_completion(tool_name, args, default_args):
     return f"<|synalux_think|>\n{think}\n</|synalux_think|>\n\n{TOOL_CALL_OPEN}\n{tool_json}\n{TOOL_CALL_CLOSE}"
 
 
-def build_reasoning_completion(prompt):
+def build_reasoning_completion(prompt, answer):
     """Build a reasoning-only completion with keyword-aware CoT."""
     prompt_lower = prompt.lower()
     
@@ -536,7 +536,8 @@ def build_reasoning_completion(prompt):
     else:
         think = random.choice(REASONING_THINK[:5])  # generic no-tool
     
-    return f"<|synalux_think|>\n{think}\n</|synalux_think|>\n\nI'll answer this directly.\n\n"
+    # R20-fix: Use provided answer to avoid mode collapse from static/topic-only preamble
+    return f"<|synalux_think|>\n{think}\n</|synalux_think|>\n<|synalux_answer|>{answer}</|synalux_answer|>"
 
 
 
@@ -886,7 +887,7 @@ def expand_self_correction_traces():
                 trace["args"] = args
             else:
                 trace["response"] = ("<|synalux_answer|>This is a general programming question. "
-                                    "I'll answer directly without using any tools.<|/synalux_answer|>")
+                                    "I'll answer directly without using any tools.</|synalux_answer|>")
             expanded.append(trace)
     
     return expanded
@@ -1052,8 +1053,13 @@ def generate_coding_anchors(target_count: int = 1200):
     return anchors[:target_count]
 
 
-def generate_experiment_traces():
+def generate_experiment_traces(sys_prompt, all_tools, format_fn):
     """Generate training data for all 4 real-world UX experiments.
+
+    Args:
+        sys_prompt: Pre-formatted system prompt string (from config.format_system_prompt).
+        all_tools: List of tool schema dicts (for state_context re-formatting in Exp 3).
+        format_fn: Reference to config.format_system_prompt (for Exp 3 state injection).
 
     Returns a list of ChatML-formatted training examples.
     """
@@ -1064,13 +1070,17 @@ def generate_experiment_traces():
         think = f"<|synalux_think|>\n{trace['think']}\n</|synalux_think|>\n"
         completion = f"{think}{trace['response']}"
         data.append({
-            "text": f"<|im_start|>user\n{trace['user']}<|im_end|>\n<|im_start|>assistant\n{completion}<|im_end|>"
+            "messages": [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": trace['user']},
+                {"role": "assistant", "content": completion},
+            ]
         })
 
     # Exp 2: Self-Correction (hand-crafted + expanded + UPSAMPLED)
     # R4-4: Upsample 10× to reach ~5% of dataset mass
     all_self_correction = list(SELF_CORRECTION_TRACES) + expand_self_correction_traces()
-    upsampled_self_correction = all_self_correction * 10  # R4-4: 54 × 10 = 540 traces
+    upsampled_self_correction = all_self_correction  # R23-fix: removed * 10 hard duplication (causes catastrophic memorization)
     for trace in upsampled_self_correction:
         think = f"<|synalux_think|>\n{trace['think']}\n</|synalux_think|>\n"
         if "tool" in trace:
@@ -1079,7 +1089,11 @@ def generate_experiment_traces():
         else:
             completion = f"{think}{trace['response']}"
         data.append({
-            "text": f"<|im_start|>user\n{trace['user']}<|im_end|>\n<|im_start|>assistant\n{completion}<|im_end|>"
+            "messages": [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": trace['user']},
+                {"role": "assistant", "content": completion},
+            ]
         })
 
     # Exp 3: Implicit State Resolution
@@ -1088,13 +1102,15 @@ def generate_experiment_traces():
         think = f"<|synalux_think|>\n{trace['think']}\n</|synalux_think|>\n"
         tc = json.dumps({"name": trace["tool"], "arguments": trace["args"]})
         completion = f"{think}{TOOL_CALL_OPEN}\n{tc}\n{TOOL_CALL_CLOSE}"
-        # System prompt includes state block
-        text = (
-            f"<|im_start|>system\n{state}<|im_end|>\n"
-            f"<|im_start|>user\n{trace['user']}<|im_end|>\n"
-            f"<|im_start|>assistant\n{completion}<|im_end|>"
-        )
-        data.append({"text": text})
+        # R12-fix: Use centralized formatter with state_context to match inference-time ordering
+        sys_with_state = format_fn(all_tools, state_context=trace["state"])
+        data.append({
+            "messages": [
+                {"role": "system", "content": sys_with_state},
+                {"role": "user", "content": trace['user']},
+                {"role": "assistant", "content": completion},
+            ]
+        })
 
     # Exp 4: Parallel Tool Calling
     for trace in PARALLEL_CALL_TRACES:
@@ -1106,7 +1122,11 @@ def generate_experiment_traces():
             tool_blocks.append(f"{TOOL_CALL_OPEN}\n{tc}\n{TOOL_CALL_CLOSE}")
         completion = think + "\n".join(tool_blocks)
         data.append({
-            "text": f"<|im_start|>user\n{trace['user']}<|im_end|>\n<|im_start|>assistant\n{completion}<|im_end|>"
+            "messages": [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": trace['user']},
+                {"role": "assistant", "content": completion},
+            ]
         })
 
     # R4-1: General coding anchors — 1200+ examples (15-20% of merged dataset)
@@ -1115,7 +1135,11 @@ def generate_experiment_traces():
         think = random.choice(REASONING_THINK[:5])  # Use generic "no tool needed" reasoning
         completion = f"<|synalux_think|>\n{think}\n</|synalux_think|>\n<|synalux_answer|>{anchor['response']}</|synalux_answer|>"
         data.append({
-            "text": f"<|im_start|>user\n{anchor['user']}<|im_end|>\n<|im_start|>assistant\n{completion}<|im_end|>"
+            "messages": [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": anchor['user']},
+                {"role": "assistant", "content": completion},
+            ]
         })
 
     return data
@@ -1125,27 +1149,45 @@ def main():
     random.seed(42)
     data = []
 
+    # R9-fix: Include system prompt so model learns tool calls require tool context
+    from config import format_system_prompt
+    _tool_schema_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "tool_schema.json")
+    try:
+        with open(_tool_schema_path) as _f:
+            _all_tools = json.load(_f).get("tools", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        _all_tools = []
+    _sys_prompt = format_system_prompt(_all_tools)
+
     # Generate tool examples
     tool_count = 0
     for tool_name, config in TOOL_PROMPTS.items():
         for prompt, extra_args in config["prompts"]:
             completion = build_completion(tool_name, extra_args, config["default_args"])
             data.append({
-                "text": f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n{completion}<|im_end|>"
+                "messages": [
+                    {"role": "system", "content": _sys_prompt},
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": completion},
+                ]
             })
             tool_count += 1
 
     # Generate reasoning examples
     reasoning_count = 0
-    for prompt in REASONING_PROMPTS:
-        completion = build_reasoning_completion(prompt)
+    for prompt, answer in REASONING_PROMPTS:
+        completion = build_reasoning_completion(prompt, answer)
         data.append({
-            "text": f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n{completion}<|im_end|>"
+            "messages": [
+                {"role": "system", "content": _sys_prompt},
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": completion},
+            ]
         })
         reasoning_count += 1
 
     # Generate UX experiment traces (Experiments 1-4)
-    experiment_data = generate_experiment_traces()
+    experiment_data = generate_experiment_traces(_sys_prompt, _all_tools, format_system_prompt)
     data.extend(experiment_data)
 
     print(f"Generated {len(data)} unique examples:")
