@@ -92,16 +92,19 @@ export const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
 export const GOOGLE_SEARCH_API_KEY = process.env.GOOGLE_SEARCH_API_KEY;
 export const GOOGLE_SEARCH_CX = process.env.GOOGLE_SEARCH_CX;
 
-// ─── v2.0: Storage Backend Selection ─────────────────────────
-// REVIEWER NOTE: Step 1 of v2.0 introduces a storage abstraction.
+// ─── v2.0 / v12.1: Storage Backend Selection ────────────────
 // Both "local" (SQLite) and "supabase" (PostgreSQL) are implemented.
-// Default is "local" for zero-config operation.
 //
-// Set PRISM_STORAGE=supabase to use Supabase REST API.
-// Set PRISM_STORAGE=local to use SQLite (default).
+// v12.1: Default changed from "local" to "auto".
+//   "auto"     = prefer Supabase when credentials are resolvable, else local.
+//   "local"    = forced local SQLite (free tier, HIPAA/PRISM_STRICT_LOCAL_MODE).
+//   "supabase" = forced Supabase (error if credentials missing).
+//
+// Set PRISM_STORAGE=local to force local SQLite.
+// Set PRISM_STORAGE=supabase to force Supabase REST API.
 
-export const PRISM_STORAGE: "local" | "supabase" =
-  (process.env.PRISM_STORAGE as "local" | "supabase") || "local";
+export const PRISM_STORAGE: "local" | "supabase" | "auto" =
+  (process.env.PRISM_STORAGE as "local" | "supabase" | "auto") || "auto";
 // Logged at debug level — see debug() at bottom of file
 
 // ─── Optional: Supabase (Session Memory Module) ───────────────
@@ -509,7 +512,7 @@ export const PRISM_HRR_DIMENSION = (() => {
 
   // 2. Auto-adjustment based on system RAM
   const totalRamGb = totalmem() / (1024 ** 3);
-  
+
   if (totalRamGb >= 48) return 8192; // High-end (M4 Max)
   if (totalRamGb >= 32) return 4096; // Mid-high (M3 Pro)
   if (totalRamGb >= 16) return 2048; // Standard (M1/M2/M3)
@@ -517,6 +520,6 @@ export const PRISM_HRR_DIMENSION = (() => {
 })();
 
 if (PRISM_DEBUG_LOGGING) {
-  console.error(`[Prism] HRR Zero-Search Dimension: ${PRISM_HRR_DIMENSION} (Total RAM: ${(totalmem() / (1024**3)).toFixed(1)}GB)`);
+  console.error(`[Prism] HRR Zero-Search Dimension: ${PRISM_HRR_DIMENSION} (Total RAM: ${(totalmem() / (1024 ** 3)).toFixed(1)}GB)`);
 }
 

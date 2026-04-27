@@ -46,7 +46,7 @@ program
   .description('Load session context for a project (same output as session_load_context MCP tool)')
   .option('-l, --level <level>', 'Context depth: quick, standard, deep', 'standard')
   .option('-r, --role <role>', 'Role scope for context loading')
-  .option('-s, --storage <backend>', 'Storage backend: local (SQLite) or supabase. Overrides PRISM_STORAGE env var.')
+  .option('-s, --storage <backend>', 'Storage backend: auto (default, prefers cloud), local (SQLite), or supabase. Overrides PRISM_STORAGE env var.')
   .option('--json', 'Emit machine-readable JSON instead of formatted text')
   .action(async (project: string, options: { level: string; role?: string; storage?: string; json?: boolean }) => {
     try {
@@ -141,7 +141,7 @@ program
       await closeStorage();
     } catch (err) {
       console.error(`Error loading context: ${err instanceof Error ? err.message : String(err)}`);
-      await closeStorage().catch(() => {});
+      await closeStorage().catch(() => { });
       process.exit(1);
     }
   });
@@ -244,7 +244,7 @@ saveCmd
       await closeStorage();
     } catch (err) {
       console.error(`Error saving ledger: ${err instanceof Error ? err.message : String(err)}`);
-      await closeStorage().catch(() => {});
+      await closeStorage().catch(() => { });
       process.exit(1);
     }
   });
@@ -310,7 +310,7 @@ saveCmd
       await closeStorage();
     } catch (err) {
       console.error(`Error saving handoff: ${err instanceof Error ? err.message : String(err)}`);
-      await closeStorage().catch(() => {});
+      await closeStorage().catch(() => { });
       process.exit(1);
     }
   });
@@ -414,7 +414,7 @@ syncCmd
       await closeStorage();
     } catch (err) {
       console.error(`Error during sync push: ${err instanceof Error ? err.message : String(err)}`);
-      await closeStorage().catch(() => {});
+      await closeStorage().catch(() => { });
       process.exit(1);
     }
   });

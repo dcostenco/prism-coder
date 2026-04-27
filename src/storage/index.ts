@@ -4,6 +4,16 @@ import { SupabaseStorage } from "./supabase.js";
 import type { StorageBackend } from "./interface.js";
 import { getSetting } from "./configStorage.js";
 
+/** Validates a URL is a valid http(s) Supabase endpoint. */
+function isValidSupabaseUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 let storageInstance: StorageBackend | null = null;
 export let activeStorageBackend: string = "local";
 
@@ -17,8 +27,32 @@ export async function getStorage(): Promise<StorageBackend> {
   if (storageInstance) return storageInstance;
 
   // Use environment variable if explicitly set, otherwise fall back to db config
-  const envStorage = process.env.PRISM_STORAGE as "supabase" | "local" | undefined;
-  const requestedBackend = (envStorage || await getSetting("PRISM_STORAGE", ENV_PRISM_STORAGE)) as "supabase" | "local";
+  const envStorage = process.env.PRISM_STORAGE as "supabase" | "local" | "auto" | undefined;
+  let requestedBackend = (envStorage || await getSetting("PRISM_STORAGE", ENV_PRISM_STORAGE)) as "supabase" | "local" | "auto";
+
+  // ─── v12.1: Auto-resolve "auto" → prefer Supabase when credentials exist ───
+  // This eliminates the split-brain where MCP clients (Claude Desktop,
+  // Antigravity) didn't pass PRISM_STORAGE=supabase and data silently
+  // went to local SQLite instead of Synalux Cloud.
+  if (requestedBackend === "auto") {
+    const envUrl = process.env.SUPABASE_URL?.trim();
+    const envKey = process.env.SUPABASE_KEY?.trim();
+    if (envUrl && envKey && isValidSupabaseUrl(envUrl)) {
+      requestedBackend = "supabase";
+      debugLog("[Prism Storage] Auto-resolved: supabase (env vars)");
+    } else {
+      // Probe dashboard config as fallback
+      const dashUrl = (await getSetting("SUPABASE_URL"))?.trim();
+      const dashKey = (await getSetting("SUPABASE_KEY"))?.trim();
+      if (dashUrl && dashKey && isValidSupabaseUrl(dashUrl)) {
+        requestedBackend = "supabase";
+        debugLog("[Prism Storage] Auto-resolved: supabase (dashboard config)");
+      } else {
+        requestedBackend = "local";
+        debugLog("[Prism Storage] Auto-resolved: local (no Supabase credentials found)");
+      }
+    }
+  }
 
   // Guardrail: if Supabase is requested but env-var credentials are missing,
   // check the dashboard config DB (prism-config.db) as a fallback before

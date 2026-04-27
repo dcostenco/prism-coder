@@ -15,7 +15,7 @@
  */
 
 export function renderDashboardHTML(version: string): string {
-  return `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -1047,9 +1047,10 @@ export function renderDashboardHTML(version: string): string {
         <div class="setting-row">
           <div>
             <div class="setting-label">Storage Backend</div>
-            <div class="setting-desc">Switch between SQLite and Supabase</div>
+            <div class="setting-desc">Auto prefers Synalux Cloud when credentials exist</div>
           </div>
           <select id="storageBackendSelect" onchange="window.saveBootSetting('PRISM_STORAGE', this.value)" style="padding: 0.2rem 0.4rem; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85rem; font-family: var(--font-mono); cursor: pointer;">
+            <option value="auto">Auto (Cloud Preferred)</option>
             <option value="local">SQLite</option>
             <option value="supabase">Supabase</option>
           </select>
