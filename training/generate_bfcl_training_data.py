@@ -1691,8 +1691,34 @@ def generate_evol_instruct_examples(output_path: Path, collections: dict, num_ex
         tc_json = json.dumps({"name": scenario["func"], "arguments": scenario["args"]})
         tc_text = f'{TOKEN_TOOL_CALL_OPEN}\n{tc_json}\n{TOKEN_TOOL_CALL_CLOSE}'
         
+        # R6.3-fix: Train/eval distribution alignment
+        # 30% of examples use RAG-retrieved heterogeneous tool pools to match
+        # the eval distribution (which uses build_rag_system_prompt).
+        # Remaining 70% use API-grouped pools for clean gradient signals.
+        use_rag_pool = random.random() < 0.3
+        if use_rag_pool:
+            try:
+                from semantic_rag import retrieve_top_k_hyde, retrieve_top_k
+                rag_tools = retrieve_top_k_hyde(scenario["clean"], k=5)
+                if not rag_tools:
+                    rag_tools = retrieve_top_k(scenario["clean"], k=5)
+                if rag_tools:
+                    # Ensure the target tool is in the RAG pool (add if missing)
+                    target_names = {t.get("name") for t in rag_tools}
+                    if scenario["func"] not in target_names:
+                        target_tool = next((t for t in tools if t.get("name") == scenario["func"]), None)
+                        if target_tool:
+                            rag_tools.append(target_tool)
+                    tools_for_prompt = rag_tools
+                else:
+                    tools_for_prompt = tools
+            except Exception:
+                tools_for_prompt = tools
+        else:
+            tools_for_prompt = tools
+        
         msgs = [
-            {"role": "system", "content": format_system_prompt(tools)},
+            {"role": "system", "content": format_system_prompt(tools_for_prompt)},
             {"role": "user", "content": messy_prompt},
             {"role": "assistant", "content": tc_text},
         ]
