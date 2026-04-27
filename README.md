@@ -1303,6 +1303,26 @@ prism scm dora --repo synalux/portal --period 2024-Q4
 
 </details>
 
+<details>
+<summary>📊 How We Compare — SCM vs GitHub / GitLab / Bitbucket (click to expand)</summary>
+
+| Feature | Synalux SCM | GitHub | GitLab | Bitbucket | Sourcegraph |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **Code Search** | Exact, Regex, Symbol, Semantic | Exact, Regex | Basic | Basic | Exact, Regex, Structural |
+| **AI Code Review** | Built-in (all tiers) | Copilot (paid add-on) | Duo (Ultimate only) | ❌ | ❌ |
+| **Secret Detection** | ✅ Free tier | Push Protection (paid) | ✅ Ultimate | ❌ | ❌ |
+| **License Scanning** | ✅ Standard+ | ❌ | ✅ Ultimate | ❌ | ❌ |
+| **Dockerfile Analysis** | ✅ Standard+ | ❌ | Container Scanning | ❌ | ❌ |
+| **DORA Metrics** | ✅ Standard+ | ❌ (3rd party) | ✅ Ultimate | ❌ | ❌ |
+| **HIPAA Compliance** | ✅ Advanced+ | Enterprise BAA | Ultimate BAA | Enterprise BAA | ❌ |
+| **Stacked PRs** | ✅ Standard+ | ❌ (Graphite) | ❌ | ❌ | ❌ |
+| **SSO/SAML** | Enterprise | Enterprise ($21/u) | Premium ($29/u) | Premium ($6/u) | Enterprise |
+| **IDE Plugin** | Prism CLI | VS Code, JetBrains | VS Code | VS Code | VS Code, JetBrains |
+| **Free Tier** | ✅ 3 repos | ✅ Unlimited public | ✅ 5 users | ✅ 5 users | ✅ Limited |
+| **Starting Price** | $12/mo | $4/u/mo | $29/u/mo | $3/u/mo | $49/u/mo |
+
+</details>
+
 > 🔧 **Configuration:** Set `SYNALUX_API_URL` and `SYNALUX_API_KEY` environment variables to connect to your Synalux instance. See [synalux.ai/docs/scm](https://synalux.ai/docs/scm) for setup.
 
 ---
