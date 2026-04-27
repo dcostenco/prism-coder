@@ -1055,22 +1055,20 @@ A VS Code-like standalone desktop IDE purpose-built for Prism Coder. Ships as `.
 
 ### 💳 Subscription Plans
 
-| Feature | **Free** | **Standard ($19/mo)** | **Advanced ($49/mo)** | **Enterprise ($99/mo)** |
-| :--- | :---: | :---: | :---: | :---: |
-| MCP Tools (30+) | 5 core | All 17 | All 17 + RBAC | All + custom |
-| Local Memory (SQLite) | ✅ | ✅ | ✅ | ✅ |
-| CLI (`prism load/sync`) | ✅ | ✅ | ✅ | ✅ |
-| Mind Palace Dashboard | ✅ | ✅ | ✅ | ✅ |
-| **Prism Coder IDE** | ✅ | ✅ | ✅ | ✅ |
-| **Desktop Packages** | ✅ | ✅ | ✅ | ✅ |
-| API Calls | 100/day | 2,000/day | 5,000/day | Unlimited |
-| Synalux Drive | ❌ | ✅ | ✅ | ✅ |
-| Cloud Sync (Supabase) | ❌ | ✅ | ✅ | ✅ |
-| Cloud Models (Gemini/Claude) | ❌ | ✅ | ✅ | ✅ |
-| Multi-Agent Hivemind | ❌ | ❌ | ✅ | ✅ |
-| Dark Factory Pipelines | ❌ | ❌ | ✅ | ✅ |
-| Priority Support | ❌ | ❌ | ❌ | ✅ |
-| HIPAA BAA | ❌ | ❌ | ❌ | ✅ |
+| Feature | **Free** | **Advanced ($12/mo)** | **Enterprise ($29/mo)** |
+| :--- | :---: | :---: | :---: |
+| MCP Tools (30+) | ✅ | ✅ | ✅ |
+| Local Memory (SQLite) | ✅ | ✅ | ✅ |
+| CLI (`prism load/sync`) | ✅ | ✅ | ✅ |
+| Mind Palace Dashboard | ✅ | ✅ | ✅ |
+| **Prism Coder IDE** | ✅ | ✅ | ✅ |
+| **Desktop Packages** | ✅ | ✅ | ✅ |
+| Synalux Drive | ❌ | ✅ | ✅ |
+| Cloud Sync (Supabase) | ❌ | ✅ | ✅ |
+| Cloud Models (Gemini/Claude) | ❌ | ✅ | ✅ |
+| Multi-Agent Hivemind | ❌ | ❌ | ✅ |
+| Dark Factory Pipelines | ❌ | ❌ | ✅ |
+| Priority Support | ❌ | ❌ | ✅ |
 
 > 🆓 **Free tier is fully functional** — all 30+ MCP tools, local memory, CLI, IDE, and desktop packages work forever with zero API keys. Paid plans unlock cloud sync, Synalux Drive, cloud models, and enterprise features. **14-day free trial** on all paid plans.
 
@@ -1252,58 +1250,6 @@ Every other AI coding pipeline has a fatal flaw: it asks the same model that wro
 > 💰 **Token Economics:** Progressive Context Loading (Quick ~50 tokens / Standard ~200 / Deep ~1000+) plus auto-compaction means you never blow your Claude/OpenAI token budget fetching 50 pages of raw chat history.
 >
 > 🔌 **BYOM (Bring Your Own Model):** While tools like Mem0 charge per API call, Prism's pluggable architecture lets you run `nomic-embed-text` locally via Ollama for **free vectors**, while using Claude or GPT for high-level reasoning. Zero vendor lock-in.
-
----
-
-## 🔀 Synalux SCM Integration (via `prism scm`)
-
-> **NEW:** Prism integrates with [Synalux SCM](https://synalux.ai) for code search, AI review, security scanning, and DORA metrics — all from the CLI. Engines run server-side on Synalux; Prism provides a thin API client for seamless IDE integration.
-
-### SCM CLI Commands
-
-```bash
-# Multi-repo code search (exact, regex, symbol, semantic)
-prism scm search "handleAuth" --mode semantic --repo synalux/portal
-
-# AI code review with optional HIPAA compliance check
-prism scm review src/db.ts src/api.ts --hipaa --json
-
-# Security scan — secrets, licenses, Dockerfile best practices
-prism scm scan .env Dockerfile --json
-
-# DORA metrics for engineering excellence
-prism scm dora --repo synalux/portal --period 2024-Q4
-```
-
-### SCM Tier Comparison
-
-| Feature | Free | Standard ($12/mo) | Advanced ($29/mo) | Enterprise |
-|---|:---:|:---:|:---:|:---:|
-| Public repos | 3 | 20 | ∞ | ∞ |
-| Private repos | 1 | 10 | 50 | ∞ |
-| AI reviews/month | 5 | 50 | 500 | ∞ |
-| IDE hours/day | 1 | 4 | 12 | ∞ |
-| Search modes | Exact | +Regex, Symbol | +Semantic | +Semantic |
-| DORA metrics | — | Basic | Full | Custom |
-| HIPAA compliance | — | — | ✅ | ✅ |
-| SSO/SAML | — | — | — | ✅ |
-| Stacked PRs | — | ✅ | ✅ | ✅ |
-
-<details>
-<summary>📸 Screenshots — SCM CLI in action (click to expand)</summary>
-
-#### Code Search (Semantic Mode)
-![prism scm search — semantic code search across repos](docs/scm_search_cli.png)
-
-#### AI Review with HIPAA Check
-![prism scm review — AI code review with HIPAA compliance](docs/scm_review_cli.png)
-
-#### Security Scan
-![prism scm scan — secret detection and Dockerfile analysis](docs/scm_scan_cli.png)
-
-</details>
-
-> 🔧 **Configuration:** Set `SYNALUX_API_URL` and `SYNALUX_API_KEY` environment variables to connect to your Synalux instance. See [synalux.ai/docs/scm](https://synalux.ai/docs/scm) for setup.
 
 ---
 
