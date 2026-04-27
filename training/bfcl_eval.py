@@ -818,7 +818,16 @@ def evaluate_test(test: dict, verbose: bool = False) -> dict:
     sys_prompt = format_system_prompt(bfcl_eval_mode=True)
     full_prompt = f"{sys_prompt}\n\nUser: {prompt}"
     
-    actual_tool, actual_args, raw_response, latency, all_calls = call_ollama(full_prompt)
+    # R6-1: Use Best-of-N when enabled (validates candidates against tool schemas)
+    best_of_n = int(os.environ.get("BFCL_BEST_OF_N", "5"))
+    if best_of_n > 1:
+        # Get available tool schemas for validation
+        available_tools = test.get("available_tools", [])
+        actual_tool, actual_args, raw_response, latency, all_calls = call_ollama_best_of_n(
+            full_prompt, available_tools=available_tools
+        )
+    else:
+        actual_tool, actual_args, raw_response, latency, all_calls = call_ollama(full_prompt)
     
     # Layer 3 validation
     actual_tool, actual_args = validate_tool_call(prompt, actual_tool, actual_args)

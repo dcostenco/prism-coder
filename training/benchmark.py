@@ -10,11 +10,12 @@ import re
 import sys
 import argparse
 
-MODEL_PATH = os.environ.get("PRISM_MODEL_PATH", "/Users/admin/prism/training/models/qwen-7b-mlx")
-ADAPTER_PATH = os.environ.get("PRISM_ADAPTER_PATH", "/Users/admin/prism/training/models/prism-grpo-lora")
-SFT_ADAPTER = os.environ.get("PRISM_SFT_ADAPTER", "/Users/admin/prism/training/models/prism-sft-lora")
-TOOL_SCHEMA = "/Users/admin/prism/training/data/tool_schema.json"
-REPORT_PATH = "/Users/admin/prism/training/results/benchmark_report.md"
+_TRAINING_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.environ.get("PRISM_MODEL_PATH", os.path.join(_TRAINING_DIR, "models", "qwen-7b-mlx"))
+ADAPTER_PATH = os.environ.get("PRISM_ADAPTER_PATH", os.path.join(_TRAINING_DIR, "models", "prism-grpo-lora"))
+SFT_ADAPTER = os.environ.get("PRISM_SFT_ADAPTER", os.path.join(_TRAINING_DIR, "models", "prism-sft-lora"))
+TOOL_SCHEMA = os.path.join(_TRAINING_DIR, "data", "tool_schema.json")
+REPORT_PATH = os.path.join(_TRAINING_DIR, "results", "benchmark_report.md")
 
 # Load valid tools
 with open(TOOL_SCHEMA) as f:

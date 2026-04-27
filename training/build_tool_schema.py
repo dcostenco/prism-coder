@@ -2,8 +2,10 @@
 """Extract Prism MCP tool schema from server.ts for training and evaluation."""
 import re, json, os
 
-SRC_DIR = "/Users/admin/prism/src"
-OUTPUT = "/Users/admin/prism/training/data/tool_schema.json"
+_TRAINING_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_DIR = os.path.dirname(_TRAINING_DIR)
+SRC_DIR = os.path.join(_REPO_DIR, "src")
+OUTPUT = os.path.join(_TRAINING_DIR, "data", "tool_schema.json")
 
 # Known Prism MCP tools from the server registration
 PRISM_TOOLS = [

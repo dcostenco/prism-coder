@@ -1508,10 +1508,12 @@ def generate_distractor_examples(output_path: Path, collections: dict, num_examp
         
         # Generate 3-4 distractors from the same API (keyword overlap)
         num_distractors = random.randint(3, 4)
+        # Use random.sample to guarantee unique suffixes (no duplicates)
+        suffix_pool = ['alt', 'legacy', 'beta', 'fast', 'v2', 'v3', 'v4', 'batch', 'async']
+        suffixes = random.sample(suffix_pool, num_distractors)
         distractors = []
-        for i in range(num_distractors):
-            suffix = f"_v{i+2}" if random.random() < 0.5 else f"_{random.choice(['alt', 'legacy', 'beta', 'fast'])}"
-            distractor = _generate_distractor_tool(target_tool, suffix)
+        for suffix in suffixes:
+            distractor = _generate_distractor_tool(target_tool, f"_{suffix}")
             distractors.append(distractor)
         
         # Also add 1-2 real tools from the same API to increase confusion
@@ -1532,10 +1534,15 @@ def generate_distractor_examples(output_path: Path, collections: dict, num_examp
         )
         for t in tools:
             if t.get("name") == scenario["func"]:
-                contrastive_think += f"- {t['name']}: ✅ MATCHES intent — correct tool\n"
+                # Explain WHY this tool matches
+                required = list(t.get("parameters", {}).get("required", []))
+                contrastive_think += f"- {t['name']}: ✅ MATCHES intent — accepts required params {required}\n"
             else:
-                contrastive_think += f"- {t['name']}: ❌ NOT the target (distractor/different purpose)\n"
-        contrastive_think += f"Decision: Use {scenario['func']} because it directly matches the user's request."
+                # Generate SEMANTIC reasoning for rejection (not just 'distractor')
+                t_params = list(t.get("parameters", {}).get("properties", {}).keys())
+                t_desc = t.get("description", "")[:60]
+                contrastive_think += f"- {t['name']}: ❌ Incorrect — description: '{t_desc}', params {t_params} do not match user request\n"
+        contrastive_think += f"Decision: Use {scenario['func']} because its parameters directly match the user's stated values."
         
         tc_json = json.dumps({"name": scenario["func"], "arguments": scenario["args"]})
         think_text = f'{TOKEN_THINK_OPEN}\n{contrastive_think}\n{TOKEN_THINK_CLOSE}\n'
@@ -1566,6 +1573,9 @@ def generate_distractor_examples(output_path: Path, collections: dict, num_examp
 # ============================================================================
 def _messify_prompt(clean_prompt: str) -> str:
     """Rewrite a clean prompt into a messy human variation."""
+    # NOTE: All styles MUST preserve enough semantic content for the model to
+    # extract the correct parameters. NEVER truncate to fewer words than needed.
+    # The removed 'Minimal' style (split[:4]) was training hallucination.
     styles = [
         # Slang/casual
         lambda p: f"yo {p.lower().replace('please ', '').replace('create ', 'make ')} plz",
@@ -1581,8 +1591,6 @@ def _messify_prompt(clean_prompt: str) -> str:
         lambda p: f"ok so basically i need you to {p.lower()} and thats about it",
         # Formal overcorrection
         lambda p: f"I would kindly request that you {p.lower()}, if at all possible",
-        # Minimal
-        lambda p: " ".join(p.lower().split()[:4]),
     ]
     return random.choice(styles)(clean_prompt)
 
