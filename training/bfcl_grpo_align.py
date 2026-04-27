@@ -6,6 +6,8 @@ Preference signal comes from data curation: train on chosen completions,
 discard rejected. mlx_lm.lora provides the SFT training loop.
 Optimized for Apple Silicon M5 Max 48GB.
 
+R19-fix: Rejected pairs now include CoT blocks to prevent DPO shortcut learning.
+
 R6-3 UPGRADE PATH (DPO/ORPO):
     Current: RS-SFT (chosen-only) — simple but discards negative signal.
     Target:  True DPO/ORPO contrastive learning that uses BOTH chosen and
@@ -77,6 +79,16 @@ def generate_dpo_pairs(data_dir: str, output_path: str, max_pairs: int = 2000):
     if grpo_path.exists():
         with open(grpo_path) as f:
             existing_pairs = [json.loads(line) for line in f]
+        # R7-fix: Convert message-array prompts to ChatML strings
+        # generate_bfcl_training_data now outputs prompt as a message list
+        for pair in existing_pairs:
+            if isinstance(pair.get("prompt"), list):
+                parts = []
+                for msg in pair["prompt"]:
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    parts.append(f"<|im_start|>{role}\n{content}<|im_end|>")
+                pair["prompt"] = "\n".join(parts) + "\n<|im_start|>assistant\n"
         print(f"   Found {len(existing_pairs)} pre-generated GRPO pairs")
     else:
         existing_pairs = []
@@ -90,27 +102,28 @@ def generate_dpo_pairs(data_dir: str, output_path: str, max_pairs: int = 2000):
     # Collect all tool-calling completions for wrong-tool rejection sampling
     tool_completions = []
     for ex in examples:
-        comp = ex.get("completion", "")
+        # R8-fix: Training data uses "messages" format from unroll_multi_turn
+        msgs = ex.get("messages", [])
+        if not msgs:
+            continue
+        assistant_msgs = [m for m in msgs if m["role"] == "assistant"]
+        if not assistant_msgs:
+            continue
+        comp = assistant_msgs[-1].get("content", "")
         if "<|tool_call|>" in comp:
-            tool_completions.append(comp.replace("<|im_start|>assistant\n", "").strip())
+            tool_completions.append(comp.strip())
     
     for ex in examples:
         category = ex.get("category", "unknown")
         
-        # Training data is now in prompt/completion format (not messages)
-        prompt_text = ex.get("prompt", "")
-        completion_text = ex.get("completion", "")
-        
-        if not prompt_text or not completion_text:
+        # R8-fix: Convert messages array to ChatML prompt + completion
+        msgs = ex.get("messages", [])
+        if not msgs or msgs[-1]["role"] != "assistant":
             continue
-        
-        # The prompt already has proper <|im_start|> chat template from unroll_multi_turn.
-        # Do NOT append another <|im_start|>assistant — it's already the boundary.
-        # DPO chosen/rejected are the raw assistant completions.
-        prompt = prompt_text
-        # CRITICAL: Do NOT strip <|im_end|> — DPO needs the EOS token in chosen/rejected
-        # or the model learns to never stop generating.
-        assistant_response = completion_text.replace("<|im_start|>assistant\n", "").strip()
+        completion_text = msgs[-1].get("content", "")
+        prompt_parts = [f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>" for m in msgs[:-1]]
+        prompt = "\n".join(prompt_parts) + "\n<|im_start|>assistant\n"
+        assistant_response = completion_text.strip()
         
         if category == "irrelevance":
             # Chosen: correct abstention
@@ -118,14 +131,14 @@ def generate_dpo_pairs(data_dir: str, output_path: str, max_pairs: int = 2000):
             abstention_pairs.append({
                 "prompt": prompt,
                 "chosen": assistant_response,
-                "rejected": '<|tool_call|>\n{"name": "unknown_function", "arguments": {"query": "irrelevant"}}\n</|tool_call|>',
+                "rejected": '<|synalux_think|>\nThe user needs help. Let me check what tools are available. I\'ll try this function.\n</|synalux_think|>\n<|tool_call|>\n{"name": "unknown_function", "arguments": {"query": "irrelevant"}}\n</|tool_call|>',
             })
         elif category == "multi_turn":
             # Pair A: Chosen=correct tool call, Rejected=false abstention
             tool_call_pairs.append({
                 "prompt": prompt,
                 "chosen": assistant_response,
-                "rejected": "I don't have the right tools to help with that request.",
+                "rejected": "<|synalux_think|>\nI don't think I have the right tools for this request. I should abstain.\n</|synalux_think|>\n<|synalux_answer|>I don't have the right tools to help with that request.</|synalux_answer|>",
             })
             # Pair B: Chosen=correct tool call, Rejected=wrong tool call
             # (prevents model from calling ANY tool indiscriminately)
@@ -143,7 +156,7 @@ def generate_dpo_pairs(data_dir: str, output_path: str, max_pairs: int = 2000):
             abstention_pairs.append({
                 "prompt": prompt,
                 "chosen": assistant_response,
-                "rejected": '<|tool_call|>\n{"name": "missing_function", "arguments": {}}\n</|tool_call|>',
+                "rejected": '<|synalux_think|>\nThe user wants to use a function. Let me call it even though I\'m not sure it exists.\n</|synalux_think|>\n<|tool_call|>\n{"name": "missing_function", "arguments": {}}\n</|tool_call|>',
             })
     
     # Balance: 50% tool-calling, 50% abstention to prevent reward collapse
@@ -187,8 +200,8 @@ def generate_dpo_pairs(data_dir: str, output_path: str, max_pairs: int = 2000):
         if sys_match:
             messages.append({"role": "system", "content": sys_match.group(1).strip()})
         
-        # Extract all user/assistant turns
-        turn_pattern = r'<\|im_start\|>(user|assistant)\n(.*?)<\|im_end\|>'
+        # R10-fix: Include 'tool' role so multi-turn tool responses are preserved
+        turn_pattern = r'<\|im_start\|>(user|assistant|tool)\n(.*?)<\|im_end\|>'
         for role, content in re.findall(turn_pattern, prompt_text, re.DOTALL):
             messages.append({"role": role, "content": content.strip()})
         
@@ -242,21 +255,33 @@ def train_dpo(model_path: str, data_dir: str, adapter_path: str,
     # NOTE: mlx_lm does not have a native DPO module. We use LoRA fine-tuning
     # on preference-ranked data (chosen examples only, with rejected filtered out).
     # The DPO signal comes from the data curation, not the training algorithm.
+
+    # mlx_lm v0.31+ requires LoRA rank/scale via YAML config file
+    config_path = os.path.join(os.path.dirname(adapter_path), "lora_config.yaml")
+    os.makedirs(os.path.dirname(adapter_path), exist_ok=True)
+    with open(config_path, "w") as f:
+        f.write(f"lora_parameters:\n")
+        f.write(f"  rank: {lora_rank}\n")
+        f.write(f"  scale: {2.0 * lora_rank}\n")
+        f.write(f"  dropout: 0.05\n")
+
     cmd = [
-        sys.executable, "-m", "mlx_lm.lora",
+        sys.executable, "-m", "mlx_lm", "lora",
         "--model", model_path,
         "--train",
         "--data", data_dir,
         "--adapter-path", adapter_path,
         "--iters", str(iters),
-        "--lora-rank", str(lora_rank),
+        "--num-layers", str(lora_layers),
         "--batch-size", "1",
         "--learning-rate", str(learning_rate),
-        "--lora-layers", str(lora_layers),
         "--save-every", "50",
         "--grad-checkpoint",
         "--mask-prompt",  # Loss only on completion, not prompt
-        "--max-seq-length", "8192",  # 32B Q4: 27GB headroom; preference data 8K safe
+        "--max-seq-length", "4096",  # 8192 OOMs on 48GB with 32B Q4
+        "--grad-accumulation-steps", "16",
+        "--clear-cache-threshold", "0.5",
+        "-c", config_path,
     ]
     
     print(f"Running: {' '.join(cmd)}\n")
@@ -271,7 +296,7 @@ def fuse_adapter(model_path: str, adapter_path: str, output_path: str):
     print(f"{'='*60}")
     
     cmd = [
-        sys.executable, "-m", "mlx_lm.fuse",
+        sys.executable, "-m", "mlx_lm", "fuse",
         "--model", model_path,
         "--adapter-path", adapter_path,
         "--save-path", output_path,
@@ -297,6 +322,9 @@ def main():
                         help="LoRA rank (default: 64, must match SFT for model souping)")
     parser.add_argument("--lr", type=float, default=5e-6,
                         help="Learning rate (default: 5e-6, lower than SFT)")
+    # R13-fix: Expose lora-layers to match SFT adapter shape for SLERP merging
+    parser.add_argument("--lora-layers", type=int, default=16,
+                        help="LoRA layers (must match SFT for model souping)")
     parser.add_argument("--generate-only", action="store_true",
                         help="Only generate DPO pairs, don't train")
     parser.add_argument("--max-pairs", type=int, default=2000,
@@ -328,6 +356,7 @@ def main():
         adapter_path=adapter_path,
         iters=args.iters,
         lora_rank=args.lora_rank,
+        lora_layers=args.lora_layers,  # R13-fix: Pass lora_layers dynamically
         learning_rate=args.lr,
     )
     

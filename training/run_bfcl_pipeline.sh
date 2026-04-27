@@ -193,7 +193,7 @@ fi
 echo ""
 echo "Phase 1b: QLoRA SFT Fine-Tuning (32B)"
 echo "--------------------------------------"
-echo "Config: rank=64, iters=1500, lr=1e-5, batch=1, grad-accum=16, layers=24, seq=16384"
+echo "Config: rank=64, iters=1500, lr=1e-5, batch=1, grad-accum=16, layers=24, seq=4096"
 echo "Estimated: ~8-10 hours on M5 Max 48GB"
 
 SFT_ADAPTER="$OUTPUT_DIR/sft_adapter"
@@ -202,13 +202,6 @@ SFT_FUSED="$OUTPUT_DIR/fused_model"
 if [ -d "$SFT_FUSED" ]; then
     echo "SFT fused model already exists. Skipping."
 else
-    # Start watchdog in background
-    if [ -f "$WATCHDOG" ]; then
-        python "$WATCHDOG" &
-        WATCHDOG_PID=$!
-        echo "Watchdog started (PID: $WATCHDOG_PID)"
-    fi
-
     python bfcl_qlora_finetune.py \
         --mlx-model "$MLX_MODEL" \
         --data "$COMBINED_DIR" \
@@ -218,11 +211,28 @@ else
         --lora-layers 24 \
         --lr 1e-5 \
         --batch-size 1 \
-        --skip-convert
+        --skip-convert &
+    TRAIN_PID=$!
+
+    # Start watchdog AFTER training so we have the PID
+    if [ -f "$WATCHDOG" ]; then
+        python "$WATCHDOG" --pid $TRAIN_PID &
+        WATCHDOG_PID=$!
+        echo "Watchdog started (PID: $WATCHDOG_PID) monitoring training (PID: $TRAIN_PID)"
+    fi
+
+    # Wait for training to complete
+    wait $TRAIN_PID
+    TRAIN_EXIT=$?
 
     # Stop watchdog
     if [ -n "${WATCHDOG_PID:-}" ]; then
         kill "$WATCHDOG_PID" 2>/dev/null || true
+    fi
+
+    if [ $TRAIN_EXIT -ne 0 ]; then
+        echo "ERROR: Phase 1b training failed with exit code $TRAIN_EXIT"
+        exit $TRAIN_EXIT
     fi
 fi
 
@@ -232,7 +242,7 @@ fi
 echo ""
 echo "Phase 2: RS-SFT Alignment"
 echo "--------------------------------------"
-echo "Config: rank=64, iters=800, lr=5e-6, layers=16, seq=8192, batch=1"
+echo "Config: rank=64, iters=800, lr=5e-6, layers=24, seq=4096, batch=1, grad-accum=16"
 echo "Estimated: ~4 hours"
 
 GRPO_DIR="$OUTPUT_DIR/grpo"
@@ -243,12 +253,6 @@ if [ -d "$SFT_FUSED" ]; then
     if [ -d "$GRPO_FUSED" ]; then
         echo "RS-SFT model already exists. Skipping."
     else
-        # Start watchdog
-        if [ -f "$WATCHDOG" ]; then
-            python "$WATCHDOG" &
-            WATCHDOG_PID=$!
-        fi
-
         # R13-fix: Explicitly pass --lora-layers 24 to match SFT
         python bfcl_grpo_align.py \
             --model "$SFT_FUSED" \
@@ -258,10 +262,6 @@ if [ -d "$SFT_FUSED" ]; then
             --lora-rank 64 \
             --lora-layers 24 \
             --lr 5e-6
-
-        if [ -n "${WATCHDOG_PID:-}" ]; then
-            kill "$WATCHDOG_PID" 2>/dev/null || true
-        fi
     fi
 else
     echo "WARNING: SFT model not found at $SFT_FUSED - run Phase 1 first"
@@ -279,13 +279,14 @@ SOUPED_MODEL="$OUTPUT_DIR/souped_model"
 if [ -d "$SOUPED_MODEL" ]; then
     echo "Souped model already exists. Skipping."
 elif [ -d "$SFT_FUSED" ] && [ -d "$GRPO_FUSED" ]; then
-    echo "Applying GRPO alignment adapter onto SFT-fused model..."
-    # R26-fix: GRPO adapter is a delta relative to $SFT_FUSED — apply directly, no SLERP.
+    echo "Fusing GRPO alignment adapter onto SFT-fused model..."
+    # R26-fix: GRPO adapter is a delta relative to $SFT_FUSED — apply directly via fuse.
     # SLERP with SFT_FUSED as base would double-apply SFT weights (1.7x SFT + 0.3x GRPO).
-    python merge_adapters.py \
-        --base-model "$SFT_FUSED" \
-        --align-adapter "$GRPO_ADAPTER" \
-        --output "$SOUPED_MODEL"
+    python -m mlx_lm fuse \
+        --model "$SFT_FUSED" \
+        --adapter-path "$GRPO_ADAPTER" \
+        --save-path "$SOUPED_MODEL" \
+        --export-gguf
 else
     echo "WARNING: Need both SFT and RS-SFT models for souping."
     echo "  Using best available model instead."
@@ -351,14 +352,10 @@ echo "  Model: $BFCL_MODEL"
 echo "  Categories: Agentic(40%), Multi-Turn(30%), Live(10%), Non-Live(10%), Hallucination(10%)"
 echo ""
 
-cd "$BFCL_DIR"
+cd "$TRAINING_DIR"
 
-echo "Generating responses..."
-bfcl generate --model "$BFCL_MODEL" --test-category all --num-threads 1 --backend vllm 2>&1 | tee "$OUTPUT_DIR/eval_generate.log"
-
-echo ""
-echo "Evaluating..."
-bfcl evaluate --model "$BFCL_MODEL" --test-category all 2>&1 | tee "$OUTPUT_DIR/eval_results.log"
+echo "Running BFCL V4 evaluation..."
+python bfcl_eval.py --model "$BFCL_MODEL" 2>&1 | tee "$OUTPUT_DIR/eval_results.log"
 
 echo ""
 echo "Results saved to: $OUTPUT_DIR/eval_results.log"
