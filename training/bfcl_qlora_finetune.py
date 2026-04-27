@@ -151,8 +151,9 @@ def train_lora(mlx_model: str, data_dir: str, adapter_path: str,
         "--save-every", "100",
         "--test-batches", "10",
         "--val-batches", "10",
-        "--max-seq-length", "16384",  # 32B Q4: ~17GB weights + KV cache at batch=1 fits 48GB
-        "--grad-accumulation-steps", "16",  # Effective batch = 1 × 16 = 16 (OOM-safe on 48GB)
+        "--max-seq-length", "4096",  # 32B Q4: 16384 OOMs on 48GB — 4096 fits safely
+        "--grad-accumulation-steps", "16",  # Effective batch = 1 × 16 = 16
+        "--clear-cache-threshold", "0.5",  # Aggressively free Metal cache to prevent OOM
         "--mask-prompt",  # BalanceSFT: loss only on completion (tool_call JSON), not prompt
         "-c", config_path,
     ]
