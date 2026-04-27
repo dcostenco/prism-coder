@@ -13,6 +13,7 @@ phrasings per tool, including:
 """
 import json
 import random
+import os
 
 TOOL_CALL_OPEN = "<|tool_call|>"
 TOOL_CALL_CLOSE = "</|tool_call|>"
@@ -1210,7 +1211,6 @@ def main():
     train = data[:split]
     valid = data[split:]
 
-    import os
     from config import AUX_DATA_DIR
     out_dir = AUX_DATA_DIR
     os.makedirs(out_dir, exist_ok=True)

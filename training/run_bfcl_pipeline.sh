@@ -29,7 +29,7 @@ set -euo pipefail
 
 TRAINING_DIR="$(cd "$(dirname "$0")" && pwd)"
 DATA_DIR="$TRAINING_DIR/data/bfcl"
-AUX_DATA_DIR="$TRAINING_DIR/data/aux_sft"
+AUX_DATA_DIR="$TRAINING_DIR/data/aux"
 # R15-fix: Export so config.py and Python scripts use the same path
 export PRISM_AUX_DATA_DIR="$AUX_DATA_DIR"
 OUTPUT_DIR="$TRAINING_DIR/output/bfcl-32b"
