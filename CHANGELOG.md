@@ -2,7 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
-## <a name="1200"></a>[12.0.0] - 2026-04-23 — 💳 Unified Billing & Agent Skill Ecosystem
+## <a name="1250"></a>[12.5.0] - 2026-04-28 — 🚀 Advanced Operations (10 New MCP Tools)
+
+> **The Enterprise Tooling Release.** Prism v12.5.0 ships 10 new MCP tools spanning team collaboration, GitHub automation, cloud runtime, and extensibility — completing the v12.3–v12.5 roadmap arc. Total tool count: **40+** across 10 categories.
+
+### 🔐 v12.3 — Team Collaboration & RBAC (2 tools)
+
+- **`manage_rbac`** — Full RBAC lifecycle: create custom roles, assign/revoke per project, check permissions, list members, delete roles. SQLite-persisted with admin/editor/viewer presets.
+- **`encrypted_sync`** — Peer-to-peer encrypted memory sync: register peers, push AES-256-GCM encrypted sessions, query sync status. SHA-256 integrity verification.
+
+### 🐙 v12.4 — GitHub Integration & Automation (4 tools)
+
+- **`github_sync`** — Configure repo-level sync, create GitHub Issues from memory entries, track PR status. REST API v3 integration.
+- **`generate_changelog`** — Auto-generate changelogs from session ledger history in Markdown or JSON. Supports date range filtering and custom templates.
+- **`generate_ci_pipeline`** — Generate GitHub Actions workflows from preset templates (node-test, npm-publish, python-test, docker-build). List presets or render specific configs.
+- **`memory_attestation`** — Cryptographic attestation reports with SHA-256 Merkle tree proofs. Generates integrity reports for auditing and tamper detection.
+
+### ☁️ v12.5 — Cloud Runtime & Extensibility (4 tools)
+
+- **`manage_plugins`** — Plugin lifecycle management: discover marketplace, load/unload plugins, validate manifests, list installed. Supports custom tool registration hooks.
+- **`synalux_proxy`** — Synalux Cloud thin-client proxy: configure endpoints, health check, query feature gates, route tier-gated requests with exponential backoff.
+- **`cloud_delegate`** — Cloud-delegated compute tasks: create embedding/training/inference jobs, query status, list history. Memory injection for remote agents.
+- **`vm_quota`** — Tier-based VM quota enforcement: check VM/run quotas, view usage summaries, set tier limits. Per-tier CPU/RAM/storage/concurrency caps.
+
+### 🧪 Testing
+
+- **106 new handler tests** in `tests/tools/v12-handlers.test.ts`:
+  - Happy paths for every action across all 10 handlers
+  - Edge cases: missing required arguments, unknown actions
+  - MCP response format compliance (content array, text type)
+  - Tool definition schema validation (10 tools × 5 assertions)
+- **Total: 221/221 tests passing** across unit, concurrent, shell, mock, stress, and v12 handler suites
+
+### 📚 Documentation
+
+- **README** — Added v12.5 Advanced Operations collapsible section with categorized tool table. Updated tool count (30+ → 40+), skill count (54 → 64), test count (115 → 221). Added architecture diagram.
+- **Architecture Diagram** — `docs/v12_5_advanced_operations.png` showing v12.3–v12.5 tool hierarchy.
+
+### Engineering
+- 6 files changed: `v12Handlers.ts`, `sessionMemoryDefinitions.ts`, `tools/index.ts`, `server.ts`, `README.md`, `v12-handlers.test.ts`
+- TypeScript: clean, zero errors (`tsc --noEmit`)
+- All handlers use async storage abstraction (`getStorage()`) with proper `{ project }` parameterization
+
+---
+
 
 > **The Platform Unification Release.** Prism v12.0.0 aligns Prism and Synalux into a single, unified billing architecture with identical tier pricing, adds 54 production-ready agent skills, and introduces a 14-day free trial across all paid tiers.
 
