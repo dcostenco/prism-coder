@@ -42,3 +42,12 @@
     - [ ] GitHub Actions deployment pipeline with test suite integration
     - [ ] Thin-client proxy to Synalux Cloud
     - [ ] Tier-gated VM quotas (apps inherit Synalux subscription tiers)
+- [ ] **v15.0.0** - SCM CI/CD Workflow Engine (GitHub Migration Parity)
+    - [ ] Workflow trigger system (`on.push.paths`, `on.pull_request`, `on.schedule`, `workflow_dispatch`)
+    - [ ] Path-based file change detection for selective pipeline runs
+    - [ ] Built-in workflow runner with Docker/container isolation
+    - [ ] Artifact storage and caching between workflow steps
+    - [ ] i18n auto-translation pipeline (triggered by README.md changes)
+    - [ ] Status checks and branch protection rules
+    - [ ] Webhook delivery (push, PR, release events)
+    - [ ] 100% GitHub Actions YAML compatibility layer

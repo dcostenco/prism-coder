@@ -105,6 +105,107 @@ export interface DoraMetrics {
     team_size: number;
 }
 
+// ── Workflow Triggers (v15 — GitHub Migration Parity) ──────
+// These types define the CI/CD workflow engine that provides
+// 100% compatibility with GitHub Actions YAML workflows.
+
+export type WorkflowTriggerEvent =
+    | 'push'
+    | 'pull_request'
+    | 'pull_request_review'
+    | 'release'
+    | 'schedule'
+    | 'workflow_dispatch'
+    | 'repository_dispatch';
+
+export interface WorkflowPathFilter {
+    /** Glob patterns that MUST match changed files to trigger */
+    paths?: string[];
+    /** Glob patterns that exclude files from triggering */
+    paths_ignore?: string[];
+}
+
+export interface WorkflowTrigger {
+    event: WorkflowTriggerEvent;
+    /** Branch filters (e.g., ['main', 'release/*']) */
+    branches?: string[];
+    branches_ignore?: string[];
+    /** Path-based filters for selective pipeline runs */
+    path_filter?: WorkflowPathFilter;
+    /** Cron expression for schedule triggers */
+    cron?: string;
+    /** Manual dispatch inputs */
+    inputs?: Record<string, {
+        description: string;
+        required: boolean;
+        default?: string;
+        type: 'string' | 'boolean' | 'number' | 'choice';
+        options?: string[];
+    }>;
+}
+
+export interface WorkflowStep {
+    name: string;
+    /** Action reference (e.g., 'actions/checkout@v4') or 'run' */
+    uses?: string;
+    run?: string;
+    with?: Record<string, string | number | boolean>;
+    env?: Record<string, string>;
+    /** Conditional execution expression */
+    if?: string;
+    /** Timeout in minutes */
+    timeout_minutes?: number;
+}
+
+export interface WorkflowJob {
+    name: string;
+    runs_on: string;
+    needs?: string[];
+    steps: WorkflowStep[];
+    env?: Record<string, string>;
+    /** Concurrency group for preventing duplicate runs */
+    concurrency?: {
+        group: string;
+        cancel_in_progress: boolean;
+    };
+    permissions?: Record<string, 'read' | 'write' | 'none'>;
+}
+
+export interface WorkflowConfig {
+    name: string;
+    on: WorkflowTrigger[];
+    jobs: Record<string, WorkflowJob>;
+    /** Global environment variables */
+    env?: Record<string, string>;
+}
+
+export type WorkflowRunStatus =
+    | 'queued'
+    | 'in_progress'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'timed_out';
+
+export interface WorkflowRun {
+    id: string;
+    workflow_name: string;
+    status: WorkflowRunStatus;
+    conclusion?: 'success' | 'failure' | 'cancelled' | 'skipped';
+    /** Trigger event that started this run */
+    trigger_event: WorkflowTriggerEvent;
+    /** Files that changed and triggered this run */
+    changed_files?: string[];
+    /** Commit SHA that triggered the run */
+    head_sha: string;
+    /** Branch name */
+    head_branch: string;
+    started_at: string;
+    completed_at?: string;
+    /** Artifact output paths */
+    artifacts?: { name: string; size_bytes: number; url: string }[];
+}
+
 // ── SCM Tiers ───────────────────────────────────────────────
 
 export type ScmTier = 'free' | 'standard' | 'advanced' | 'enterprise';

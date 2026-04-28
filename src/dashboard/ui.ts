@@ -579,6 +579,120 @@ export function renderDashboardHTML(version: string): string {
       margin-top: 1rem;
       display: none;
     }
+
+    /* ─── VM Lab Panel (v14.0) ─── */
+    .vm-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; }
+    .vm-card {
+      background: rgba(15,23,42,0.6); border: 1px solid var(--border-glass);
+      border-radius: var(--radius-sm); padding: 1rem; cursor: pointer;
+      transition: all 0.25s ease; position: relative; overflow: hidden;
+    }
+    .vm-card:hover { border-color: var(--accent-purple); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(139,92,246,0.15); }
+    .vm-card .vm-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+    .vm-card .vm-name { font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem; }
+    .vm-card .vm-specs { font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); }
+    .vm-card .vm-tier {
+      position: absolute; top: 0.5rem; right: 0.5rem;
+      font-size: 0.6rem; padding: 0.1rem 0.4rem; border-radius: 4px;
+      font-weight: 600; text-transform: uppercase;
+    }
+    .vm-tier.free { background: rgba(16,185,129,0.2); color: var(--accent-green); }
+    .vm-tier.standard { background: rgba(59,130,246,0.2); color: var(--accent-blue); }
+    .vm-tier.advanced { background: rgba(139,92,246,0.2); color: var(--accent-purple); }
+    .vm-tier.enterprise { background: rgba(245,158,11,0.2); color: var(--accent-amber); }
+    .vm-status-list { margin-top: 1.25rem; }
+    .vm-status-row {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.5rem 0.75rem; background: rgba(15,23,42,0.5);
+      border-radius: var(--radius-sm); margin-bottom: 0.5rem;
+      font-size: 0.82rem;
+    }
+    .vm-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .vm-status-dot.running { background: var(--accent-green); animation: pulseDot 2s ease-in-out infinite; }
+    .vm-status-dot.stopped { background: var(--text-muted); }
+    .vm-status-dot.paused { background: var(--accent-amber); }
+
+    /* ─── Marketplace Panel (v14.0) ─── */
+    .mp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .mp-card {
+      background: rgba(15,23,42,0.6); border: 1px solid var(--border-glass);
+      border-radius: var(--radius-sm); padding: 1.25rem;
+      transition: all 0.25s ease;
+    }
+    .mp-card:hover { border-color: var(--accent-cyan); box-shadow: 0 6px 20px rgba(6,182,212,0.1); }
+    .mp-card .mp-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem; }
+    .mp-card .mp-name { font-weight: 600; font-size: 0.95rem; }
+    .mp-card .mp-author { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem; }
+    .mp-card .mp-desc { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 0.75rem; }
+    .mp-price-badge {
+      font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.5rem;
+      border-radius: 4px; flex-shrink: 0;
+    }
+    .mp-price-badge.free { background: rgba(16,185,129,0.2); color: var(--accent-green); }
+    .mp-price-badge.paid { background: rgba(245,158,11,0.2); color: var(--accent-amber); }
+    .mp-install-btn {
+      width: 100%; padding: 0.45rem; font-size: 0.8rem; font-weight: 600;
+      border-radius: var(--radius-sm); border: 1px solid var(--border-glass);
+      background: rgba(139,92,246,0.1); color: var(--accent-purple);
+      cursor: pointer; transition: all 0.2s;
+    }
+    .mp-install-btn:hover { background: rgba(139,92,246,0.25); border-color: var(--accent-purple); }
+    .mp-filters {
+      display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;
+    }
+    .mp-filter-chip {
+      padding: 0.3rem 0.75rem; font-size: 0.78rem; border-radius: 999px;
+      border: 1px solid var(--border-glass); background: none;
+      color: var(--text-secondary); cursor: pointer; transition: all 0.2s;
+    }
+    .mp-filter-chip.active, .mp-filter-chip:hover {
+      background: rgba(139,92,246,0.15); border-color: var(--accent-purple); color: var(--accent-purple);
+    }
+
+    /* ─── Compliance Panel (v14.0) ─── */
+    .compliance-layers {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+    .compliance-layer {
+      background: rgba(15,23,42,0.6); border: 1px solid var(--border-glass);
+      border-radius: var(--radius-sm); padding: 0.85rem; text-align: center;
+    }
+    .compliance-layer .cl-icon { font-size: 1.5rem; margin-bottom: 0.35rem; }
+    .compliance-layer .cl-name { font-size: 0.78rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .compliance-layer .cl-status {
+      font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+      padding: 0.1rem 0.5rem; border-radius: 4px; display: inline-block;
+    }
+    .cl-status.active { background: rgba(16,185,129,0.2); color: var(--accent-green); }
+    .cl-status.warning { background: rgba(245,158,11,0.2); color: var(--accent-amber); }
+    .cl-status.error { background: rgba(244,63,94,0.2); color: var(--accent-rose); }
+    .country-badges {
+      display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;
+    }
+    .country-badge {
+      font-size: 0.72rem; padding: 0.2rem 0.6rem; border-radius: 6px;
+      font-weight: 600; font-family: var(--font-mono);
+    }
+    .country-badge.embargoed { background: rgba(244,63,94,0.15); color: var(--accent-rose); border: 1px solid rgba(244,63,94,0.3); }
+    .country-badge.restricted { background: rgba(245,158,11,0.12); color: var(--accent-amber); border: 1px solid rgba(245,158,11,0.25); }
+    .audit-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    .audit-table th {
+      text-align: left; padding: 0.5rem 0.75rem;
+      font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--text-muted); border-bottom: 1px solid var(--border-glass);
+    }
+    .audit-table td {
+      padding: 0.5rem 0.75rem; color: var(--text-secondary);
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+    .audit-severity {
+      font-size: 0.65rem; font-weight: 600; padding: 0.1rem 0.4rem;
+      border-radius: 3px; text-transform: uppercase;
+    }
+    .audit-severity.high { background: rgba(244,63,94,0.2); color: var(--accent-rose); }
+    .audit-severity.medium { background: rgba(245,158,11,0.2); color: var(--accent-amber); }
+    .audit-severity.low { background: rgba(16,185,129,0.2); color: var(--accent-green); }
   </style>
 </head>
 <body>
@@ -604,6 +718,9 @@ export function renderDashboardHTML(version: string): string {
       <button class="s-tab active" id="mtab-project" onclick="switchMainTab('project')" style="font-size: 1rem;">📁 Project View</button>
       <button class="s-tab" id="mtab-search" onclick="switchMainTab('search')" style="font-size: 1rem;">🔍 Vector Search</button>
       <button class="s-tab" id="mtab-factory" onclick="switchMainTab('factory')" style="font-size: 1rem;">🏭 Factory</button>
+      <button class="s-tab" id="mtab-vm" onclick="switchMainTab('vm')" style="font-size: 1rem;">🖥️ VM Lab</button>
+      <button class="s-tab" id="mtab-marketplace" onclick="switchMainTab('marketplace')" style="font-size: 1rem;">🛒 Marketplace</button>
+      <button class="s-tab" id="mtab-compliance" onclick="switchMainTab('compliance')" style="font-size: 1rem;">🛡️ Compliance</button>
     </div>
 
     <div id="welcome" class="empty">
@@ -961,6 +1078,254 @@ export function renderDashboardHTML(version: string): string {
           <span id="factoryCount" style="font-size:0.75rem;color:var(--text-muted);margin-left:auto"></span>
         </div>
         <div id="factoryList" style="font-size:0.85rem;color:var(--text-muted)">Loading pipelines...</div>
+      </div>
+    </div>
+
+    <!-- VM Lab Panel (v14.0) -->
+    <div id="vm-content" class="fade-in" style="display:none; margin: 0 auto; max-width: 1100px; padding: 0 1rem;">
+      <div class="card">
+        <div class="card-title">
+          <span class="dot" style="background:var(--accent-blue)"></span>
+          Device Template Gallery 🖥️
+          <span style="margin-left:auto;font-size:0.72rem;color:var(--text-muted)">14 templates</span>
+        </div>
+        <div class="vm-gallery">
+          <div class="vm-card"><span class="vm-tier free">FREE</span><div class="vm-icon">🐧</div><div class="vm-name">Ubuntu 24.04 LTS</div><div class="vm-specs">4 cores · 8 GB · 64 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier free">FREE</span><div class="vm-icon">🐧</div><div class="vm-name">Debian 12 Minimal</div><div class="vm-specs">2 cores · 4 GB · 32 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier standard">STD</span><div class="vm-icon">🪣</div><div class="vm-name">Windows 11 Dev</div><div class="vm-specs">4 cores · 16 GB · 128 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier standard">STD</span><div class="vm-icon">🪣</div><div class="vm-name">Windows Server 2022</div><div class="vm-specs">8 cores · 32 GB · 256 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier advanced">ADV</span><div class="vm-icon">📱</div><div class="vm-name">iOS 18 Simulator</div><div class="vm-specs">4 cores · 8 GB · 64 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier advanced">ADV</span><div class="vm-icon">📱</div><div class="vm-name">iPadOS 18</div><div class="vm-specs">4 cores · 8 GB · 64 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier advanced">ADV</span><div class="vm-icon">⌚</div><div class="vm-name">watchOS 11</div><div class="vm-specs">2 cores · 2 GB · 16 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier standard">STD</span><div class="vm-icon">🤖</div><div class="vm-name">Android 15</div><div class="vm-specs">4 cores · 8 GB · 64 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier standard">STD</span><div class="vm-icon">⌚</div><div class="vm-name">Wear OS 5</div><div class="vm-specs">2 cores · 2 GB · 16 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier advanced">ADV</span><div class="vm-icon">🌎</div><div class="vm-name">macOS Sequoia</div><div class="vm-specs">8 cores · 16 GB · 256 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier enterprise">ENT</span><div class="vm-icon">🥽</div><div class="vm-name">visionOS 2</div><div class="vm-specs">8 cores · 16 GB · 128 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier enterprise">ENT</span><div class="vm-icon">🥽</div><div class="vm-name">Meta Quest 3</div><div class="vm-specs">8 cores · 12 GB · 128 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier free">FREE</span><div class="vm-icon">🐧</div><div class="vm-name">Alpine Linux</div><div class="vm-specs">1 core · 1 GB · 8 GB SSD</div></div>
+          <div class="vm-card"><span class="vm-tier standard">STD</span><div class="vm-icon">🐧</div><div class="vm-name">Fedora 41</div><div class="vm-specs">4 cores · 8 GB · 64 GB SSD</div></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1.25rem">
+        <div class="card-title">
+          <span class="dot" style="background:var(--accent-green)"></span>
+          Active VMs
+          <span style="margin-left:auto;font-size:0.72rem;color:var(--text-muted)">0 running</span>
+        </div>
+        <div class="vm-status-list">
+          <div style="text-align:center;padding:2rem;color:var(--text-muted);font-size:0.85rem">
+            <div style="font-size:2rem;margin-bottom:0.5rem">💤</div>
+            No active VMs. Click a template above to create one.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Marketplace Panel (v14.0) -->
+    <div id="marketplace-content" class="fade-in" style="display:none; margin: 0 auto; max-width: 1100px; padding: 0 1rem;">
+      <div class="card">
+        <div class="card-title">
+          <span class="dot" style="background:var(--accent-cyan)"></span>
+          Component Marketplace 🛒
+          <button style="margin-left:auto;background:var(--gradient-hero);color:white;border:none;padding:0.35rem 0.85rem;border-radius:var(--radius-sm);font-size:0.78rem;font-weight:600;cursor:pointer">+ Publish Component</button>
+        </div>
+
+        <div style="display:flex;gap:0.75rem;margin-bottom:1rem;align-items:center">
+          <input type="text" class="input-modern" style="flex:1;padding:0.6rem 1rem;font-size:0.9rem" placeholder="Search components, shaders, UI kits...">
+        </div>
+
+        <div class="mp-filters">
+          <button class="mp-filter-chip active">All</button>
+          <button class="mp-filter-chip">🎨 UI</button>
+          <button class="mp-filter-chip">⚙️ Logic</button>
+          <button class="mp-filter-chip">🎧 Audio</button>
+          <button class="mp-filter-chip">✨ Shader</button>
+          <button class="mp-filter-chip">📄 Template</button>
+          <button class="mp-filter-chip">🎮 Game</button>
+          <button class="mp-filter-chip">🤖 AI/ML</button>
+        </div>
+
+        <div class="mp-grid">
+          <div class="mp-card">
+            <div class="mp-header">
+              <div><div class="mp-name">🎨 Glassmorphism UI Kit</div><div class="mp-author">by @studioflow</div></div>
+              <span class="mp-price-badge free">FREE</span>
+            </div>
+            <div class="mp-desc">Premium glass-effect components with dark/light mode support. 24 components included.</div>
+            <button class="mp-install-btn">⬇ Install</button>
+          </div>
+          <div class="mp-card">
+            <div class="mp-header">
+              <div><div class="mp-name">✨ PBR Shader Pack</div><div class="mp-author">by @renderlab</div></div>
+              <span class="mp-price-badge paid">$14.99</span>
+            </div>
+            <div class="mp-desc">Physically-based rendering shaders for Metal, Vulkan, and WebGPU. Includes toon, cel, and water effects.</div>
+            <button class="mp-install-btn">🛒 Purchase</button>
+          </div>
+          <div class="mp-card">
+            <div class="mp-header">
+              <div><div class="mp-name">🎮 Netcode Toolkit</div><div class="mp-author">by @multiplayerlabs</div></div>
+              <span class="mp-price-badge paid">$29.99</span>
+            </div>
+            <div class="mp-desc">Client-side prediction, server reconciliation, and lag compensation for multiplayer games.</div>
+            <button class="mp-install-btn">🛒 Purchase</button>
+          </div>
+          <div class="mp-card">
+            <div class="mp-header">
+              <div><div class="mp-name">🤖 Edge AI Runtime</div><div class="mp-author">by @inferenceio</div></div>
+              <span class="mp-price-badge free">FREE</span>
+            </div>
+            <div class="mp-desc">On-device ML inference with CoreML, ONNX, and TFLite. Includes pose estimation and object detection models.</div>
+            <button class="mp-install-btn">⬇ Install</button>
+          </div>
+          <div class="mp-card">
+            <div class="mp-header">
+              <div><div class="mp-name">🎧 Spatial Audio Engine</div><div class="mp-author">by @soundscapevr</div></div>
+              <span class="mp-price-badge paid">$19.99</span>
+            </div>
+            <div class="mp-desc">HRTF-based 3D audio for VR/AR. Supports ambisonics, reverb zones, and occlusion.</div>
+            <button class="mp-install-btn">🛒 Purchase</button>
+          </div>
+          <div class="mp-card">
+            <div class="mp-header">
+              <div><div class="mp-name">📄 SaaS Starter Kit</div><div class="mp-author">by @launchfast</div></div>
+              <span class="mp-price-badge free">FREE</span>
+            </div>
+            <div class="mp-desc">Full-stack SaaS boilerplate with auth, billing, dashboard, and API. Next.js + Supabase.</div>
+            <button class="mp-install-btn">⬇ Install</button>
+          </div>
+        </div>
+
+        <div style="margin-top:1.25rem;padding:0.85rem;border-radius:var(--radius-sm);background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);font-size:0.78rem;color:var(--text-secondary)">
+          💰 <strong>Revenue Sharing:</strong> Earn 70% of sales on paid components. Payouts via Synalux every 30 days.
+        </div>
+      </div>
+    </div>
+
+    <!-- Compliance Panel (v14.0) -->
+    <div id="compliance-content" class="fade-in" style="display:none; margin: 0 auto; max-width: 1100px; padding: 0 1rem;">
+      <div class="card">
+        <div class="card-title">
+          <span class="dot" style="background:var(--accent-green)"></span>
+          Enforcement Pipeline — 6 Layers 🛡️
+        </div>
+        <div class="compliance-layers">
+          <div class="compliance-layer">
+            <div class="cl-icon">📋</div>
+            <div class="cl-name">Registration Gate</div>
+            <div class="cl-status active">Active</div>
+          </div>
+          <div class="compliance-layer">
+            <div class="cl-icon">🌐</div>
+            <div class="cl-name">Geofence Gate</div>
+            <div class="cl-status active">Active</div>
+          </div>
+          <div class="compliance-layer">
+            <div class="cl-icon">🧠</div>
+            <div class="cl-name">Use-Case AI</div>
+            <div class="cl-status active">Active</div>
+          </div>
+          <div class="compliance-layer">
+            <div class="cl-icon">📊</div>
+            <div class="cl-name">Runtime Monitor</div>
+            <div class="cl-status active">Active</div>
+          </div>
+          <div class="compliance-layer">
+            <div class="cl-icon">🚨</div>
+            <div class="cl-name">Kill Switch</div>
+            <div class="cl-status active">Armed</div>
+          </div>
+          <div class="compliance-layer">
+            <div class="cl-icon">🔗</div>
+            <div class="cl-name">Audit Trail</div>
+            <div class="cl-status active">Hash-Chain</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1.25rem">
+        <div class="card-title">
+          <span class="dot" style="background:var(--accent-rose)"></span>
+          Embargoed Countries — Hard-Blocked
+        </div>
+        <div class="country-badges">
+          <span class="country-badge embargoed">⛔ BY — Belarus</span>
+          <span class="country-badge embargoed">⛔ CU — Cuba</span>
+          <span class="country-badge embargoed">⛔ IR — Iran</span>
+          <span class="country-badge embargoed">⛔ KP — DPRK</span>
+          <span class="country-badge embargoed">⛔ SY — Syria</span>
+        </div>
+
+        <div class="card-title" style="margin-top:1rem">
+          <span class="dot" style="background:var(--accent-amber)"></span>
+          Restricted — Civilian Only
+        </div>
+        <div class="country-badges">
+          <span class="country-badge restricted">🟡 RU — Russia</span>
+          <span class="country-badge restricted">🟡 CN — China</span>
+          <span class="country-badge restricted">🟡 VE</span>
+          <span class="country-badge restricted">🟡 MM</span>
+          <span class="country-badge restricted">🟡 SD</span>
+          <span class="country-badge restricted">🟡 SS</span>
+          <span class="country-badge restricted">🟡 LY</span>
+          <span class="country-badge restricted">🟡 SO</span>
+          <span class="country-badge restricted">🟡 YE</span>
+          <span class="country-badge restricted">🟡 ZW</span>
+          <span class="country-badge restricted">🟡 CD</span>
+          <span class="country-badge restricted">🟡 CF</span>
+          <span class="country-badge restricted">🟡 IQ</span>
+          <span class="country-badge restricted">🟡 LB</span>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1.25rem">
+        <div class="card-title">
+          <span class="dot" style="background:var(--accent-purple)"></span>
+          Recent Audit Events 📜
+        </div>
+        <table class="audit-table">
+          <thead>
+            <tr><th>Time</th><th>Event</th><th>Severity</th><th>Details</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-family:var(--font-mono);font-size:0.72rem">2 min ago</td>
+              <td>Registration screened</td>
+              <td><span class="audit-severity low">Low</span></td>
+              <td style="color:var(--text-muted)">KYC passed — US-based individual</td>
+            </tr>
+            <tr>
+              <td style="font-family:var(--font-mono);font-size:0.72rem">18 min ago</td>
+              <td>Use-case classified</td>
+              <td><span class="audit-severity low">Low</span></td>
+              <td style="color:var(--text-muted)">Project "pet-tracker" — consumer app (2% risk)</td>
+            </tr>
+            <tr>
+              <td style="font-family:var(--font-mono);font-size:0.72rem">1 hr ago</td>
+              <td>Geofence mismatch</td>
+              <td><span class="audit-severity medium">Medium</span></td>
+              <td style="color:var(--text-muted)">IP: DE, Billing: FR — flagged for human review</td>
+            </tr>
+            <tr>
+              <td style="font-family:var(--font-mono);font-size:0.72rem">4 hr ago</td>
+              <td>VPN detected</td>
+              <td><span class="audit-severity medium">Medium</span></td>
+              <td style="color:var(--text-muted)">NordVPN exit node — billing triangulation passed</td>
+            </tr>
+            <tr>
+              <td style="font-family:var(--font-mono);font-size:0.72rem">1 day ago</td>
+              <td>Sanctions check failed</td>
+              <td><span class="audit-severity high">High</span></td>
+              <td style="color:var(--text-muted)">OFAC SDN match — registration blocked</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:1.25rem;padding:0.85rem;border-radius:var(--radius-sm);background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);font-size:0.78rem;color:var(--text-secondary)">
+        ✅ <strong>All 6 enforcement layers are active.</strong> Ethics enforcement is NOT tier-gated — applies equally to Free, Standard, Advanced, and Enterprise.
+        <a href="/ethics" style="color:var(--accent-purple);margin-left:0.5rem">View full policy →</a>
       </div>
     </div>
 
@@ -1421,9 +1786,11 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
 // Fix 1: track whether a project has been successfully loaded
 var projectLoaded = false;
 function switchMainTab(tabId) {
-    document.getElementById('mtab-project').classList.toggle('active', tabId === 'project');
-    document.getElementById('mtab-search').classList.toggle('active', tabId === 'search');
-    document.getElementById('mtab-factory').classList.toggle('active', tabId === 'factory');
+    var tabs = ['project', 'search', 'factory', 'vm', 'marketplace', 'compliance'];
+    tabs.forEach(function(t) {
+        var btn = document.getElementById('mtab-' + t);
+        if (btn) btn.classList.toggle('active', tabId === t);
+    });
     // Fix 2: restore correct visibility when switching back to project tab;
     // setting display='' would let CSS display:none win, hiding loaded content.
     // Also hide welcome div when on non-project tabs so it doesn't bleed through.
@@ -1436,6 +1803,9 @@ function switchMainTab(tabId) {
     }
     document.getElementById('search-content').style.display = tabId === 'search' ? 'block' : 'none';
     document.getElementById('factory-content').style.display = tabId === 'factory' ? 'block' : 'none';
+    document.getElementById('vm-content').style.display = tabId === 'vm' ? 'block' : 'none';
+    document.getElementById('marketplace-content').style.display = tabId === 'marketplace' ? 'block' : 'none';
+    document.getElementById('compliance-content').style.display = tabId === 'compliance' ? 'block' : 'none';
     if (tabId === 'search') {
         document.getElementById('searchInput').focus();
     }
