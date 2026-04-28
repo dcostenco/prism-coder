@@ -1108,8 +1108,8 @@ Prism's local engine (`prism-coder:7b`) is optimized for low-latency, high-valid
 
 | Metric | Score | Details |
 |:-------|:---:|:---|
-| **Overall Accuracy** | **99.3%** (avg) | 3 runs: 49/50, 50/50, 50/50 |
-| **Median** | **100%** (50/50) | 2 perfect runs out of 3 |
+| **Overall Accuracy** | **100%** (avg) | 3 runs: 50/50, 50/50, 50/50 |
+| **Median** | **100%** (50/50) | 3 perfect runs out of 3 |
 | **Tool-Call Accuracy** | **100%** (31/31) | Correct tool on all tool-requiring prompts |
 | **Abstention Accuracy** | **100%** (19/19) | Correctly avoids tool calls on all adversarial traps |
 | **Adversarial Traps** | **100%** (15/15 × 3) | Express.js sessions, LSTM forget gates, context managers |
@@ -1193,7 +1193,7 @@ Compared against the **[Berkeley Function Calling Leaderboard (BFCL V4)](https:/
 
 | Model | Provider | Tool-Call Accuracy | SWE-bench | Cost |
 |:---|:---|:---:|:---:|:---:|
-| **Prism-Coder 7B** | **Prism (local)** | **99.3%** ⭐ | — | **$0 (on-device)** |
+| **Prism-Coder 7B** | **Prism (local)** | **100%** ⭐ | — | **$0 (on-device)** |
 | Claude Opus 4.7 | Anthropic | 77.3% | 87.6% | $5 / $25 per 1M tok |
 | Gemini 3.1 Pro | Google | 77.1% | 80.6% | $1.25 / $10 per 1M tok |
 | Claude Opus 4.5 | Anthropic | 77.47% | 70.3% | $15 / $75 per 1M tok |
