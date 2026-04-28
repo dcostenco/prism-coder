@@ -278,7 +278,7 @@ def train_dpo(model_path: str, data_dir: str, adapter_path: str,
         "--save-every", "50",
         "--grad-checkpoint",
         "--mask-prompt",  # Loss only on completion, not prompt
-        "--max-seq-length", "2048",  # 8192 OOMs on 48GB with 32B Q4
+        "--max-seq-length", "4096",  # 8192 OOMs on 48GB with 32B Q4
         "--grad-accumulation-steps", "16",
         "--clear-cache-threshold", "0.5",
         "-c", config_path,
@@ -344,12 +344,9 @@ def main():
     # Step 1: Generate pairs
     print(f"\n📊 Generating DPO preference pairs...")
     generate_dpo_pairs(args.data, dpo_data_dir, max_pairs=args.max_pairs)
-
-    print(f"\n🧹 Filtering sequences longer than 2000 tokens to prevent NaN loss...")
-    import subprocess
-    subprocess.run(["python", "filter_long_seqs.py"], cwd=str(Path(__file__).parent), check=True, env={"PRISM_DATA_DIR": dpo_data_dir, "PRISM_DATA_OUT_DIR": dpo_data_dir, **os.environ})
-
-    if args.generate_only:        print("\n✅ Pairs generated. Use --model to train.")
+    
+    if args.generate_only:
+        print("\n✅ Pairs generated. Use --model to train.")
         return
     
     # Step 2: Train
