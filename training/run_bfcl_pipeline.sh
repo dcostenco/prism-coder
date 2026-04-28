@@ -353,8 +353,12 @@ echo ""
 
 cd "$TRAINING_DIR"
 
+FINAL_DIR="$SOUPED_MODEL"
+[ ! -d "$FINAL_DIR" ] && FINAL_DIR="$GRPO_FUSED"
+[ ! -d "$FINAL_DIR" ] && FINAL_DIR="$SFT_FUSED"
+
 echo "Running BFCL V4 evaluation..."
-python bfcl_eval.py --model "$BFCL_MODEL" 2>&1 | tee "$OUTPUT_DIR/eval_results.log"
+python bfcl_eval.py --model "$FINAL_DIR" 2>&1 | tee "$OUTPUT_DIR/eval_results.log"
 
 echo ""
 echo "Results saved to: $OUTPUT_DIR/eval_results.log"

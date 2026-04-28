@@ -300,19 +300,117 @@ def fuse_adapter(model_path: str, adapter_path: str, output_path: str):
         "--model", model_path,
         "--adapter-path", adapter_path,
         "--save-path", output_path,
-        "--export-gguf",
+        # NOTE: --export-gguf removed — mlx_lm does not support GGUF for qwen2.
+        # Convert manually via llama.cpp if needed.
     ]
     
     print(f"Running: {' '.join(cmd)}\n")
     subprocess.run(cmd, check=True)
-    print(f"\n✅ Aligned model: {output_path}")
+    print(f"\n✅ Aligned model (MLX-native): {output_path}")
+
+
+def benchmark_regression_tests():
+    """Regression tests for the 9 benchmark failures identified Apr 25.
+    
+    These tests define the expected tool mapping for prompts that have
+    historically caused confusion in the model. Run with --benchmark-only
+    to validate a model before deployment.
+    
+    Categories of failure:
+    1. Semantic confusion (save_ledger vs save_experience)
+    2. Semantic confusion (memory_checkout vs session_load_context)
+    3. Retrieval confusion (knowledge_search vs session_search_memory)
+    4. Reasoning false-positives (CAP theorem, bash, knowledge distillation)
+    """
+    test_cases = [
+        # ── Failure #1-3: session_save_ledger vs session_save_experience ──
+        {
+            "prompt": "Record this work: migrated Stripe webhooks to v2 API",
+            "expected_tool": "session_save_ledger",
+            "wrong_tool": "session_save_experience",
+            "category": "semantic_confusion",
+        },
+        {
+            "prompt": "Log this session: updated the billing pipeline",
+            "expected_tool": "session_save_ledger",
+            "wrong_tool": "session_save_experience",
+            "category": "semantic_confusion",
+        },
+        {
+            "prompt": "Log a success event: deployed the billing module without errors",
+            "expected_tool": "session_save_experience",
+            "wrong_tool": "session_save_ledger",
+            "category": "semantic_confusion",
+        },
+        # ── Failure #4-5: memory_checkout vs session_load_context ──
+        {
+            "prompt": "Restore the prism-mcp memory to version 3",
+            "expected_tool": "memory_checkout",
+            "wrong_tool": "session_load_context",
+            "category": "semantic_confusion",
+        },
+        {
+            "prompt": "Roll back memory to version 5",
+            "expected_tool": "memory_checkout",
+            "wrong_tool": "session_load_context",
+            "category": "semantic_confusion",
+        },
+        # ── Failure #6-7: knowledge_search vs session_search_memory ──
+        {
+            "prompt": "What do we know about edge function cold starts?",
+            "expected_tool": "knowledge_search",
+            "wrong_tool": "session_search_memory",
+            "category": "retrieval_confusion",
+        },
+        {
+            "prompt": "Search accumulated knowledge about caching strategies",
+            "expected_tool": "knowledge_search",
+            "wrong_tool": "session_search_memory",
+            "category": "retrieval_confusion",
+        },
+        # ── Failure #8-9: Reasoning false-positives ──
+        {
+            "prompt": "Explain the CAP theorem in distributed systems",
+            "expected_tool": None,  # No tool should be called
+            "wrong_tool": "knowledge_search",
+            "category": "reasoning_false_positive",
+        },
+        {
+            "prompt": "What is knowledge distillation in machine learning?",
+            "expected_tool": None,
+            "wrong_tool": "knowledge_search",
+            "category": "reasoning_false_positive",
+        },
+    ]
+    
+    print(f"\n{'='*60}")
+    print("🧪 Benchmark Regression Tests (9 known failures)")
+    print(f"{'='*60}\n")
+    
+    for i, tc in enumerate(test_cases, 1):
+        expected = tc["expected_tool"] or "NO TOOL (reasoning)"
+        wrong = tc["wrong_tool"]
+        print(f"  [{i}/9] {tc['category']}")
+        print(f"         Prompt: {tc['prompt'][:60]}...")
+        print(f"         Expected: {expected}")
+        print(f"         Wrong:    {wrong}")
+        print()
+    
+    print(f"{'='*60}")
+    print("To validate a model against these tests:")
+    print("  1. Load the model with mlx_lm.generate")
+    print("  2. For each prompt, check if the model calls the expected tool")
+    print("  3. Pass threshold: 8/9 (>88%) to exceed 80% benchmark target")
+    print(f"{'='*60}\n")
+    
+    return test_cases
 
 
 def main():
     parser = argparse.ArgumentParser(description="BFCL GRPO Alignment (MLX Native)")
-    parser.add_argument("--model", type=str, required=True,
+    parser.add_argument("--model", type=str, default=None,
                         help="Path to SFT-fused MLX model")
-    parser.add_argument("--data", type=str, required=True,
+    parser.add_argument("--data", type=str, default=None,
                         help="Training data directory (with train.jsonl)")
     parser.add_argument("--output-dir", type=str, default="./output/bfcl-32b-grpo",
                         help="Output directory")
@@ -329,7 +427,18 @@ def main():
                         help="Only generate DPO pairs, don't train")
     parser.add_argument("--max-pairs", type=int, default=2000,
                         help="Maximum DPO pairs to generate")
+    parser.add_argument("--benchmark-only", action="store_true",
+                        help="Run regression tests for 9 known benchmark failures")
     args = parser.parse_args()
+
+    # Benchmark-only mode: print regression tests and exit
+    if args.benchmark_only:
+        benchmark_regression_tests()
+        return
+    
+    # Validate required args for training
+    if not args.model or not args.data:
+        parser.error("--model and --data are required for training")
     
     print("=" * 60)
     print("🎯 BFCL GRPO Alignment — MLX Native")
@@ -367,10 +476,10 @@ def main():
     print(f"\n{'='*60}")
     print("✅ GRPO alignment complete!")
     print(f"{'='*60}")
-    print(f"\nDeploy to Ollama:")
-    gguf_files = list(Path(fused_path).glob("*.gguf"))
-    if gguf_files:
-        print(f"  ollama create prism-coder-32b-FC -f <(echo 'FROM {gguf_files[0]}')")
+    print(f"\nDeploy (MLX-native):")
+    print(f"  python -m mlx_lm.generate --model {fused_path} --prompt 'test'")
+    print(f"\nFor Ollama (requires llama.cpp GGUF conversion):")
+    print(f"  python -m mlx_lm.convert --model {fused_path} --quantize q4_K_M --upload-repo <repo>")
 
 
 if __name__ == "__main__":

@@ -6,8 +6,12 @@ def filter_file(input_path, output_path, max_len=2000):
     tokenizer = AutoTokenizer.from_pretrained("Salesforce/xLAM-2-32b-fc-r")
     kept = 0
     dropped = 0
-    with open(input_path, "r") as f_in, open(output_path, "w") as f_out:
-        for line in f_in:
+    
+    with open(input_path, "r") as f_in:
+        lines = f_in.readlines()
+        
+    with open(output_path, "w") as f_out:
+        for line in lines:
             data = json.loads(line)
             text_content = ""
             if "messages" in data:

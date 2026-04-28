@@ -581,54 +581,35 @@ def parse_all_tool_calls(response_text: str) -> list:
     return results
 
 
-def call_ollama(prompt: str, use_json_format: bool = False) -> tuple:  # R24-fix: False — JSON mode blocks XML CoT tags
-    """Call Ollama API and parse tool call response.
-    
-    R5-3: Constrained decoding via Ollama JSON format mode.
-    R5-5: KV cache via keep_alive and num_ctx configuration.
-    
-    Returns: (tool_name, tool_args, response_text, elapsed, all_calls)
-        all_calls: list of (name, args) for parallel tool evaluation
-    """
-    from config import OLLAMA_KEEP_ALIVE, OLLAMA_NUM_CTX, OLLAMA_TEMPERATURE
 
-    payload_dict = {
-        "model": MODEL,
-        "prompt": prompt,
-        "raw": True,
-        "stream": False,
-        "keep_alive": OLLAMA_KEEP_ALIVE,  # R5-5: Keep model loaded for prefix caching
-        "options": {
-            "temperature": OLLAMA_TEMPERATURE,
-            "num_predict": 512,
-            "num_ctx": OLLAMA_NUM_CTX,  # R5-5: Full context window
-        }
-    }
+MLX_MODEL_CACHE = None
+MLX_TOKENIZER_CACHE = None
+
+def call_ollama(prompt: str, use_json_format: bool = False) -> tuple:
+    global MLX_MODEL_CACHE, MLX_TOKENIZER_CACHE
+    import os, time, json, urllib.request
+    from config import OLLAMA_KEEP_ALIVE, OLLAMA_NUM_CTX, OLLAMA_TEMPERATURE
     
-    payload = json.dumps(payload_dict).encode()
-    
-    req = urllib.request.Request(OLLAMA_API, data=payload,
-                                  headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            result = json.loads(resp.read().decode())
-    except Exception as e:
-        return "ERROR", {}, str(e), 0.0, []
-    
-    response_text = result.get("response", "")
-    elapsed = result.get("total_duration", 0) / 1e9  # nanoseconds to seconds
-    
-    all_calls = parse_all_tool_calls(response_text)
-    
-    # R5-3: Post-processing repair — fix common JSON errors
-    if not all_calls:
-        all_calls = _repair_and_extract(response_text)
-    
-    if all_calls:
-        # Return first call for backward compat, all calls for parallel eval
-        return all_calls[0][0], all_calls[0][1], response_text, elapsed, all_calls
-    
-    return "NO_TOOL", {}, response_text, elapsed, []
+    if MODEL.startswith("/") or os.path.exists(MODEL):
+        if MLX_MODEL_CACHE is None:
+            from mlx_lm import load
+            print(f"Loading MLX model: {MODEL}")
+            MLX_MODEL_CACHE, MLX_TOKENIZER_CACHE = load(MODEL)
+        
+        from mlx_lm import generate
+        start_time = time.time()
+        response_text = generate(MLX_MODEL_CACHE, MLX_TOKENIZER_CACHE, prompt=prompt, max_tokens=512, temp=OLLAMA_TEMPERATURE)
+        elapsed = time.time() - start_time
+        
+        all_calls = parse_all_tool_calls(response_text)
+        if not all_calls:
+            all_calls = _repair_and_extract(response_text)
+        
+        if all_calls:
+            return all_calls[0][0], all_calls[0][1], response_text, elapsed, all_calls
+        
+        return "NO_TOOL", {}, response_text, elapsed, []
+
 
 
 # =============================================================================
@@ -718,18 +699,12 @@ def validate_tool_call_against_schema(tool_name: str, tool_args: dict,
     return True, "valid"
 
 
+
 def call_ollama_best_of_n(prompt: str, available_tools: list = None,
                            n: int = None) -> tuple:
-    """Best-of-N inference with schema validation (Test-Time Compute Scaling).
-    
-    Generates N responses at higher temperature, validates each against
-    the tool schemas, and returns the first valid one. Falls back to
-    standard greedy decoding if no candidate passes validation.
-    
-    Args:
-        prompt: Full prompt including system instructions
-        available_tools: List of tool schema dicts for validation
-        n: Number of candidates to generate (default: BEST_OF_N env var)
+    return call_ollama(prompt)
+
+default: BEST_OF_N env var)
     
     Returns: Same tuple as call_ollama
     """
