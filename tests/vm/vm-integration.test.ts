@@ -67,6 +67,7 @@ import {
     PROHIBITED_USE_POLICY,
     EMBARGOED_COUNTRIES,
     RESTRICTED_COUNTRIES,
+    CIVILIAN_ONLY_DEFAULTS,
     DEFAULT_SANCTIONS_CONFIG,
     DEFAULT_GEOFENCE_CONFIG,
     DEFAULT_RUNTIME_MONITOR,
@@ -826,8 +827,9 @@ describe('Ethics Enforcement — Prohibited Use Policy', () => {
 });
 
 describe('Ethics Enforcement — Sanctions & Embargoed Countries', () => {
-    test('Russia is embargoed', () => {
-        expect(EMBARGOED_COUNTRIES).toContain('RU');
+    test('Russia is in RESTRICTED (civilian-only), NOT embargoed', () => {
+        expect(EMBARGOED_COUNTRIES).not.toContain('RU');
+        expect(RESTRICTED_COUNTRIES).toContain('RU');
     });
 
     test('Belarus is embargoed (sanctions facilitation)', () => {
@@ -841,11 +843,12 @@ describe('Ethics Enforcement — Sanctions & Embargoed Countries', () => {
         expect(EMBARGOED_COUNTRIES).toContain('CU');
     });
 
-    test('at least 6 embargoed countries', () => {
-        expect(EMBARGOED_COUNTRIES.length).toBeGreaterThanOrEqual(6);
+    test('at least 5 embargoed countries', () => {
+        expect(EMBARGOED_COUNTRIES.length).toBeGreaterThanOrEqual(5);
     });
 
-    test('restricted countries include China (sector-specific)', () => {
+    test('restricted countries include Russia and China', () => {
+        expect(RESTRICTED_COUNTRIES).toContain('RU');
         expect(RESTRICTED_COUNTRIES).toContain('CN');
     });
 
@@ -860,6 +863,33 @@ describe('Ethics Enforcement — Sanctions & Embargoed Countries', () => {
         RESTRICTED_COUNTRIES.forEach(code => {
             expect(embargoedSet.has(code)).toBe(false);
         });
+    });
+});
+
+describe('Ethics Enforcement — Civilian-Only Restrictions', () => {
+    test('registration is allowed for restricted countries', () => {
+        expect(CIVILIAN_ONLY_DEFAULTS.registration_allowed).toBe(true);
+    });
+
+    test('military and defense sectors are blocked', () => {
+        expect(CIVILIAN_ONLY_DEFAULTS.blocked_sectors).toContain('military');
+        expect(CIVILIAN_ONLY_DEFAULTS.blocked_sectors).toContain('defense');
+        expect(CIVILIAN_ONLY_DEFAULTS.blocked_sectors).toContain('intelligence');
+        expect(CIVILIAN_ONLY_DEFAULTS.blocked_sectors).toContain('weapons_manufacturing');
+    });
+
+    test('defense contractor orgs are blocked', () => {
+        expect(CIVILIAN_ONLY_DEFAULTS.blocked_org_types).toContain('defense_contractor');
+        expect(CIVILIAN_ONLY_DEFAULTS.blocked_org_types).toContain('ministry_of_defense');
+        expect(CIVILIAN_ONLY_DEFAULTS.blocked_org_types).toContain('intelligence_agency');
+    });
+
+    test('government domains are blocked', () => {
+        expect(CIVILIAN_ONLY_DEFAULTS.block_gov_domains).toBe(true);
+    });
+
+    test('re-verification is required within 90 days', () => {
+        expect(CIVILIAN_ONLY_DEFAULTS.re_verification_days).toBeLessThanOrEqual(90);
     });
 });
 

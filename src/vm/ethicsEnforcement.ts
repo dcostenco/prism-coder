@@ -105,12 +105,14 @@ export const EMBARGOED_COUNTRIES: string[] = [
     'IR',  // Iran
     'KP',  // North Korea (DPRK)
     'SY',  // Syria
-    'RU',  // Russia — added per user requirement
     'BY',  // Belarus — facilitating sanctions evasion
 ];
 
-/** Countries under partial/sectoral sanctions — require enhanced due diligence */
+/** Countries under partial/sectoral sanctions — require enhanced due diligence.
+ *  Users CAN register but military/defense/government projects are blocked.
+ *  Civilian software development is permitted. */
 export const RESTRICTED_COUNTRIES: string[] = [
+    'RU',  // Russia — civilian use allowed, military/defense blocked
     'CN',  // China — sector-specific (military end-use)
     'VE',  // Venezuela
     'MM',  // Myanmar
@@ -125,6 +127,39 @@ export const RESTRICTED_COUNTRIES: string[] = [
     'IQ',  // Iraq — sector-specific
     'LB',  // Lebanon — Hezbollah-related
 ];
+
+/** Restricted-country enforcement: civilian projects only */
+export interface CivilianOnlyRestriction {
+    /** Country code */
+    country: string;
+    /** Registration allowed */
+    registration_allowed: boolean;
+    /** Blocked project types */
+    blocked_sectors: string[];
+    /** Blocked organization types */
+    blocked_org_types: string[];
+    /** Require government domain check */
+    block_gov_domains: boolean;
+    /** Require periodic re-verification */
+    re_verification_days: number;
+}
+
+/** Default civilian-only restrictions for countries in RESTRICTED_COUNTRIES */
+export const CIVILIAN_ONLY_DEFAULTS: CivilianOnlyRestriction = {
+    country: '*',  // applies to all restricted countries
+    registration_allowed: true,
+    blocked_sectors: [
+        'military', 'defense', 'intelligence', 'law_enforcement_surveillance',
+        'weapons_manufacturing', 'dual_use_technology', 'nuclear_energy',
+        'aerospace_defense', 'government_security',
+    ],
+    blocked_org_types: [
+        'military', 'ministry_of_defense', 'intelligence_agency',
+        'defense_contractor', 'state_security',
+    ],
+    block_gov_domains: true,
+    re_verification_days: 90,
+};
 
 export interface SanctionsScreeningConfig {
     /** Sanctions lists to check against */

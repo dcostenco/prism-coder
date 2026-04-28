@@ -38,18 +38,31 @@ Accounts cannot be created from, billed to, or operated from the following count
 
 | Code | Country | Basis |
 |------|---------|-------|
-| 🇷🇺 RU | Russia | US/EU comprehensive sanctions |
 | 🇧🇾 BY | Belarus | Sanctions facilitation |
 | 🇨🇺 CU | Cuba | US comprehensive sanctions |
 | 🇮🇷 IR | Iran | US/EU comprehensive sanctions |
 | 🇰🇵 KP | North Korea (DPRK) | UN/US/EU comprehensive sanctions |
 | 🇸🇾 SY | Syria | US/EU comprehensive sanctions |
 
-### Restricted Countries (Enhanced Due Diligence)
+### Restricted Countries (Enhanced Due Diligence — Civilian Only)
 
-The following countries require enhanced verification. Military end-use is blocked.
+The following countries **can register** but are subject to **civilian-only restrictions**. Military, defense, intelligence, and government security projects are blocked at the platform level.
 
-`CN` · `VE` · `MM` · `SD` · `SS` · `LY` · `SO` · `YE` · `ZW` · `CD` · `CF` · `IQ` · `LB`
+| Status | Countries |
+|--------|----------|
+| 🇷🇺 Civilian Only | **Russia** — registration allowed, military/defense/intelligence blocked |
+| Sector-Restricted | `CN` · `VE` · `MM` · `SD` · `SS` · `LY` · `SO` · `YE` · `ZW` · `CD` · `CF` · `IQ` · `LB` |
+
+**Blocked sectors** for restricted countries:
+- Military · Defense · Intelligence · Law enforcement surveillance
+- Weapons manufacturing · Dual-use technology · Nuclear energy
+- Aerospace defense · Government security
+
+**Blocked organization types:**
+- Military branches · Ministry of Defense · Intelligence agencies
+- Defense contractors · State security services
+
+**Additional controls:** Government email domains (`.mil`, `.gov.ru`, `.mil.ru`) are blocked. All restricted-country accounts require **re-verification every 90 days**.
 
 ---
 
