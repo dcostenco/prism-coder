@@ -22,3 +22,7 @@ export { MARKETPLACE_TIERS } from './componentMarketplace.js';
 // ── Project Templates ───────────────────────────────────────────
 export type { ProjectTemplate, TemplateCreateRequest, TemplateCreateResult, TemplateTierLimits } from './projectTemplates.js';
 export { GAME_TEMPLATES, APP_TEMPLATES, CREATIVE_TEMPLATES, ALL_PROJECT_TEMPLATES, TEMPLATE_TIERS } from './projectTemplates.js';
+
+// ── Workspace & Product Licensing ───────────────────────────────
+export type { WorkspaceLicense, DistributionRights, ProductLicense, LicensePermissions, LicenseConditions, LicenseLimitations, CommercialTerms, LicenseComplianceCheck, ComplianceResult, LicenseConflict, LicenseTierLimits } from './workspaceLicensing.js';
+export { WORKSPACE_LICENSE_PRESETS, LICENSE_COMPATIBILITY, LICENSE_TIERS } from './workspaceLicensing.js';
