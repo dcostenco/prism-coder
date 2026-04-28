@@ -18,18 +18,18 @@
     - [x] Queue watchdog for deadlock auto-drain
     - [x] Unified agent status dashboard (`agent_status.sh`)
     - [x] 115/115 tests across 5 suites (unit, concurrent, shell, mock, stress)
-- [ ] **v12.1.0** - Developer Onboarding & Framework Bridge
-    - [ ] Interactive first-run setup wizard in Mind Palace Dashboard
-    - [ ] LangChain/LlamaIndex Python memory adapter (`pip install prism-memory`)
-    - [ ] CrewAI/AutoGen memory provider plugin
-    - [ ] Implicit memory extraction (NER) from raw conversations — auto-save entities without explicit tool calls
-    - [ ] 3-minute quickstart tutorial (guided in-dashboard walkthrough)
-- [ ] **v12.2.0** - Enterprise Observability & Reliability
-    - [ ] API usage analytics dashboard (per-project call tracking, token spend charts)
-    - [ ] Real-time notifications (webhook/Slack/email on health degradation, compaction events)
-    - [ ] Automated SQLite backup scheduler (hourly/daily/weekly with point-in-time restore)
-    - [ ] Memory analytics time-series charts (growth, compaction efficiency, search patterns)
-    - [ ] Natural language memory query ("what did we decide about auth?" → structured results)
+- [x] **v12.1.0** - Developer Onboarding & Framework Bridge
+    - [x] Interactive first-run setup wizard in Mind Palace Dashboard
+    - [x] LangChain/LlamaIndex Python memory adapter (`pip install prism-memory`)
+    - [x] CrewAI/AutoGen memory provider plugin
+    - [x] Implicit memory extraction (NER) from raw conversations — auto-save entities without explicit tool calls
+    - [x] 3-minute quickstart tutorial (guided in-dashboard walkthrough)
+- [x] **v12.2.0** - Enterprise Observability & Reliability
+    - [x] API usage analytics dashboard (per-project call tracking, token spend charts)
+    - [x] Real-time notifications (webhook/Slack/email on health degradation, compaction events)
+    - [x] Automated SQLite backup scheduler (hourly/daily/weekly with point-in-time restore)
+    - [x] Memory analytics time-series charts (growth, compaction efficiency, search patterns)
+    - [x] Natural language memory query ("what did we decide about auth?" → structured results)
 - [ ] **v13.0.0** - Team Collaboration & Administration
     - [ ] Encrypted peer-to-peer session syncing
     - [ ] Multi-agent task routing with verifiable memory

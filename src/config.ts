@@ -523,3 +523,72 @@ if (PRISM_DEBUG_LOGGING) {
   console.error(`[Prism] HRR Zero-Search Dimension: ${PRISM_HRR_DIMENSION} (Total RAM: ${(totalmem() / (1024 ** 3)).toFixed(1)}GB)`);
 }
 
+// ─── v12.1: Implicit Memory NER ──────────────────────────────
+// Automatically extracts entities from raw conversation text.
+// Rule-based extraction is always available. LLM extraction requires
+// PRISM_LOCAL_LLM_ENABLED=true.
+
+/** Master switch for auto-NER on session_save_ledger calls. */
+export const PRISM_NER_AUTO_EXTRACT =
+  process.env.PRISM_NER_AUTO_EXTRACT === "true"; // Opt-in
+
+/** Minimum confidence threshold for NER results. Default: 0.6 */
+export const PRISM_NER_MIN_CONFIDENCE = parseFloat(
+  process.env.PRISM_NER_MIN_CONFIDENCE || "0.6"
+);
+
+// ─── v12.1: Onboarding Wizard ────────────────────────────────
+// First-run setup experience for new users.
+
+/** If true, show onboarding wizard on first load_context call. Default: true */
+export const PRISM_ONBOARDING_ENABLED =
+  process.env.PRISM_ONBOARDING_ENABLED !== "false"; // Default: true
+
+// ─── v12.2: API Usage Analytics ──────────────────────────────
+// Tracks tool invocations for per-project usage reporting.
+
+/** Master switch for API usage analytics tracking. Default: true */
+export const PRISM_ANALYTICS_ENABLED =
+  process.env.PRISM_ANALYTICS_ENABLED !== "false"; // Default: true
+
+/** Buffer flush threshold (number of invocations before writing). Default: 25 */
+export const PRISM_ANALYTICS_FLUSH_THRESHOLD = parseInt(
+  process.env.PRISM_ANALYTICS_FLUSH_THRESHOLD || "25", 10
+);
+
+// ─── v12.2: Notification System ──────────────────────────────
+// Sends alerts for significant memory events.
+
+/** Webhook URL for notifications. Set to enable webhook channel. */
+export const PRISM_NOTIFICATION_WEBHOOK = process.env.PRISM_NOTIFICATION_WEBHOOK;
+
+/** Slack webhook URL for notifications. Set to enable Slack channel. */
+export const PRISM_NOTIFICATION_SLACK = process.env.PRISM_NOTIFICATION_SLACK;
+
+/** Minimum severity for notifications: info, warning, critical. Default: warning */
+export const PRISM_NOTIFICATION_MIN_SEVERITY =
+  (process.env.PRISM_NOTIFICATION_MIN_SEVERITY || "warning") as "info" | "warning" | "critical";
+
+// ─── v12.2: Automated Backup ─────────────────────────────────
+// Scheduled SQLite database backups.
+
+/** Backup schedule: hourly, daily, weekly, manual. Default: manual (disabled). */
+export const PRISM_BACKUP_SCHEDULE =
+  (process.env.PRISM_BACKUP_SCHEDULE || "manual") as "hourly" | "daily" | "weekly" | "manual";
+
+/** Maximum number of backups to retain. Default: 7 */
+export const PRISM_BACKUP_MAX = parseInt(
+  process.env.PRISM_BACKUP_MAX || "7", 10
+);
+
+/** Custom backup directory. Default: ~/.prism/backups/ */
+export const PRISM_BACKUP_DIR = process.env.PRISM_BACKUP_DIR || "";
+
+/** Enable automated backup scheduler at startup. */
+export const PRISM_BACKUP_ENABLED =
+  PRISM_BACKUP_SCHEDULE !== "manual";
+
+if (PRISM_BACKUP_ENABLED && PRISM_DEBUG_LOGGING) {
+  console.error(`[Prism] Backup scheduler: ${PRISM_BACKUP_SCHEDULE}, max=${PRISM_BACKUP_MAX}`);
+}
+

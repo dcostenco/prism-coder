@@ -1067,10 +1067,10 @@ export function isSessionSaveExperienceArgs(
   if (
     typeof a.event_type !== "string" ||
     (a.event_type !== "correction" &&
-     a.event_type !== "success" &&
-     a.event_type !== "failure" &&
-     a.event_type !== "learning" &&
-     a.event_type !== "validation_result")
+      a.event_type !== "success" &&
+      a.event_type !== "failure" &&
+      a.event_type !== "learning" &&
+      a.event_type !== "validation_result")
   ) return false;
   if (typeof a.context !== "string") return false;
   if (typeof a.action !== "string") return false;
@@ -1548,6 +1548,324 @@ export function isSessionTaskRouteArgs(
   )
     return false;
   if (a.project !== undefined && typeof a.project !== "string") return false;
+  return true;
+}
+
+// ─── v12.1: Onboarding Wizard Tool ─────────────────────────────
+
+export const ONBOARDING_WIZARD_TOOL: Tool = {
+  name: "onboarding_wizard",
+  description:
+    "Interactive setup wizard for new Prism users. Provides a step-by-step " +
+    "guided experience to get productive in under 3 minutes.\n\n" +
+    "**Actions:**\n" +
+    "- `start` — Begin the wizard from step 1\n" +
+    "- `next` — Advance to the next step\n" +
+    "- `status` — Check current wizard progress\n" +
+    "- `skip` — Skip to completion\n\n" +
+    "Each step returns instructions, code snippets, and progress percentage.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["start", "next", "status", "skip"],
+        description: "Wizard action to perform.",
+      },
+      project_name: {
+        type: "string",
+        description: "Optional project name to use in setup examples.",
+      },
+      ide_client: {
+        type: "string",
+        enum: ["claude_desktop", "cursor", "windsurf", "vscode", "other"],
+        description: "IDE client for config generation.",
+      },
+    },
+    required: ["action"],
+  },
+};
+
+export interface OnboardingWizardArgs {
+  action: "start" | "next" | "status" | "skip";
+  project_name?: string;
+  ide_client?: string;
+}
+
+export function isOnboardingWizardArgs(
+  args: unknown
+): args is OnboardingWizardArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  if (typeof a.action !== "string") return false;
+  if (!["start", "next", "status", "skip"].includes(a.action)) return false;
+  if (a.project_name !== undefined && typeof a.project_name !== "string") return false;
+  if (a.ide_client !== undefined && typeof a.ide_client !== "string") return false;
+  return true;
+}
+
+// ─── v12.1: NER Entity Extraction Tool ───────────────────────
+
+export const EXTRACT_ENTITIES_TOOL: Tool = {
+  name: "extract_entities",
+  description:
+    "Extract named entities from raw text using rule-based + optional LLM extraction. " +
+    "Automatically identifies technologies, file paths, decisions, TODOs, people, projects, " +
+    "and configuration values without explicit tagging.\n\n" +
+    "**Entity types:** PERSON, PROJECT, TECH, FILE, DECISION, TODO, CONFIG\n\n" +
+    "Use this to auto-enrich session context with structured metadata from " +
+    "raw conversation text.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      text: {
+        type: "string",
+        description: "Raw text to extract entities from.",
+      },
+      use_llm: {
+        type: "boolean",
+        description: "If true, also uses local LLM for higher-quality extraction. Default: false.",
+      },
+      project: {
+        type: "string",
+        description: "Optional project to auto-save extracted entities to.",
+      },
+    },
+    required: ["text"],
+  },
+};
+
+export interface ExtractEntitiesArgs {
+  text: string;
+  use_llm?: boolean;
+  project?: string;
+}
+
+export function isExtractEntitiesArgs(
+  args: unknown
+): args is ExtractEntitiesArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  if (typeof a.text !== "string") return false;
+  if (a.use_llm !== undefined && typeof a.use_llm !== "boolean") return false;
+  if (a.project !== undefined && typeof a.project !== "string") return false;
+  return true;
+}
+
+// ─── v12.2: API Analytics Tool ───────────────────────────────
+
+export const API_ANALYTICS_TOOL: Tool = {
+  name: "api_analytics",
+  description:
+    "View API usage analytics per project or system-wide. " +
+    "Shows call counts, success rates, latency, token usage, " +
+    "top tools, and daily trends.\n\n" +
+    "**Scopes:**\n" +
+    "- `project` — Analytics for a specific project\n" +
+    "- `system` — System-wide aggregate analytics",
+  inputSchema: {
+    type: "object",
+    properties: {
+      scope: {
+        type: "string",
+        enum: ["project", "system"],
+        description: "Analytics scope: 'project' for per-project, 'system' for global.",
+      },
+      project: {
+        type: "string",
+        description: "Project identifier (required when scope='project').",
+      },
+      days: {
+        type: "integer",
+        description: "Number of days to analyze (default: 30).",
+      },
+    },
+    required: ["scope"],
+  },
+};
+
+export interface APIAnalyticsArgs {
+  scope: "project" | "system";
+  project?: string;
+  days?: number;
+}
+
+export function isAPIAnalyticsArgs(
+  args: unknown
+): args is APIAnalyticsArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  if (a.scope !== "project" && a.scope !== "system") return false;
+  if (a.project !== undefined && typeof a.project !== "string") return false;
+  if (a.days !== undefined && typeof a.days !== "number") return false;
+  return true;
+}
+
+// ─── v12.2: Database Backup Tool ─────────────────────────────
+
+export const BACKUP_DATABASE_TOOL: Tool = {
+  name: "backup_database",
+  description:
+    "Create, list, or restore SQLite database backups.\n\n" +
+    "**Actions:**\n" +
+    "- `create` — Create a new backup now\n" +
+    "- `list` — List available backups with sizes and ages\n" +
+    "- `restore` — Restore from a specific backup file\n" +
+    "- `configure` — Set backup schedule (hourly/daily/weekly)\n\n" +
+    "Backups are stored in ~/.prism/backups/ by default. " +
+    "Automatic retention pruning keeps only the configured maximum.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["create", "list", "restore", "configure"],
+        description: "Backup action to perform.",
+      },
+      backup_path: {
+        type: "string",
+        description: "Path to backup file (required for 'restore' action).",
+      },
+      schedule: {
+        type: "string",
+        enum: ["hourly", "daily", "weekly", "manual"],
+        description: "Backup schedule (for 'configure' action).",
+      },
+      max_backups: {
+        type: "integer",
+        description: "Maximum number of backups to retain (for 'configure' action). Default: 7.",
+      },
+    },
+    required: ["action"],
+  },
+};
+
+export interface BackupDatabaseArgs {
+  action: "create" | "list" | "restore" | "configure";
+  backup_path?: string;
+  schedule?: "hourly" | "daily" | "weekly" | "manual";
+  max_backups?: number;
+}
+
+export function isBackupDatabaseArgs(
+  args: unknown
+): args is BackupDatabaseArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  if (!["create", "list", "restore", "configure"].includes(a.action as string)) return false;
+  if (a.backup_path !== undefined && typeof a.backup_path !== "string") return false;
+  if (a.schedule !== undefined && !["hourly", "daily", "weekly", "manual"].includes(a.schedule as string)) return false;
+  if (a.max_backups !== undefined && typeof a.max_backups !== "number") return false;
+  return true;
+}
+
+// ─── v12.2: Notification Configuration Tool ──────────────────
+
+export const CONFIGURE_NOTIFICATIONS_TOOL: Tool = {
+  name: "configure_notifications",
+  description:
+    "Configure real-time notifications for memory events via webhook, Slack, or email.\n\n" +
+    "**Actions:**\n" +
+    "- `status` — Show current notification configuration\n" +
+    "- `add_channel` — Add a notification channel (webhook/slack/email)\n" +
+    "- `remove_channel` — Remove a channel by URL\n" +
+    "- `test` — Send a test notification to all configured channels\n\n" +
+    "**Events:** health_degradation, compaction_complete, backup_complete, " +
+    "backup_failed, memory_threshold, new_graduated_insight, scheduler_error",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["status", "add_channel", "remove_channel", "test"],
+        description: "Configuration action to perform.",
+      },
+      channel_type: {
+        type: "string",
+        enum: ["webhook", "slack", "email"],
+        description: "Channel type (for add_channel).",
+      },
+      channel_url: {
+        type: "string",
+        description: "Channel URL (webhook endpoint, Slack webhook, or email relay).",
+      },
+      min_severity: {
+        type: "string",
+        enum: ["info", "warning", "critical"],
+        description: "Minimum severity to notify. Default: 'warning'.",
+      },
+    },
+    required: ["action"],
+  },
+};
+
+export interface ConfigureNotificationsArgs {
+  action: "status" | "add_channel" | "remove_channel" | "test";
+  channel_type?: "webhook" | "slack" | "email";
+  channel_url?: string;
+  min_severity?: "info" | "warning" | "critical";
+}
+
+export function isConfigureNotificationsArgs(
+  args: unknown
+): args is ConfigureNotificationsArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  if (!["status", "add_channel", "remove_channel", "test"].includes(a.action as string)) return false;
+  if (a.channel_type !== undefined && !["webhook", "slack", "email"].includes(a.channel_type as string)) return false;
+  if (a.channel_url !== undefined && typeof a.channel_url !== "string") return false;
+  return true;
+}
+
+// ─── v12.2: Natural Language Memory Query Tool ───────────────
+
+export const QUERY_MEMORY_NATURAL_TOOL: Tool = {
+  name: "query_memory_natural",
+  description:
+    "Query memories using natural language instead of structured tool syntax. " +
+    "Automatically classifies intent, extracts keywords, and executes the " +
+    "appropriate search strategy.\n\n" +
+    "**Examples:**\n" +
+    "- \"What did we decide about authentication?\"\n" +
+    "- \"What's still open on the billing project?\"\n" +
+    "- \"What files did we change last week?\"\n" +
+    "- \"Show me recent work on the API\"\n\n" +
+    "Returns the parsed intent, search results, and optionally an " +
+    "LLM-synthesized answer.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      question: {
+        type: "string",
+        description: "Natural language question about your memories.",
+      },
+      project: {
+        type: "string",
+        description: "Optional project scope for the query.",
+      },
+      synthesize: {
+        type: "boolean",
+        description: "If true, use local LLM to synthesize a natural language answer. Default: false.",
+      },
+    },
+    required: ["question"],
+  },
+};
+
+export interface QueryMemoryNaturalArgs {
+  question: string;
+  project?: string;
+  synthesize?: boolean;
+}
+
+export function isQueryMemoryNaturalArgs(
+  args: unknown
+): args is QueryMemoryNaturalArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  if (typeof a.question !== "string") return false;
+  if (a.project !== undefined && typeof a.project !== "string") return false;
+  if (a.synthesize !== undefined && typeof a.synthesize !== "boolean") return false;
   return true;
 }
 
