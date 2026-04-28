@@ -26,3 +26,7 @@ export { GAME_TEMPLATES, APP_TEMPLATES, CREATIVE_TEMPLATES, ALL_PROJECT_TEMPLATE
 // ── Workspace & Product Licensing ───────────────────────────────
 export type { WorkspaceLicense, DistributionRights, ProductLicense, LicensePermissions, LicenseConditions, LicenseLimitations, CommercialTerms, LicenseComplianceCheck, ComplianceResult, LicenseConflict, LicenseTierLimits } from './workspaceLicensing.js';
 export { WORKSPACE_LICENSE_PRESETS, LICENSE_COMPATIBILITY, LICENSE_TIERS } from './workspaceLicensing.js';
+
+// ── Ethics & Export Control Enforcement ─────────────────────────
+export type { ProhibitedUsePolicy, SanctionsScreeningConfig, GeofenceConfig, UseCaseScreeningConfig, RuntimeMonitorConfig, KillSwitchAction, KillSwitchScope, AuditEntry, AuditConfig, EnforcementPipeline, EthicsTierConfig } from './ethicsEnforcement.js';
+export { PROHIBITED_USE_POLICY, EMBARGOED_COUNTRIES, RESTRICTED_COUNTRIES, DEFAULT_SANCTIONS_CONFIG, DEFAULT_GEOFENCE_CONFIG, DEFAULT_USE_CASE_SCREENING, DEFAULT_RUNTIME_MONITOR, DEFAULT_AUDIT_CONFIG, DEFAULT_ENFORCEMENT_PIPELINE, ETHICS_TIERS } from './ethicsEnforcement.js';
