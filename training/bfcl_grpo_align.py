@@ -349,8 +349,7 @@ def main():
     import subprocess
     subprocess.run(["python", "filter_long_seqs.py"], cwd=str(Path(__file__).parent), check=True, env={"PRISM_DATA_DIR": dpo_data_dir, "PRISM_DATA_OUT_DIR": dpo_data_dir, **os.environ})
 
-    if args.generate_only:
-        print("\n✅ Pairs generated. Use --model to train.")
+    if args.generate_only:        print("\n✅ Pairs generated. Use --model to train.")
         return
     
     # Step 2: Train
