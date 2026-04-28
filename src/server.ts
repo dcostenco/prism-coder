@@ -220,6 +220,27 @@ import {
   backupDatabaseHandler,
   configureNotificationsHandler,
   queryMemoryNaturalHandler,
+  // v12.3-v12.5: Tool definitions & handlers
+  MANAGE_RBAC_TOOL,
+  ENCRYPTED_SYNC_TOOL,
+  GITHUB_SYNC_TOOL,
+  GENERATE_CHANGELOG_TOOL,
+  GENERATE_CI_PIPELINE_TOOL,
+  MEMORY_ATTESTATION_TOOL,
+  MANAGE_PLUGINS_TOOL,
+  SYNALUX_PROXY_TOOL,
+  CLOUD_DELEGATE_TOOL,
+  VM_QUOTA_TOOL,
+  manageRbacHandler,
+  encryptedSyncHandler,
+  githubSyncHandler,
+  generateChangelogHandler,
+  generateCiPipelineHandler,
+  memoryAttestationHandler,
+  managePluginsHandler,
+  synaluxProxyHandler,
+  cloudDelegateHandler,
+  vmQuotaHandler,
 } from "./tools/index.js";
 
 // ─── Security: Boundary Tags for Context Output ──────────────
@@ -320,6 +341,19 @@ function buildSessionMemoryTools(autoloadList: string[]): Tool[] {
     BACKUP_DATABASE_TOOL,          // backup_database — scheduled SQLite backup/restore
     CONFIGURE_NOTIFICATIONS_TOOL,  // configure_notifications — webhook/Slack/email alerts
     QUERY_MEMORY_NATURAL_TOOL,     // query_memory_natural — NL → structured memory search
+    // ─── v12.3: Team Collaboration & RBAC ───
+    MANAGE_RBAC_TOOL,              // manage_rbac — role-based access control management
+    ENCRYPTED_SYNC_TOOL,           // encrypted_sync — AES-256-GCM peer-to-peer sync
+    // ─── v12.4: GitHub Integration & Automation ───
+    GITHUB_SYNC_TOOL,              // github_sync — bidirectional GitHub issue/PR sync
+    GENERATE_CHANGELOG_TOOL,       // generate_changelog — LLM-powered changelog from ledger
+    GENERATE_CI_PIPELINE_TOOL,     // generate_ci_pipeline — CI/CD pipeline generation
+    MEMORY_ATTESTATION_TOOL,       // memory_attestation — SHA-256 Merkle tree integrity
+    // ─── v12.5: Cloud Runtime & Extensibility ───
+    MANAGE_PLUGINS_TOOL,           // manage_plugins — plugin lifecycle management
+    SYNALUX_PROXY_TOOL,            // synalux_proxy — Synalux API gateway proxy
+    CLOUD_DELEGATE_TOOL,           // cloud_delegate — multi-cloud task delegation
+    VM_QUOTA_TOOL,                 // vm_quota — VM resource quota enforcement
   ];
 }
 
@@ -1034,6 +1068,52 @@ export function createServer() {
           case "query_memory_natural":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
             result = await queryMemoryNaturalHandler(args); break;
+
+          // ─── v12.3: Team Collaboration & RBAC ───
+
+          case "manage_rbac":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            result = await manageRbacHandler(args); break;
+
+          case "encrypted_sync":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            result = await encryptedSyncHandler(args); break;
+
+          // ─── v12.4: GitHub Integration & Automation ───
+
+          case "github_sync":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            result = await githubSyncHandler(args); break;
+
+          case "generate_changelog":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            result = await generateChangelogHandler(args); break;
+
+          case "generate_ci_pipeline":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            result = await generateCiPipelineHandler(args); break;
+
+          case "memory_attestation":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            result = await memoryAttestationHandler(args); break;
+
+          // ─── v12.5: Cloud Runtime & Extensibility ───
+
+          case "manage_plugins":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            result = await managePluginsHandler(args); break;
+
+          case "synalux_proxy":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            result = await synaluxProxyHandler(args); break;
+
+          case "cloud_delegate":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            result = await cloudDelegateHandler(args); break;
+
+          case "vm_quota":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            result = await vmQuotaHandler(args); break;
 
           default:
             result = {

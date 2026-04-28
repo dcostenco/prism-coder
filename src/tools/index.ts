@@ -108,4 +108,31 @@ export {
   backupDatabaseHandler,
   configureNotificationsHandler,
   queryMemoryNaturalHandler,
+  // v12.3: Team Collaboration & RBAC
+  manageRbacHandler,
+  encryptedSyncHandler,
+  // v12.4: GitHub Integration & Automation
+  githubSyncHandler,
+  generateChangelogHandler,
+  generateCiPipelineHandler,
+  memoryAttestationHandler,
+  // v12.5: Cloud Runtime & Extensibility
+  managePluginsHandler,
+  synaluxProxyHandler,
+  cloudDelegateHandler,
+  vmQuotaHandler,
 } from "./v12Handlers.js";
+
+// ── v12.3-v12.5 Tool Definitions ──
+export {
+  MANAGE_RBAC_TOOL,
+  ENCRYPTED_SYNC_TOOL,
+  GITHUB_SYNC_TOOL,
+  GENERATE_CHANGELOG_TOOL,
+  GENERATE_CI_PIPELINE_TOOL,
+  MEMORY_ATTESTATION_TOOL,
+  MANAGE_PLUGINS_TOOL,
+  SYNALUX_PROXY_TOOL,
+  CLOUD_DELEGATE_TOOL,
+  VM_QUOTA_TOOL,
+} from "./sessionMemoryDefinitions.js";

@@ -1869,3 +1869,307 @@ export function isQueryMemoryNaturalArgs(
   return true;
 }
 
+
+// ══════════════════════════════════════════════════════════════
+// v12.3: Team Collaboration & RBAC
+// ══════════════════════════════════════════════════════════════
+
+export const MANAGE_RBAC_TOOL = {
+  name: "manage_rbac",
+  description: "Manage role-based access control for projects and memory partitions. Create/modify roles, assign users, check permissions.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      action: { type: "string", enum: ["create_role", "delete_role", "assign_role", "revoke_role", "check_permission", "list_roles", "list_assignments"], description: "RBAC action to perform." },
+      project: { type: "string", description: "Project to manage RBAC for." },
+      role: { type: "string", description: "Role name (for create/delete/assign/revoke)." },
+      user_id: { type: "string", description: "User ID (for assign/revoke)." },
+      permission: { type: "string", description: "Permission to check (for check_permission)." },
+      permissions: { type: "array", items: { type: "string" }, description: "Permissions list (for create_role)." },
+    },
+    required: ["action"],
+  },
+};
+
+export interface ManageRbacArgs {
+  action: string;
+  project?: string;
+  role?: string;
+  user_id?: string;
+  permission?: string;
+  permissions?: string[];
+}
+
+export function isManageRbacArgs(args: unknown): args is ManageRbacArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  return typeof a.action === "string";
+}
+
+export const ENCRYPTED_SYNC_TOOL = {
+  name: "encrypted_sync",
+  description: "Synchronize session data between peers using AES-256-GCM encryption. Push/pull/status operations.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      action: { type: "string", enum: ["push", "pull", "status", "configure"], description: "Sync action to perform." },
+      project: { type: "string", description: "Project to sync." },
+      peer_url: { type: "string", description: "Peer endpoint URL." },
+      encryption_key: { type: "string", description: "Shared encryption key (for configure)." },
+    },
+    required: ["action"],
+  },
+};
+
+export interface EncryptedSyncArgs {
+  action: string;
+  project?: string;
+  peer_url?: string;
+  encryption_key?: string;
+}
+
+export function isEncryptedSyncArgs(args: unknown): args is EncryptedSyncArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  return typeof a.action === "string";
+}
+
+// ══════════════════════════════════════════════════════════════
+// v12.4: GitHub Integration & Automation
+// ══════════════════════════════════════════════════════════════
+
+export const GITHUB_SYNC_TOOL = {
+  name: "github_sync",
+  description: "Bidirectional sync between Prism memory entries and GitHub Issues/PRs. Export memory as issues or import issues as memory.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      action: { type: "string", enum: ["push_to_github", "pull_from_github", "sync_status", "configure"], description: "GitHub sync action." },
+      project: { type: "string", description: "Prism project to sync." },
+      repo: { type: "string", description: "GitHub repo (owner/name)." },
+      token: { type: "string", description: "GitHub personal access token." },
+      entry_ids: { type: "array", items: { type: "string" }, description: "Specific entry IDs to push (optional)." },
+    },
+    required: ["action"],
+  },
+};
+
+export interface GithubSyncArgs {
+  action: string;
+  project?: string;
+  repo?: string;
+  token?: string;
+  entry_ids?: string[];
+}
+
+export function isGithubSyncArgs(args: unknown): args is GithubSyncArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  return typeof a.action === "string";
+}
+
+export const GENERATE_CHANGELOG_TOOL = {
+  name: "generate_changelog",
+  description: "Generate AI-powered changelogs from session ledger history. Outputs in Keep a Changelog format with optional LLM enhancement.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      project: { type: "string", description: "Project to generate changelog for." },
+      from_date: { type: "string", description: "Start date (ISO 8601)." },
+      to_date: { type: "string", description: "End date (ISO 8601)." },
+      format: { type: "string", enum: ["markdown", "json", "html"], description: "Output format. Default: markdown." },
+      use_llm: { type: "boolean", description: "Use LLM for enhanced summarization. Default: false." },
+      include_files: { type: "boolean", description: "Include file change lists. Default: false." },
+    },
+    required: ["project"],
+  },
+};
+
+export interface GenerateChangelogArgs {
+  project: string;
+  from_date?: string;
+  to_date?: string;
+  format?: string;
+  use_llm?: boolean;
+  include_files?: boolean;
+}
+
+export function isGenerateChangelogArgs(args: unknown): args is GenerateChangelogArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  return typeof a.project === "string";
+}
+
+export const GENERATE_CI_PIPELINE_TOOL = {
+  name: "generate_ci_pipeline",
+  description: "Generate GitHub Actions CI/CD workflows from project configuration or preset templates (node-test, npm-publish, python-test).",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      project: { type: "string", description: "Project name for the workflow." },
+      preset: { type: "string", enum: ["node-test", "npm-publish", "python-test", "custom"], description: "Preset template to use." },
+      custom_config: { type: "object", description: "Custom pipeline configuration (for preset=custom)." },
+    },
+    required: ["project"],
+  },
+};
+
+export interface GenerateCiPipelineArgs {
+  project: string;
+  preset?: string;
+  custom_config?: Record<string, unknown>;
+}
+
+export function isGenerateCiPipelineArgs(args: unknown): args is GenerateCiPipelineArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  return typeof a.project === "string";
+}
+
+export const MEMORY_ATTESTATION_TOOL = {
+  name: "memory_attestation",
+  description: "Generate or verify SHA-256 Merkle tree attestation reports for memory integrity. Provides tamper detection and provable audit trails.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      action: { type: "string", enum: ["generate", "verify", "proof"], description: "Attestation action." },
+      project: { type: "string", description: "Project to attest." },
+      entry_id: { type: "string", description: "Entry ID to verify or generate proof for." },
+      report: { type: "object", description: "Previous attestation report (for verify)." },
+    },
+    required: ["action", "project"],
+  },
+};
+
+export interface MemoryAttestationArgs {
+  action: string;
+  project: string;
+  entry_id?: string;
+  report?: Record<string, unknown>;
+}
+
+export function isMemoryAttestationArgs(args: unknown): args is MemoryAttestationArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  return typeof a.action === "string" && typeof a.project === "string";
+}
+
+// ══════════════════════════════════════════════════════════════
+// v12.5: Cloud Runtime & Extensibility
+// ══════════════════════════════════════════════════════════════
+
+export const MANAGE_PLUGINS_TOOL = {
+  name: "manage_plugins",
+  description: "Manage Prism plugins/extensions. Discover, load, unload, and list plugins from the ~/.prism/plugins directory.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      action: { type: "string", enum: ["discover", "load", "unload", "list", "validate"], description: "Plugin action." },
+      plugin_name: { type: "string", description: "Plugin name (for load/unload/validate)." },
+    },
+    required: ["action"],
+  },
+};
+
+export interface ManagePluginsArgs {
+  action: string;
+  plugin_name?: string;
+}
+
+export function isManagePluginsArgs(args: unknown): args is ManagePluginsArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  return typeof a.action === "string";
+}
+
+export const SYNALUX_PROXY_TOOL = {
+  name: "synalux_proxy",
+  description: "Manage the Synalux Cloud thin-client proxy. Configure, check health, list features, and send proxied requests.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      action: { type: "string", enum: ["configure", "health", "features", "request", "status"], description: "Proxy action." },
+      tier: { type: "string", enum: ["free", "standard", "advanced", "enterprise"], description: "Subscription tier (for configure)." },
+      api_key: { type: "string", description: "Synalux API key (for configure)." },
+      request: { type: "object", description: "Proxy request details (for request action)." },
+    },
+    required: ["action"],
+  },
+};
+
+export interface SynaluxProxyArgs {
+  action: string;
+  tier?: string;
+  api_key?: string;
+  request?: Record<string, unknown>;
+}
+
+export function isSynaluxProxyArgs(args: unknown): args is SynaluxProxyArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  return typeof a.action === "string";
+}
+
+export const CLOUD_DELEGATE_TOOL = {
+  name: "cloud_delegate",
+  description: "Delegate compute-intensive tasks to Synalux Cloud agents. Create, dispatch, monitor, and cancel remote tasks with Prism memory injection.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      action: { type: "string", enum: ["create", "dispatch", "status", "cancel", "list", "history", "configure"], description: "Delegate action." },
+      task_type: { type: "string", enum: ["build", "test", "deploy", "analyze", "transform", "custom"], description: "Task type (for create)." },
+      project: { type: "string", description: "Project context." },
+      task_id: { type: "string", description: "Task ID (for dispatch/status/cancel)." },
+      payload: { type: "object", description: "Task payload (for create)." },
+      priority: { type: "string", enum: ["low", "normal", "high", "critical"], description: "Task priority." },
+    },
+    required: ["action"],
+  },
+};
+
+export interface CloudDelegateArgs {
+  action: string;
+  task_type?: string;
+  project?: string;
+  task_id?: string;
+  payload?: Record<string, unknown>;
+  priority?: string;
+}
+
+export function isCloudDelegateArgs(args: unknown): args is CloudDelegateArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  return typeof a.action === "string";
+}
+
+export const VM_QUOTA_TOOL = {
+  name: "vm_quota",
+  description: "Check and manage tier-gated VM quotas. View limits, usage, and check if resource allocation is allowed for the current subscription tier.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      action: { type: "string", enum: ["summary", "check_vm", "check_run", "set_tier", "usage"], description: "Quota action." },
+      tier: { type: "string", enum: ["free", "standard", "advanced", "enterprise"], description: "Subscription tier (for set_tier)." },
+      cpu_cores: { type: "number", description: "CPU cores requested (for check_vm)." },
+      ram_gb: { type: "number", description: "RAM GB requested (for check_vm)." },
+      storage_gb: { type: "number", description: "Storage GB requested (for check_vm)." },
+      platform: { type: "string", description: "Target platform (for check_vm)." },
+    },
+    required: ["action"],
+  },
+};
+
+export interface VmQuotaArgs {
+  action: string;
+  tier?: string;
+  cpu_cores?: number;
+  ram_gb?: number;
+  storage_gb?: number;
+  platform?: string;
+}
+
+export function isVmQuotaArgs(args: unknown): args is VmQuotaArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  return typeof a.action === "string";
+}

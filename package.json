@@ -1,6 +1,6 @@
 {
   "name": "prism-mcp-server",
-  "version": "12.0.0",
+  "version": "12.5.0",
   "mcpName": "io.github.dcostenco/prism-mcp",
   "description": "Prism v12.0.0: The world's first O(1) Cognitive Memory Architecture for AI Agents. Features Unified Billing (Synalux + Prism), 54 Agent Skills, 14-Day Trial, 100% Tool-Call Accuracy (GRPO Aligned), Zero-Search Retrieval (HDC/HRR), and HIPAA-hardened local-first storage.",
   "module": "index.ts",
