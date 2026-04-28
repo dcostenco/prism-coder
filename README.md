@@ -1080,23 +1080,25 @@ A VS Code-like standalone desktop IDE purpose-built for Prism Coder. Ships as `.
 
 Standard memory servers (like Mem0, Zep, or the baseline Anthropic MCP) act as passive filing cabinets — they wait for the LLM to search them. **Prism is an active cognitive architecture.** Designed specifically for the **Model Context Protocol (MCP)**, Prism doesn't just store vectors — it consolidates experience into principles, traverses causal graphs for multi-hop reasoning, and rejects queries it can't confidently answer.
 
-### 📊 Feature-by-Feature Comparison
+### 📊 Feature-by-Feature Comparison (2026 Q2)
 
-| Feature / Architecture | 🧠 Prism MCP | 🐘 Mem0 | ⚡ Zep | 🧪 Anthropic Base MCP |
-| :--- | :--- | :--- | :--- | :--- |
-| **Privacy & HIPAA** | **✅ 100% Local / Air-gapped / Redacted** | ❌ Cloud-dependent | ❌ Cloud-dependent | ✅ Local-only |
-| **Local LLM Logic** | **✅ `prism-coder:7b` (Compaction, Routing)** | ❌ Cloud only | ❌ Cloud only | ❌ None |
-| **Primary Interface** | **Native MCP** (Tools, Prompts, Resources) | REST API & Python/TS SDKs | REST API & Python/TS SDKs | Native MCP (Tools only) |
-| **Storage Engine** | **BYO SQLite or Supabase** | Managed Cloud / VectorDBs | Managed Cloud / Postgres | Local SQLite only |
-| **Context Assembly** | **Progressive (Quick/Std/Deep)** | Top-K Semantic Search | Top-K + Temporal Summaries | Basic Entity Search |
-| **Memory Mechanics** | **ACT-R Activation, Spreading Activation, Hebbian Consolidation, Rejection Gate** | Basic Vector + Entity | Fading Temporal Graph | None (Infinite growth) |
-| **Multi-Agent Sync** | **CRDT (Remove-Wins / LWW)** | Cloud locks | Postgres locks | ❌ None (Data races) |
-| **Data Compression** | **TurboQuant (7x smaller vectors)** | ❌ Standard F32 Vectors | ❌ Standard Vectors | ❌ No Vectors |
-| **Observability** | **OTel Traces + Built-in PWA UI** | Cloud Dashboard | Cloud Dashboard | ❌ None |
-| **Maintenance** | **Autonomous Background Scheduler** | Manual/API driven | Automated (Cloud) | ❌ Manual |
-| **Data Portability** | **Prism-Port (Obsidian/Logseq Vault)** | JSON Export | JSON Export | Raw `.db` file |
-| **Cost Model** | **Free + BYOM (Ollama)** | Per-API-call pricing | Per-API-call pricing | Free (limited) |
-| **Autonomous Pipelines** | **✅ Dark Factory** — adversarial eval, evidence-bound rubric, fail-closed 3-gate execution | ❌ | ❌ | ❌ |
+| Feature / Architecture | 🧠 Prism MCP | 🐘 Mem0 | ⚡ Zep | 🧪 Anthropic Base MCP | 🔬 mcp-memory-service |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Privacy & HIPAA** | **✅ 100% Local / Air-gapped / Redacted** | ❌ Cloud-dependent (SOC2) | ❌ Cloud-dependent | ✅ Local-only | ✅ Local (ChromaDB) |
+| **Local LLM Logic** | **✅ `prism-coder:7b` (Compaction, Routing)** | ❌ Cloud only | ❌ Cloud only | ❌ None | ❌ Cloud only |
+| **Primary Interface** | **Native MCP** (Tools, Prompts, Resources) | REST API & Python/TS SDKs | REST API & Python/TS SDKs | Native MCP (Tools only) | Native MCP (7 tools) |
+| **Storage Engine** | **BYO SQLite or Supabase** | Managed Cloud / VectorDBs | Managed Cloud / Postgres | Local SQLite only | ChromaDB / Cloudflare Vectorize |
+| **Context Assembly** | **Progressive (Quick/Std/Deep)** | Top-K Semantic Search | Top-K + Temporal Summaries | Basic Entity Search | Top-K Semantic |
+| **Memory Mechanics** | **ACT-R Activation, Spreading Activation, Hebbian Consolidation, Rejection Gate** | Basic Vector + Entity | Fading Temporal Graph | None (Infinite growth) | Basic Vector |
+| **Multi-Agent Sync** | **CRDT (Remove-Wins / LWW)** | Cloud locks | Postgres locks | ❌ None (Data races) | ❌ Single-agent |
+| **Data Compression** | **TurboQuant (7.7× smaller vectors)** | ❌ Standard F32 Vectors | ❌ Standard Vectors | ❌ No Vectors | ❌ Standard F32 |
+| **Observability** | **OTel Traces + Built-in PWA UI** | Cloud Dashboard | Cloud Dashboard | ❌ None | ❌ None |
+| **Maintenance** | **Autonomous Background Scheduler** | Manual/API driven | Automated (Cloud) | ❌ Manual | ❌ Manual |
+| **Data Portability** | **Prism-Port (Obsidian/Logseq Vault)** | JSON Export | JSON Export | Raw `.db` file | JSON Export |
+| **Cost Model** | **Free + BYOM (Ollama)** | Per-API-call pricing | Per-API-call pricing | Free (limited) | Free (OSS) |
+| **Autonomous Pipelines** | **✅ Dark Factory** — adversarial eval, evidence-bound rubric, fail-closed 3-gate execution | ❌ | ❌ | ❌ | ❌ |
+| **Framework Integrations** | ❌ MCP-only *(v12.1 roadmap)* | **✅ LangChain, CrewAI, AutoGen, LlamaIndex** | **✅ LangChain, LlamaIndex** | ❌ MCP-only | ❌ MCP-only |
+| **Implicit Memory (NER)** | ❌ Explicit saves *(v12.1 roadmap)* | **✅ Auto-extract entities** | **✅ Auto-extract** | ❌ None | ❌ Manual |
 
 ### 📊 Local Engine Benchmarks (Prism-Coder 7B)
 

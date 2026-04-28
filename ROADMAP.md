@@ -18,13 +18,25 @@
     - [x] Queue watchdog for deadlock auto-drain
     - [x] Unified agent status dashboard (`agent_status.sh`)
     - [x] 115/115 tests across 5 suites (unit, concurrent, shell, mock, stress)
-- [ ] **v12.0.0** - Distal Memory
-    - [ ] Semantic clustering of long-term history
-    - [ ] Active-Prism background maintenance
-- [ ] **v13.0.0** - Team Handoff
+- [ ] **v12.1.0** - Developer Onboarding & Framework Bridge
+    - [ ] Interactive first-run setup wizard in Mind Palace Dashboard
+    - [ ] LangChain/LlamaIndex Python memory adapter (`pip install prism-memory`)
+    - [ ] CrewAI/AutoGen memory provider plugin
+    - [ ] Implicit memory extraction (NER) from raw conversations — auto-save entities without explicit tool calls
+    - [ ] 3-minute quickstart tutorial (guided in-dashboard walkthrough)
+- [ ] **v12.2.0** - Enterprise Observability & Reliability
+    - [ ] API usage analytics dashboard (per-project call tracking, token spend charts)
+    - [ ] Real-time notifications (webhook/Slack/email on health degradation, compaction events)
+    - [ ] Automated SQLite backup scheduler (hourly/daily/weekly with point-in-time restore)
+    - [ ] Memory analytics time-series charts (growth, compaction efficiency, search patterns)
+    - [ ] Natural language memory query ("what did we decide about auth?" → structured results)
+- [ ] **v13.0.0** - Team Collaboration & Administration
     - [ ] Encrypted peer-to-peer session syncing
     - [ ] Multi-agent task routing with verifiable memory
-- [ ] **v14.0.0** - VM & Device Integration + Game Dev Studio
+    - [ ] Team management admin UI in Mind Palace Dashboard (user/role/permission CRUD)
+    - [ ] Role-based access control (RBAC) for projects and memory partitions
+    - [ ] Mobile-responsive dashboard for on-the-go agent health monitoring
+- [ ] **v14.0.0** - Cloud Agent Runtime + VM & Device Integration
     - [x] Hypervisor abstraction (Apple Virtualization, VMware, Parallels, QEMU, Hyper-V)
     - [x] 14 built-in device templates (Linux, Windows, iOS, iPadOS, watchOS, Wear OS, Android, macOS, Vision Pro, Meta Quest)
     - [x] VMware/Parallels import (vmx, pvm, ova, qcow2, vhdx)
@@ -42,6 +54,11 @@
     - [ ] GitHub Actions deployment pipeline with test suite integration
     - [ ] Thin-client proxy to Synalux Cloud
     - [ ] Tier-gated VM quotas (apps inherit Synalux subscription tiers)
+    - [ ] Cloud-delegated Dark Factory pipelines (remote agent execution)
+    - [ ] Remote agent execution with Prism memory injection
+    - [ ] GitHub Issues/PR bidirectional sync with memory entries
+    - [ ] AI-generated changelogs from session ledger history
+    - [ ] Plugin/Extension API for IDE marketplace
 - [ ] **v15.0.0** - SCM CI/CD Workflow Engine (GitHub Migration Parity)
     - [ ] Workflow trigger system (`on.push.paths`, `on.pull_request`, `on.schedule`, `workflow_dispatch`)
     - [ ] Path-based file change detection for selective pipeline runs
