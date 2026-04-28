@@ -104,7 +104,7 @@ Prism v12.0.0 unifies Prism and Synalux into a **single billing architecture** w
 | **Support** | Community | Email | Priority | Dedicated SLA |
 | **HIPAA BAA** | — | — | — | ✅ |
 
-### 64 Production-Ready Agent Skills
+### 54 Production-Ready Agent Skills
 
 - **10 Super-Skills** — Dev Engineering, AI Agent, Sales, Content Creative, PM, Legal, Research Knowledge, Operations CX, Finance, Marketing (compacted 73%: 22K→6K lines)
 - **4 Medical Skills** — `hipaa-compliance`, `clinical-documentation`, `medical-billing-coding`, `patient-data-privacy`
@@ -131,9 +131,7 @@ Prism v11.6.0 introduces **production-grade agent infrastructure** for running m
 | **Queue Watchdog** | Deadlocks from zombie queue entries |
 | **Status Dashboard** | Blind spots in infrastructure health |
 
-> 🧪 **Verified:** 221/221 tests passing across unit, concurrent, shell integration, mock Ollama, live stress test, and v12 handler suites. v12.5.0 includes 106 dedicated tests for new RBAC, sync, GitHub, plugin, proxy, delegate, and quota handlers.
-
-![Prism v12.5 — 10 New Advanced Operations Tools](docs/v12_5_advanced_operations.png)
+> 🧪 **Verified:** 115/115 tests passing across unit, concurrent, shell integration, mock Ollama, and live stress test suites. v12.0.0 billing tests included.
 
 ---
 
@@ -1364,7 +1362,7 @@ prism verify generate                          # Bless current rubric as canonic
 
 ## <a name="tool-reference"></a>🔧 Tool Reference
 
-Prism ships **40+ tools** across 10 categories, but **90% of your workflow uses just three:**
+Prism ships 30+ tools, but **90% of your workflow uses just three:**
 
 > **🎯 The Big Three**
 >
@@ -1479,26 +1477,6 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 | `session_start_pipeline` | Create and enqueue a background autonomous pipeline |
 | `session_check_pipeline_status` | Poll the current step, iteration, and status of a pipeline |
 | `session_abort_pipeline` | Emergency kill switch to halt a running background pipeline |
-
-</details>
-
-<details>
-<summary><strong>v12.5 Advanced Operations (10 tools) ✨ NEW</strong></summary>
-
-Added in v12.3–v12.5 for team collaboration, GitHub automation, cloud runtime, and extensibility.
-
-| Tool | Category | Purpose |
-|------|----------|---------|
-| `manage_rbac` | v12.3 Team | Create/assign/revoke roles, check permissions, list project members |
-| `encrypted_sync` | v12.3 Team | Register peers, push encrypted memory, check sync status |
-| `github_sync` | v12.4 Automation | Configure repo sync, create issues from memory, track PRs |
-| `generate_changelog` | v12.4 Automation | Auto-generate changelogs from ledger entries (Markdown/JSON) |
-| `generate_ci_pipeline` | v12.4 Automation | Generate GitHub Actions workflows from presets (Node, Python, etc.) |
-| `memory_attestation` | v12.4 Automation | Cryptographic attestation reports with Merkle proofs |
-| `manage_plugins` | v12.5 Extensibility | Discover, load, unload, validate, and list plugins |
-| `synalux_proxy` | v12.5 Cloud | Configure Synalux Cloud proxy, health check, route requests |
-| `cloud_delegate` | v12.5 Cloud | Create and dispatch cloud compute tasks (embedding, training) |
-| `vm_quota` | v12.5 Cloud | Enforce tier-based VM quotas (CPU, RAM, storage, concurrency) |
 
 </details>
 
