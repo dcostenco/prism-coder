@@ -24,11 +24,21 @@
 - [ ] **v13.0.0** - Team Handoff
     - [ ] Encrypted peer-to-peer session syncing
     - [ ] Multi-agent task routing with verifiable memory
-- [ ] **v14.0.0** - VM & Device Integration
-    - [ ] Hypervisor abstraction (Apple Virtualization, VMware, Parallels, QEMU, Hyper-V)
-    - [ ] 9 built-in device templates (Linux, Windows, iOS, iPadOS, watchOS, Wear OS, Android)
-    - [ ] VMware/Parallels import (vmx, pvm, ova, qcow2, vhdx)
-    - [ ] Custom device parameters (user-defined specs, port forwarding, env vars)
+- [ ] **v14.0.0** - VM & Device Integration + Game Dev Studio
+    - [x] Hypervisor abstraction (Apple Virtualization, VMware, Parallels, QEMU, Hyper-V)
+    - [x] 14 built-in device templates (Linux, Windows, iOS, iPadOS, watchOS, Wear OS, Android, macOS, Vision Pro, Meta Quest)
+    - [x] VMware/Parallels import (vmx, pvm, ova, qcow2, vhdx)
+    - [x] Custom device parameters (user-defined specs, port forwarding, env vars)
+    - [x] Game Engine SDK — GPU profiling, shader pipelines, build/render farms, netcode simulation
+    - [x] Creative Studio — 3D/5D visualization, video production, AI audio generation
+    - [x] Competitor Import — Unity, Unreal, Godot, Xcode + 10 more platforms
+    - [x] Component Marketplace — paid/free asset sharing via Synalux with revenue sharing
+    - [x] 17 Project Templates — game, app, and creative starter scaffolds
+    - [x] Two-layer Licensing — workspace (11 types) + per-product (25 types) with compliance engine
+    - [x] **Ethics & Export Control Enforcement** — 6-layer physical enforcement (see [ETHICS.md](ETHICS.md))
+        - Sanctions screening (OFAC/EU/UN/BIS), geofencing with VPN/Tor detection
+        - AI use-case classification, runtime monitoring, kill switches, tamper-proof audit trail
+        - Embargoed: RU, BY, CU, IR, KP, SY — hard-blocked at registration
     - [ ] GitHub Actions deployment pipeline with test suite integration
     - [ ] Thin-client proxy to Synalux Cloud
     - [ ] Tier-gated VM quotas (apps inherit Synalux subscription tiers)

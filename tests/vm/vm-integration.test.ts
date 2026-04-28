@@ -62,6 +62,19 @@ import {
     LICENSE_TIERS,
 } from '../../src/vm/workspaceLicensing.js';
 
+// ── Ethics & Export Control ──
+import {
+    PROHIBITED_USE_POLICY,
+    EMBARGOED_COUNTRIES,
+    RESTRICTED_COUNTRIES,
+    DEFAULT_SANCTIONS_CONFIG,
+    DEFAULT_GEOFENCE_CONFIG,
+    DEFAULT_RUNTIME_MONITOR,
+    DEFAULT_AUDIT_CONFIG,
+    DEFAULT_ENFORCEMENT_PIPELINE,
+    ETHICS_TIERS,
+} from '../../src/vm/ethicsEnforcement.js';
+
 const ALL_TIERS: ScmTier[] = ['free', 'standard', 'advanced', 'enterprise'];
 
 // ═══════════════════════════════════════════════════════════════
@@ -764,5 +777,232 @@ describe('Edge Cases — Boundary Values', () => {
             expect(pct).toBeGreaterThanOrEqual(0);
             expect(pct).toBeLessThanOrEqual(100);
         });
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 12. ETHICS & EXPORT CONTROL ENFORCEMENT
+// ═══════════════════════════════════════════════════════════════
+
+describe('Ethics Enforcement — Prohibited Use Policy', () => {
+    test('all 10 prohibited categories are defined', () => {
+        expect(PROHIBITED_USE_POLICY.prohibited_categories.length).toBe(10);
+    });
+
+    test('weapons, military, and autonomous lethal are prohibited', () => {
+        const cats = PROHIBITED_USE_POLICY.prohibited_categories;
+        expect(cats).toContain('weapons_development');
+        expect(cats).toContain('military_operations');
+        expect(cats).toContain('autonomous_lethal');
+        expect(cats).toContain('nuclear_bio_chem');
+        expect(cats).toContain('cyber_offensive');
+        expect(cats).toContain('surveillance_mass');
+        expect(cats).toContain('disinformation');
+        expect(cats).toContain('human_rights_abuse');
+        expect(cats).toContain('child_exploitation');
+        expect(cats).toContain('sanctions_evasion');
+    });
+
+    test('trigger keywords include military terms', () => {
+        const kw = PROHIBITED_USE_POLICY.trigger_keywords;
+        expect(kw.length).toBeGreaterThan(10);
+        expect(kw.some(k => k.includes('weapons'))).toBe(true);
+        expect(kw.some(k => k.includes('missile'))).toBe(true);
+        expect(kw.some(k => k.includes('surveillance'))).toBe(true);
+        expect(kw.some(k => k.includes('lethal'))).toBe(true);
+    });
+
+    test('auto-reject threshold is higher than human-review threshold', () => {
+        expect(PROHIBITED_USE_POLICY.auto_reject_threshold)
+            .toBeGreaterThan(PROHIBITED_USE_POLICY.human_review_threshold);
+    });
+
+    test('thresholds are valid probabilities (0-1)', () => {
+        expect(PROHIBITED_USE_POLICY.auto_reject_threshold).toBeGreaterThan(0);
+        expect(PROHIBITED_USE_POLICY.auto_reject_threshold).toBeLessThanOrEqual(1);
+        expect(PROHIBITED_USE_POLICY.human_review_threshold).toBeGreaterThan(0);
+        expect(PROHIBITED_USE_POLICY.human_review_threshold).toBeLessThanOrEqual(1);
+    });
+});
+
+describe('Ethics Enforcement — Sanctions & Embargoed Countries', () => {
+    test('Russia is embargoed', () => {
+        expect(EMBARGOED_COUNTRIES).toContain('RU');
+    });
+
+    test('Belarus is embargoed (sanctions facilitation)', () => {
+        expect(EMBARGOED_COUNTRIES).toContain('BY');
+    });
+
+    test('North Korea, Iran, Syria, Cuba are embargoed', () => {
+        expect(EMBARGOED_COUNTRIES).toContain('KP');
+        expect(EMBARGOED_COUNTRIES).toContain('IR');
+        expect(EMBARGOED_COUNTRIES).toContain('SY');
+        expect(EMBARGOED_COUNTRIES).toContain('CU');
+    });
+
+    test('at least 6 embargoed countries', () => {
+        expect(EMBARGOED_COUNTRIES.length).toBeGreaterThanOrEqual(6);
+    });
+
+    test('restricted countries include China (sector-specific)', () => {
+        expect(RESTRICTED_COUNTRIES).toContain('CN');
+    });
+
+    test('all country codes are 2-letter ISO', () => {
+        [...EMBARGOED_COUNTRIES, ...RESTRICTED_COUNTRIES].forEach(code => {
+            expect(code).toMatch(/^[A-Z]{2}$/);
+        });
+    });
+
+    test('no overlap between embargoed and restricted lists', () => {
+        const embargoedSet = new Set(EMBARGOED_COUNTRIES);
+        RESTRICTED_COUNTRIES.forEach(code => {
+            expect(embargoedSet.has(code)).toBe(false);
+        });
+    });
+});
+
+describe('Ethics Enforcement — Sanctions Screening Config', () => {
+    test('screens against OFAC SDN list', () => {
+        expect(DEFAULT_SANCTIONS_CONFIG.lists).toContain('ofac_sdn');
+    });
+
+    test('screens against EU consolidated sanctions', () => {
+        expect(DEFAULT_SANCTIONS_CONFIG.lists).toContain('eu_consolidated');
+    });
+
+    test('screens against BIS entity list (export control)', () => {
+        expect(DEFAULT_SANCTIONS_CONFIG.lists).toContain('bis_entity_list');
+    });
+
+    test('checks at least 6 sanctions lists', () => {
+        expect(DEFAULT_SANCTIONS_CONFIG.lists.length).toBeGreaterThanOrEqual(6);
+    });
+
+    test('list refresh is at least every 24 hours', () => {
+        expect(DEFAULT_SANCTIONS_CONFIG.list_refresh_hours).toBeLessThanOrEqual(24);
+    });
+
+    test('screens billing country, IP, org name, and individuals', () => {
+        expect(DEFAULT_SANCTIONS_CONFIG.screen_billing_country).toBe(true);
+        expect(DEFAULT_SANCTIONS_CONFIG.screen_ip_country).toBe(true);
+        expect(DEFAULT_SANCTIONS_CONFIG.screen_org_name).toBe(true);
+        expect(DEFAULT_SANCTIONS_CONFIG.screen_individuals).toBe(true);
+    });
+
+    test('embargoed countries are blocked by default', () => {
+        expect(DEFAULT_SANCTIONS_CONFIG.block_embargoed).toBe(true);
+    });
+
+    test('enhanced due diligence is enabled for restricted countries', () => {
+        expect(DEFAULT_SANCTIONS_CONFIG.enhanced_due_diligence).toBe(true);
+    });
+});
+
+describe('Ethics Enforcement — Geofencing', () => {
+    test('IP geolocation is enabled', () => {
+        expect(DEFAULT_GEOFENCE_CONFIG.ip_geolocation).toBe(true);
+    });
+
+    test('VPN detection is enabled', () => {
+        expect(DEFAULT_GEOFENCE_CONFIG.vpn_detection).toBe(true);
+    });
+
+    test('Tor exit node blocking is enabled', () => {
+        expect(DEFAULT_GEOFENCE_CONFIG.tor_blocking).toBe(true);
+    });
+
+    test('triangulation requires minimum 2 matching signals', () => {
+        expect(DEFAULT_GEOFENCE_CONFIG.triangulation_required).toBe(true);
+        expect(DEFAULT_GEOFENCE_CONFIG.min_matching_signals).toBeGreaterThanOrEqual(2);
+    });
+
+    test('billing country match is required', () => {
+        expect(DEFAULT_GEOFENCE_CONFIG.billing_country_match).toBe(true);
+    });
+});
+
+describe('Ethics Enforcement — Runtime Monitoring', () => {
+    test('API pattern monitoring is enabled', () => {
+        expect(DEFAULT_RUNTIME_MONITOR.api_pattern_monitoring).toBe(true);
+    });
+
+    test('geo anomaly detection is enabled', () => {
+        expect(DEFAULT_RUNTIME_MONITOR.geo_anomaly_detection).toBe(true);
+    });
+
+    test('spike threshold is reasonable (5-20x)', () => {
+        expect(DEFAULT_RUNTIME_MONITOR.spike_threshold_multiplier).toBeGreaterThanOrEqual(5);
+        expect(DEFAULT_RUNTIME_MONITOR.spike_threshold_multiplier).toBeLessThanOrEqual(20);
+    });
+
+    test('auto-suspend is human-in-the-loop by default', () => {
+        expect(DEFAULT_RUNTIME_MONITOR.auto_suspend_on_anomaly).toBe(false);
+    });
+});
+
+describe('Ethics Enforcement — Audit Trail', () => {
+    test('hash chain is enabled for tamper-proof logging', () => {
+        expect(DEFAULT_AUDIT_CONFIG.hash_chain_enabled).toBe(true);
+    });
+
+    test('retention is forever (0 = infinite)', () => {
+        expect(DEFAULT_AUDIT_CONFIG.retention_days).toBe(0);
+    });
+
+    test('high-severity events trigger alerts', () => {
+        const alerts = DEFAULT_AUDIT_CONFIG.alert_events;
+        expect(alerts).toContain('sanctions_check_failed');
+        expect(alerts).toContain('kill_switch_executed');
+        expect(alerts).toContain('use_case_rejected');
+    });
+});
+
+describe('Ethics Enforcement — Tier Independence', () => {
+    test('enforcement is ALWAYS active for ALL tiers (not tier-gated)', () => {
+        ALL_TIERS.forEach(t => {
+            expect(ETHICS_TIERS[t].enforcement_active).toBe(true);
+        });
+    });
+
+    test('all 4 tiers are defined', () => {
+        ALL_TIERS.forEach(t => expect(ETHICS_TIERS[t]).toBeDefined());
+    });
+
+    test('free tier cannot view audit logs', () => {
+        expect(ETHICS_TIERS.free.view_own_audit_logs).toBe(false);
+        expect(ETHICS_TIERS.free.compliance_reports).toBe(false);
+    });
+
+    test('enterprise has full compliance visibility', () => {
+        const ent = ETHICS_TIERS.enterprise;
+        expect(ent.view_own_audit_logs).toBe(true);
+        expect(ent.compliance_reports).toBe(true);
+        expect(ent.dedicated_trust_contact).toBe(true);
+        expect(ent.custom_geofence).toBe(true);
+        expect(ent.pre_clearance).toBe(true);
+    });
+});
+
+describe('Ethics Enforcement — Enforcement Pipeline', () => {
+    test('pipeline has all 3 registration gates', () => {
+        const pipeline = DEFAULT_ENFORCEMENT_PIPELINE;
+        expect(pipeline.registration_gates.sanctions_screening).toBeDefined();
+        expect(pipeline.registration_gates.geofence).toBeDefined();
+        expect(pipeline.registration_gates.use_case_screening).toBeDefined();
+    });
+
+    test('pipeline includes runtime monitors', () => {
+        expect(DEFAULT_ENFORCEMENT_PIPELINE.runtime_monitors).toBeDefined();
+    });
+
+    test('pipeline includes audit config', () => {
+        expect(DEFAULT_ENFORCEMENT_PIPELINE.audit).toBeDefined();
+    });
+
+    test('pipeline includes prohibited use policy', () => {
+        expect(DEFAULT_ENFORCEMENT_PIPELINE.prohibited_use).toBeDefined();
+        expect(DEFAULT_ENFORCEMENT_PIPELINE.prohibited_use.prohibited_categories.length).toBe(10);
     });
 });
