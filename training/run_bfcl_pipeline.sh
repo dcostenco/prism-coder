@@ -285,8 +285,7 @@ elif [ -d "$SFT_FUSED" ] && [ -d "$GRPO_FUSED" ]; then
     python -m mlx_lm fuse \
         --model "$SFT_FUSED" \
         --adapter-path "$GRPO_ADAPTER" \
-        --save-path "$SOUPED_MODEL" \
-        --export-gguf
+        --save-path "$SOUPED_MODEL"
 else
     echo "WARNING: Need both SFT and RS-SFT models for souping."
     echo "  Using best available model instead."

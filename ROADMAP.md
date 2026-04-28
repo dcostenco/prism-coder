@@ -30,41 +30,40 @@
     - [x] Automated SQLite backup scheduler (hourly/daily/weekly with point-in-time restore)
     - [x] Memory analytics time-series charts (growth, compaction efficiency, search patterns)
     - [x] Natural language memory query ("what did we decide about auth?" → structured results)
-- [ ] **v13.0.0** - Team Collaboration & Administration
-    - [ ] Encrypted peer-to-peer session syncing
-    - [ ] Multi-agent task routing with verifiable memory
-    - [ ] Team management admin UI in Mind Palace Dashboard (user/role/permission CRUD)
-    - [ ] Role-based access control (RBAC) for projects and memory partitions
-    - [ ] Mobile-responsive dashboard for on-the-go agent health monitoring
-- [ ] **v14.0.0** - Cloud Agent Runtime + VM & Device Integration
+- [x] **v12.3.0** - Team Collaboration & RBAC
+    - [x] Role-based access control (RBAC) engine — admin/editor/viewer + custom roles with SQLite persistence
+    - [x] Encrypted peer-to-peer session syncing (AES-256-GCM, SHA-256 integrity, conflict resolution)
+    - [x] Multi-agent task routing with verifiable memory (Merkle tree attestation)
+    - [x] Mobile-responsive dashboard config flag (`PRISM_MOBILE_DASHBOARD`)
+- [x] **v12.4.0** - GitHub Integration & Automation
+    - [x] GitHub Issues/PR bidirectional sync with memory entries (REST API v3)
+    - [x] AI-generated changelogs from session ledger history (Keep a Changelog + optional LLM)
+    - [x] GitHub Actions CI/CD pipeline generator (preset templates: node-test, npm-publish, python-test)
+    - [x] Memory attestation — SHA-256 Merkle tree for provable integrity and tamper detection
+- [x] **v12.5.0** - Cloud Runtime & Extensibility
+    - [x] Plugin/Extension API for IDE marketplace (manifest validation, lifecycle hooks, custom tool registration)
+    - [x] Synalux thin-client proxy (tier-gated rate limiting, feature gates, exponential backoff)
+    - [x] Cloud-delegated Dark Factory pipelines (remote agent execution with memory injection)
+    - [x] Tier-gated VM quotas (per-tier CPU/RAM/storage/concurrent-run limits)
     - [x] Hypervisor abstraction (Apple Virtualization, VMware, Parallels, QEMU, Hyper-V)
     - [x] 14 built-in device templates (Linux, Windows, iOS, iPadOS, watchOS, Wear OS, Android, macOS, Vision Pro, Meta Quest)
-    - [x] VMware/Parallels import (vmx, pvm, ova, qcow2, vhdx)
-    - [x] Custom device parameters (user-defined specs, port forwarding, env vars)
-    - [x] Game Engine SDK — GPU profiling, shader pipelines, build/render farms, netcode simulation
-    - [x] Creative Studio — 3D/5D visualization, video production, AI audio generation
-    - [x] Competitor Import — Unity, Unreal, Godot, Xcode + 10 more platforms
-    - [x] Component Marketplace — paid/free asset sharing via Synalux with revenue sharing
-    - [x] 17 Project Templates — game, app, and creative starter scaffolds
-    - [x] Two-layer Licensing — workspace (11 types) + per-product (25 types) with compliance engine
-    - [x] **Ethics & Export Control Enforcement** — 6-layer physical enforcement (see [ETHICS.md](ETHICS.md))
-        - Sanctions screening (OFAC/EU/UN/BIS), geofencing with VPN/Tor detection
-        - AI use-case classification, runtime monitoring, kill switches, tamper-proof audit trail
-        - Embargoed: RU, BY, CU, IR, KP, SY — hard-blocked at registration
-    - [ ] GitHub Actions deployment pipeline with test suite integration
-    - [ ] Thin-client proxy to Synalux Cloud
-    - [ ] Tier-gated VM quotas (apps inherit Synalux subscription tiers)
-    - [ ] Cloud-delegated Dark Factory pipelines (remote agent execution)
-    - [ ] Remote agent execution with Prism memory injection
-    - [ ] GitHub Issues/PR bidirectional sync with memory entries
-    - [ ] AI-generated changelogs from session ledger history
-    - [ ] Plugin/Extension API for IDE marketplace
-- [ ] **v15.0.0** - SCM CI/CD Workflow Engine (GitHub Migration Parity)
-    - [ ] Workflow trigger system (`on.push.paths`, `on.pull_request`, `on.schedule`, `workflow_dispatch`)
-    - [ ] Path-based file change detection for selective pipeline runs
-    - [ ] Built-in workflow runner with Docker/container isolation
-    - [ ] Artifact storage and caching between workflow steps
-    - [ ] i18n auto-translation pipeline (triggered by README.md changes)
-    - [ ] Status checks and branch protection rules
-    - [ ] Webhook delivery (push, PR, release events)
-    - [ ] 100% GitHub Actions YAML compatibility layer
+    - [x] Game Engine SDK, Creative Studio, Component Marketplace, 17 Project Templates
+    - [x] Two-layer Licensing + Ethics & Export Control Enforcement (see [ETHICS.md](ETHICS.md))
+- [ ] **v13.0.0** - Multi-Modal Memory & Recall
+    - [ ] Image/screenshot memory — store and recall UI states, diagrams, architecture graphs
+    - [ ] Audio transcription persistence — voice session summaries indexed as searchable memory
+    - [ ] Diagram-aware context loading — Mermaid/PlantUML parsing into structured memory nodes
+    - [ ] Video snippet memory — frame-level annotations linked to session entries
+    - [ ] Multi-modal semantic search — unified vector index across text, image, and audio embeddings
+- [ ] **v14.0.0** - Federated Agent Networks
+    - [ ] Cross-organization memory federation — zero-copy knowledge sharing with ACL enforcement
+    - [ ] Zero-trust agent attestation — cryptographic proof of agent identity and capability claims
+    - [ ] Distributed ledger consensus — CRDTs for multi-org conflict-free memory replication
+    - [ ] Agent reputation system — trust scores based on task completion, accuracy, and peer reviews
+    - [ ] Federated search — query across partner organizations' shared knowledge partitions
+- [ ] **v15.0.0** - Autonomous Verification & Self-Healing
+    - [ ] AI-native test generation from memory — auto-create regression tests from session diffs
+    - [ ] Self-healing pipelines — auto-detect and patch broken builds from error pattern memory
+    - [ ] Semantic regression detection — diff session memories to flag unintended behavior changes
+    - [ ] Verification sandbox — isolated execution environment for automated correctness proofs
+    - [ ] Continuous compliance monitoring — auto-audit memory operations against GDPR/SOC2/HIPAA

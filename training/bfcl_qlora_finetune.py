@@ -181,7 +181,7 @@ def train_lora(mlx_model: str, data_dir: str, adapter_path: str,
 
 
 def fuse_adapter(mlx_model: str, adapter_path: str, output_path: str,
-                 export_gguf: bool = True):
+                 export_gguf: bool = False):
     """Fuse LoRA adapter back into the model."""
     print(f"\n{'='*60}")
     print(f"Step 3: Fusing LoRA Adapter")
