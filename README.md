@@ -21,9 +21,9 @@
 
 | Platform | Package | Size |
 |----------|---------|------|
-| **Windows** | [Prism Coder-1.0.0-Setup.exe](https://github.com/dcostenco/prism-mcp/releases/download/v1.0.0/Prism.Coder-1.0.0-Setup.exe) | 99 MB |
-| **macOS (Apple Silicon)** | [Prism Coder-1.0.0-arm64.dmg](https://github.com/dcostenco/prism-mcp/releases/download/v1.0.0/Prism.Coder-1.0.0-arm64.dmg) | 113 MB |
-| **Linux** | [Prism Coder-1.0.0.AppImage](https://github.com/dcostenco/prism-mcp/releases/download/v1.0.0/Prism.Coder-1.0.0.AppImage) | 119 MB |
+| **Windows** | [Prism Coder-1.0.0-Setup.exe](https://github.com/dcostenco/prism-coder/releases/download/v1.0.0/Prism.Coder-1.0.0-Setup.exe) | 99 MB |
+| **macOS (Apple Silicon)** | [Prism Coder-1.0.0-arm64.dmg](https://github.com/dcostenco/prism-coder/releases/download/v1.0.0/Prism.Coder-1.0.0-arm64.dmg) | 113 MB |
+| **Linux** | [Prism Coder-1.0.0.AppImage](https://github.com/dcostenco/prism-coder/releases/download/v1.0.0/Prism.Coder-1.0.0.AppImage) | 119 MB |
 | **npm (MCP Server)** | `npx -y prism-mcp-server` | — |
 
 | What You Get | Time Saved vs. Traditional |
@@ -45,7 +45,7 @@
 
 **27/27 features** — more than any competitor (Cursor: 9, Windsurf: 9, Replit: 12, Bolt: 9).
 
-👉 **[Download from GitHub Releases →](https://github.com/dcostenco/prism-mcp/releases/tag/v1.0.0)**
+👉 **[Download from GitHub Releases →](https://github.com/dcostenco/prism-coder/releases/tag/v1.0.0)**
 
 ---
 
