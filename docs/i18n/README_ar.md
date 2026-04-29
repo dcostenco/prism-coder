@@ -188,6 +188,15 @@ Prism features a cutting-edge **Zero-Search Retrieval** system for its cognitive
 ### 🏥 Flagship Implementation: [Synalux](https://synalux.ai)
 **Synalux** is a high-compliance, local-first Practice Management System for ABA and Pediatrics. It is the flagship implementation of the Prism v11.5.1 engine, utilizing **Zero-Search Retrieval** and **Parallel Academic Discovery** to provide clinicians with real-time, evidence-based reasoning.
 
+| Resource | Link |
+|----------|------|
+| **Synalux Docs** | [github.com/dcostenco/synalux-docs](https://github.com/dcostenco/synalux-docs) |
+| **Synalux Platform** | [synalux.ai](https://synalux.ai) |
+| **Prism Coder 7B (HuggingFace)** | [huggingface.co/dcostenco/prism-coder-7b](https://huggingface.co/dcostenco/prism-coder-7b) |
+| **BFCL Submission** | [PR #1332](https://github.com/ShishirPatil/gorilla/pull/1332) |
+| **Changelog** | [synalux-docs/CHANGELOG.md](https://github.com/dcostenco/synalux-docs/blob/main/CHANGELOG.md) |
+| **Roadmap** | [synalux-docs/ROADMAP.md](https://github.com/dcostenco/synalux-docs/blob/main/ROADMAP.md) |
+
 ---
 
 <details>
