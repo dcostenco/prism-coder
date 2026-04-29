@@ -174,21 +174,21 @@ const mockGetAllSettings = vi.mocked(getAllSettings);
 
 function makeStorageStub() {
   return {
-    saveLedger: vi.fn(() => Promise.resolve([{ id: "entry-uuid-001", created_at: new Date().toISOString() }])),
+    saveLedger: vi.fn((_entry: Record<string, any>): Promise<unknown> => Promise.resolve([{ id: "entry-uuid-001", created_at: new Date().toISOString() }])),
     patchLedger: vi.fn(() => Promise.resolve()),
-    getLedgerEntries: vi.fn(() => Promise.resolve([])),
+    getLedgerEntries: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
     deleteLedger: vi.fn(() => Promise.resolve([])),
     softDeleteLedger: vi.fn(() => Promise.resolve()),
     hardDeleteLedger: vi.fn(() => Promise.resolve()),
-    saveHandoff: vi.fn(() => Promise.resolve({ status: "created", version: 1 })),
+    saveHandoff: vi.fn((_entry: Record<string, any>): Promise<{ status: string; version?: number; current_version?: number }> => Promise.resolve({ status: "created", version: 1 })),
     getHandoffAtVersion: vi.fn(() => Promise.resolve(null)),
     deleteHandoff: vi.fn(() => Promise.resolve()),
-    loadContext: vi.fn(() => Promise.resolve(null)),
+    loadContext: vi.fn((): Promise<Record<string, unknown> | null> => Promise.resolve(null)),
     searchKnowledge: vi.fn(() => Promise.resolve(null)),
     searchMemory: vi.fn(() => Promise.resolve([])),
-    saveHistorySnapshot: vi.fn(() => Promise.resolve()),
-    getHistory: vi.fn(() => Promise.resolve([])),
-    listProjects: vi.fn(() => Promise.resolve([])),
+    saveHistorySnapshot: vi.fn((_snapshot: Record<string, unknown>) => Promise.resolve()),
+    getHistory: vi.fn((): Promise<Record<string, unknown>[]> => Promise.resolve([])),
+    listProjects: vi.fn((): Promise<string[]> => Promise.resolve([])),
     getHealthStats: vi.fn(() => Promise.resolve({})),
     decayImportance: vi.fn(() => Promise.resolve()),
     registerAgent: vi.fn(),
@@ -673,7 +673,7 @@ describe("ledgerHandlers", () => {
 
       // saveHistorySnapshot is called fire-and-forget
       expect(storage.saveHistorySnapshot).toHaveBeenCalledTimes(1);
-      const snapshotArg = storage.saveHistorySnapshot.mock.calls[0][0];
+      const snapshotArg = storage.saveHistorySnapshot.mock.calls[0]![0] as Record<string, unknown>;
       expect(snapshotArg.project).toBe("test-project");
       expect(snapshotArg.version).toBe(3);
     });
@@ -1113,7 +1113,7 @@ describe("ledgerHandlers", () => {
       });
 
       expect(storage.saveHandoff).toHaveBeenCalledTimes(1);
-      const callArg = storage.saveHandoff.mock.calls[0][0];
+      const callArg = storage.saveHandoff.mock.calls[0]![0] as Record<string, any>;
       expect(callArg.metadata.visual_memory).toHaveLength(1);
       expect(callArg.metadata.visual_memory[0].description).toBe("UI mockup");
     });
