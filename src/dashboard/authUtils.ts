@@ -234,11 +234,11 @@ export function createRateLimiter(opts: RateLimiterOptions) {
         store.set(key, entry);
       }
 
-      // Filter to only timestamps within the window
-      entry.timestamps = entry.timestamps.filter(t => now - t < opts.windowMs);
-
       if (entry.timestamps.length >= opts.maxAttempts) {
-        return false; // Rate limited
+        entry.timestamps = entry.timestamps.filter(t => now - t < opts.windowMs);
+        if (entry.timestamps.length >= opts.maxAttempts) {
+          return false;
+        }
       }
 
       entry.timestamps.push(now);

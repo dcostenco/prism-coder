@@ -65,7 +65,7 @@ export async function captureLocalEnvironment(
         const filename = `auto_${snapshotId}.html`;
         const vaultPath = path.join(mediaDir, filename);
 
-        fs.writeFileSync(vaultPath, html, "utf8");
+        await fs.promises.writeFile(vaultPath, html, "utf8");
 
         const sizeKB = (Buffer.byteLength(html, "utf8") / 1024).toFixed(1);
         console.error(

@@ -846,6 +846,22 @@ export async function runSchedulerSweep(
     }
   }
 
+  // ── Evict stale project entries from tracking Maps ──────────
+  try {
+    const activeProjects = new Set(await storage.listProjects());
+    for (const key of lastSynthesisAt.keys()) {
+      if (!activeProjects.has(key)) lastSynthesisAt.delete(key);
+    }
+    for (const key of synthesisBackoffUntil.keys()) {
+      if (!activeProjects.has(key)) synthesisBackoffUntil.delete(key);
+    }
+    for (const key of lastPruneAt.keys()) {
+      if (!activeProjects.has(key)) lastPruneAt.delete(key);
+    }
+  } catch {
+    // Non-critical — stale entries are harmless, just wasteful
+  }
+
   // ── Finalize ───────────────────────────────────────────────
   result.completedAt = new Date().toISOString();
   result.durationMs = Date.now() - sweepStart;

@@ -36,7 +36,7 @@
 
 **27/27 features** — more than any competitor (Cursor: 9, Windsurf: 9, Replit: 12, Bolt: 9).
 
-👉 **[Full IDE README with screenshots, architecture, and technical details →](https://github.com/dcostenco/prism-coder-ide/blob/main/README.md)**
+👉 **[Full IDE README with screenshots, architecture, and technical details →](https://github.com/nicecode-dev/prism-coder-ide/blob/main/README.md)**
 
 ---
 
