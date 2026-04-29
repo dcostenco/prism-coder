@@ -2,13 +2,15 @@
 # Export fine-tuned Prism model to GGUF for Ollama
 set -euo pipefail
 
-MODEL_DIR="/Users/admin/prism/training/models"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_PYTHON="$SCRIPT_DIR/venv/bin/python3"
+MODEL_DIR="$SCRIPT_DIR/models"
 MLX_MODEL="$MODEL_DIR/qwen-7b-mlx"
-SFT_ADAPTER="$MODEL_DIR/prism-sft-lora"
 GRPO_ADAPTER="$MODEL_DIR/prism-grpo-lora"
+SFT_ADAPTER="$MODEL_DIR/prism-sft-lora-v4-backup"
 FUSED_MODEL="$MODEL_DIR/prism-fused"
-HF_MODEL="$MODEL_DIR/prism-hf"
 GGUF_OUTPUT="$MODEL_DIR/prism-coder-7b-Q4_K_M.gguf"
+LLAMA_CPP="/Users/admin/llama.cpp"
 
 echo "============================================"
 echo "  Prism Model Export: MLX → GGUF → Ollama"
@@ -21,72 +23,87 @@ if [ ! -d "$GRPO_ADAPTER" ] || [ ! -f "$GRPO_ADAPTER/adapters.safetensors" ]; th
     ADAPTER="$SFT_ADAPTER"
 fi
 
-if [ ! -d "$ADAPTER" ] || [ ! -f "$ADAPTER/adapters.safetensors" ]; then
-    echo "ERROR: No adapter found at $ADAPTER"
+# Check if we already have a fused model from the training pipeline
+PREFUSED=""
+if [ -d "$GRPO_ADAPTER/fused_aligned" ] && [ -f "$GRPO_ADAPTER/fused_aligned/config.json" ]; then
+    PREFUSED="$GRPO_ADAPTER/fused_aligned"
+    echo "Found pre-fused model at $PREFUSED"
+elif [ -d "$GRPO_ADAPTER/fused_hf" ] && [ -f "$GRPO_ADAPTER/fused_hf/config.json" ]; then
+    PREFUSED="$GRPO_ADAPTER/fused_hf"
+    echo "Found pre-fused model at $PREFUSED"
+fi
+
+# Step 2: Fuse if not already fused
+if [ -n "$PREFUSED" ]; then
+    echo ""
+    echo "Step 1/3: Skipping fusion — using pre-fused model"
+    FUSED_MODEL="$PREFUSED"
+else
+    if [ ! -d "$ADAPTER" ] || [ ! -f "$ADAPTER/adapters.safetensors" ]; then
+        echo "ERROR: No adapter found at $ADAPTER"
+        exit 1
+    fi
+    echo ""
+    echo "Step 1/3: Fusing LoRA adapter into base model..."
+    echo "Using adapter: $ADAPTER"
+    "$VENV_PYTHON" -m mlx_lm.fuse \
+        --model "$MLX_MODEL" \
+        --adapter-path "$ADAPTER" \
+        --save-path "$FUSED_MODEL" \
+        --dequantize
+    echo "Fused model saved to $FUSED_MODEL"
+fi
+
+echo "Model config:"
+cat "$FUSED_MODEL/config.json" | head -5
+
+# Step 3: Convert HF safetensors → GGUF using llama.cpp
+echo ""
+echo "Step 2/3: Converting to GGUF F16..."
+
+F16_GGUF="$MODEL_DIR/prism-coder-7b-f16.gguf"
+
+if [ -f "$LLAMA_CPP/convert_hf_to_gguf.py" ]; then
+    python3 "$LLAMA_CPP/convert_hf_to_gguf.py" "$FUSED_MODEL" \
+        --outfile "$F16_GGUF" \
+        --outtype f16
+elif command -v convert_hf_to_gguf &>/dev/null; then
+    convert_hf_to_gguf "$FUSED_MODEL" --outfile "$F16_GGUF" --outtype f16
+else
+    echo "ERROR: llama.cpp convert_hf_to_gguf.py not found at $LLAMA_CPP"
+    echo "Install: git clone https://github.com/ggml-org/llama.cpp /Users/admin/llama.cpp"
     exit 1
 fi
 
-echo "Using adapter: $ADAPTER"
+echo "F16 GGUF: $(du -h "$F16_GGUF" | cut -f1)"
 
-# Step 2: Fuse LoRA adapter into base model
+# Step 4: Quantize F16 → Q4_K_M
 echo ""
-echo "Step 1/4: Fusing LoRA adapter into base model..."
-python3 -m mlx_lm.fuse \
-    --model "$MLX_MODEL" \
-    --adapter-path "$ADAPTER" \
-    --save-path "$FUSED_MODEL" \
-    --dequantize
+echo "Step 3/3: Quantizing F16 → Q4_K_M..."
 
-echo "Fused model saved to $FUSED_MODEL"
-
-# Step 3: Convert to HuggingFace format
-echo ""
-echo "Step 2/4: Converting to HuggingFace format..."
-# mlx_lm.fuse with --de-quantize outputs HF-compatible safetensors
-# Copy config files
-cp "$FUSED_MODEL"/*.json "$FUSED_MODEL/" 2>/dev/null || true
-
-# Step 4: Install llama.cpp if not present
-echo ""
-echo "Step 3/4: Checking llama.cpp... (skipped in mock environment)"
-
-
-# Step 5: Convert to GGUF and quantize
-echo ""
-echo "Step 4/4: Converting to GGUF Q4_K_M..."
-
-# Use the llama.cpp convert script
-if command -v llama-gguf-convert &>/dev/null; then
-    llama-gguf-convert "$FUSED_MODEL" --outfile "$MODEL_DIR/prism-coder-7b-f16.gguf" --outtype f16
-elif [ -f "/opt/homebrew/bin/convert_hf_to_gguf.py" ]; then
-    python3 /opt/homebrew/bin/convert_hf_to_gguf.py "$FUSED_MODEL" --outfile "$MODEL_DIR/prism-coder-7b-f16.gguf" --outtype f16
-else
-    # Try python conversion from llama-cpp-python
-    pip3 install llama-cpp-python 2>/dev/null || true
-    python3 -c "
-from llama_cpp import llama_cpp
-print('llama.cpp available')
-" 2>/dev/null || {
-    echo "WARNING: llama.cpp not found. Attempting alternative conversion..."
-    # Create GGUF from MLX directly using mlx_lm's built-in conversion
-    python3 << 'PYEOF'
-import os, json, shutil
-fused = "$FUSED_MODEL"
-# The fused model is already in HF safetensors format
-# We can register it directly with Ollama using safetensors
-print("Model is in HuggingFace safetensors format")
-print("Creating Ollama-compatible package...")
-PYEOF
-}
+QUANTIZE_BIN=""
+if command -v llama-quantize &>/dev/null; then
+    QUANTIZE_BIN="llama-quantize"
+elif [ -f "$LLAMA_CPP/build/bin/llama-quantize" ]; then
+    QUANTIZE_BIN="$LLAMA_CPP/build/bin/llama-quantize"
 fi
 
-# Quantize F16 → Q4_K_M if F16 GGUF exists
-if [ -f "$MODEL_DIR/prism-coder-7b-f16.gguf" ]; then
-    llama-quantize "$MODEL_DIR/prism-coder-7b-f16.gguf" "$GGUF_OUTPUT" Q4_K_M
-    echo "Quantized GGUF: $GGUF_OUTPUT"
-    echo "Size: $(du -h "$GGUF_OUTPUT" | cut -f1)"
-    # Cleanup F16
-    rm -f "$MODEL_DIR/prism-coder-7b-f16.gguf"
+if [ -n "$QUANTIZE_BIN" ]; then
+    "$QUANTIZE_BIN" "$F16_GGUF" "$GGUF_OUTPUT" Q4_K_M
+    echo "Quantized GGUF: $(du -h "$GGUF_OUTPUT" | cut -f1)"
+    rm -f "$F16_GGUF"
+else
+    echo "WARNING: llama-quantize not found. Building llama.cpp..."
+    cd "$LLAMA_CPP" && cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target llama-quantize -j$(sysctl -n hw.ncpu)
+    if [ -f "$LLAMA_CPP/build/bin/llama-quantize" ]; then
+        "$LLAMA_CPP/build/bin/llama-quantize" "$F16_GGUF" "$GGUF_OUTPUT" Q4_K_M
+        echo "Quantized GGUF: $(du -h "$GGUF_OUTPUT" | cut -f1)"
+        rm -f "$F16_GGUF"
+    else
+        echo "WARNING: Build failed. Using F16 GGUF directly (larger but functional)"
+        mv "$F16_GGUF" "$GGUF_OUTPUT"
+    fi
+    cd "$SCRIPT_DIR"
 fi
 
 # Register with Ollama
@@ -95,21 +112,15 @@ echo "============================================"
 echo "  Registering with Ollama"
 echo "============================================"
 
-MODELFILE_PATH="$MODEL_DIR/../Modelfile"
+MODELFILE_PATH="$SCRIPT_DIR/Modelfile"
 
 if [ -f "$GGUF_OUTPUT" ]; then
     echo "Creating Ollama model from GGUF..."
     ollama create prism-coder:7b -f "$MODELFILE_PATH"
     echo ""
-    echo "✅ Model registered: prism-coder:7b"
-    echo "   Run: ollama run prism-coder:7b"
+    echo "Done! Model registered: prism-coder:7b"
+    echo "Run: ollama run prism-coder:7b"
 else
-    echo "GGUF not available. Creating from fused safetensors..."
-    # Ollama can import HF models directly
-    ollama create prism-coder:7b -f "$MODELFILE_PATH" --from "$FUSED_MODEL"
-    echo ""
-    echo "✅ Model registered: prism-coder:7b"
+    echo "ERROR: GGUF file not created at $GGUF_OUTPUT"
+    exit 1
 fi
-
-echo ""
-echo "Done! Run: ollama run prism-coder:7b \"Load context for prism-mcp\""

@@ -24,29 +24,13 @@ echo "Starting MLX LORA training with matched SFT shapes (Rank 8, Layers 16, Seq
 echo "GRPO training completed!"
 
 echo "Fusing adapter..."
-./venv/bin/python3 -m mlx_lm fuse \
-  --model models/prism-fused \
+./venv/bin/python3 -m mlx_lm.fuse \
+  --model models/qwen-7b-mlx \
   --adapter-path models/prism-grpo-lora/adapters \
-  --save-path models/prism-grpo-lora/fused_aligned
+  --save-path models/prism-grpo-lora/fused_aligned \
+  --dequantize
 
-echo "Exporting to GGUF..."
+echo "Exporting to GGUF and deploying to Ollama..."
 ./export_gguf.sh
-
-echo "Deploying to Ollama..."
-GGUF_FILE="/Users/admin/prism/training/models/prism-coder-7b-Q4_K_M.gguf"
-if [ -f "$GGUF_FILE" ]; then
-    cat > Modelfile << OLLAMA_EOF
-FROM $GGUF_FILE
-PARAMETER temperature 0.6
-PARAMETER num_ctx 32768
-PARAMETER stop <|im_end|>
-OLLAMA_EOF
-    ollama create prism-coder:7b -f Modelfile
-    ollama cp prism-coder:7b dcostenco/prism-coder-7b
-    echo "Deployed to Ollama successfully!"
-else
-    echo "Failed to find GGUF file!"
-    exit 1
-fi
 
 echo "All Done!"

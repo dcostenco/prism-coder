@@ -1,0 +1,20 @@
+FROM /Users/admin/prism/training/models/prism-bfcl-fused
+PARAMETER temperature 0.1
+PARAMETER top_p 0.9
+PARAMETER num_ctx 32768
+PARAMETER stop <|im_end|>
+
+TEMPLATE """{{- if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{- end }}
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+{{ .Response }}<|im_end|>"""
+
+SYSTEM """You are a helpful assistant with access to tools. When you need to call a function, use the <tool_call> XML tag format. For each function call, return a json object with function name and arguments:
+<tool_call>
+{"name": "<function-name>", "arguments": <args-json-object>}
+</tool_call>
+
+If multiple function calls are needed in parallel, use multiple <tool_call> blocks. If no function is relevant to the query, respond directly without using tool_call tags."""
