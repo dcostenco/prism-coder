@@ -49,7 +49,7 @@ const PORT = parseInt(process.env.PRISM_DASHBOARD_PORT || "3000", 10);
 
 /** Read HTTP request body as string (Buffer-based to avoid GC thrash on large imports) */
 /** SECURITY: 10MB limit prevents memory exhaustion from oversized POST payloads. */
-const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10MB
+const MAX_BODY_BYTES = parseInt(process.env.PRISM_MAX_REQUEST_BYTES ?? String(10 * 1024 * 1024), 10);
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -109,8 +109,8 @@ export async function startDashboardServer(): Promise<void> {
     initJWKS(AUTH_JWKS_URI);
   }
 
-  const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-  const activeSessions = new Map<string, number>(); // token → expiry timestamp
+  const SESSION_TTL_MS = parseInt(process.env.PRISM_SESSION_TTL_MS ?? String(24 * 60 * 60 * 1000), 10);
+  const activeSessions = new Map<string, number>();
 
   // Auth config object — injectable for testing via authUtils.ts
   const authConfig: AuthConfig = {
@@ -1502,5 +1502,13 @@ self.addEventListener('message', (e) => {
   // Run immediately on startup, then every 12 hours
   runTtlSweep().catch(() => {});
   setInterval(() => { runTtlSweep().catch(() => {}); }, 12 * 60 * 60 * 1000);
+
+  // Prune expired dashboard sessions every hour
+  setInterval(() => {
+    const now = Date.now();
+    for (const [token, expiry] of activeSessions) {
+      if (now > expiry) activeSessions.delete(token);
+    }
+  }, 60 * 60 * 1000);
 }
 

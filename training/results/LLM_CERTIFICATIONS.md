@@ -179,7 +179,7 @@ Final     ███████████████  100%   — Production A
 | **Hardware** | Apple M4 Max 36GB / M5 Max 48GB |
 | **License** | Apache-2.0 |
 | **Organization** | Synalux |
-| **Repository** | [github.com/dcostenco/prism-coder](https://github.com/dcostenco/prism-coder) |
+| **Repository** | [github.com/nicecode-dev/prism-coder-ide](https://github.com/nicecode-dev/prism-coder-ide) |
 
 ---
 

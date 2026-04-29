@@ -19,7 +19,7 @@
 | **Parameters** | 7.6B (11.5M trainable LoRA) |
 | **Hardware** | Apple M4 Max 36GB (MLX-native) |
 | **License** | Apache-2.0 |
-| **Repository** | [github.com/dcostenco/prism-coder](https://github.com/dcostenco/prism-coder) |
+| **Repository** | [github.com/nicecode-dev/prism-coder-ide](https://github.com/nicecode-dev/prism-coder-ide) |
 | **Date** | April 28, 2026 |
 
 ---

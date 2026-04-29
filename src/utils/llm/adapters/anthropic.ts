@@ -41,13 +41,18 @@ import type { LLMProvider } from "../provider.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Default to Claude 3.5 Sonnet — best quality/cost ratio for the tasks
-// Prism performs (compaction, briefing, fact merging, security scan).
-const DEFAULT_MODEL = "claude-3-5-sonnet-20241022";
+let _defaultModel: string | null = null;
+let _maxTokens: number | null = null;
 
-// Max output tokens for all Prism text-generation tasks.
-// 4096 is sufficient for compaction summaries; raise if needed.
-const MAX_TOKENS = 4096;
+function getDefaultModel(): string {
+  if (!_defaultModel) _defaultModel = getSettingSync("anthropic_model", process.env.PRISM_ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514");
+  return _defaultModel;
+}
+
+function getMaxTokens(): number {
+  if (!_maxTokens) _maxTokens = parseInt(getSettingSync("anthropic_max_tokens", process.env.PRISM_ANTHROPIC_MAX_TOKENS ?? "4096"), 10);
+  return _maxTokens;
+}
 
 export class AnthropicAdapter implements LLMProvider {
   private client: Anthropic;
@@ -69,7 +74,7 @@ export class AnthropicAdapter implements LLMProvider {
   // ─── Text Generation ─────────────────────────────────────────────────────
 
   async generateText(prompt: string, systemInstruction?: string): Promise<string> {
-    const model = getSettingSync("anthropic_model", DEFAULT_MODEL);
+    const model = getSettingSync("anthropic_model", getDefaultModel());
 
     debugLog(`[AnthropicAdapter] generateText — model=${model}`);
 
@@ -77,7 +82,7 @@ export class AnthropicAdapter implements LLMProvider {
     // This maps cleanly to LLMProvider's systemInstruction parameter.
     const response = await this.client.messages.create({
       model,
-      max_tokens: MAX_TOKENS,
+      max_tokens: getMaxTokens(),
       ...(systemInstruction ? { system: systemInstruction } : {}),
       messages: [{ role: "user", content: prompt }],
     });
@@ -128,7 +133,7 @@ export class AnthropicAdapter implements LLMProvider {
     mimeType: string,
     context?: string,
   ): Promise<string> {
-    const model = getSettingSync("anthropic_model", DEFAULT_MODEL);
+    const model = getSettingSync("anthropic_model", getDefaultModel());
     const prompt = context
       ? `Describe this image in rich detail for a developer knowledge base. User context: "${context}"`
       : "Describe this image in rich detail for a developer knowledge base. Include: UI elements, visible text, architectural components, and key observations.";
