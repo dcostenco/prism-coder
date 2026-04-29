@@ -1,6 +1,6 @@
 {
   "name": "prism-mcp-server",
-  "version": "12.5.5",
+  "version": "12.5.6",
   "mcpName": "io.github.dcostenco/prism-coder",
   "description": "Prism-Coder v12.5: The world's first O(1) Cognitive Memory Architecture for AI Agents. 100% Tool-Call Accuracy (BFCL Gold Certified), 54 Agent Skills, Zero-Search Retrieval (HDC/HRR), HIPAA-hardened local-first storage, and SLERP-optimized GRPO alignment.",
   "module": "index.ts",
