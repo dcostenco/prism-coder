@@ -43,4 +43,5 @@ def analyze_lengths(filepath):
     for x in lengths[-10:]:
         print(f"  Total: {x[0]}, Prompt: {x[1]}, Assistant: {x[2]}")
 
-analyze_lengths("/Users/admin/prism/training/models/prism-grpo-lora/dpo_data/train.jsonl")
+_TRAINING_DIR = os.path.dirname(os.path.abspath(__file__))
+analyze_lengths(os.path.join(_TRAINING_DIR, "models", "prism-grpo-lora", "dpo_data", "train.jsonl"))

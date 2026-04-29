@@ -7,10 +7,11 @@ import subprocess
 import sys
 import os
 
-MODEL_PATH = "/Users/admin/prism/training/models/qwen-7b-mlx"
-TRAIN_DATA = "/Users/admin/prism/training/data/sft_dataset.jsonl"
-VALID_DATA = "/Users/admin/prism/training/data/sft_valid.jsonl"
-OUTPUT_ADAPTER = "/Users/admin/prism/training/models/prism-sft-lora"
+_TRAINING_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.environ.get("PRISM_MODEL_PATH", os.path.join(_TRAINING_DIR, "models", "qwen-7b-mlx"))
+TRAIN_DATA = os.path.join(_TRAINING_DIR, "data", "sft_dataset.jsonl")
+VALID_DATA = os.path.join(_TRAINING_DIR, "data", "sft_valid.jsonl")
+OUTPUT_ADAPTER = os.path.join(_TRAINING_DIR, "models", "prism-sft-lora")
 
 def main():
     if not os.path.exists(MODEL_PATH):
@@ -48,7 +49,7 @@ def main():
     print(f"Command: {' '.join(cmd)}")
     print("=" * 60)
 
-    result = subprocess.run(cmd, cwd="/Users/admin/prism/training")
+    result = subprocess.run(cmd, cwd=_TRAINING_DIR)
     if result.returncode != 0:
         print(f"Training failed with exit code {result.returncode}")
         sys.exit(1)

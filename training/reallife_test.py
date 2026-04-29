@@ -221,7 +221,8 @@ def run_real_tests():
         "reasoning_accuracy": round(100*reasoning_correct/len(reasoning_tests), 1),
         "results": results,
     }
-    report_path = "/Users/admin/prism/training/results/reallife_test_report.json"
+    _training_dir = os.path.dirname(os.path.abspath(__file__))
+    report_path = os.path.join(_training_dir, "results", "reallife_test_report.json")
     with open(report_path, "w") as f:
         json.dump(report, f, indent=2)
     print(f"\nReport saved: {report_path}")

@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-LOG_FILE="/Users/admin/prism/training/output_grpo_resume.log"
-TRAINING_DIR="/Users/admin/prism/training"
+TRAINING_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="$TRAINING_DIR/output_grpo_resume.log"
 EVAL_RESULTS="$TRAINING_DIR/output/bfcl-32b/eval_results.log"
 
 echo "Monitoring training pipeline for completion..."

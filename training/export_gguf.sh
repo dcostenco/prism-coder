@@ -10,7 +10,7 @@ GRPO_ADAPTER="$MODEL_DIR/prism-grpo-lora"
 SFT_ADAPTER="$MODEL_DIR/prism-sft-lora-v4-backup"
 FUSED_MODEL="$MODEL_DIR/prism-fused"
 GGUF_OUTPUT="$MODEL_DIR/prism-coder-7b-Q4_K_M.gguf"
-LLAMA_CPP="/Users/admin/llama.cpp"
+LLAMA_CPP="${LLAMA_CPP_DIR:-$(dirname "$SCRIPT_DIR")/llama.cpp}"
 
 echo "============================================"
 echo "  Prism Model Export: MLX → GGUF → Ollama"
@@ -71,7 +71,7 @@ elif command -v convert_hf_to_gguf &>/dev/null; then
     convert_hf_to_gguf "$FUSED_MODEL" --outfile "$F16_GGUF" --outtype f16
 else
     echo "ERROR: llama.cpp convert_hf_to_gguf.py not found at $LLAMA_CPP"
-    echo "Install: git clone https://github.com/ggml-org/llama.cpp /Users/admin/llama.cpp"
+    echo "Install: git clone https://github.com/ggml-org/llama.cpp $LLAMA_CPP"
     exit 1
 fi
 

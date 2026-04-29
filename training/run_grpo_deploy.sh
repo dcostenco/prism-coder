@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e
 
-cd /Users/admin/prism/training
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 echo "Starting MLX LORA training with matched SFT shapes (Rank 8, Layers 16, Seq 1024)..."
 ./venv/bin/python3 -m mlx_lm lora \

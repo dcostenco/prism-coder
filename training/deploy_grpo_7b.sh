@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 echo "Waiting for GRPO training (PID 23860) to finish..."
 while kill -0 23860 2>/dev/null; do
     sleep 10
@@ -8,11 +10,11 @@ done
 echo "GRPO training completed!"
 
 echo "Exporting to GGUF..."
-cd /Users/admin/prism/training
+cd "$SCRIPT_DIR"
 ./export_gguf.sh
 
 echo "Deploying to Ollama..."
-GGUF_FILE="/Users/admin/prism/training/models/prism-coder-7b-Q4_K_M.gguf"
+GGUF_FILE="$SCRIPT_DIR/models/prism-coder-7b-Q4_K_M.gguf"
 if [ -f "$GGUF_FILE" ]; then
     cat > Modelfile << OLLAMA_EOF
 FROM $GGUF_FILE

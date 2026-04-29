@@ -21,6 +21,7 @@ def filter_file(input_path, output_path, max_len=2000):
             kept += 1
     print(f"{input_path}: Kept {kept}, Dropped {dropped}")
 
-data_dir = "/Users/admin/prism/training/models/prism-grpo-lora/dpo_data"
+_TRAINING_DIR = os.path.dirname(os.path.abspath(__file__))
+data_dir = os.path.join(_TRAINING_DIR, "models", "prism-grpo-lora", "dpo_data")
 filter_file(f"{data_dir}/train.jsonl", f"{data_dir}/train.jsonl", 2000)
 filter_file(f"{data_dir}/valid.jsonl", f"{data_dir}/valid.jsonl", 2000)

@@ -28,6 +28,7 @@ def filter_file(input_path, output_path, max_len=2000):
             kept += 1
     print(f"{input_path}: Kept {kept}, Dropped {dropped}")
 
-os.makedirs("/Users/admin/prism/training/data/filtered", exist_ok=True)
-filter_file("/Users/admin/prism/training/data/combined/train.jsonl", "/Users/admin/prism/training/data/filtered/train.jsonl")
-filter_file("/Users/admin/prism/training/data/combined/valid.jsonl", "/Users/admin/prism/training/data/filtered/valid.jsonl")
+_TRAINING_DIR = os.path.dirname(os.path.abspath(__file__))
+os.makedirs(os.path.join(_TRAINING_DIR, "data", "filtered"), exist_ok=True)
+filter_file(os.path.join(_TRAINING_DIR, "data", "combined", "train.jsonl"), os.path.join(_TRAINING_DIR, "data", "filtered", "train.jsonl"))
+filter_file(os.path.join(_TRAINING_DIR, "data", "combined", "valid.jsonl"), os.path.join(_TRAINING_DIR, "data", "filtered", "valid.jsonl"))

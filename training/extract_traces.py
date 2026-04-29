@@ -11,8 +11,9 @@ import random
 
 DB_PATH = os.path.expanduser("~/.prism-mcp/data.db")
 BRAIN_DIR = os.path.expanduser("~/.gemini/antigravity/brain")
-TOOL_SCHEMA_PATH = "/Users/admin/prism/training/data/tool_schema.json"
-OUTPUT = "/Users/admin/prism/training/data/sft_dataset.jsonl"
+_TRAINING_DIR = os.path.dirname(os.path.abspath(__file__))
+TOOL_SCHEMA_PATH = os.path.join(_TRAINING_DIR, "data", "tool_schema.json")
+OUTPUT = os.path.join(_TRAINING_DIR, "data", "sft_dataset.jsonl")
 
 SYSTEM_PROMPT = """You are Prism, an AI coding assistant with persistent memory across sessions.
 You have access to MCP tools for session management, knowledge retrieval, and project context.
@@ -269,7 +270,7 @@ def generate_handoff_examples():
 
 def main():
     # Build tool schema first
-    os.system("python3 /Users/admin/prism/training/build_tool_schema.py")
+    os.system(f"python3 {os.path.join(_TRAINING_DIR, 'build_tool_schema.py')}")
 
     conn = sqlite3.connect(DB_PATH)
 

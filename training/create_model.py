@@ -1,8 +1,12 @@
 import requests
 import json
 import sys
+import os
 
-modelfile_content = """FROM /Users/admin/prism/training/models/prism-fused
+_TRAINING_DIR = os.path.dirname(os.path.abspath(__file__))
+_FUSED_MODEL = os.path.join(_TRAINING_DIR, "models", "prism-fused")
+
+modelfile_content = f"""FROM {_FUSED_MODEL}
 
 PARAMETER temperature 0.3
 PARAMETER top_p 0.9
