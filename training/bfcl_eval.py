@@ -593,12 +593,27 @@ def call_ollama(prompt: str, use_json_format: bool = False) -> tuple:
     if MODEL.startswith("/") or os.path.exists(MODEL):
         if MLX_MODEL_CACHE is None:
             from mlx_lm import load
+            import gc, mlx.core as mx
             print(f"Loading MLX model: {MODEL}")
+            # OOM protection: clear any prior model from memory
+            gc.collect()
+            mx.metal.clear_cache()
             MLX_MODEL_CACHE, MLX_TOKENIZER_CACHE = load(MODEL)
-        
+            peak = mx.metal.get_peak_memory() / 1e9
+            print(f"  Model loaded. Peak GPU memory: {peak:.1f}GB")
+
         from mlx_lm import generate
         start_time = time.time()
-        response_text = generate(MLX_MODEL_CACHE, MLX_TOKENIZER_CACHE, prompt=prompt, max_tokens=512, temp=OLLAMA_TEMPERATURE)
+        try:
+            response_text = generate(MLX_MODEL_CACHE, MLX_TOKENIZER_CACHE, prompt=prompt, max_tokens=512)
+        except Exception as e:
+            if "out of memory" in str(e).lower() or "malloc" in str(e).lower():
+                import gc, mlx.core as mx
+                print(f"  ⚠️ OOM detected — clearing cache and retrying with max_tokens=256")
+                gc.collect(); mx.metal.clear_cache()
+                response_text = generate(MLX_MODEL_CACHE, MLX_TOKENIZER_CACHE, prompt=prompt, max_tokens=256)
+            else:
+                raise
         elapsed = time.time() - start_time
         
         all_calls = parse_all_tool_calls(response_text)
@@ -607,9 +622,42 @@ def call_ollama(prompt: str, use_json_format: bool = False) -> tuple:
         
         if all_calls:
             return all_calls[0][0], all_calls[0][1], response_text, elapsed, all_calls
-        
+
         return "NO_TOOL", {}, response_text, elapsed, []
 
+    # Ollama HTTP path (when MODEL is a tag, not a local MLX path)
+    OLLAMA_API = "http://localhost:11434/api/generate"
+    payload = json.dumps({
+        "model": MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "raw": False,
+        "options": {
+            "temperature": 0.0,
+            "num_predict": 512,
+            "num_ctx": OLLAMA_NUM_CTX,
+        },
+        "keep_alive": OLLAMA_KEEP_ALIVE,
+    }).encode()
+    start_time = time.time()
+    try:
+        req = urllib.request.Request(OLLAMA_API, data=payload,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read().decode())
+        response_text = data.get("response", "")
+    except Exception as e:
+        return "ERROR", {}, str(e), time.time() - start_time, []
+    elapsed = time.time() - start_time
+
+    all_calls = parse_all_tool_calls(response_text)
+    if not all_calls:
+        all_calls = _repair_and_extract(response_text)
+
+    if all_calls:
+        return all_calls[0][0], all_calls[0][1], response_text, elapsed, all_calls
+
+    return "NO_TOOL", {}, response_text, elapsed, []
 
 
 # =============================================================================
@@ -702,85 +750,6 @@ def validate_tool_call_against_schema(tool_name: str, tool_args: dict,
 
 def call_ollama_best_of_n(prompt: str, available_tools: list = None,
                            n: int = None) -> tuple:
-    return call_ollama(prompt)
-
-default: BEST_OF_N env var)
-    
-    Returns: Same tuple as call_ollama
-    """
-    from config import OLLAMA_KEEP_ALIVE, OLLAMA_NUM_CTX
-    
-    if n is None:
-        n = BEST_OF_N
-    
-    if not available_tools or n <= 1:
-        # No schemas to validate against, or single shot
-        return call_ollama(prompt)
-    
-    candidates = []
-    
-    for i in range(n):
-        payload_dict = {
-            "model": MODEL,
-            "prompt": prompt,
-            "raw": True,
-            "stream": False,
-            "keep_alive": OLLAMA_KEEP_ALIVE,
-            "options": {
-                "temperature": BEST_OF_N_TEMPERATURE,  # From config.py
-                "num_predict": 512,
-                "num_ctx": OLLAMA_NUM_CTX,
-                "seed": random.randint(0, 2**31),  # Different seed each time
-            }
-        }
-        
-        try:
-            payload = json.dumps(payload_dict).encode()
-            req = urllib.request.Request(OLLAMA_API, data=payload,
-                                         headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                result = json.loads(resp.read().decode())
-        except Exception:
-            continue
-        
-        response_text = result.get("response", "")
-        elapsed = result.get("total_duration", 0) / 1e9
-        
-        all_calls = parse_all_tool_calls(response_text)
-        if not all_calls:
-            all_calls = _repair_and_extract(response_text)
-        
-        if not all_calls:
-            # R13-fix: If model correctly abstained (plain text response), mark as valid
-            has_answer = "<|synalux_answer|>" in response_text
-            candidates.append((
-                "NO_TOOL", {}, response_text, elapsed, [], has_answer, "no tool call"
-            ))
-            if has_answer:
-                break  # Valid abstention — stop generating more candidates
-            continue
-        
-        # Validate first call against schema
-        tool_name, tool_args = all_calls[0]
-        is_valid, reason = validate_tool_call_against_schema(
-            tool_name, tool_args, available_tools
-        )
-        
-        candidates.append((
-            tool_name, tool_args, response_text, elapsed, all_calls,
-            is_valid, reason
-        ))
-        
-        # Early exit: first valid candidate wins
-        if is_valid:
-            break
-    
-    # Return first valid candidate, or best invalid one
-    for c in candidates:
-        if c[5]:  # is_valid
-            return c[0], c[1], c[2], c[3], c[4]
-    
-    # No valid candidate — fall back to greedy single-shot
     return call_ollama(prompt)
 
 
