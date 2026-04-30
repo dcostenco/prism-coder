@@ -41,6 +41,8 @@ import type {
   SaveHandoffResult,
   ContextResult,
   KnowledgeSearchResult,
+  SemanticSearchResult,
+  SpreadingActivationOptions,
 } from "./interface.js";
 
 interface PortalResponse {
@@ -270,6 +272,45 @@ export class SynaluxStorage extends SupabaseStorage {
       memory_id: id,
       hard_delete: true,
     });
+  }
+
+  // ─── Semantic search (pgvector) ──────────────────────────────
+  // Phase 3 Tier B.2: routes through the `search_memory` action.
+  // The portal expects query_embedding as a number[]; the storage
+  // interface passes it as a JSON-stringified array, so we parse
+  // before sending. Activation (spreading-activation graph traversal)
+  // is currently not supported through the portal — that's done
+  // client-side after results return; the portal just runs the
+  // pgvector cosine-similarity match.
+
+  async searchMemory(params: {
+    queryEmbedding: string;
+    project?: string | null;
+    limit: number;
+    similarityThreshold: number;
+    userId: string;
+    role?: string | null;
+    activation?: SpreadingActivationOptions;
+  }): Promise<SemanticSearchResult[]> {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(params.queryEmbedding);
+    } catch {
+      throw new Error("[SynaluxStorage] queryEmbedding must be a JSON-stringified number[]");
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error("[SynaluxStorage] queryEmbedding must parse to an array");
+    }
+
+    const result = await this.portalPost("/api/v1/prism/memory", {
+      action: "search_memory",
+      project: params.project ?? undefined,
+      query_embedding: parsed,
+      similarity_threshold: params.similarityThreshold,
+      limit: params.limit,
+      role: params.role ?? undefined,
+    });
+    return (Array.isArray(result.results) ? result.results : []) as SemanticSearchResult[];
   }
 
   // ─── Knowledge search (keyword + category) ───────────────────
