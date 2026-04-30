@@ -272,19 +272,34 @@ export class SynaluxStorage extends SupabaseStorage {
     });
   }
 
-  // ─── Knowledge search (keyword) ──────────────────────────────
+  // ─── Knowledge search (keyword + category) ───────────────────
+  // Phase 3 Tier B: routes through `knowledge_search` (full schema)
+  // instead of the project-only `search` action. The portal returns
+  // full ledger fields, supports keywords[] intersection via Postgres
+  // array overlap, and accepts optional project / category / role
+  // filters. Falls back to plain text search when only queryText is
+  // supplied.
 
   async searchKnowledge(params: {
     project?: string | null;
+    keywords?: string[];
+    category?: string | null;
     queryText?: string | null;
+    limit?: number;
+    role?: string | null;
     [key: string]: unknown;
   }): Promise<KnowledgeSearchResult | null> {
     const result = await this.portalPost("/api/v1/prism/memory", {
-      action: "search",
-      project: params.project,
-      query: params.queryText,
-      ...params,
+      action: "knowledge_search",
+      project: params.project ?? undefined,
+      keywords: params.keywords ?? [],
+      category: params.category ?? undefined,
+      queryText: params.queryText ?? undefined,
+      limit: params.limit ?? 10,
+      role: params.role ?? undefined,
     });
-    return (result.results ?? null) as KnowledgeSearchResult | null;
+    const count = typeof result.count === "number" ? result.count : 0;
+    const results = Array.isArray(result.results) ? result.results : [];
+    return { count, results } as KnowledgeSearchResult;
   }
 }
