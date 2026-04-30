@@ -196,6 +196,7 @@ Prism features a cutting-edge **Zero-Search Retrieval** system for its cognitive
 | **BFCL Submission** | [PR #1332](https://github.com/ShishirPatil/gorilla/pull/1332) |
 | **Changelog** | [synalux-docs/CHANGELOG.md](https://github.com/dcostenco/synalux-docs/blob/main/CHANGELOG.md) |
 | **Roadmap** | [synalux-docs/ROADMAP.md](https://github.com/dcostenco/synalux-docs/blob/main/ROADMAP.md) |
+| **PrismAAC** | [github.com/dcostenco/prism-aac](https://github.com/dcostenco/prism-aac) — AAC web app for children with motor impairments |
 
 ---
 
