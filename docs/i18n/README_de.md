@@ -329,6 +329,9 @@ Then open `http://localhost:3001` instead.
 
 ---
 
+<details>
+<summary><strong>📖 Setup Guides</strong> — MCP client configs, schema migrations, troubleshooting <em>(technical · click to expand)</em></summary>
+
 ## <a name="setup-guides"></a>📖 Setup Guides
 
 <details>
@@ -609,6 +612,8 @@ Prism can be deployed natively to cloud platforms like [Render](https://render.c
 > At the start of every conversation, call session_load_context with project "my-project" before doing any work.
 > ```
 > Claude Code users can use the `.clauderules` auto-load hook shown in the [Setup Guides](#setup-guides). Prism also has a **server-side fallback** (v5.2.1+) that auto-pushes context after 10 seconds if no load is detected.
+
+</details>
 
 ---
 
@@ -1349,6 +1354,9 @@ prism scm dora --repo synalux/portal --period 2024-Q4
 
 ---
 
+<details>
+<summary><strong>💻 CLI Reference</strong> — commands for CI/CD, scripts, and non-MCP environments <em>(technical · click to expand)</em></summary>
+
 ## <a name="cli-reference"></a>💻 CLI Reference
 
 Prism includes a CLI for environments where MCP tools aren't available (CI/CD pipelines, Bash scripts, non-MCP IDEs like Antigravity).
@@ -1379,6 +1387,13 @@ prism verify generate                          # Bless current rubric as canonic
 > 📦 **Installation:** The CLI is available as `prism` when installed globally (`npm install -g prism-mcp-server`), or via `node dist/cli.js` for local dev builds.
 
 ---
+
+</details>
+
+---
+
+<details>
+<summary><strong>🔧 Tool Reference</strong> — full schema for all 30+ MCP tools <em>(technical · click to expand)</em></summary>
 
 ## <a name="tool-reference"></a>🔧 Tool Reference
 
@@ -1513,6 +1528,13 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 
 ---
 
+</details>
+
+---
+
+<details>
+<summary><strong>⚙️ Environment Variables</strong> — full config reference, env vars, dashboard settings <em>(technical · click to expand)</em></summary>
+
 ## <a name="environment-variables"></a>Environment Variables
 
 > **🚦 TL;DR — Just want the best experience fast?** Two options:
@@ -1577,6 +1599,13 @@ Some configurations are stored dynamically in SQLite (`system_settings` table) a
 - **`intent_health_stale_threshold_days`** (default: `30`): Number of days before a project is considered fully stale for Intent Health scoring.
 
 ---
+
+</details>
+
+---
+
+<details>
+<summary><strong>🏗️ Architecture</strong> — startup sequence, storage layers, auto-load mechanics <em>(technical · click to expand)</em></summary>
 
 ## <a name="architecture"></a>Architecture
 
@@ -1654,6 +1683,13 @@ All platforms benefit from the **server-side fallback** (v5.2.1): if `session_lo
 
 ---
 
+</details>
+
+---
+
+<details>
+<summary><strong>🧬 Scientific Foundation</strong> — cognitive science citations, ACT-R, HRR, peer-reviewed models <em>(technical · click to expand)</em></summary>
+
 ## <a name="scientific-foundation"></a>🧬 Scientific Foundation
 
 Prism has evolved from smart session logging into a **cognitive memory architecture** — grounded in real research, not marketing. Every retrieval decision is backed by peer-reviewed models from cognitive psychology, neuroscience, and distributed computing.
@@ -1711,6 +1747,10 @@ The core unbinding engine is verified via Synalux's cognitive testing suite:
 - **Benchmarks**: [O(1) Retrieval Comparison Script](../../tests/verification/cli-integration.test.ts)
 
 > Informed by Anderson's ACT-R (Adaptive Control of Thought—Rational), Collins & Loftus spreading activation networks (1975), Kanerva's SDM (1988), Hebb's learning rule, and LeCun's "Why AI Systems Don't Learn" (Dupoux, LeCun, Malik).
+
+---
+
+</details>
 
 ---
 
