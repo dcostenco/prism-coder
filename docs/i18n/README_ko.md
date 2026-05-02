@@ -20,20 +20,25 @@
 
 ### Downloads
 
-Latest IDE release: **v2.0.0** ([release notes](https://github.com/dcostenco/prism-coder/releases/tag/v2.0.0)) — adds Debugger, LSP, Remote SSH, Builder version history, AI design-to-code, and the `prism` CLI. macOS DMG ships today; Windows + Linux v2.0 installers are tracking in v2.0.1.
+Latest IDE release: **v2.0.1** ([release notes](https://github.com/dcostenco/prism-coder/releases/tag/v2.0.1)) — adds Debugger, LSP, Remote SSH, Builder version history, AI design-to-code, and the `prism` CLI. All platforms (macOS, Windows, Linux) ship at v2.0.1 with Authenticode-signed Windows installer.
 
 | Platform | Package | Version | Size |
 |----------|---------|:-------:|:----:|
-| **macOS (Apple Silicon)** | [Prism Coder-2.0.0-arm64.dmg](https://github.com/dcostenco/prism-coder/releases/download/v2.0.0/Prism.Coder-2.0.0-arm64.dmg) | **v2.0.0** | 114 MB |
-| **macOS (Apple Silicon, zip)** | [Prism Coder-2.0.0-arm64.zip](https://github.com/dcostenco/prism-coder/releases/download/v2.0.0/Prism.Coder-2.0.0-arm64.zip) | **v2.0.0** | 110 MB |
-| **Windows** | [Prism Coder-1.0.1-Setup.exe](https://github.com/dcostenco/prism-coder/releases/download/v1.0.1/Prism.Coder-1.0.1-Setup.exe) | v1.0.1 | 99 MB |
-| **Linux** | [Prism Coder-1.0.0.AppImage](https://github.com/dcostenco/prism-coder/releases/download/v1.0.0/Prism.Coder-1.0.0.AppImage) | v1.0.0 | 119 MB |
+| **macOS (Apple Silicon)** | [Prism Coder-2.0.1-arm64.dmg](https://github.com/dcostenco/prism-coder/releases/download/v2.0.1/Prism.Coder-2.0.1-arm64.dmg) | **v2.0.1** | 114 MB |
+| **macOS (Apple Silicon, zip)** | [Prism Coder-2.0.1-arm64.zip](https://github.com/dcostenco/prism-coder/releases/download/v2.0.1/Prism.Coder-2.0.1-arm64.zip) | **v2.0.1** | 110 MB |
+| **Windows (signed)** | [Prism Coder-2.0.1-Setup.exe](https://github.com/dcostenco/prism-coder/releases/download/v2.0.1/Prism.Coder-2.0.1-Setup.exe) | **v2.0.1** | 100 MB |
+| **Linux (arm64)** | [Prism Coder-2.0.1-arm64.AppImage](https://github.com/dcostenco/prism-coder/releases/download/v2.0.1/Prism.Coder-2.0.1-arm64.AppImage) | **v2.0.1** | 120 MB |
 | **npm (MCP Server)** | `npx -y prism-mcp-server` | latest | — |
 
-> **macOS first-launch note:** the v2.0.0 .app is signed with a Developer ID
+> **macOS first-launch note:** the v2.0.1 .app is signed with a Developer ID
 > certificate but **not yet notarized**. macOS may show a "developer cannot
 > be verified" warning on first launch — right-click the app → **Open** to
-> bypass once. Notarization tracking in v2.0.1.
+> bypass once. Notarization tracking in v2.1.
+>
+> **Windows first-launch note:** the v2.0.1 installer is **Authenticode-signed**
+> with a self-signed Synalux certificate (DigiCert-timestamped). SmartScreen
+> may still warn until the cert builds reputation — click **More info → Run anyway**.
+> EV cert tracking in v2.1.
 
 | What You Get | Time Saved vs. Traditional |
 |---|:---:|
@@ -54,7 +59,7 @@ Latest IDE release: **v2.0.0** ([release notes](https://github.com/dcostenco/pri
 
 **27/27 features** — more than any competitor (Cursor: 9, Windsurf: 9, Replit: 12, Bolt: 9).
 
-👉 **[Full IDE README with screenshots, architecture, and technical details →](https://github.com/dcostenco/prism-coder/releases/tag/v1.0.0)**
+👉 **[Full v2.0.1 release notes — features, parity matrix, and install notes →](https://github.com/dcostenco/prism-coder/releases/tag/v2.0.1)**
 
 ---
 
@@ -129,7 +134,7 @@ Prism v12.5 unifies Prism and Synalux into a **single billing architecture** wit
 - **10 Vendor Skills** — Vercel, Supabase, Stripe, Sentry, OpenAI, Addy Osmani, Garry Tan/gstack
 - **30+ Community Skills** — Installed and optimized from the Gemini ecosystem
 
-> 📦 **Packages:** [`prism-mcp-server`](https://www.npmjs.com/package/prism-mcp-server) (npm) · [Prism Coder IDE](https://github.com/dcostenco/prism-coder/releases/tag/v1.0.0) (VS Code) · `prism` CLI
+> 📦 **Packages:** [`prism-mcp-server`](https://www.npmjs.com/package/prism-mcp-server) (npm) · [Prism Coder IDE](https://github.com/dcostenco/prism-coder/releases/tag/v2.0.1) (VS Code) · `prism` CLI
 
 ---
 
