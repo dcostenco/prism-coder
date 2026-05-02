@@ -301,8 +301,7 @@ export async function sessionSaveLedgerHandler(args: unknown) {
         (files_changed?.length ? `Files changed: ${files_changed.length}\n` : "") +
         (decisions?.length ? `Decisions: ${decisions.length}\n` : "") +
         `📊 Embedding generation queued for semantic search.` +
-        resolverNote +
-        `\nRaw response: ${JSON.stringify(result)}`,
+        resolverNote,
     }],
     isError: false,
   };
@@ -931,12 +930,55 @@ export async function sessionLoadContextHandler(args: unknown) {
   // agent loads its rules/conventions automatically at session start.
   let skillBlock = "";
   let skillLoaded = false;
+  const loadedSkills: string[] = [];
+
   if (effectiveRole) {
     const skillContent = await getSetting(`skill:${effectiveRole}`, "");
     if (skillContent && skillContent.trim()) {
       skillBlock = `\n\n[📜 ROLE SKILL: ${effectiveRole}]\n${skillContent.trim()}`;
       skillLoaded = true;
+      loadedSkills.push(effectiveRole);
       debugLog(`[session_load_context] Injecting skill for role="${effectiveRole}" (${skillContent.length} chars)`);
+    }
+  }
+
+  // ─── Project-Aware Skill Injection ──────────────────────────
+  // Skill routing (which skills load for which project) is the SINGLE
+  // SOURCE OF TRUTH at synalux: /api/v1/skills/routing. We pull the
+  // canonical table on every session and resolve locally. Skill CONTENT
+  // continues to be stored in this server's settings under skill:<name>
+  // — synalux owns the WHICH, this server owns the WHAT, no duplication
+  // of the routing config in three repos.
+  const { resolveSkillsForProject } = await import("./skillRouting.js");
+  const skillsToLoad = await resolveSkillsForProject(project);
+
+  for (const skillName of skillsToLoad) {
+    if (loadedSkills.includes(skillName)) continue;
+    const content = await getSetting(`skill:${skillName}`, "");
+    if (content && content.trim()) {
+      skillBlock += `\n\n[📜 SKILL: ${skillName}]\n${content.trim()}`;
+      loadedSkills.push(skillName);
+      skillLoaded = true;
+      debugLog(`[session_load_context] Skill "${skillName}" loaded for project="${project}"`);
+    }
+  }
+
+  // ─── Memory-Based Skill Discovery ──────────────────────────
+  // If recent handoff/ledger mentions a skill name, auto-load it.
+  // This lets the agent's own memory drive skill activation.
+  if (formattedContext.length > 0) {
+    const contextText = formattedContext.toLowerCase();
+    const allSkillKeys = await storage.getAllSettings?.() || {};
+    for (const [k, v] of Object.entries(allSkillKeys)) {
+      if (!k.startsWith("skill:") || !v) continue;
+      const skillName = k.replace("skill:", "");
+      if (loadedSkills.includes(skillName)) continue;
+      // Only load if the skill name appears in recent context
+      if (contextText.includes(skillName.replace(/-/g, " ")) || contextText.includes(skillName)) {
+        skillBlock += `\n\n[📜 CONTEXT SKILL: ${skillName}]\n${v}`;
+        loadedSkills.push(skillName);
+        debugLog(`[session_load_context] Context-triggered skill "${skillName}"`);
+      }
     }
   }
 
@@ -946,7 +988,9 @@ export async function sessionLoadContextHandler(args: unknown) {
   if (agentName || effectiveRole) {
     const namePart = agentName ? `👋 **${agentName}**` : `👋 **Agent**`;
     const rolePart = effectiveRole ? ` · Role: \`${effectiveRole}\`` : "";
-    const skillPart = skillLoaded ? ` · 📜 \`${effectiveRole}\` skill loaded` : (effectiveRole ? " · 📜 No skill configured" : "");
+    const skillPart = loadedSkills.length > 0
+      ? ` · 📜 Skills: ${loadedSkills.map(s => `\`${s}\``).join(", ")}`
+      : (effectiveRole ? " · 📜 No skill configured" : "");
     greetingBlock = `\n\n[👤 AGENT IDENTITY]\n${namePart}${rolePart}${skillPart}`;
   }
 
@@ -1161,6 +1205,15 @@ export async function sessionSaveImageHandler(args: unknown) {
 
   // Resolve path (supports relative paths)
   const resolvedPath = nodePath.resolve(file_path);
+  const home = os.homedir();
+  const cwd = process.cwd();
+  const tmpDir = os.tmpdir();
+  if (!resolvedPath.startsWith(home) && !resolvedPath.startsWith(cwd) && !resolvedPath.startsWith('/tmp') && !resolvedPath.startsWith(tmpDir)) {
+    return {
+      content: [{ type: "text", text: "Error: file_path must be within your home directory, project directory, or /tmp." }],
+      isError: true,
+    };
+  }
   if (!fs.existsSync(resolvedPath)) {
     return {
       content: [{ type: "text", text: `Error: File not found at "${resolvedPath}".` }],
@@ -1285,7 +1338,15 @@ export async function sessionViewImageHandler(args: unknown) {
     };
   }
 
-  const vaultPath = nodePath.join(os.homedir(), ".prism-mcp", "media", project, imgMeta.filename);
+  const sanitizedFilename = nodePath.basename(imgMeta.filename);
+  const mediaBase = nodePath.join(os.homedir(), ".prism-mcp", "media", project);
+  const vaultPath = nodePath.join(mediaBase, sanitizedFilename);
+  if (!vaultPath.startsWith(mediaBase)) {
+    return {
+      content: [{ type: "text", text: "Error: Invalid image path." }],
+      isError: true,
+    };
+  }
   if (!fs.existsSync(vaultPath)) {
     return {
       content: [{
@@ -1411,12 +1472,16 @@ export async function sessionSaveExperienceHandler(args: unknown) {
     throw new Error("Invalid arguments for session_save_experience");
   }
 
-  const { project, event_type, context: ctx, action, outcome, correction, confidence_score, role } = args;
+  const { project, event_type, context: rawCtx, action: rawAction, outcome: rawOutcome, correction: rawCorrection, confidence_score, role } = args;
   const storage = await getStorage();
 
   debugLog(`[session_save_experience] Recording ${event_type} event for project="${project}"`);
 
-  // Format structured summary from event fields
+  const ctx = sanitizeMemoryInput(rawCtx);
+  const action = sanitizeMemoryInput(rawAction);
+  const outcome = sanitizeMemoryInput(rawOutcome);
+  const correction = rawCorrection ? sanitizeMemoryInput(rawCorrection) : undefined;
+
   let summary = `[${event_type.toUpperCase()}] ${ctx} → ${action} → ${outcome}`;
   if (event_type === "correction" && correction) {
     summary += ` | CORRECTION: ${correction}`;

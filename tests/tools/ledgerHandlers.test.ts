@@ -880,14 +880,14 @@ describe("ledgerHandlers", () => {
   describe("sessionForgetMemoryHandler", () => {
     it("soft-deletes a memory entry by default", async () => {
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-123",
+        memory_id: "a0000000-0000-4000-8000-000000000001",
       });
 
       expect(result.isError).toBe(false);
       expect(result.content[0].text).toContain("Soft Deleted");
-      expect(result.content[0].text).toContain("uuid-123");
+      expect(result.content[0].text).toContain("a0000000-0000-4000-8000-000000000001");
       expect(storage.softDeleteLedger).toHaveBeenCalledWith(
-        "uuid-123",
+        "a0000000-0000-4000-8000-000000000001",
         "test-user-id",
         undefined
       );
@@ -895,7 +895,7 @@ describe("ledgerHandlers", () => {
 
     it("soft-deletes with reason for audit trail", async () => {
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-456",
+        memory_id: "a0000000-0000-4000-8000-000000000002",
         reason: "GDPR Article 17 request",
       });
 
@@ -903,7 +903,7 @@ describe("ledgerHandlers", () => {
       expect(result.content[0].text).toContain("Reason");
       expect(result.content[0].text).toContain("GDPR Article 17 request");
       expect(storage.softDeleteLedger).toHaveBeenCalledWith(
-        "uuid-456",
+        "a0000000-0000-4000-8000-000000000002",
         "test-user-id",
         "GDPR Article 17 request"
       );
@@ -911,7 +911,7 @@ describe("ledgerHandlers", () => {
 
     it("hard-deletes when hard_delete is true", async () => {
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-789",
+        memory_id: "a0000000-0000-4000-8000-000000000003",
         hard_delete: true,
       });
 
@@ -919,14 +919,14 @@ describe("ledgerHandlers", () => {
       expect(result.content[0].text).toContain("Hard Deleted");
       expect(result.content[0].text).toContain("permanently removed");
       expect(storage.hardDeleteLedger).toHaveBeenCalledWith(
-        "uuid-789",
+        "a0000000-0000-4000-8000-000000000003",
         "test-user-id"
       );
     });
 
     it("does not call hardDeleteLedger when hard_delete is false", async () => {
       await sessionForgetMemoryHandler({
-        memory_id: "uuid-aaa",
+        memory_id: "a0000000-0000-4000-8000-000000000004",
         hard_delete: false,
       });
 
@@ -962,7 +962,7 @@ describe("ledgerHandlers", () => {
       storage.softDeleteLedger.mockRejectedValue(new Error("Entry not found"));
 
       const result = await sessionForgetMemoryHandler({
-        memory_id: "nonexistent-uuid",
+        memory_id: "a0000000-0000-4000-8000-000000000005",
       });
 
       expect(result.isError).toBe(true);
@@ -973,7 +973,7 @@ describe("ledgerHandlers", () => {
       storage.hardDeleteLedger.mockRejectedValue(new Error("FK constraint"));
 
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-fail",
+        memory_id: "a0000000-0000-4000-8000-000000000006",
         hard_delete: true,
       });
 
@@ -1121,7 +1121,7 @@ describe("ledgerHandlers", () => {
     it("returns error for non-existent file", async () => {
       const result = await sessionSaveImageHandler({
         project: "test-project",
-        file_path: "/nonexistent/path/image.png",
+        file_path: join(tempDir, "does-not-exist.png"),
         description: "Missing image",
       });
 
@@ -1476,7 +1476,7 @@ describe("ledgerHandlers", () => {
 
     it("sessionForgetMemoryHandler includes 'tombstoned' in soft-delete response", async () => {
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-test",
+        memory_id: "550e8400-e29b-41d4-a716-446655440000",
       });
 
       expect(result.content[0].text).toContain("tombstoned");
@@ -1484,7 +1484,7 @@ describe("ledgerHandlers", () => {
 
     it("sessionForgetMemoryHandler mentions hard_delete option in soft-delete response", async () => {
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-test",
+        memory_id: "550e8400-e29b-41d4-a716-446655440000",
       });
 
       expect(result.content[0].text).toContain("hard_delete: true");

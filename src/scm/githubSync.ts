@@ -104,7 +104,7 @@ async function githubFetch(
         options.body = JSON.stringify(body);
     }
 
-    const response = await fetch(url, options);
+    const response = await fetch(url, { ...options, signal: AbortSignal.timeout(15_000) });
     const data = await response.json();
     return { status: response.status, data };
 }

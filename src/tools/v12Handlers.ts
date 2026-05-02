@@ -251,7 +251,17 @@ export async function backupDatabaseHandler(args: Record<string, unknown>) {
                         isError: true,
                     };
                 }
-                const result = await backup.restoreFromBackup(dbPath, backup_path as string);
+                const nodePath = await import("node:path");
+                const nodeOs = await import("node:os");
+                const resolvedBackup = nodePath.resolve(backup_path as string);
+                const backupDir = nodePath.join(nodeOs.homedir(), ".prism", "backups");
+                if (!resolvedBackup.startsWith(backupDir)) {
+                    return {
+                        content: [{ type: "text", text: `Error: backup_path must be within ${backupDir}` }],
+                        isError: true,
+                    };
+                }
+                const result = await backup.restoreFromBackup(dbPath, resolvedBackup);
                 return {
                     content: [{
                         type: "text",

@@ -19,6 +19,7 @@
 
 import { SyncBus } from "./index.js";
 import { debugLog } from "../utils/logger.js";
+import { PRISM_USER_ID } from "../config.js";
 
 export class SupabaseSyncBus extends SyncBus {
   private supabaseUrl: string;
@@ -56,6 +57,7 @@ export class SupabaseSyncBus extends SyncBus {
             event: "UPDATE",
             schema: "public",
             table: "session_handoffs",
+            filter: `user_id=eq.${PRISM_USER_ID}`,
           },
           (payload: any) => {
             const newRow = payload.new;

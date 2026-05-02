@@ -69,6 +69,9 @@ const activeTasks = new Map<string, DelegateTask>();
 const taskHistory: DelegateTask[] = [];
 
 export function configureDelegate(updates: Partial<DelegateConfig>): void {
+    if (updates.endpoint && !updates.endpoint.startsWith('https://') && !updates.endpoint.includes('localhost')) {
+        throw new Error('Cloud delegate endpoint must use HTTPS');
+    }
     config = { ...config, ...updates };
     debugLog(`Cloud Delegate: Configured → ${config.endpoint}`);
 }
@@ -185,6 +188,7 @@ export async function dispatchTask(taskId: string): Promise<DelegateTask> {
 
     // Move to history
     taskHistory.push({ ...task });
+    if (taskHistory.length > 1000) taskHistory.splice(0, taskHistory.length - 1000);
     activeTasks.delete(taskId);
 
     debugLog(`Cloud Delegate: Task ${taskId} → ${task.status}`);
@@ -200,6 +204,7 @@ export function cancelTask(taskId: string): boolean {
 
     task.status = "cancelled";
     taskHistory.push({ ...task });
+    if (taskHistory.length > 1000) taskHistory.splice(0, taskHistory.length - 1000);
     activeTasks.delete(taskId);
 
     debugLog(`Cloud Delegate: Cancelled task ${taskId}`);

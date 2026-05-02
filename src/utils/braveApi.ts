@@ -124,6 +124,7 @@ export async function performBraveAnswers(
       stream: false,
       messages,
     }),
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) {
@@ -160,6 +161,7 @@ export async function performWebSearchRaw(
       "Accept-Encoding": "gzip",
       "X-Subscription-Token": BRAVE_API_KEY!,
     },
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) {
@@ -205,6 +207,7 @@ export async function getPoisData(ids: string[]): Promise<BravePoiResponse> {
       "Accept-Encoding": "gzip",
       "X-Subscription-Token": BRAVE_API_KEY!,
     },
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) {
@@ -229,6 +232,7 @@ export async function getDescriptionsData(
       "Accept-Encoding": "gzip",
       "X-Subscription-Token": BRAVE_API_KEY!,
     },
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) {
@@ -267,6 +271,7 @@ export async function performLocalSearchRaw(
       "Accept-Encoding": "gzip",
       "X-Subscription-Token": BRAVE_API_KEY!,
     },
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!webResponse.ok) {

@@ -58,8 +58,10 @@ export class SqliteSyncBus extends SyncBus {
       timestamp: Date.now(),
     };
 
-    // Atomic write — content is < 200 bytes, well within single-page write
-    fs.writeFileSync(this.lockFilePath, JSON.stringify(payload), "utf8");
+    // Atomic write — write to temp file then rename (atomic on POSIX)
+    const tmpPath = this.lockFilePath + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(payload), "utf8");
+    fs.renameSync(tmpPath, this.lockFilePath);
     debugLog(
       `[SyncBus] Broadcast: project=${project}, version=${version}, ` +
         `client=${this.clientId.substring(0, 8)}`

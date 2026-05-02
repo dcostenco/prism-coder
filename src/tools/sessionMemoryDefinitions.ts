@@ -870,12 +870,14 @@ export const SESSION_FORGET_MEMORY_TOOL: Tool = {
  * Validates that memory_id (required) is present and is a string.
  * hard_delete and reason are optional.
  */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function isSessionForgetMemoryArgs(
   args: unknown
 ): args is { memory_id: string; hard_delete?: boolean; reason?: string } {
   if (typeof args !== "object" || args === null) return false;
   const a = args as Record<string, unknown>;
-  if (typeof a.memory_id !== "string") return false;
+  if (typeof a.memory_id !== "string" || !UUID_RE.test(a.memory_id)) return false;
   if (a.hard_delete !== undefined && typeof a.hard_delete !== "boolean") return false;
   if (a.reason !== undefined && typeof a.reason !== "string") return false;
   return true;

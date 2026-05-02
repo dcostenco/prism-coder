@@ -561,7 +561,7 @@ describe("isSessionForgetMemoryArgs", () => {
    */
 
   it("accepts minimal valid args (memory_id only — the only required field)", () => {
-    expect(isSessionForgetMemoryArgs({ memory_id: "abc123-uuid" })).toBe(true);
+    expect(isSessionForgetMemoryArgs({ memory_id: "550e8400-e29b-41d4-a716-446655440000" })).toBe(true);
   });
 
   it("accepts full args (memory_id + hard_delete + reason)", () => {
@@ -578,7 +578,7 @@ describe("isSessionForgetMemoryArgs", () => {
 
   it("accepts args with hard_delete: false (soft-delete, the default case)", () => {
     expect(isSessionForgetMemoryArgs({
-      memory_id:   "some-uuid",
+      memory_id:   "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
       hard_delete: false,  // explicit false — should not confuse the guard
     })).toBe(true);
   });
@@ -636,10 +636,10 @@ describe("isSessionForgetMemoryArgs", () => {
      * drifts from the guard's actual behavior, TypeScript would emit a compile
      * error here — preventing the merge rather than causing a runtime surprise.
      */
-    const args: unknown = { memory_id: "test-uuid", hard_delete: false, reason: "test" };
+    const args: unknown = { memory_id: "12345678-1234-4abc-9def-123456789abc", hard_delete: false, reason: "test" };
     if (isSessionForgetMemoryArgs(args)) {
       // TypeScript narrows `args` here — all fields must be accessible without cast
-      expect(args.memory_id).toBe("test-uuid");
+      expect(args.memory_id).toBe("12345678-1234-4abc-9def-123456789abc");
       expect(args.hard_delete).toBe(false);
       expect(args.reason).toBe("test");
     } else {

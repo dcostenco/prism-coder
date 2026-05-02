@@ -159,8 +159,9 @@ export async function flushBuffer(): Promise<number> {
         debugLog(`Analytics: flushed ${batch.length} invocations to SQLite`);
         return batch.length;
     } catch (err) {
-        // Re-add to buffer on failure
+        // Re-add to buffer on failure, cap max size to prevent unbounded growth
         BUFFER.unshift(...batch);
+        if (BUFFER.length > 1000) BUFFER.splice(1000);
         debugLog(`Analytics flush failed: ${err}`);
         return 0;
     }
