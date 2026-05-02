@@ -210,7 +210,7 @@ return false;}
         res.setHeader("Access-Control-Allow-Credentials", "true");
       }
     } else {
-      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Origin", `http://localhost:${PORT}`);
     }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -243,7 +243,7 @@ return false;}
           loginRateLimiter.reset(clientIP);
           res.writeHead(200, {
             "Content-Type": "application/json",
-            "Set-Cookie": `prism_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_TTL_MS / 1000}`,
+            "Set-Cookie": `prism_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_TTL_MS / 1000}${(process.env.PRISM_DASHBOARD_ORIGIN?.startsWith("https://") || process.env.PRISM_DASHBOARD_SECURE) ? "; Secure" : ""}`,
           });
           return res.end(JSON.stringify({ ok: true }));
         }
@@ -263,7 +263,7 @@ return false;}
       res.writeHead(200, {
         "Content-Type": "application/json",
         // Clear the cookie on the client side
-        "Set-Cookie": `prism_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+        "Set-Cookie": `prism_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${(process.env.PRISM_DASHBOARD_ORIGIN?.startsWith("https://") || process.env.PRISM_DASHBOARD_SECURE) ? "; Secure" : ""}`,
       });
       return res.end(JSON.stringify({ ok: true }));
     }
@@ -659,10 +659,7 @@ return false;}
             // SECURITY: Allowlist of dashboard-settable keys to prevent
             // credential overwrite (SUPABASE_KEY, STRIPE_SECRET_KEY, etc.)
             const SETTABLE_KEYS = new Set([
-              "PRISM_STORAGE", "SUPABASE_URL", "SUPABASE_KEY",
-              "BRAVE_API_KEY", "BRAVE_ANSWERS_API_KEY",
-              "GOOGLE_API_KEY", "VOYAGE_API_KEY",
-              "FIRECRAWL_API_KEY",
+              "PRISM_STORAGE",
               "embedding_provider", "embedding_model",
               "PRISM_ENABLE_HIVEMIND", "PRISM_DARK_FACTORY_ENABLED",
               "PRISM_TASK_ROUTER_ENABLED", "PRISM_SCHOLAR_ENABLED",
@@ -861,7 +858,7 @@ return false;}
           // Only allow files from home directory, /tmp, and current working directory.
           const resolvedPath = path.resolve(filePath);
           const homeDir = os.homedir();
-          const allowedPrefixes = [homeDir, os.tmpdir(), process.cwd()];
+          const allowedPrefixes = [path.join(homeDir, ".prism-mcp", "imports"), os.tmpdir()];
           const isAllowed = allowedPrefixes.some(prefix => resolvedPath.startsWith(prefix + path.sep) || resolvedPath === prefix);
           if (!isAllowed) {
             res.writeHead(403, { "Content-Type": "application/json" });
@@ -1428,7 +1425,8 @@ self.addEventListener('message', (e) => {
         reject(err);
       };
       httpServer.on("error", onError);
-      httpServer.listen(port, () => {
+      const bindHost = AUTH_ENABLED ? "0.0.0.0" : "127.0.0.1";
+      httpServer.listen(port, bindHost, () => {
         httpServer.removeListener("error", onError);
         // Re-register a permanent error handler for runtime errors
         httpServer.on("error", (err: NodeJS.ErrnoException) => {

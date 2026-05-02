@@ -118,6 +118,7 @@ export class SynaluxStorage extends SupabaseStorage {
             "Authorization": `Bearer ${this.refreshToken}`,
             "X-Prism-Client": "prism-mcp-thin-client",
           },
+          signal: AbortSignal.timeout(10_000),
         });
       } catch (err) {
         throw new Error(
@@ -169,6 +170,7 @@ export class SynaluxStorage extends SupabaseStorage {
             "X-Prism-Client": "prism-mcp-thin-client",
           },
           body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30_000),
         });
       } catch (err) {
         throw new Error(

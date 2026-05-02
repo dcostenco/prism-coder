@@ -64,6 +64,7 @@ async function supabaseRequest(opts: SupabaseRequestOptions): Promise<unknown> {
       ...(opts.headers || {}),
     },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
+    signal: AbortSignal.timeout(10_000),
   });
 
   // Handle errors with a descriptive message

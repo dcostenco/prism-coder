@@ -27,7 +27,8 @@ export async function searchYahooFree(query: string, limit: number = 5): Promise
         method: 'GET',
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+        },
+        signal: AbortSignal.timeout(15_000),
     });
 
     if (!response.ok) {
@@ -69,10 +70,35 @@ export async function searchYahooFree(query: string, limit: number = 5): Promise
  * and converts it to Markdown using Turndown.
  */
 export async function scrapeArticleLocal(url: string): Promise<LocalArticle> {
+    // SSRF protection: reject private/internal URLs.
+    // Set PRISM_DEV_MODE=1 to allow loopback/private hosts during local dev
+    // (testing against a local docs server, internal wiki, etc.). The flag
+    // is intentionally OFF in production deploys.
+    const devMode = process.env.PRISM_DEV_MODE === '1' || process.env.NODE_ENV === 'development';
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('Invalid protocol');
+        const host = parsed.hostname.toLowerCase();
+        const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+        const isPrivate =
+            host.startsWith('10.') || host.startsWith('192.168.') || host.startsWith('169.254.') ||
+            /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host.endsWith('.internal') || host.endsWith('.local');
+        if (isLoopback && !devMode) {
+            throw new Error('Loopback URLs not allowed in production (set PRISM_DEV_MODE=1 to allow)');
+        }
+        if (isPrivate) {
+            // Private RFC1918 ranges are never allowed — even in dev mode they
+            // can cross into other tenants' machines on a shared LAN.
+            throw new Error('Private network URLs not allowed');
+        }
+    } catch (e) { throw new Error(`Invalid URL: ${e instanceof Error ? e.message : 'unknown'}`); }
+
     const response = await fetch(url, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+        },
+        redirect: 'error',
+        signal: AbortSignal.timeout(15_000),
     });
 
     if (!response.ok) {

@@ -19,6 +19,8 @@ import type {
     DoraMetrics,
 } from './types.js';
 
+const SAFE_SCM_NAME = /^[a-zA-Z0-9._-]+$/;
+
 export class ScmClient {
     private readonly baseUrl: string;
     private readonly apiKey?: string;
@@ -28,6 +30,14 @@ export class ScmClient {
         this.apiKey = apiKey || process.env.SYNALUX_API_KEY;
     }
 
+    private parseRepo(repo: string): [string, string] {
+        const [owner, name] = repo.split('/');
+        if (!owner || !name || !SAFE_SCM_NAME.test(owner) || !SAFE_SCM_NAME.test(name)) {
+            throw new Error(`Invalid repo identifier: "${repo}". Owner and name must match /^[a-zA-Z0-9._-]+$/.`);
+        }
+        return [owner, name];
+    }
+
     private async request<T>(path: string, options?: RequestInit): Promise<T> {
         const url = `${this.baseUrl}/api/v1/scm${path}`;
         const headers: Record<string, string> = {
@@ -35,7 +45,7 @@ export class ScmClient {
             ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
         };
 
-        const res = await fetch(url, { ...options, headers: { ...headers, ...options?.headers } });
+        const res = await fetch(url, { ...options, headers: { ...headers, ...options?.headers }, signal: AbortSignal.timeout(15_000) });
 
         if (!res.ok) {
             const body = await res.text().catch(() => '');
@@ -48,7 +58,7 @@ export class ScmClient {
     // ── Code Search ─────────────────────────────────────────
 
     async search(repo: string, query: SearchQuery): Promise<SearchResponse> {
-        const [owner, name] = repo.split('/');
+        const [owner, name] = this.parseRepo(repo);
         return this.request<SearchResponse>(`/repos/${owner}/${name}/search`, {
             method: 'POST',
             body: JSON.stringify(query),
@@ -58,7 +68,7 @@ export class ScmClient {
     // ── AI Review ───────────────────────────────────────────
 
     async review(repo: string, files: Array<{ name: string; content: string }>, options?: { hipaa?: boolean }): Promise<{ review: AIReviewResult; hipaa?: HipaaResult }> {
-        const [owner, name] = repo.split('/');
+        const [owner, name] = this.parseRepo(repo);
         return this.request(`/repos/${owner}/${name}/review`, {
             method: 'POST',
             body: JSON.stringify({ files, hipaa: options?.hipaa }),
@@ -68,7 +78,7 @@ export class ScmClient {
     // ── Security Scan ───────────────────────────────────────
 
     async scan(repo: string, files: Array<{ name: string; content: string }>): Promise<{ summary: ScanSummary; findings: SecurityFinding[] }> {
-        const [owner, name] = repo.split('/');
+        const [owner, name] = this.parseRepo(repo);
         return this.request(`/repos/${owner}/${name}/security`, {
             method: 'POST',
             body: JSON.stringify({ files }),
@@ -78,7 +88,7 @@ export class ScmClient {
     // ── DORA Metrics ────────────────────────────────────────
 
     async dora(repo: string, period?: string): Promise<DoraMetrics> {
-        const [owner, name] = repo.split('/');
+        const [owner, name] = this.parseRepo(repo);
         const qs = period ? `?period=${encodeURIComponent(period)}` : '';
         return this.request<DoraMetrics>(`/repos/${owner}/${name}/dora${qs}`);
     }

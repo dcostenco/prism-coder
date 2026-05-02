@@ -12,7 +12,8 @@
  */
 
 import { debugLog } from "../utils/logger.js";
-import { createHash, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import crypto from "node:crypto";
+const { createHash, randomBytes, createCipheriv, createDecipheriv } = crypto;
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -61,7 +62,7 @@ export interface EncryptedPacket {
 // ─── Encryption / Decryption ─────────────────────────────────
 
 const ALGORITHM = "aes-256-gcm";
-const IV_LENGTH = 16;
+const IV_LENGTH = 12;
 const KEY_LENGTH = 32;
 
 /**
@@ -150,7 +151,8 @@ export function buildSyncPayload(
  */
 export function verifySyncPayload(payload: SyncPayload): boolean {
     const computed = computeChecksum(payload.entries);
-    return computed === payload.checksum;
+    if (computed.length !== payload.checksum.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(payload.checksum));
 }
 
 // ─── Peer Management ─────────────────────────────────────────
@@ -211,7 +213,17 @@ export function receiveSyncPacket(
 ): SyncPayload {
     const key = deriveKey(sharedSecret);
     const decrypted = decrypt(encrypted, key);
-    const payload: SyncPayload = JSON.parse(decrypted);
+
+    // Wrap JSON.parse so a malformed payload from a misbehaving peer doesn't
+    // crash the receiver with an unhandled SyntaxError. We re-throw with a
+    // typed message so callers can distinguish corruption from auth failures.
+    let payload: SyncPayload;
+    try {
+        payload = JSON.parse(decrypted) as SyncPayload;
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`Sync payload corrupted: invalid JSON (${msg})`);
+    }
 
     if (!verifySyncPayload(payload)) {
         throw new Error("Sync payload integrity check failed — checksum mismatch");

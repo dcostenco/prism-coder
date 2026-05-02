@@ -907,6 +907,11 @@ export async function knowledgeSyncRulesHandler(args: unknown) {
     };
   }
 
+  // Block writes to .git/ and node_modules/ directories
+  if (target_file.startsWith('.git/') || target_file.includes('/.git/') || target_file.startsWith('node_modules/')) {
+    return { content: [{ type: "text", text: "Error: Cannot write to .git/ or node_modules/ directories" }], isError: true };
+  }
+
   // Ensure directory exists (handles nested target_file like ".config/rules.md")
   const targetDir = dirname(targetPath);
   if (!existsSync(targetDir)) {

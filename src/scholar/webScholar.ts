@@ -199,7 +199,7 @@ export async function runWebScholar(overrideTopic?: string, overrideProject?: st
 async function searchPubMed(query: string, count: number): Promise<string[]> {
   const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmode=json&retmax=${count}`;
   try {
-    const searchResp = await fetch(searchUrl);
+    const searchResp = await fetch(searchUrl, { signal: AbortSignal.timeout(15_000) });
     if (!searchResp.ok) throw new Error("PubMed Search failed");
     const searchData = await searchResp.json();
     const pmids: string[] = searchData.esearchresult?.idlist || [];
@@ -213,7 +213,7 @@ async function searchPubMed(query: string, count: number): Promise<string[]> {
 async function searchERIC(query: string, count: number): Promise<string[]> {
   const url = `https://api.ies.ed.gov/eric/?search=${encodeURIComponent(query)}&rows=${count}&format=json`;
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!resp.ok) throw new Error("ERIC Search failed");
     const data = await resp.json();
     return (data.response?.docs || []).map((doc: any) => `https://eric.ed.gov/?id=${doc.id}`);
@@ -228,7 +228,7 @@ async function searchSemanticScholar(query: string, count: number): Promise<stri
   try {
     const headers: Record<string, string> = {};
     if (SEMANTIC_SCHOLAR_API_KEY) headers["x-api-key"] = SEMANTIC_SCHOLAR_API_KEY;
-    const resp = await fetch(url, { headers });
+    const resp = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
     if (!resp.ok) throw new Error("Semantic Scholar Search failed");
     const data = await resp.json();
     return (data.data || []).map((paper: any) => paper.url).filter(Boolean);

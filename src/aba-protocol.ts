@@ -112,9 +112,11 @@ export function buildVSCodePrompt(identity: string): string {
 
 // ─── Input Sanitization ─────────────────────────────────────────
 
-/** Strip XML-like tags that could hijack system instructions */
+import { sanitizeMcpOutput } from './utils/sanitizer.js';
+
+/** Strip XML-like tags that could hijack system instructions — delegates to shared sanitizer */
 export function sanitizeUserInput(text: string): string {
-  return text.replace(/<\/?(?:anti_pattern|desired_pattern|system|user_input|instruction)[^>]*>/gi, '');
+  return sanitizeMcpOutput(text);
 }
 
 /** Wrap user input in <user_input> tags after sanitization */

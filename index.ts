@@ -17,8 +17,13 @@ process.on('uncaughtException', (error) => {
   console.error('Uncaught exception:', error);
 });
 
+let unhandledCount = 0;
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled rejection at:', promise, 'reason:', reason);
+  if (++unhandledCount >= 5) {
+    console.error('[FATAL] Too many unhandled rejections — exiting');
+    process.exit(1);
+  }
 });
 
 // Run the server

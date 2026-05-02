@@ -149,12 +149,31 @@ export function acquireLock() {
     }
   }
 
-  // Claim the lock for this process
+  // Claim the lock for this process — use 'wx' for atomic exclusive creation (prevents TOCTOU)
   try {
-    fs.writeFileSync(PID_FILE, process.pid.toString(), "utf8");
+    fs.writeFileSync(PID_FILE, process.pid.toString(), { encoding: "utf8", flag: "wx" });
     log(`Acquired singleton lock (PID ${process.pid})`);
-  } catch (err) {
-    log(`Warning: Failed to write PID file: ${err instanceof Error ? err.message : String(err)}`);
+  } catch (wxErr: any) {
+    if (wxErr.code === "EEXIST") {
+      // File was created between our check and write — re-read and verify
+      try {
+        const racePid = parseInt(fs.readFileSync(PID_FILE, "utf8").trim(), 10);
+        let raceAlive = false;
+        try { process.kill(racePid, 0); raceAlive = true; } catch { raceAlive = false; }
+        if (!raceAlive || isOrphanProcess(racePid)) {
+          // Dead or orphan — safe to overwrite
+          fs.writeFileSync(PID_FILE, process.pid.toString(), "utf8");
+          log(`Acquired singleton lock (PID ${process.pid}) — stale PID ${racePid} replaced`);
+        } else {
+          log(`Existing server (PID ${racePid}) is active. Coexisting...`);
+          return;
+        }
+      } catch (innerErr) {
+        log(`Warning: Failed to handle PID race: ${innerErr instanceof Error ? innerErr.message : String(innerErr)}`);
+      }
+    } else {
+      log(`Warning: Failed to write PID file: ${wxErr instanceof Error ? wxErr.message : String(wxErr)}`);
+    }
   }
 }
 

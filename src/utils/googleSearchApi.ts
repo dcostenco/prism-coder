@@ -27,7 +27,9 @@ export async function performGoogleSearch(
     url.searchParams.append("q", query);
     url.searchParams.append("num", safeCount.toString());
 
-    const response = await fetch(url.toString());
+    const response = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(15_000),
+    });
     if (!response.ok) {
       const error = await response.json();
       throw new Error(`Google Search API failed: ${JSON.stringify(error)}`);

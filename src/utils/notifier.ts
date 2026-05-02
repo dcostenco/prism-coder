@@ -75,6 +75,14 @@ function isInCooldown(event: NotificationEvent, project?: string): boolean {
 function markNotified(event: NotificationEvent, project?: string): void {
     const key = `${event}:${project || "global"}`;
     lastNotifiedAt.set(key, Date.now());
+
+    // Evict stale entries to prevent unbounded map growth
+    if (lastNotifiedAt.size > 500) {
+        const cutoff = Date.now() - 2 * currentConfig.cooldownMs;
+        for (const [k, ts] of lastNotifiedAt) {
+            if (ts < cutoff) lastNotifiedAt.delete(k);
+        }
+    }
 }
 
 // ─── Severity Check ──────────────────────────────────────────
@@ -88,12 +96,52 @@ function meetsMinSeverity(severity: NotificationSeverity): boolean {
     );
 }
 
+// ─── SSRF Protection ─────────────────────────────────────────
+
+function isAllowedUrl(url: string): boolean {
+    try {
+        const parsed = new URL(url);
+
+        // Block non-HTTP(S) schemes
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+
+        const hostname = parsed.hostname.toLowerCase();
+
+        // Block localhost and loopback
+        if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]") return false;
+
+        // Block .internal and .local TLDs
+        if (hostname.endsWith(".internal") || hostname.endsWith(".local")) return false;
+
+        // Block private IP ranges
+        const ipParts = hostname.split(".").map(Number);
+        if (ipParts.length === 4 && ipParts.every(p => Number.isFinite(p))) {
+            // 10.0.0.0/8
+            if (ipParts[0] === 10) return false;
+            // 172.16.0.0/12
+            if (ipParts[0] === 172 && ipParts[1] >= 16 && ipParts[1] <= 31) return false;
+            // 192.168.0.0/16
+            if (ipParts[0] === 192 && ipParts[1] === 168) return false;
+            // 169.254.0.0/16 (link-local)
+            if (ipParts[0] === 169 && ipParts[1] === 254) return false;
+        }
+
+        return true;
+    } catch {
+        return false; // Malformed URL
+    }
+}
+
 // ─── Channel Senders ─────────────────────────────────────────
 
 async function sendWebhook(
     url: string,
     payload: NotificationPayload,
 ): Promise<boolean> {
+    if (!isAllowedUrl(url)) {
+        debugLog(`Webhook URL blocked by SSRF policy: ${url}`);
+        return false;
+    }
     try {
         const response = await fetch(url, {
             method: "POST",
@@ -112,6 +160,10 @@ async function sendSlack(
     webhookUrl: string,
     payload: NotificationPayload,
 ): Promise<boolean> {
+    if (!isAllowedUrl(webhookUrl)) {
+        debugLog(`Slack webhook URL blocked by SSRF policy: ${webhookUrl}`);
+        return false;
+    }
     const severityEmoji: Record<NotificationSeverity, string> = {
         info: "ℹ️",
         warning: "⚠️",
@@ -169,6 +221,10 @@ async function sendEmail(
     endpoint: string,
     payload: NotificationPayload,
 ): Promise<boolean> {
+    if (!isAllowedUrl(endpoint)) {
+        debugLog(`Email endpoint URL blocked by SSRF policy: ${endpoint}`);
+        return false;
+    }
     // Email via webhook relay (e.g., SendGrid, Mailgun, or custom endpoint)
     try {
         const response = await fetch(endpoint, {
