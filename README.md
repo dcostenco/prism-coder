@@ -195,7 +195,7 @@ Prism features a cutting-edge **Zero-Search Retrieval** system for its cognitive
 | **BFCL Submission** | [PR #1332](https://github.com/ShishirPatil/gorilla/pull/1332) |
 | **Changelog** | [synalux-docs/CHANGELOG.md](https://github.com/dcostenco/synalux-docs/blob/main/CHANGELOG.md) |
 | **Roadmap** | [synalux-docs/ROADMAP.md](https://github.com/dcostenco/synalux-docs/blob/main/ROADMAP.md) |
-| **PrismAAC** | [github.com/dcostenco/prism-aac](https://github.com/dcostenco/prism-aac) — AAC web app for children with motor impairments |
+| **PrismAAC** | [github.com/dcostenco/prism-aac](https://github.com/dcostenco/prism-aac) — AAC web app for children with motor impairments. Powered by `prism-coder:7b` for offline text correction, AI Chat, translation, caregiver-note parsing, and emergency phone-call AI (13/13 on live Twilio test). Ships **all-neural offline TTS across 14 locales** via Kokoro-82M (Apache-2.0, 6 langs) + Piper (MIT, 5 langs) + Azure Neural fallback (Cantonese + emotional styles). Optional local servers `mlx-vlm` and `mlx-whisper` add scene understanding and HQ STT for Mac users. |
 
 ---
 
@@ -735,14 +735,17 @@ Prism scores coding tasks across **6 weighted heuristic signals** (keyword analy
 To achieve zero-latency, offline routing and memory compilation without cloud dependencies, Prism utilizes an internal fine-tuned ML model: **`prism-coder:7b`**.
 Built atop Qwen 2.5 Coder 7B using the MLX framework for Apple Silicon, this engine underwent aggressive Supervised Fine-Tuning (SFT) over 3,300+ session traces, then aligned using **GRPO (Group Relative Policy Optimization)** with a decomposed 4-component reward function.
 
-**Benchmark Results ([`training/benchmark.py`](https://github.com/dcostenco/prism-mcp/blob/main/training/benchmark.py), N=15 held-out):**
-- **Tool-Call Accuracy:** 100.0% — correct tool on unseen prompts (15/15)
-- **Tool Selection:** 100.0% (7/7) — perfect on all tool-call prompts
-- **Retrieval Accuracy:** 100.0% (3/3) — perfect on search/list/knowledge tasks
-- **JSON Validity:** 100.0% — every output parses as valid JSON
-- **Parameter Accuracy:** 73.3% — required params present when tool is correct
-- **Generation Speed:** 29.9 Tokens/sec (Apple M4 Max, 36GB)
-- **Avg Latency:** 2.2s per prompt
+**Benchmark Results — v12 production model:**
+- **BFCL Tool-Call Accuracy:** 100% (64/64)
+- **AAC realigned eval (production paths from prism-aac):** 89.6% overall — text-correct 80%, emergency Q&A **100% (13/13)**, translation 87.5%, caregiver-note parsing 85.7%, ask-AI 100%
+- **Live emergency phone call (Twilio):** 13/13 questions answered correctly with proactive safety guidance
+- **Generation Speed:** 130 ms / call on Apple M5 Max
+- **Quantization:** Q4_K_M GGUF, 4 GB on disk
+- **Distribution:** [`dcostenco/prism-coder-7b`](https://huggingface.co/dcostenco/prism-coder-7b) on HuggingFace; `ollama pull prism-coder:7b`
+
+**v16 in training (Modal H100, May 2026):** combined synalux + AAC SFT (~7,300 examples) targeting the 5 remaining v12 failures plus full multi-locale coverage of the 14 prism-aac locales (incl. zh-Hans / zh-Hant / zh-HK / Romanian / Ukrainian / Russian / German / Korean / Japanese / Arabic). DoRA rank=256, continuing from v12-fused base. Reliability gate: BFCL ≥ 95% AND AAC eval ≥ 89% (v12 baseline) AND Emergency Q&A == 13/13 — promote to `prism-coder:7b` only on all-pass. See [`training/modal_v16_sft.py`](training/modal_v16_sft.py) and [`training/deploy_v16.sh`](training/deploy_v16.sh).
+
+**Sister local servers (M-series Apple Silicon, optional):** when running on a Mac, prism-aac users can additionally stand up `mlx-vlm` (Qwen2.5-VL-7B for camera/scene understanding, port 8001) and `mlx-whisper` (large-v3-turbo for high-accuracy STT, port 8002) for fully-offline multimodal AI. See [`training/whisper_server.py`](training/whisper_server.py).
 
 **Integration**: Run via Ollama natively to power autonomous file operations and session routing entirely within the local host environment.
 
@@ -1778,10 +1781,11 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 
 ## <a name="milestones-roadmap"></a>📦 Milestones & Roadmap
 
-> **Current: v12.5** — Unified Billing & Agent Skill Ecosystem ([CHANGELOG](CHANGELOG.md))
+> **Current: v13.0** — The Adaptive Release ([CHANGELOG](CHANGELOG.md#1300))
 
 | Release | Headline |
 |---------|----------|
+| **v13.0** | 🧬 **The Adaptive Release** — Auto tone switch, cursor that learns motor rhythm, identity-locked tracking, BCBA-aligned behavioral safety, 319 security findings fixed across 3 repos. [Details →](CHANGELOG.md#1300) |
 | **v12.5** | 💳 **Unified Billing & Agent Skill Ecosystem** — Synalux-priced tiers ($19/$49/$99), 14-day trial, 54 skills, BSL-1.1 license. |
 | **v11.6.0** | 🏗️ **Agent Infrastructure Resilience** — Production-grade serialized queue, memory guardian, queue watchdog, status dashboard. 115/115 tests. |
 | **v11.5.1** | 🧠 **Structural GRPO Alignment** — Perfect 100% accuracy cross-validated on Synalux Elite platform. |
@@ -1797,8 +1801,7 @@ Prism MCP is open-source and free for individual developers. For teams and enter
 | **v7.0** | 🧬 ACT-R Activation Memory |
 
 ### Future Tracks
-- **v12.0: Distal Memory** — Semantic clustering of long-term history with Active-Prism background maintenance.
-- **v13.0: Team Handoff** — Encrypted peer-to-peer session syncing with multi-agent task routing and verifiable memory.
+- **v14.0: Prism-Coder v2** — Retrained model with adaptive behavioral alignment (training in progress).
 
 👉 **[Full ROADMAP.md →](ROADMAP.md)**
 
