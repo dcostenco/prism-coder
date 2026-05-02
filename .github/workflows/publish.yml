@@ -16,6 +16,22 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - run: npm install
       - run: npm run build
-      - run: npm publish --access public
+      # Skip publish if this version is already on npm (e.g. tag was force-
+      # moved after a history rewrite). Without this guard the workflow
+      # turns red on every retag with a benign 403 "cannot publish over
+      # previously published versions" error.
+      - name: Check if version already published
+        id: check
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VER=$(node -p "require('./package.json').version")
+          if npm view "$PKG@$VER" version 2>/dev/null | grep -q "^$VER$"; then
+            echo "Already published: $PKG@$VER — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.check.outputs.skip != 'true'
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
