@@ -19,12 +19,20 @@
 
 ### Downloads
 
-| Platform | Package | Size |
-|----------|---------|------|
-| **Windows** | [Prism Coder-1.0.0-Setup.exe](https://github.com/dcostenco/prism-coder/releases/download/v1.0.0/Prism.Coder-1.0.0-Setup.exe) | 99 MB |
-| **macOS (Apple Silicon)** | [Prism Coder-1.0.0-arm64.dmg](https://github.com/dcostenco/prism-coder/releases/download/v1.0.0/Prism.Coder-1.0.0-arm64.dmg) | 113 MB |
-| **Linux** | [Prism Coder-1.0.0.AppImage](https://github.com/dcostenco/prism-coder/releases/download/v1.0.0/Prism.Coder-1.0.0.AppImage) | 119 MB |
-| **npm (MCP Server)** | `npx -y prism-mcp-server` | — |
+Latest IDE release: **v2.0.0** ([release notes](https://github.com/dcostenco/prism-coder/releases/tag/v2.0.0)) — adds Debugger, LSP, Remote SSH, Builder version history, AI design-to-code, and the `prism` CLI. macOS DMG ships today; Windows + Linux v2.0 installers are tracking in v2.0.1.
+
+| Platform | Package | Version | Size |
+|----------|---------|:-------:|:----:|
+| **macOS (Apple Silicon)** | [Prism Coder-2.0.0-arm64.dmg](https://github.com/dcostenco/prism-coder/releases/download/v2.0.0/Prism.Coder-2.0.0-arm64.dmg) | **v2.0.0** | 114 MB |
+| **macOS (Apple Silicon, zip)** | [Prism Coder-2.0.0-arm64.zip](https://github.com/dcostenco/prism-coder/releases/download/v2.0.0/Prism.Coder-2.0.0-arm64.zip) | **v2.0.0** | 110 MB |
+| **Windows** | [Prism Coder-1.0.1-Setup.exe](https://github.com/dcostenco/prism-coder/releases/download/v1.0.1/Prism.Coder-1.0.1-Setup.exe) | v1.0.1 | 99 MB |
+| **Linux** | [Prism Coder-1.0.0.AppImage](https://github.com/dcostenco/prism-coder/releases/download/v1.0.0/Prism.Coder-1.0.0.AppImage) | v1.0.0 | 119 MB |
+| **npm (MCP Server)** | `npx -y prism-mcp-server` | latest | — |
+
+> **macOS first-launch note:** the v2.0.0 .app is signed with a Developer ID
+> certificate but **not yet notarized**. macOS may show a "developer cannot
+> be verified" warning on first launch — right-click the app → **Open** to
+> bypass once. Notarization tracking in v2.0.1.
 
 | What You Get | Time Saved vs. Traditional |
 |---|:---:|
