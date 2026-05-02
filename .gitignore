@@ -93,3 +93,4 @@ training/mlx_model/
 
 # Expo config from sibling prism-aac repo that leaked here
 /app.json
+.gemini/
