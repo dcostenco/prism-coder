@@ -66,6 +66,8 @@ Latest IDE release: **v2.0.1** ([release notes](https://github.com/dcostenco/pri
 
 **Your AI agent forgets everything between sessions. Prism fixes that — then teaches it to think.**
 
+> **🆕 May 2026 — `prism-coder:7b` v18aac released.** New on-device LLM backing the agent: AAC realigned eval **47/48 (98%)**, emergency_qa **13/13 perfect**, text_correct **15/15 perfect**, translate **8/8 perfect**, plus first-class gesture-recognition support for accessibility (smile/brow/jaw/blink/head-tilt). Built on Qwen2.5-Coder-7B-Instruct with full SFT on commercial-safe data (Apache 2.0 / CC-BY-4.0). Hybrid `prism-coder:7b-coder` (BFCL-optimized variant) coming soon for a top-rank function-calling track. See `prism/training/HYBRID_RESEARCH.md` for the dual-model deployment plan.
+
 <details>
 <summary>Cognitive Architecture Deep Dive (v12.5)</summary>
 
