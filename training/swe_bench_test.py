@@ -207,7 +207,7 @@ def call_ollama(prompt: str, timeout: int = 120) -> tuple:
             "prompt": prompt,
             "stream": False,
             "raw": True,
-            "options": {"temperature": 0.1, "num_predict": 512}
+            "options": {"temperature": 0.0, "num_predict": 512}
         }).encode("utf-8")
         
         req = urllib.request.Request(
@@ -351,7 +351,7 @@ def evaluate_result(expected_tool, required_params, got_tool, got_args):
             return "partial_pass"  # Got the tool right but missing params
 
 
-def main(shuffle=False):
+def main(shuffle=False, no_validate_layer3=False):
     print("=" * 70)
     print("SWE-BENCH INSPIRED BLIND EVALUATION — prism-coder:7b")
     print("=" * 70)
@@ -383,7 +383,9 @@ def main(shuffle=False):
         full_prompt = f"<|im_start|>system\n{_sys_prompt}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
         raw, got_tool, got_args, latency = call_ollama(full_prompt)
         # Layer 3: reject false positive tool calls on general programming prompts
-        got_tool, got_args = validate_tool_call(prompt, got_tool, got_args)
+        # Disabled during training benchmarks so RFT/DPO sees true model failures.
+        if not no_validate_layer3:
+            got_tool, got_args = validate_tool_call(prompt, got_tool, got_args)
         verdict = evaluate_result(expected, required_params, got_tool, got_args)
         
         is_pass = verdict in ("strict_pass", "partial_pass")
@@ -492,10 +494,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--runs", type=int, default=1, help="Number of eval runs for statistical validation")
     parser.add_argument("--shuffle", action="store_true", help="Randomize test order each run")
+    parser.add_argument("--no-validate-layer3", action="store_true",
+                        help="Disable Layer 3 false-positive rejection (use during training benchmarks "
+                             "so RFT/DPO sees true model failures, not heuristic-corrected results)")
     args = parser.parse_args()
-    
+
     if args.runs == 1:
-        main(shuffle=args.shuffle)
+        main(shuffle=args.shuffle, no_validate_layer3=args.no_validate_layer3)
     else:
         all_scores = []
         per_test_pass = [0] * len(BLIND_TESTS)
@@ -508,7 +513,7 @@ if __name__ == "__main__":
             print(f"{'#'*70}")
             if seed is not None:
                 random.seed(seed)
-            strict, total, results = main(shuffle=args.shuffle)
+            strict, total, results = main(shuffle=args.shuffle, no_validate_layer3=args.no_validate_layer3)
             all_scores.append(strict)
             for i, r in enumerate(results):
                 if r["verdict"] == "strict_pass":

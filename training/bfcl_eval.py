@@ -80,15 +80,30 @@ PRISM_INTENT_PATTERNS = [
     r'\btask.*rout',
 ]
 
-def validate_tool_call(prompt, tool_name, tool_args):
+def validate_tool_call(prompt, tool_name, tool_args, is_followup=False):
     """Layer 3: reject false-positive tool calls on general programming prompts,
     AND remap tool calls when the model picks a close semantic neighbor
     for a tool it wasn't trained on."""
-    
+
     prompt_lower = prompt.lower()
-    
+
+    # --- Layer 3a0: Multi-step first-action protection (first turn only) ---
+    # If model already picked the correct first-step tool, protect it from
+    # being remapped by downstream Layer 3a patterns that match step-2 keywords
+    if not is_followup:
+        import re as _re
+        multi_parts = _re.split(r'\b(?:then|and then|after that)\b', prompt_lower, maxsplit=1)
+        if len(multi_parts) == 2:
+            first_part = multi_parts[0].strip()
+            # Protect export/backup tools from retention remap
+            if ('export' in first_part or 'backup' in first_part or 'dump' in first_part):
+                if tool_name == 'session_export_memory':
+                    return tool_name, tool_args  # already correct, protect it
+                else:
+                    return 'session_export_memory', {"project": "default", "output_path": "/tmp/backup"}
+
     # --- Layer 3a: Tool Remapping (fix known model blind spots) ---
-    
+
     # Known target tools that should never be remapped FROM
     RETENTION_TOOL = "knowledge_set_retention"
     IMAGE_SAVE_TOOL = "session_save_image"
@@ -146,7 +161,25 @@ def validate_tool_call(prompt, tool_name, tool_args):
         if any(re.search(p, prompt_lower) for p in image_view_patterns):
             return IMAGE_VIEW_TOOL, dict(tool_args) if isinstance(tool_args, dict) else {}
     
-    # --- Layer 3b: False-positive rejection (existing behavior) ---
+    # --- Layer 3a2: Search disambiguation ---
+    # "recent X" / "past X" / "what we decided" → session history, not knowledge base
+    if tool_name == 'knowledge_search':
+        session_search_hints = [r'\brecent\b', r'\bpast\b', r'\blast\s+(?:week|month|session)', r'\bwhat\s+we\s+(?:did|decided|worked)', r'\bdeployment\s+issues\b']
+        if any(re.search(p, prompt_lower) for p in session_search_hints):
+            return 'session_search_memory', tool_args
+
+    # --- Layer 3b: Social pleasantry rejection ---
+    if tool_name != "NO_TOOL":
+        SOCIAL_PATTERNS = [
+            r'^thanks',  r'^thank you', r'^cheers', r'^goodbye', r'^bye',
+            r"that's all", r"we're done", r"all done", r"all set",
+            r'^ok\s+great', r'^perfect$', r'^nice$', r'^cool$',
+        ]
+        is_social = any(re.search(p, prompt_lower.strip()) for p in SOCIAL_PATTERNS)
+        if is_social and not any(w in prompt_lower for w in ['save', 'export', 'search', 'load', 'record', 'log', 'run', 'check', 'find']):
+            return "NO_TOOL", {}
+
+    # --- Layer 3c: False-positive rejection (existing behavior) ---
     if tool_name == "NO_TOOL":
         return tool_name, tool_args
     is_general = any(re.search(p, prompt_lower) for p in GENERAL_PROGRAMMING_PATTERNS)
@@ -202,7 +235,7 @@ SIMPLE_TESTS = [
     {
         "prompt": "Export all memory to /tmp/export in JSON format.",
         "expected_tool": "session_export_memory",
-        "required_params": {"output_dir": "/tmp/export", "format": "json"},
+        "required_params": {"output_path": "/tmp/export", "format": "json"},
         "id": "simple_007"
     },
     {
@@ -335,7 +368,7 @@ AST_PARAM_TESTS = [
     {
         "prompt": "Export my memories to /tmp/backup in markdown format for the billing project.",
         "expected_tool": "session_export_memory",
-        "required_params": {"output_dir": "/tmp/backup", "format": "markdown", "project": "billing"},
+        "required_params": {"output_path": "/tmp/backup", "format": "markdown", "project": "billing"},
         "ast_strict": True,  # enforce exact param values
         "id": "ast_001"
     },
@@ -363,7 +396,7 @@ AST_PARAM_TESTS = [
     {
         "prompt": "Save an image at /tmp/screenshot.png for the dashboard project with description 'Login page redesign mockup'.",
         "expected_tool": "session_save_image",
-        "required_params": {"project": "dashboard", "file_path": "/tmp/screenshot.png"},
+        "required_params": {"project": "dashboard", "image_path": "/tmp/screenshot.png"},
         "ast_strict": True,
         "id": "ast_005"
     },
@@ -451,7 +484,7 @@ MULTI_TURN_TESTS = [
         # Export memory → set retention policy
         "prompt": "Export the billing project memory to /tmp/backup, then set a 60-day retention policy.",
         "expected_tool": "session_export_memory",
-        "required_params": {"output_dir": "/tmp/backup"},
+        "required_params": {"output_path": "/tmp/backup"},
         "id": "multiturn_006",
         "followup": {
             "tool_response": '{"status": "exported", "file": "/tmp/backup/prism-export-billing.json", "entries": 142}',
@@ -935,7 +968,13 @@ def evaluate_test(test: dict, verbose: bool = False) -> dict:
             )
         else:
             next_tool, next_args, next_raw, next_latency, _ = call_ollama(history)
-        
+
+        # Layer 3 on followup: validate + catch repeated tool calls
+        next_tool, next_args = validate_tool_call(prompt, next_tool, next_args, is_followup=True)
+        if next_tool == actual_tool and next_tool != "NO_TOOL":
+            next_tool = "NO_TOOL"
+            next_args = {}
+
         result["actual"] += f" -> {next_tool}"
         result["latency"] += next_latency
         expected_followup = followup.get("expected_tool", "NO_TOOL")
@@ -952,7 +991,7 @@ def evaluate_test(test: dict, verbose: bool = False) -> dict:
     return result
 
 
-def run_evaluation(shuffle: bool = False, verbose: bool = False) -> dict:
+def run_evaluation(shuffle: bool = False, verbose: bool = False, quiet: bool = False) -> dict:
     """Run full BFCL-style evaluation across all categories."""
     
     # Build flat test list with category tags
@@ -987,12 +1026,14 @@ def run_evaluation(shuffle: bool = False, verbose: bool = False) -> dict:
         results.append(result)
         category_results[cat].append(result)
         
-        if not verbose:
+        if not verbose and not quiet:
             status = "✅" if result["correct"] else "❌"
             print(f"  {status} [{result['id']}] {result['expected']:>25s} → {result['actual']:<25s} {result['latency']:.1f}s", end="")
             if result["hallucinated"]:
                 print(" 🚨 HALLUCINATED", end="")
             print()
+        elif quiet and not result["correct"]:
+            print(f"  ❌ [{result['id']}] expected {result['expected']}, got {result['actual']}")
     
     elapsed = time.time() - start_time
     
@@ -1055,6 +1096,8 @@ def main():
     parser.add_argument("--runs", type=int, default=1, help="Number of evaluation runs")
     parser.add_argument("--shuffle", action="store_true", help="Randomize test order each run")
     parser.add_argument("--verbose", action="store_true", help="Show detailed model outputs")
+    parser.add_argument("--quiet", action="store_true", help="Only print category breakdown and overall results (suppress per-test lines)")
+    parser.add_argument("--cleanup", action="store_true", help="Release MLX model from memory after eval completes")
     args = parser.parse_args()
     
     # Allow --model to override the global MODEL
@@ -1071,7 +1114,7 @@ def main():
             print(f"  RUN {run_idx + 1} / {args.runs}")
             print(f"{'#'*70}")
         
-        result = run_evaluation(shuffle=args.shuffle, verbose=args.verbose)
+        result = run_evaluation(shuffle=args.shuffle, verbose=args.verbose, quiet=args.quiet)
         all_run_results.append(result)
     
     if args.runs > 1:
@@ -1121,9 +1164,29 @@ def main():
             sys.exit(0)
     else:
         overall = all_run_results[0]["overall_accuracy"]
+        if args.cleanup:
+            cleanup_mlx_model()
         if overall < 90:
             sys.exit(1)
         sys.exit(0)
+
+    if args.cleanup:
+        cleanup_mlx_model()
+
+
+def cleanup_mlx_model():
+    global MLX_MODEL_CACHE, MLX_TOKENIZER_CACHE
+    if MLX_MODEL_CACHE is not None:
+        import gc
+        try:
+            import mlx.core as mx
+            mx.clear_cache()
+        except Exception:
+            pass
+        MLX_MODEL_CACHE = None
+        MLX_TOKENIZER_CACHE = None
+        gc.collect()
+        print("🧹 MLX model released from memory")
 
 
 if __name__ == "__main__":

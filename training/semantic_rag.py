@@ -122,14 +122,21 @@ HYDE_QUERIES = {
     "knowledge_search": [
         "find past insights", "search curated knowledge", "look up graduated memories",
         "what do I know about this topic", "search accumulated wisdom",
+        "search documentation", "search knowledge base", "what do we know about",
+        "accumulated documentation", "institutional knowledge about",
+        "best practices for", "search our docs",
     ],
     "session_search_memory": [
         "search my memories", "find similar sessions", "semantic memory search",
         "look for related past work", "find sessions about this",
+        "search past sessions", "what did we work on", "find the session where",
+        "look up past work", "what was decided about", "search session history",
     ],
     "knowledge_forget": [
         "delete old memories", "forget irrelevant entries", "clean up knowledge base",
         "remove outdated information", "prune stale sessions",
+        "clear out knowledge entries", "purge stale knowledge", "wipe knowledge",
+        "forget all knowledge entries", "clear old knowledge",
     ],
     "session_compact_ledger": [
         "my session history is too long", "clean up old logs",
@@ -152,19 +159,39 @@ HYDE_QUERIES = {
     "knowledge_downvote": [
         "this isn't useful", "downvote this memory", "decrease importance",
         "this entry is wrong", "demote this insight",
+        "downvote the stale entry", "mark as not useful",
     ],
     "session_forget_memory": [
         "delete this specific memory", "remove this entry", "erase this record",
         "forget this particular session", "GDPR delete request",
+        "delete memory entry", "remove memory by ID", "purge this memory",
+        "get rid of that memory", "delete that specific memory entry",
+    ],
+    "session_save_experience": [
+        "record a successful experience", "log this learning",
+        "save this experience", "record a lesson learned",
+        "log a success event", "save what I learned",
+        "record this outcome", "log experience",
+    ],
+    "knowledge_set_retention": [
+        "set retention policy", "configure retention days",
+        "set knowledge expiry", "retention period for knowledge",
+        "how long to keep knowledge", "set TTL for knowledge",
     ],
     # Health & maintenance
     "session_health_check": [
         "check memory health", "run diagnostics", "is my database okay",
         "check for problems", "scan for issues in memory",
+        "health check", "run a health check", "health check on the memory backend",
+        "is the memory system healthy", "verify the memory backend is working",
+        "memory health", "system health check", "status check",
     ],
     "session_export_memory": [
         "export my data", "download my memories", "backup everything",
         "data portability export", "save all data to file",
+        "export memory", "export all memory", "export memories to file",
+        "dump session data", "back up memory", "export to JSON",
+        "export the project memory", "backup memory to disk",
     ],
     # Task routing
     "session_task_route": [
@@ -235,12 +262,53 @@ def generate_hyde_embeddings():
     print(f"Saved {len(embeddings)} HyDE embeddings to {HYDE_EMBEDDINGS_PATH}")
 
 
-def retrieve_top_k_hyde(query: str, k: int = 5) -> list:
+KEYWORD_BOOST = {
+    "health check": ["session_health_check"],
+    "health": ["session_health_check"],
+    "diagnostics": ["session_health_check"],
+    "status check": ["session_health_check"],
+    "export": ["session_export_memory"],
+    "backup": ["session_export_memory"],
+    "dump": ["session_export_memory"],
+    "retention": ["knowledge_set_retention"],
+    "ttl": ["knowledge_set_retention"],
+    "experience": ["session_save_experience"],
+    "lesson": ["session_save_experience"],
+    "learning": ["session_save_experience"],
+    "downvote": ["knowledge_downvote"],
+    "upvote": ["knowledge_upvote"],
+    "compact": ["session_compact_ledger"],
+    "purge knowledge": ["knowledge_forget"],
+    "clear knowledge": ["knowledge_forget"],
+    "forget knowledge": ["knowledge_forget"],
+    "record this": ["session_save_ledger"],
+    "record this session": ["session_save_ledger"],
+    "log this session": ["session_save_ledger"],
+    "log today": ["session_save_ledger"],
+    "save the handoff": ["session_save_handoff"],
+    "handoff": ["session_save_handoff"],
+    "search for what": ["session_search_memory"],
+    "search for past": ["session_search_memory"],
+    "what we decided": ["session_search_memory"],
+    "save": ["session_save_ledger"],
+    "search for": ["session_search_memory", "knowledge_search"],
+    "then search": ["session_search_memory"],
+    "then log": ["session_save_experience"],
+    "successfully": ["session_save_experience"],
+    "deployed": ["session_save_experience"],
+    "then save a handoff": ["session_save_handoff"],
+    "then save the handoff": ["session_save_handoff"],
+}
+
+
+def retrieve_top_k_hyde(query: str, k: int = 7) -> list:
     """R6-4: HyDE-enhanced retrieval — matches against hypothetical user queries.
-    
+
     For each tool, computes similarity against BOTH the tool description
     AND all hypothetical user queries, taking the MAX score.
     This bridges the vocabulary gap between user problems and tool names.
+
+    R8-fix: Keyword boost injects tools that MUST appear when trigger words match.
     """
     # Try HyDE embeddings first, fall back to standard
     hyde_path = HYDE_EMBEDDINGS_PATH
@@ -249,34 +317,46 @@ def retrieve_top_k_hyde(query: str, k: int = 5) -> list:
             embeddings = json.load(f)
     else:
         return retrieve_top_k(query, k)
-    
+
     query_emb = get_embedding(query)
     if not query_emb:
         return []
-    
+
+    # Keyword boost: identify tools that MUST appear in results
+    query_lower = query.lower()
+    boosted_tools = set()
+    for keyword, tools in KEYWORD_BOOST.items():
+        if keyword in query_lower:
+            boosted_tools.update(tools)
+
     scores = []
     for tool_name, data in embeddings.items():
         # Score against tool description
         desc_sim = cosine_similarity(query_emb, data["embedding"])
-        
+
         # Score against all HyDE queries, take MAX
         hyde_sims = [
             cosine_similarity(query_emb, he)
             for he in data.get("hyde_embeddings", [])
         ]
         max_hyde = max(hyde_sims) if hyde_sims else 0.0
-        
+
         # Combined score: max of description and HyDE queries
         best_sim = max(desc_sim, max_hyde)
+
+        # Keyword boost: push boosted tools to top
+        if tool_name in boosted_tools:
+            best_sim = max(best_sim, 0.95)
+
         scores.append((best_sim, tool_name, data["schema"]))
-    
+
     scores.sort(key=lambda x: x[0], reverse=True)
-    
+
     results = []
     for sim, name, schema in scores[:k]:
         results.append(schema)
         print(f"  HyDE-RAG: {name} (sim={sim:.4f})")
-    
+
     return results
 
 
@@ -328,7 +408,7 @@ def retrieve_top_k(query: str, k: int = 5) -> list:
 # R6.4-fix: Module-level cache for fallback schema (avoids 80+ disk reads)
 _FALLBACK_SCHEMA_CACHE = None
 
-def build_rag_system_prompt(query: str, k: int = 5, use_hyde: bool = True, **kwargs) -> str:
+def build_rag_system_prompt(query: str, k: int = 7, use_hyde: bool = True, **kwargs) -> str:
     """Build a system prompt with only the top-k relevant tools.
 
     R6-4: Prefers HyDE retrieval for better accuracy.
@@ -338,7 +418,26 @@ def build_rag_system_prompt(query: str, k: int = 5, use_hyde: bool = True, **kwa
     global _FALLBACK_SCHEMA_CACHE
     from config import format_system_prompt
 
-    if use_hyde:
+    # R9-fix: Dual-RAG for multi-step queries — split on "then"/"and then" and
+    # union tools from both halves to ensure step-2 tools are available
+    import re
+    multi_step_split = re.split(r'\b(?:then|and then|after that)\b', query, maxsplit=1)
+    if len(multi_step_split) == 2 and len(multi_step_split[1].strip()) > 5:
+        step1_query = multi_step_split[0].strip()
+        step2_query = multi_step_split[1].strip()
+        if use_hyde:
+            tools_1 = retrieve_top_k_hyde(step1_query, k=k)
+            tools_2 = retrieve_top_k_hyde(step2_query, k=4)
+        else:
+            tools_1 = retrieve_top_k(step1_query, k=k)
+            tools_2 = retrieve_top_k(step2_query, k=4)
+        seen = {t['name'] for t in tools_1}
+        tools = list(tools_1)
+        for t in tools_2:
+            if t['name'] not in seen:
+                tools.append(t)
+                seen.add(t['name'])
+    elif use_hyde:
         tools = retrieve_top_k_hyde(query, k=k)
     else:
         tools = retrieve_top_k(query, k=k)

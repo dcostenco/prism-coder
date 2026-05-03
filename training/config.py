@@ -228,6 +228,7 @@ def format_system_prompt(tools=None, state_context=None, bfcl_eval_mode=False):
         prompt += f'{TOKEN_TOOL_CALL_OPEN}\n{{"name": <function-name>, "arguments": <args-json-object>}}\n{TOKEN_TOOL_CALL_CLOSE}\n\n'
         prompt += 'IMPORTANT RULES:\n'
         prompt += f'1. If NONE of the provided functions are relevant, respond with a plain text message inside {TOKEN_ANSWER_OPEN} tags. Do NOT call any function when the query is unrelated.\n'
+        prompt += f'   ABSTAIN for: general programming questions, capability questions ("what can you do"), greetings, thanks, CS concepts, API design patterns.\n'
         prompt += '2. Do not interpret or guess information. Wait for tool results to be returned before responding.\n'
         prompt += f'3. If a tool result provides the answer, output it directly inside {TOKEN_ANSWER_OPEN} tags.\n'
         
@@ -238,7 +239,8 @@ def format_system_prompt(tools=None, state_context=None, bfcl_eval_mode=False):
             prompt += "4. If the user's input lacks required parameters, ask for clarification.\n"
         
         prompt += '5. Do not hallucinate optional parameters. Only include parameters explicitly provided.\n'
-        prompt += '6. When saving data to memory, use the EXACT variable names and values provided.'
+        prompt += '6. When saving data to memory, use the EXACT variable names and values provided.\n'
+        prompt += '7. For multi-step requests ("X then Y"), execute the FIRST action mentioned. The second action comes after the first tool response.'
     
     return prompt
 

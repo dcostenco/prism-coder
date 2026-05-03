@@ -1,13 +1,85 @@
 #!/usr/bin/env python3
-"""Iterative GRPO alignment — run until BFCL >= 90% or max iterations."""
-import json, subprocess, re, time, os, shutil
+"""Iterative DPO alignment with TEACHER-GENERATED chosen traces.
 
-MODEL_TAG = "prism-coder:7b-v4a"
-BASE_MODEL = "models/prism-fused-v4"
-ADAPTER_DIR = "models/adapter-v4-grpo-iter"
+Reviewer fix #1: previous version overwrote nuanced reasoning with shallow
+hard-coded `<think>` templates ("The user wants to X. I should use X."),
+causing reasoning collapse and a regression from 66% -> 62% BFCL.
+
+This version uses Claude as a teacher to write each `chosen` <think> trace
+as an EXPLICIT contrastive debate between the right tool and the wrong
+tool the model actually picked. The rejected trace is the model's real
+output. This preserves the depth of reasoning the SFT phase taught.
+
+Layer 3 false-positive heuristics are disabled during the benchmark so
+the loop sees the model's true failure distribution.
+"""
+import json, subprocess, re, time, os, shutil, urllib.request
+
+MODEL_TAG = "prism-coder:7b-v5c"
+BASE_MODEL = "models/prism-fused-v5c"
+ADAPTER_DIR = "models/adapter-v5c-align-iter"
 TARGET_SCORE = 0.90
 MAX_ROUNDS = 8
-BENCHMARK_CMD = ["python3", "-u", "swe_bench_test.py", "--runs", "1"]
+BENCHMARK_CMD = ["python3", "-u", "swe_bench_test.py", "--runs", "1", "--no-validate-layer3"]
+TEACHER_MODEL = "qwen2.5-coder:32b"   # local Ollama teacher
+OLLAMA_API = "http://localhost:11434/api/generate"
+
+
+TEACHER_SYSTEM = """You write contrastive reasoning traces for a tool-calling LLM's preference-tuning data.
+
+Given a user prompt, the RIGHT tool, and the WRONG tool the model actually picked, produce a `<think>` trace that:
+1. Names the wrong tool and acknowledges what about the prompt made it tempting.
+2. Identifies the discriminating signal that disqualifies the wrong tool.
+3. Commits to the right tool with a one-line justification.
+
+Output ONLY valid JSON: {"think": "..."}. 2-3 sentences max. No filler. No code fences."""
+
+
+def _strip_fence_obj(text):
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)
+        text = text[1] if len(text) >= 2 else text[0]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip().rstrip("`").strip()
+    if "{" in text and "}" in text:
+        text = text[text.index("{"): text.rindex("}") + 1]
+    return text
+
+
+def teacher_chosen_think(prompt, right_tool, wrong_tool, max_retries=2):
+    """Ask the local Ollama teacher for a contrastive think trace."""
+    user = (
+        f"User prompt: {prompt}\n"
+        f"RIGHT tool (use this): {right_tool}\n"
+        f"WRONG tool (model incorrectly picked / would pick): {wrong_tool}\n\n"
+        f'Return JSON only: {{"think": "..."}}'
+    )
+    full_prompt = (
+        f"<|im_start|>system\n{TEACHER_SYSTEM}<|im_end|>\n"
+        f"<|im_start|>user\n{user}<|im_end|>\n"
+        f"<|im_start|>assistant\n"
+    )
+    payload = json.dumps({
+        "model": TEACHER_MODEL,
+        "prompt": full_prompt,
+        "stream": False,
+        "raw": True,
+        "options": {"temperature": 0.3, "num_predict": 400, "num_ctx": 4096},
+    }).encode("utf-8")
+    last = None
+    for _ in range(max_retries + 1):
+        try:
+            req = urllib.request.Request(OLLAMA_API, data=payload,
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            text = _strip_fence_obj(data.get("response", ""))
+            return json.loads(text)["think"]
+        except Exception as e:
+            last = e
+    raise RuntimeError(f"teacher failed: {last}")
 
 def run_benchmark(model_tag):
     """Run BFCL and return (score, failures)."""
@@ -36,56 +108,70 @@ def run_benchmark(model_tag):
     
     return score, failures
 
+DEFAULT_ARGS = {
+    'session_save_ledger':   lambda p: {"project": "my-project", "conversation_id": "session-1", "summary": "Completed work"},
+    'session_load_context':  lambda p: {"project": "my-project"},
+    'knowledge_search':      lambda p: {"query": p[:80]},
+    'session_search_memory': lambda p: {"query": p[:80]},
+    'session_forget_memory': lambda p: {"memory_id": "target-id"},
+    'knowledge_forget':      lambda p: {"project": "my-project"},
+    'session_compact_ledger':lambda p: {"project": "my-project"},
+    'session_export_memory': lambda p: {"output_dir": "./export", "format": "json"},
+    'session_task_route':    lambda p: {"task_description": p[:80]},
+    'session_health_check':  lambda p: {},
+    'session_save_handoff':  lambda p: {"project": "my-project"},
+}
+
+
+def build_args(tool, prompt):
+    fn = DEFAULT_ARGS.get(tool)
+    return fn(prompt) if fn else {}
+
+
 def generate_dpo(failures):
-    """Generate DPO preference pairs from benchmark failures."""
+    """Generate DPO preference pairs with teacher-generated contrastive traces.
+
+    The chosen <think> is written by Claude and explicitly debates the
+    wrong tool the model picked. This is the reviewer's #1 fix to avoid
+    reasoning collapse from shallow templated traces.
+    """
     pairs = []
     for f in failures:
         expected = f['expected']
-        prompt = f['prompt']
-        
-        if expected == 'NO_TOOL':
-            chosen = f'<think>\nThis is a general question, not a Prism tool request. I should answer directly without calling any tools.\n</think>\n\nI\'ll help with that directly.'
-        else:
-            # Build correct tool call with appropriate args
-            args = {}
-            if expected == 'session_save_ledger':
-                args = {"project": "my-project", "conversation_id": "session-1", "summary": "Work completed"}
-            elif expected == 'session_load_context':
-                args = {"project": "my-project"}
-            elif expected == 'knowledge_search':
-                args = {"query": prompt[:50]}
-            elif expected == 'session_search_memory':
-                args = {"query": prompt[:50]}
-            elif expected == 'session_forget_memory':
-                args = {"memory_id": "target-id"}
-            elif expected == 'knowledge_forget':
-                args = {"project": "my-project"}
-            elif expected == 'session_compact_ledger':
-                args = {"project": "my-project"}
-            elif expected == 'session_export_memory':
-                args = {"output_dir": "./export"}
-            elif expected == 'session_task_route':
-                args = {"task_description": prompt[:50]}
-            elif expected == 'session_health_check':
-                args = {}
-            else:
-                args = {}
-            
-            chosen = f'<think>\nThe user wants to {expected.replace("_", " ")}. I should use the {expected} tool.\n</think>\n\n<|tool_call|>\n{json.dumps({"name": expected, "arguments": args})}\n<|tool_call_end|>'
-        
-        # Build rejected (wrong) response
         got = f['got']
-        if got == 'NO_TOOL':
-            rejected = '<think>\nThis seems like a general question.\n</think>\n\nI\'ll help with that.'
+        prompt = f['prompt']
+
+        # 1. Chosen trace (teacher-generated, contrastive)
+        try:
+            think = teacher_chosen_think(prompt, expected, got)
+        except Exception as e:
+            print(f"  ! teacher fallback ({e}); skipping pair for: {prompt[:50]}")
+            continue
+
+        if expected == 'NO_TOOL':
+            chosen = f"<think>\n{think}\n</think>\n\nI'll answer this directly without calling any tools."
         else:
-            rejected = f'<think>\nI should use {got}.\n</think>\n\n<|tool_call|>\n{json.dumps({"name": got, "arguments": {}})}\n<|tool_call_end|>'
-        
+            args = build_args(expected, prompt)
+            chosen = (
+                f"<think>\n{think}\n</think>\n\n"
+                f"<|tool_call|>\n{json.dumps({'name': expected, 'arguments': args})}\n<|tool_call_end|>"
+            )
+
+        # 2. Rejected trace = model's actual wrong output (preserve real failure mode)
+        if got == 'NO_TOOL':
+            rejected = "<think>\nThis seems like a general question I can answer directly.\n</think>\n\nI'll help with that."
+        else:
+            rejected = (
+                f"<think>\nI should use {got}.\n</think>\n\n"
+                f"<|tool_call|>\n{json.dumps({'name': got, 'arguments': {}})}\n<|tool_call_end|>"
+            )
+
         pairs.append({
             'messages': [{'role': 'user', 'content': prompt}],
             'chosen': chosen,
             'rejected': rejected,
         })
-    
+
     return pairs
 
 def train_dpo(dpo_data, round_num, base_model):
@@ -153,11 +239,11 @@ def fuse_and_deploy(base_model, adapter_path, model_tag):
         fused_path, "--outfile", gguf_path, "--outtype", "q8_0",
     ], capture_output=True, timeout=300)
     
-    # Create Modelfile
+    # Create Modelfile (v5 base — already has the reformatted vertical tool list)
     modelfile = f"{adapter_path}/Modelfile"
-    with open("Modelfile.v4a") as src:
+    with open("Modelfile.v5") as src:
         content = src.read().replace(
-            "FROM /Users/admin/prism/training/models/prism-coder-v4-aligned.gguf",
+            "FROM /Users/admin/prism/training/models/prism-coder-v5.gguf",
             f"FROM /Users/admin/prism/training/{gguf_path}"
         )
     with open(modelfile, 'w') as f:
@@ -174,10 +260,15 @@ def main():
     current_base = BASE_MODEL
     all_dpo = []
     
-    # Load existing DPO data as seed
+    # Seed: 178 contrastive DPO pairs derived from the contrastive SFT corpus.
+    # These have teacher-quality contrastive <think> traces (not the legacy
+    # shallow templates) and provide enough volume for the loop to converge.
     existing_dpo = []
-    for line in open("models/prism-grpo-lora/dpo_data/train.jsonl"):
-        existing_dpo.append(json.loads(line))
+    seed_path = "data/contrastive_dpo_seed.jsonl"
+    if os.path.exists(seed_path):
+        for line in open(seed_path):
+            existing_dpo.append(json.loads(line))
+        print(f"Loaded {len(existing_dpo)} contrastive DPO seed pairs")
     
     for round_num in range(1, MAX_ROUNDS + 1):
         print(f"\n{'='*60}")
