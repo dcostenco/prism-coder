@@ -1062,8 +1062,9 @@ The Generator strips the `console.log`, resubmits, and the next `EVALUATE` retur
 
 ## <a name="whats-new"></a>🆕 What's New
 
-> **Current release: v12.5 — Unified Billing & Agent Skill Ecosystem**
+> **Current release: v12.6 — Prism Coder 14B sibling + tier-aware local routing**
 
+- 🤖 **v12.6 — Prism Coder 14B sibling + tier-aware local routing:** `prism-coder:7b` re-trained from clean Qwen2.5-Coder-7B base. **BFCL 88.1%** (3-run StdDev 0%, +40.9pp over previous prod), AAC realigned **47/48 (97.9%)**, caregiver targeted **20/20**, emergency_qa **13/13**, text_correct **15/15**, translate **8/8**. New **`prism-coder:14b`** sibling tag (BFCL 85.9%, AAC 46/48, 32K context) auto-routed for paid-tier medium-length queries via Synalux portal — keeps inference local, $0 marginal cost vs Claude/Gemini. Rollback: `ollama cp prism-coder:7b-prev-20260504-1325 prism-coder:7b`. Coordinated with synalux-private v0.14.4. → [Changelog](../../CHANGELOG.md)
 - 💳 **v12.5 — Unified Billing & Agent Skill Ecosystem:** Aligned Prism and Synalux tiers (Standard $19, Advanced $49, Enterprise $99), 14-day free trial, 54 agent skills, BSL-1.1 license. → [Changelog](../../CHANGELOG.md#1200)
 - 🏗️ **v11.6.0 — Agent Infrastructure Resilience:** Production-grade concurrent agent execution with serialized queue (Python `fcntl`), memory guardian daemon, queue watchdog, and unified status dashboard. 115/115 tests verified across 5 suites. → [Changelog](../../CHANGELOG.md#1160)
 - 🧠 **v11.5.1 — Structural GRPO Alignment:** GRPO-aligned local engine with held-out benchmark suite (N=15). **100% tool-call accuracy**, 100% JSON validity, 100% retrieval accuracy, 100% reasoning abstention. → [Changelog](../../CHANGELOG.md#1150)
