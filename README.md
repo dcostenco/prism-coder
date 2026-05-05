@@ -1608,8 +1608,34 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 | `PRISM_JWKS_URI` | No | JWKS endpoint URL for vendor-neutral JWT auth (e.g., `https://your-tenant.auth0.com/.well-known/jwks.json`) |
 | `PRISM_JWT_AUDIENCE` | No | Expected JWT `aud` claim — prevents cross-service token confusion |
 | `PRISM_JWT_ISSUER` | No | Expected JWT `iss` claim — validates token origin |
+| `PRISM_TEXT_PROVIDER` | No | Override text provider (`gemini` \| `openai` \| `anthropic` \| `none`). Wins over the dashboard `text_provider` setting — useful for OSS / containerized deploys without a dashboard. Restart required. |
+| `PRISM_EMBEDDING_PROVIDER` | No | Override embedding provider (`auto` \| `gemini` \| `openai` \| `voyage` \| `local`). Wins over the dashboard `embedding_provider` setting. `auto` follows `PRISM_TEXT_PROVIDER` (anthropic auto-bridges to gemini for embeddings). Restart required. |
 
 </details>
+
+### Provider matrix
+
+`PRISM_TEXT_PROVIDER` × `PRISM_EMBEDDING_PROVIDER`. Either env var alone is enough — defaults fill the other.
+
+| Text | Embedding | API keys needed | Notes |
+|------|-----------|-----------------|-------|
+| `gemini` (default) | `gemini` (auto) | `GOOGLE_API_KEY` | Default. Single-provider stack. |
+| `openai` | `openai` (auto) | `OPENAI_API_KEY` | All-OpenAI stack. Compatible with Ollama via `OPENAI_BASE_URL=http://localhost:11434/v1`. |
+| `anthropic` | `gemini` (auto-bridge) | `ANTHROPIC_API_KEY` + `GOOGLE_API_KEY` | Anthropic has no embedding API, so embeddings auto-bridge to Gemini. |
+| `anthropic` | `voyage` | `ANTHROPIC_API_KEY` + `VOYAGE_API_KEY` | The Anthropic-recommended pairing. `voyage-3` supports 768-dim output via MRL. |
+| `anthropic` | `openai` | `ANTHROPIC_API_KEY` + `OPENAI_API_KEY` | Anthropic text + OpenAI/Ollama embeddings (cost-optimized). |
+| any | `local` | none | Fully offline embeddings via `LocalEmbeddingAdapter`. Pair with `text_provider=none` for a zero-keys local-only setup. |
+| `none` | `local` | none | Disabled text generation; only embeddings + memory ops. The "I just want offline semantic search" preset. |
+
+Example one-liner (OpenAI text + Voyage embeddings, no dashboard):
+
+```bash
+export PRISM_TEXT_PROVIDER=openai
+export PRISM_EMBEDDING_PROVIDER=voyage
+export OPENAI_API_KEY=sk-…
+export VOYAGE_API_KEY=pa-…
+npx prism-mcp-server
+```
 
 ### System Settings (Dashboard)
 Some configurations are stored dynamically in SQLite (`system_settings` table) and can be edited through the Dashboard UI at `http://localhost:3000`:

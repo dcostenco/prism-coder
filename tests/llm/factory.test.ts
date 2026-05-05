@@ -289,4 +289,83 @@ describe("LLM Provider Factory — Split Architecture", () => {
     // Each call creates 2 GeminiAdapters (text + embed) ⇒ 4 total across two inits
     expect(GeminiAdapter).toHaveBeenCalledTimes(4);
   });
+
+  // ── Env-var overrides (CUSTOMER_FEEDBACK § #9) ───────────────────────────
+  //
+  // Self-host story: a user installs prism-mcp-server, exports
+  //   PRISM_TEXT_PROVIDER=openai
+  //   PRISM_EMBEDDING_PROVIDER=voyage
+  // and runs. No dashboard required. The env var beats whatever the
+  // dashboard says — useful for OSS / containerized deploys where
+  // env injection is the natural config path.
+  //
+  // These tests pin the precedence rules so a future refactor can't
+  // silently drop env-var support.
+
+  describe("env-var overrides", () => {
+    const ORIGINAL_ENV = process.env;
+    beforeEach(() => {
+      process.env = { ...ORIGINAL_ENV };
+      delete process.env.PRISM_TEXT_PROVIDER;
+      delete process.env.PRISM_EMBEDDING_PROVIDER;
+    });
+
+    it("PRISM_TEXT_PROVIDER beats dashboard setting", () => {
+      // Dashboard says gemini; env says openai → env wins.
+      mockProviders("gemini", "auto");
+      process.env.PRISM_TEXT_PROVIDER = "openai";
+      getLLMProvider();
+      expect(OpenAIAdapter).toHaveBeenCalled();
+    });
+
+    it("PRISM_EMBEDDING_PROVIDER beats dashboard setting", () => {
+      mockProviders("gemini", "gemini");
+      process.env.PRISM_EMBEDDING_PROVIDER = "voyage";
+      getLLMProvider();
+      expect(mockVoyageAdapter).toHaveBeenCalled();
+    });
+
+    it("env value is lowercased + trimmed before matching", () => {
+      // 'OpenAI ' (mixed case + trailing space) should still resolve
+      // to the openai adapter — small thing that prevents a frustrating
+      // "why doesn't my env var work" debugging session.
+      mockProviders("gemini", "auto");
+      process.env.PRISM_TEXT_PROVIDER = "  OpenAI ";
+      getLLMProvider();
+      expect(OpenAIAdapter).toHaveBeenCalled();
+    });
+
+    it("empty / whitespace-only env value falls back to dashboard setting", () => {
+      // PRISM_TEXT_PROVIDER='' (or '   ') is treated as unset, NOT as
+      // "use the empty-string provider" (which would fall to default
+      // gemini, but only by accident). We want explicit "no env set"
+      // semantics so users with stale shells don't get unexpected behavior.
+      mockProviders("anthropic", "auto", { anthropic_api_key: "sk-ant-test" });
+      process.env.PRISM_TEXT_PROVIDER = "   ";
+      const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+      getLLMProvider();
+      expect(AnthropicAdapter).toHaveBeenCalled();
+      infoSpy.mockRestore();
+    });
+
+    it("both env vars together compose split providers", () => {
+      mockProviders("gemini", "auto");
+      process.env.PRISM_TEXT_PROVIDER = "anthropic";
+      process.env.PRISM_EMBEDDING_PROVIDER = "voyage";
+      const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+      getLLMProvider();
+      expect(AnthropicAdapter).toHaveBeenCalled();
+      expect(mockVoyageAdapter).toHaveBeenCalled();
+      // Should log the split-provider info line
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("Split provider: text=anthropic"));
+      infoSpy.mockRestore();
+    });
+
+    it("PRISM_TEXT_PROVIDER unset → dashboard wins", () => {
+      mockProviders("openai", "auto", { openai_api_key: "sk-test" });
+      // Env not set
+      getLLMProvider();
+      expect(OpenAIAdapter).toHaveBeenCalled();
+    });
+  });
 });

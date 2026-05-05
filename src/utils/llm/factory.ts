@@ -84,6 +84,28 @@ function buildEmbeddingAdapter(type: string): LLMProvider {
 // ─── Factory ─────────────────────────────────────────────────────────────────
 
 /**
+ * Resolution precedence for provider settings:
+ *
+ *   1. Env var (PRISM_TEXT_PROVIDER, PRISM_EMBEDDING_PROVIDER)
+ *      — wins everything; the OSS / self-host story.
+ *      Set this in the shell (or the MCP server's env) and you don't
+ *      need a dashboard at all. Examples:
+ *          export PRISM_TEXT_PROVIDER=openai
+ *          export PRISM_EMBEDDING_PROVIDER=voyage
+ *   2. Dashboard setting (system_settings table via getSettingSync).
+ *   3. Hard-coded default ("gemini" for text, "auto" for embedding).
+ *
+ * Trim + lowercase the env value and treat empty / whitespace-only as
+ * "unset" so a user with `PRISM_TEXT_PROVIDER=` exported gets the
+ * dashboard / default path instead of a confusing "no such provider".
+ */
+function resolveProviderSetting(envKey: string, settingKey: string, defaultValue: string): string {
+  const fromEnv = process.env[envKey]?.trim().toLowerCase();
+  if (fromEnv) return fromEnv;
+  return getSettingSync(settingKey, defaultValue);
+}
+
+/**
  * Returns the singleton LLM provider, initializing it on first call.
  *
  * The returned object composes two independent adapters:
@@ -91,16 +113,18 @@ function buildEmbeddingAdapter(type: string): LLMProvider {
  *   - generateEmbedding() → embedding adapter (embedding_provider setting)
  *
  * Consumers see no difference — the interface is identical to before.
+ *
+ * Configuration sources (in precedence order): see resolveProviderSetting().
  */
 export function getLLMProvider(): LLMProvider {
   // Fast path: return cached composite instance
   if (providerInstance) return providerInstance;
 
   // ── Resolve text provider ─────────────────────────────────────────────
-  const textType = getSettingSync("text_provider", "gemini");
+  const textType = resolveProviderSetting("PRISM_TEXT_PROVIDER", "text_provider", "gemini");
 
   // ── Resolve embedding provider ────────────────────────────────────────
-  let embedType = getSettingSync("embedding_provider", "auto");
+  let embedType = resolveProviderSetting("PRISM_EMBEDDING_PROVIDER", "embedding_provider", "auto");
 
   if (embedType === "auto") {
     // Anthropic has no embedding API — auto-bridge to Gemini.
