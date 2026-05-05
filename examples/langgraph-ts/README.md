@@ -109,5 +109,6 @@ await client.callTool("session_save_experience", {
 ## See Also
 
 - [Python LangGraph Example](../langgraph-agent/) — Full Python implementation
+- [Vercel AI SDK Example](../vercel-ai-sdk-prism/) — Streaming chat + Prism memory in a Next.js App Router app
 - [Architecture Guide](../../docs/ARCHITECTURE.md) — How Prism's memory system works
 - [Self-Improving Agent Guide](../../docs/self-improving-agent.md) — Building agents that learn
