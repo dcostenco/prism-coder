@@ -68,17 +68,13 @@ test_save.js
 test_save2.js
 upvote.js
 test-results.txt
-training/grpo_v3_train.log
-
-# Training artifacts (logs, caches, deprecated, repomix)
-training/*.log
-training/__pycache__/
-training/*.deprecated
-training/bfcl_repomix_*.txt
-training/repomix-output.txt
-training/data/
-training/output/
-training/models/
+# ─── Training: ENTIRE directory blocked from this PUBLIC repo ───
+# 2026-05-05: training/ was force-purged from prism-coder history after a
+# leak audit found 178 proprietary files (Modal scripts, Phase plans,
+# BFCL eval methodology, build_phase pipelines) in the public repo.
+# All training work belongs in synalux-private/prism-training/.
+# See ~/.agent/skills/no-public-leak/SKILL.md for the full rule.
+training/
 bfcl-submission/
 
 # ─── Training runtime artifacts (do not commit) ───
