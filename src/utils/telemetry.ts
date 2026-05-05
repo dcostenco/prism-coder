@@ -78,6 +78,62 @@ const TRACER_NAME = "prism-mcp";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Resolve OTel settings with the standard precedence:
+ *   1. OTEL_* env vars (industry-standard names — self-host friendly)
+ *   2. Dashboard system_settings via getSettingSync
+ *   3. Hard-coded default
+ *
+ * Standard env var names are documented at:
+ *   https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/
+ *
+ * Supported here:
+ *   OTEL_SDK_DISABLED                       — "true" disables, anything else enables
+ *   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT      — full traces endpoint (most specific)
+ *   OTEL_EXPORTER_OTLP_ENDPOINT             — base endpoint; /v1/traces is appended
+ *   OTEL_SERVICE_NAME                       — service.name resource attribute
+ *
+ * Why follow the standard names: any user who already runs an OTEL-aware
+ * stack (Jaeger, Honeycomb, Datadog) has these env vars set in their
+ * deployment. Reading the same names means prism-mcp "just works" with
+ * zero extra config in those environments.
+ */
+// Exported for unit testing only — production code should not call these
+// directly; they're called internally by initTelemetry().
+export function resolveOtelEnabled(): boolean {
+  // OTEL_SDK_DISABLED takes precedence (matches the spec). Hard kill switch.
+  const sdkDisabled = process.env.OTEL_SDK_DISABLED?.trim().toLowerCase();
+  if (sdkDisabled === "true") return false;
+  // PRISM_OTEL_ENABLED is our explicit on-switch — useful for OSS / container
+  // deploys where the user wants to enable OTel without standing up a
+  // dashboard. There's no standard "enable" env var in the OTel spec
+  // (SDKs are typically opt-out, but ours is opt-in), so this lives under
+  // the PRISM_ namespace alongside PRISM_TEXT_PROVIDER etc.
+  const prismOtel = process.env.PRISM_OTEL_ENABLED?.trim().toLowerCase();
+  if (prismOtel === "true") return true;
+  // No env-var override → fall back to dashboard. Dashboard default is "false".
+  return getSettingSync("otel_enabled", "false") === "true";
+}
+
+export function resolveOtelEndpoint(): string {
+  // Most specific env wins.
+  const tracesEndpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT?.trim();
+  if (tracesEndpoint) return tracesEndpoint;
+  // Base endpoint — the OTel spec says we should append /v1/traces.
+  const baseEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
+  if (baseEndpoint) {
+    // Strip any trailing slash to avoid "//" in the resulting URL.
+    return `${baseEndpoint.replace(/\/$/, "")}/v1/traces`;
+  }
+  return getSettingSync("otel_endpoint", "http://localhost:4318/v1/traces");
+}
+
+export function resolveOtelServiceName(): string {
+  const fromEnv = process.env.OTEL_SERVICE_NAME?.trim();
+  if (fromEnv) return fromEnv;
+  return getSettingSync("otel_service_name", "prism-mcp-server");
+}
+
+/**
  * Initialize the OpenTelemetry SDK.
  *
  * Must be called after initConfigStorage() so the settings cache is warm.
@@ -87,11 +143,11 @@ const TRACER_NAME = "prism-mcp";
 export function initTelemetry(): void {
   if (_provider) return; // Already initialized
 
-  const enabled     = getSettingSync("otel_enabled",      "false");
-  const endpoint    = getSettingSync("otel_endpoint",     "http://localhost:4318/v1/traces");
-  const serviceName = getSettingSync("otel_service_name", "prism-mcp-server");
+  const enabled     = resolveOtelEnabled();
+  const endpoint    = resolveOtelEndpoint();
+  const serviceName = resolveOtelServiceName();
 
-  if (enabled !== "true") {
+  if (!enabled) {
     // OTel is disabled. getTracer() will return the SDK global no-op tracer.
     // No NodeTracerProvider is created; no OTLP connections are attempted.
     return;

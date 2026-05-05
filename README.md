@@ -1610,6 +1610,11 @@ Requires `PRISM_DARK_FACTORY_ENABLED=true`.
 | `PRISM_JWT_ISSUER` | No | Expected JWT `iss` claim — validates token origin |
 | `PRISM_TEXT_PROVIDER` | No | Override text provider (`gemini` \| `openai` \| `anthropic` \| `none`). Wins over the dashboard `text_provider` setting — useful for OSS / containerized deploys without a dashboard. Restart required. |
 | `PRISM_EMBEDDING_PROVIDER` | No | Override embedding provider (`auto` \| `gemini` \| `openai` \| `voyage` \| `local`). Wins over the dashboard `embedding_provider` setting. `auto` follows `PRISM_TEXT_PROVIDER` (anthropic auto-bridges to gemini for embeddings). Restart required. |
+| `PRISM_OTEL_ENABLED` | No | `"true"` to turn on OpenTelemetry tracing without a dashboard. Wins over dashboard `otel_enabled`. See [Observability](#observability) for the full env-var matrix. |
+| `OTEL_SDK_DISABLED` | No | Standard OTel kill-switch — `"true"` force-disables tracing even if `PRISM_OTEL_ENABLED=true` or the dashboard says on. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | Standard OTel base endpoint (e.g. `http://otel-collector:4318`). `/v1/traces` is appended automatically. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | No | Standard OTel traces endpoint, full URL. Wins over the base endpoint. Used to point at Honeycomb / Datadog / Jaeger directly. |
+| `OTEL_SERVICE_NAME` | No | Standard OTel service name. Becomes the primary label in Jaeger / Tempo / Honeycomb. Defaults to `prism-mcp-server`. |
 
 </details>
 
@@ -1636,6 +1641,44 @@ export OPENAI_API_KEY=sk-…
 export VOYAGE_API_KEY=pa-…
 npx prism-mcp-server
 ```
+
+### <a name="observability"></a>Observability — OpenTelemetry
+
+Prism ships with built-in OpenTelemetry tracing. Spans cover the MCP tool-call surface, LLM calls (text + embedding + VLM), the visual-memory captioner, and the Web Scholar pipeline. When tracing is on, every memory operation shows up in your existing observability stack — Jaeger, Honeycomb, Datadog, Grafana Tempo, Zipkin, anything that speaks OTLP/HTTP.
+
+**Enable via env vars** (no dashboard required — useful for containerized / k8s deploys):
+
+```bash
+# Point at any OTLP/HTTP collector
+export PRISM_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+export OTEL_SERVICE_NAME=my-prism-prod
+
+npx prism-mcp-server
+```
+
+**Or via the Dashboard** — Observability tab → toggle Enabled, set endpoint + service name, restart the server. Same effect.
+
+**Precedence** when both are set:
+
+| Setting | High → Low |
+|---------|-----------|
+| Enabled | `OTEL_SDK_DISABLED=true` (kill) → `PRISM_OTEL_ENABLED=true` → dashboard `otel_enabled` → off (default) |
+| Endpoint | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` → `OTEL_EXPORTER_OTLP_ENDPOINT` (+`/v1/traces`) → dashboard `otel_endpoint` → `http://localhost:4318/v1/traces` |
+| Service name | `OTEL_SERVICE_NAME` → dashboard `otel_service_name` → `prism-mcp-server` |
+
+**Example: point at Honeycomb**
+
+```bash
+export PRISM_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://api.honeycomb.io/v1/traces
+export OTEL_EXPORTER_OTLP_HEADERS="x-honeycomb-team=$HONEYCOMB_API_KEY"
+export OTEL_SERVICE_NAME=prism-prod
+```
+
+`OTEL_EXPORTER_OTLP_HEADERS` is read by the OTel SDK directly, no extra Prism config.
+
+When tracing is off, every span call is a zero-cost no-op — there's no compile-time difference between instrumented and non-instrumented Prism. Safe to leave instrumentation in hot paths.
 
 ### System Settings (Dashboard)
 Some configurations are stored dynamically in SQLite (`system_settings` table) and can be edited through the Dashboard UI at `http://localhost:3000`:
