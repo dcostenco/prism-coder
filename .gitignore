@@ -88,6 +88,9 @@ training/*.pid
 training/*.log
 # Manual backups of broken / experimental files
 training/*.broken
+# Modal-watcher runtime files (status snapshots + alert flag files)
+training/*.status
+training/*.ALERT
 # MLX model weights — 4 GB of binary tensors, never belongs in git
 training/mlx_model/
 
