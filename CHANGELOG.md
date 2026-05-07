@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [14.0.0] - 2026-05-07 — 🧠 Prism as Foundation: algorithm-stability contract
+## [14.0.0] - 2026-05-07 — 🧠 Prism Coder: project rename + algorithm-stability contract
 
-A documentation + governance release. **No code changes to the npm package or the binary distribution** — `prism-mcp-server` semver continues at 13.x. v14.0.0 marks the cognitive-architecture / source-tree version where Prism's algorithm exports become a stable public contract.
+The project is renamed from **Prism MCP** to **Prism Coder** to reflect its full surface — the Mind Palace memory server *and* the `prism-coder:7b` / `prism-coder:14b` open-weights LLM fleet that ships alongside it. The npm package remains published as `prism-mcp-server` so existing install URLs (`npm install -g prism-mcp-server`, `npx prism-mcp-server`, the `mcp.json` entries every consumer already wrote) keep working without churn — but the `prism-coder` binary that package provides has been the canonical entry point since v12, and "Prism Coder" is now the user-facing project name across README, docs, and all new surfaces. v14.0.0 also formalises Prism's algorithm exports as a stable public contract so external consumers can depend on the constants without re-implementing them.
 
 ### What's new
 
@@ -25,7 +25,10 @@ External systems were already building on Prism algorithms with hand-tuned appro
 - No new MCP tools.
 - No model changes — `prism-coder:7b` and `prism-coder:14b` unchanged from v13.1.x.
 - No schema changes.
-- No npm package version bump for `prism-mcp-server` — the binary distribution is unchanged from 13.1.1.
+
+### npm
+
+`prism-mcp-server` v14.0.0 is published to npm — same package name, semver-major bump aligned with the project rename + the new public API contract. Earlier 13.1.1 stays available for users who want the pre-rename release.
 
 ---
 

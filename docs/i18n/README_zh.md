@@ -1,19 +1,21 @@
-# 🧠 Prism MCP
+# 🧠 Prism Coder
 
-**Persistent memory for AI agents.**
+**Persistent memory + tool-calling intelligence for AI agents.** *(formerly Prism MCP)*
 
-A Model Context Protocol server that gives Claude, Cursor, and other AI tools a Mind Palace — long-term memory that survives across sessions, with semantic search, cognitive routing, and a visual dashboard.
+A Model Context Protocol server that gives Claude, Cursor, and other AI tools a Mind Palace — long-term memory that survives across sessions, with semantic search, cognitive routing, a visual dashboard, and the open-weights `prism-coder:7b` / `prism-coder:14b` LLM fleet for offline tool-calling (BFCL Gold Certified, 100 % JSON validity).
 
-[![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm)](https://www.npmjs.com/package/prism-mcp-server)
+[![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm%20%E2%80%94%20prism-mcp-server)](https://www.npmjs.com/package/prism-mcp-server)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8)](https://github.com/modelcontextprotocol/servers)
 [![Smithery](https://img.shields.io/badge/Smithery-listed-6B4FBB)](https://smithery.ai/server/@dcostenco/prism-mcp)
 [![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](../../LICENSE)
+
+> **Renamed in v14.0.0:** the project is now **Prism Coder** to cover both the Mind Palace memory server *and* the `prism-coder:7b` / `prism-coder:14b` LLM fleet on HuggingFace + Ollama. The npm package stays `prism-mcp-server` so existing install URLs and `mcp.json` entries keep working — the `prism-coder` binary has been the canonical entry point since v12.
 
 🌐 **Translations:** [Español](README_es.md) · [Français](README_fr.md) · [Português](README_pt.md) · [Română](README_ro.md) · [Українська](README_uk.md) · [Русский](README_ru.md) · [Deutsch](README_de.md) · [日本語](README_ja.md) · [한국어](README_ko.md) · [中文](README_zh.md) · [العربية](README_ar.md)
 
 ---
 
-## What Prism does
+## What Prism Coder does
 
 ### 💾 Your AI remembers across sessions
 Every conversation feeds the Mind Palace. Next session, your AI agent loads the right context automatically — no re-explaining.
@@ -92,7 +94,7 @@ More setup details in [`docs/SETUP_GEMINI.md`](../SETUP_GEMINI.md).
 | HRR Zero-Search retrieval | ✅ | ✅ |
 | Custom domains / SSO | — | Enterprise |
 
-The thin-client architecture: when authenticated to Synalux, prism-mcp routes through the portal for paid features. When not authenticated (or `PRISM_FORCE_LOCAL=1`), runs purely local. Same binary.
+The thin-client architecture: when authenticated to Synalux, Prism Coder routes through the portal for paid features. When not authenticated (or `PRISM_FORCE_LOCAL=1`), runs purely local. Same binary.
 
 [Pricing →](https://synalux.ai/pricing)
 
