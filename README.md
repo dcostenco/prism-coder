@@ -1,5 +1,7 @@
 # 🧠 Prism Coder
 
+🌐 **Read in your language:** 🇬🇧 English · [🇪🇸 Español](docs/i18n/README_es.md) · [🇫🇷 Français](docs/i18n/README_fr.md) · [🇵🇹 Português](docs/i18n/README_pt.md) · [🇷🇴 Română](docs/i18n/README_ro.md) · [🇺🇦 Українська](docs/i18n/README_uk.md) · [🇷🇺 Русский](docs/i18n/README_ru.md) · [🇩🇪 Deutsch](docs/i18n/README_de.md) · [🇯🇵 日本語](docs/i18n/README_ja.md) · [🇰🇷 한국어](docs/i18n/README_ko.md) · [🇨🇳 中文](docs/i18n/README_zh.md) · [🇸🇦 العربية](docs/i18n/README_ar.md)
+
 **Persistent memory + tool-calling intelligence for AI agents.** *(formerly Prism MCP)*
 
 A Model Context Protocol server that gives Claude, Cursor, and other AI tools a Mind Palace — long-term memory that survives across sessions, with semantic search, cognitive routing, a visual dashboard, and the open-weights `prism-coder:7b` / `prism-coder:14b` LLM fleet for offline tool-calling (BFCL Gold Certified, 100 % JSON validity).
@@ -10,8 +12,6 @@ A Model Context Protocol server that gives Claude, Cursor, and other AI tools a 
 [![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](LICENSE)
 
 > **Renamed in v14.0.0:** the project is now **Prism Coder** to cover both the Mind Palace memory server *and* the `prism-coder:7b` / `prism-coder:14b` LLM fleet on HuggingFace + Ollama. The npm package stays `prism-mcp-server` so existing install URLs and `mcp.json` entries keep working — the `prism-coder` binary has been the canonical entry point since v12.
-
-🌐 **Translations:** [Español](docs/i18n/README_es.md) · [Français](docs/i18n/README_fr.md) · [Português](docs/i18n/README_pt.md) · [Română](docs/i18n/README_ro.md) · [Українська](docs/i18n/README_uk.md) · [Русский](docs/i18n/README_ru.md) · [Deutsch](docs/i18n/README_de.md) · [日本語](docs/i18n/README_ja.md) · [한국어](docs/i18n/README_ko.md) · [中文](docs/i18n/README_zh.md) · [العربية](docs/i18n/README_ar.md)
 
 ---
 
