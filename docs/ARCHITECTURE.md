@@ -400,5 +400,95 @@ The Mind Palace dashboard exposes:
 
 ---
 
-*Prism Coder Architecture Guide — Last Updated: v6.5*
+## 12. Skill Architecture (v15.1)
+
+Skills are SKILL.md documents injected into every `session_load_context`
+response. They carry behavioral rules, protocols, and domain knowledge that
+shape how the agent behaves for the rest of the session.
+
+### Data flow diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        AI Agent (Claude etc.)                       │
+│                     calls session_load_context()                    │
+└────────────────────────────┬────────────────────────────────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │   prism-mcp     │
+                    │  ledgerHandlers │
+                    └───┬─────────┬───┘
+                        │         │
+          ┌─────────────▼─────┐   └──────────────────────────────┐
+          │  STEP 1            │                                  │
+          │  WHICH skills?     │         STEP 2: WHAT content?   │
+          │                    │                                  │
+          │  Synalux portal    │   ┌──────────────────────────────▼───────┐
+          │  /api/v1/skills/   │   │          SYNALUX_CONFIGURED?         │
+          │  routing           │   └──────┬───────────────────────┬───────┘
+          │  (all tiers)       │          │ YES (paid)            │ NO (free)
+          └─────────┬──────────┘          │                       │
+                    │              ┌──────▼──────────┐   ┌────────▼──────────┐
+         resolved   │              │ Synalux portal  │   │ Local SQLite      │
+         skill list │              │ /api/v1/skills/ │   │ ~/.prism-mcp/     │
+                    │              │ content         │   │ prism-config.db   │
+                    │              │ (batch, 1 req)  │   │ skill:<name>      │
+                    │              └──────┬──────────┘   └────────┬──────────┘
+                    │                     │ miss?                 │
+                    │                     └──────► local fallback ┘
+                    │                                  │
+                    └──────────────────────────────────▼
+                              SKILL.md content injected as
+                              [📜 SKILL: <name>] blocks in
+                              session_load_context response
+```
+
+### Tier behaviour
+
+| | Free tier | Paid tier (`SYNALUX_CONFIGURED=true`) |
+|---|---|---|
+| Routing (which skills) | Synalux `/api/v1/skills/routing` | Same |
+| Content (SKILL.md) | Local SQLite (`sync-skills.sh`) | Synalux `/api/v1/skills/content` → local fallback |
+| Works offline | Yes | Yes (local fallback) |
+| Always up-to-date | Requires manual `sync-skills.sh` | Yes — Synalux deploy → live on next session |
+
+### Skill resolution order per `session_load_context` call
+
+1. **Role skill** — if `role` param is set (e.g. `"dev"`), load `skill:<role>` first.
+2. **Project skills** — fetch routing table from Synalux; resolve union of
+   `universal` + matching `projects[]` entries for the project name.
+3. **Context-triggered skills** — scan recent handoff/ledger text; auto-load
+   any skill whose name appears in recent context.
+
+Content priority for each resolved name:
+```
+Synalux /api/v1/skills/content (paid) → local SQLite → skip
+```
+
+### Source of truth
+
+| Concern | Owner | Where to edit |
+|---|---|---|
+| Which skills load for which project | Synalux | `synalux-private/portal/src/app/api/v1/skills/routing/route.ts` |
+| Skill SKILL.md content | Synalux | `synalux-private/skills/<name>/SKILL.md` |
+| Free-tier local copy | `sync-skills.sh` | `~/.agent/skills/<name>/SKILL.md` |
+| Behavioral correction tests | Synalux | `synalux-private/skills/<name>/tests/` |
+
+### Adding a skill
+
+1. Create `synalux-private/skills/<name>/SKILL.md`.
+2. Add `<name>` to `universal` (or a `projects` entry) in `routing/route.ts`.
+3. Deploy Synalux — prism-mcp picks up the new skill within 60 s (content
+   cache TTL). Routing updates within 5 min.
+4. Free-tier / offline support: run `bash scripts/sync-skills.sh`.
+
+**Key files:**
+`src/tools/skillRouting.ts` · `src/tools/ledgerHandlers.ts` ·
+`src/storage/synalux.ts` (`fetchSkillContent`) ·
+`synalux-private/portal/src/app/api/v1/skills/routing/route.ts` ·
+`synalux-private/portal/src/app/api/v1/skills/content/route.ts`
+
+---
+
+*Prism Coder Architecture Guide — Last Updated: v15.1*
 
