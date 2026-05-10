@@ -26,6 +26,20 @@ Ask "what did I decide about the auth flow last month?" and get the answer with 
 ### 🧬 Cognitive routing
 Different memory types live in different stores: episodic (what happened), semantic (what's true), procedural (how to do X). The router picks where to store and where to retrieve.
 
+### 🔄 Proactive session drift detection *(new in v15)*
+Your AI agent can now detect when it has drifted from your original goals — mid-session, automatically — and self-correct before you notice the problem.
+
+Three direct Prism calls:
+1. **`session_save_ledger`** — snapshot current state
+2. **`session_cognitive_route`** — compare current work against original goals, returns `on_track / minor_drift / major_drift`
+3. **`session_compact_ledger`** — if drifted, compress and reload only what matters
+
+When major drift is detected, the alert routes to the **Synalux portal** so it's visible across sessions and devices — not just in the current conversation.
+
+**Real example it caught:** A training session promised BFCL ≥90% for three AI models. The agent spent 3 hours debugging audio bugs instead. The drift check surfaced: "Training goal unmet. Layer3 corpus missing from all training sets. 0 BFCL scores measured." The session immediately re-aligned.
+
+No scripts. No cron. No hooks. Three tool calls, Prism handles the rest.
+
 ### 🛡 Local-first
 Free tier runs entirely on your machine — SQLite, local embedding model, no API keys, no cloud. Paid tier adds cloud sync via Synalux portal.
 
