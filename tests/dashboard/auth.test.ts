@@ -473,6 +473,14 @@ function createAuthTestServer(opts: {
     windowMs: 60 * 1000,
   });
 
+  // allowedOrigins is populated with exact loopback origins after listen() binds
+  // to a port — see start() below. The handler only ever sets Allow-Origin to a
+  // value that the server itself placed in this Set (not a reflected request header),
+  // which is what closes CodeQL js/cors-misconfiguration-for-credentials.
+  const allowedOrigins = new Set<string>(
+    [process.env.PRISM_DASHBOARD_ORIGIN || ""].filter(Boolean)
+  );
+
   function readBody(req: http.IncomingMessage): Promise<string> {
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
@@ -482,22 +490,12 @@ function createAuthTestServer(opts: {
   }
 
   const server = http.createServer(async (req, res) => {
-    // CORS — mirror the production allowlist in src/dashboard/server.ts.
-    // CodeQL js/cors-misconfiguration-for-credentials previously fired
-    // here because the test echoed the caller's origin verbatim with
-    // credentials enabled. Production has always used an allowlist;
-    // the test had drifted from prod.
+    // CORS — allowedOrigins is pre-populated with exact bound origins by start().
+    // No regex matching against request headers: the Set lookup guarantees the
+    // value was written by server code, not reflected from the caller.
     if (AUTH_ENABLED) {
       const origin = req.headers.origin || "";
-      const allowedOrigins = new Set<string>([
-        "http://localhost:0",  // ephemeral test port
-        "http://127.0.0.1:0",
-        process.env.PRISM_DASHBOARD_ORIGIN || "",
-      ].filter(Boolean));
-      // Tests use a randomly assigned port — match host:<digits> against
-      // the same loopback hosts.
-      const isLoopback = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
-      if (origin && (allowedOrigins.has(origin) || isLoopback)) {
+      if (origin && allowedOrigins.has(origin)) {
         res.setHeader("Access-Control-Allow-Origin", origin);
         res.setHeader("Access-Control-Allow-Credentials", "true");
       }
@@ -576,6 +574,10 @@ function createAuthTestServer(opts: {
       new Promise<number>((resolve) => {
         server.listen(0, () => {
           const addr = server.address() as { port: number };
+          // Register the exact origins the test will use — these are server-
+          // generated values, never user-controlled request headers.
+          allowedOrigins.add(`http://localhost:${addr.port}`);
+          allowedOrigins.add(`http://127.0.0.1:${addr.port}`);
           resolve(addr.port);
         });
       }),
@@ -805,12 +807,15 @@ describe("HTTP Auth Integration", () => {
 
   // ─── CORS ───
 
-  it("CORS — restricts origin when auth is enabled", async () => {
+  it("CORS — allows loopback origin matching server's bound port", async () => {
+    // Use the server's own bound origin — this is the only loopback origin in
+    // the allowlist (populated in start()). A different port would be rejected.
+    const serverOrigin = `http://localhost:${port}`;
     const res = await httpRequest(port, "OPTIONS", "/api/projects", {
-      headers: { origin: "http://localhost:8080" },
+      headers: { origin: serverOrigin },
     });
     expect(res.status).toBe(204);
-    expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:8080");
+    expect(res.headers["access-control-allow-origin"]).toBe(serverOrigin);
     expect(res.headers["access-control-allow-credentials"]).toBe("true");
   });
 
