@@ -60,6 +60,7 @@ vi.mock("../../src/config.js", () => ({
   PRISM_GRAPH_PRUNE_MAX_PROJECTS_PER_SWEEP: 25,
   PRISM_ACTR_ENABLED: false,
   PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS: 90,
+  SYNALUX_CONFIGURED: false,
 }));
 
 vi.mock("../../src/utils/logger.js", () => ({
