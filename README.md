@@ -113,21 +113,31 @@ The LLM context window is treated as ephemeral scratch space. All durable state 
 
 ---
 
+## Models
+
+All Prism Coder inference uses **only fine-tuned Prism Coder models** — no Claude, no Gemini, no OpenRouter fallbacks. Models are exclusively accessible through the Synalux router (authentication + subscription required).
+
+| Model | Where | Tier | Latency |
+|---|---|---|---|
+| **Qwen3-1.7B** (fine-tuned) | On-device — iOS CoreML / Android ONNX | Free | ~50ms offline |
+| **Qwen3-14B** (fine-tuned) | RunPod A100 via Synalux | Standard+ | ~200ms |
+| **QwQ-32B** (fine-tuned) | RunPod A100 80GB via Synalux | Pro/Enterprise | ~3–5s |
+| **Qwen3-30B-A3B** (fine-tuned MoE) | RunPod via Synalux | Enterprise | ~2–3s |
+
+Fine-tuned on the 3-layer corpus: AAC + BFCL tool-calling + clinical workflows. BFCL gate: ≥ 90% on all tiers before production promotion. Adapters stored at `dcostenco/prism-coder-*` (private HuggingFace).
+
 ## Plans
 
-| | Free (local) | Paid (Synalux portal) |
-|---|---|---|
-| Local SQLite memory | ✅ | ✅ |
-| Semantic search | ✅ (local embedding) | ✅ (cloud-backed) |
-| Cross-device sync | — | ✅ |
-| Hivemind multi-agent | ✅ local team | ✅ + cloud roster |
-| Auto-Scholar (web research → memory) | — | ✅ |
-| HRR Zero-Search retrieval | ✅ | ✅ |
-| Custom domains / SSO | — | Enterprise |
+| | Free | Standard $19/mo | Pro $49/mo | Enterprise $99/mo |
+|---|---|---|---|---|
+| Qwen3-1.7B on-device | ✅ unlimited | ✅ | ✅ | ✅ |
+| Qwen3-14B cloud | — | ✅ 200 req/day | ✅ 2K req/day | ✅ unlimited |
+| QwQ-32B reasoning | — | — | ✅ | ✅ priority |
+| Qwen3-30B-A3B MoE | — | — | — | ✅ |
+| Custom fine-tuning | — | — | — | ✅ |
+| HIPAA BAA | — | — | — | ✅ |
 
-The thin-client architecture: when authenticated to Synalux, Prism Coder routes through the portal for paid features. When not authenticated (or `PRISM_FORCE_LOCAL=1`), runs purely local. Same binary.
-
-[Pricing →](https://synalux.ai/pricing)
+[Subscribe →](https://synalux.ai/pricing)
 
 ---
 
@@ -173,6 +183,52 @@ As of v14.0.0, Prism's algorithm exports are a **stable public contract** under 
 | [Audit hooks framework](https://github.com/dcostenco/prism-coder/blob/main/docs/WOW_FEATURES.md#7-the-recipe-combining-all-of-the-above) | ACT-R decay (`d=0.25` lesson rate), spreading activation hybrid score (0.7/0.3), experience bias (`MIN_SAMPLES=5`, `MAX_BIAS_CAP=0.15`), graph-metrics warning ratios (0.20 / 0.30 / 0.40), compaction's 25KB prompt-budget. **327 tests pin every constant** — CI catches divergence automatically. |
 | [PrismAAC](https://github.com/dcostenco/prism-aac) | Spreading-activation phrase ranking (recency × frequency × per-user history). Caregiver corrections auto-harvest into the personalization corpus via the audit-hooks postflight harvester. The on-device 7B model + this algorithm stack is what makes PrismAAC defensible. |
 | Synalux portal | Tier-aware model routing using experience bias on prior outcomes per fingerprint. HIPAA-compliant clinical scribe with on-device-first privacy guarantees. |
+
+## Synalux Inference Router — Architecture (v16)
+
+All Prism AAC model inference is protected behind Synalux as a mandatory router. Models are **never accessible directly** — all traffic goes through Synalux for auth, billing, and rate limiting.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      CLIENT LAYER                           │
+│  prism-aac (iOS/web)         │   Synalux Portal             │
+└──────────────┬──────────────────────────────────────────────┘
+               │ POST /api/v1/prism-aac/inference
+               │ Authorization: Bearer <user-JWT>
+               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   SYNALUX ROUTER                            │
+│  1. Verify JWT (no anonymous access)                        │
+│  2. Check subscription tier                                 │
+│  3. Enforce rate limit (50–2000 req/day by plan)            │
+│  4. Route to model tier by complexity                       │
+│  5. Proxy → RunPod with SECRET key (never sent to client)   │
+│  6. Log → aac_inference_log (billing audit trail)           │
+└──────────┬─────────────────────────────────────┬────────────┘
+           │ tier=fast                            │ tier=reason
+           ▼                                      ▼
+  ┌──────────────────┐               ┌───────────────────────┐
+  │  Qwen3-14B       │               │  QwQ-32B              │
+  │  RunPod A100 40G │               │  RunPod A100 80G      │
+  │  ~200ms          │               │  ~3–5s (reasoning)    │
+  │  standard/pro    │               │  pro/enterprise only  │
+  └──────────────────┘               └───────────────────────┘
+           │                                      │
+           └────────────────┬─────────────────────┘
+                            ▼
+               HuggingFace dcostenco/prism-coder-* (private)
+               RunPod pulls at pod start with server-side token
+
+On-device (free, zero latency, offline):
+  Qwen3-1.7B GGUF Q4_K_M → iOS CoreML / Android ONNX
+```
+
+| Plan | Cloud model | Daily limit | On-device |
+|---|---|---|---|
+| Free | — | unlimited local | Qwen3-1.7B |
+| Standard $5/mo | Qwen3-14B | 200 req | + cloud |
+| Pro $15/mo | QwQ-32B | 2,000 req | + reasoning |
+| Enterprise | QwQ-32B priority | unlimited | full stack |
 
 See [`docs/WOW_FEATURES.md`](docs/WOW_FEATURES.md) for the algorithm catalogue. Release notes in [`docs/releases/v14.0.0-prism-as-foundation.md`](docs/releases/v14.0.0-prism-as-foundation.md).
 
