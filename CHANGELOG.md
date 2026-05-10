@@ -2,6 +2,68 @@
 
 All notable changes to this project will be documented in this file.
 
+## [15.0.0] - 2026-05-10 — 🔄 Proactive drift detection + evidence-first behavioral protocol
+
+### What's new
+
+**Proactive session drift detection** (`session_cognitive_route` pattern)
+Three direct Prism calls — no scripts, no cron, no hooks — detect when an AI agent has drifted from stated goals mid-session and self-correct before the user notices. Returns `on_track / minor_drift / major_drift`. Routes major drift alerts to Synalux portal for cross-session visibility. 10 behavioral test cases cover: obvious drift, scope creep, on-track false positive, promise gaps, repeated fixes, cascading violations, and Synalux routing. Documented as the flagship v15 feature.
+
+**Evidence-first behavioral protocol** (new skill + CLAUDE.md gates)
+Prevents AI agents from reporting `done / fixed / working / 90%+` without observable evidence. Five hard gates that supersede all other instructions: (1) no positive completion claim without evidence; (2) diagnose before asserting causes; (3) write test before pushing any bug fix; (4) training quality gate BFCL ≥90%; (5) 60-min drift check for long sessions. Born from five May 2026 failures that each wasted 1-3 hours of production work. Evidence gate table maps every claim type to required proof.
+
+**TTS audio protection** (prism-aac)
+- `PROTECT_PLAY_MS=600ms`: autoSpeak calls that arrive within 600ms of a playing source are gracefully dropped instead of killing the audio. Fixes complete silence from rapid prediction-tile taps.
+- `interrupt` parameter threaded through `speakAzure → decodeAndPlay`: replaces the shared `_nextSpeakInterrupt` flag that could be stolen by concurrent autoSpeak calls, silencing the Speak button.
+- `volume=0` guard in `speak()`: early exit with console.warn before any network call.
+- `vol=` and `rate=` added to TTS log for live diagnostics.
+- 10 unit tests covering: flag theft, rapid-tap protection, interrupt override, volume=0, NaN volume, suspended AudioContext, 3 concurrent autoSpeak, Speak wins among concurrent calls.
+
+**SW auto-bump** (prism-aac)
+`NEXT_PUBLIC_BUILD_ID = VERCEL_GIT_COMMIT_SHA[:8]` on every Vercel deploy. SW killswitch version changes automatically — no manual bump needed. Identical pattern applied to Synalux portal (`synalux-sw-v` key in localStorage, fires once per deploy not every session).
+
+**Search keyboard** (prism-aac)
+- Opening Search now shows the keyboard immediately (no second tap needed).
+- On-screen keyboard keys route to the search input via `searchKeyBridge.ts` pub/sub — tile taps no longer land in the message bar while searching.
+
+**Tone fix** (prism-aac)
+`toneToAzureStyle()` replaced invalid `'general'` (default) and `'gentle'` (empathetic) with valid `ToneStyle` members. `tone=general` no longer appears in TTS logs.
+
+**SSML rate formula restored** (prism-aac)
+`rate × 2` formula (capped at 1.4) confirmed working via tts-live-diag-rate.mjs. Stored slider 0.5 → SSML 1.0 (normal speed). Fixes Romanian/Ukrainian 2× slower regression.
+
+**Marketplace catalog** (synalux-private)
+`marketplace_modules` table created via migration `20260510_marketplace_modules.sql`. Resolves 500 on every `/api/v1/marketplace/catalog` call (table was never applied to prod Supabase).
+
+**13 synalux stub fixes**
+Unread count, mail sync (IMAP→501, OAuth→real Gmail fetch), inbox thread 503, accounting providers removed (no longer returned as 'planned'), Zoom 501→422, chat providers cleaned, e-sign 501→422, feature-flags DB error returns success:false, SMS send 501→503, marketplace/installed 401, MathPanel + MathKeyboardRegion stub comments removed.
+
+**Inbox / messages** (prism-aac + synalux-private)
+- `/api/v1/prism-aac/inbox/poll` now returns real Gmail unread messages (via user's OAuth grant) and unclaimed SMS from `inbound_sms` table. Previously returned `[]`.
+- Per-message TTS on arrival: speaks "New message from [sender]: [text]" for ≤3 messages.
+- Reply button (↩) on schedule message tasks opens AACChatPanel and pre-selects the sender contact.
+
+**Twilio env fix**
+`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` were set but empty in Vercel production. Values pushed from `.env.local`.
+
+**Training infrastructure** (vast.ai)
+- `autonomous-training-protocol` skill: mandatory layer3 corpus assert (≥40 examples), BFCL ≥90% gate before "done".
+- `train_max_quality_vastai.py`: DoRA SFT script with paged_adamw_8bit, TRL API compat, crash.log, PID file, SIGTERM handler.
+- `monitor_training.sh`: 5-min polling daemon with macOS alerts, crash dedup, GPU stall detection, disk threshold.
+- Layer3 corpus (45 examples) merged into training data for 32B/35B tier.
+
+### Why a major bump
+
+The drift detection + evidence-first protocol represent a change in how Prism agents operate — not just what they can do. These behavioral guarantees are additive but meaningful enough to warrant a major version signal.
+
+### npm
+
+```
+npm install -g prism-mcp-server@15.0.0
+```
+
+---
+
 ## [14.0.0] - 2026-05-07 — 🧠 Prism Coder: project rename + algorithm-stability contract
 
 The project is renamed from **Prism MCP** to **Prism Coder** to reflect its full surface — the Mind Palace memory server *and* the `prism-coder:7b` / `prism-coder:14b` open-weights LLM fleet that ships alongside it. The npm package remains published as `prism-mcp-server` so existing install URLs (`npm install -g prism-mcp-server`, `npx prism-mcp-server`, the `mcp.json` entries every consumer already wrote) keep working without churn — but the `prism-coder` binary that package provides has been the canonical entry point since v12, and "Prism Coder" is now the user-facing project name across README, docs, and all new surfaces. v14.0.0 also formalises Prism's algorithm exports as a stable public contract so external consumers can depend on the constants without re-implementing them.
