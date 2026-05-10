@@ -39,7 +39,7 @@ import { resolveProject } from "../utils/projectResolver.js";
 // containing: strategy, scores, latency breakdown (embedding/storage/total), and metadata.
 // See src/utils/tracing.ts for full type definitions and design decisions.
 import { createMemoryTrace, traceToContentBlock } from "../utils/tracing.js";
-import { PRISM_USER_ID, PRISM_AUTO_CAPTURE, PRISM_CAPTURE_PORTS } from "../config.js";
+import { PRISM_USER_ID, PRISM_AUTO_CAPTURE, PRISM_CAPTURE_PORTS, SYNALUX_CONFIGURED } from "../config.js";
 import { captureLocalEnvironment } from "../utils/autoCapture.js";
 import { fireCaptionAsync } from "../utils/imageCaptioner.js";
 import {
@@ -944,23 +944,31 @@ export async function sessionLoadContextHandler(args: unknown) {
   }
 
   // ─── Project-Aware Skill Injection ──────────────────────────
-  // Skill routing (which skills load for which project) is the SINGLE
-  // SOURCE OF TRUTH at synalux: /api/v1/skills/routing. We pull the
-  // canonical table on every session and resolve locally. Skill CONTENT
-  // continues to be stored in this server's settings under skill:<name>
-  // — synalux owns the WHICH, this server owns the WHAT, no duplication
-  // of the routing config in three repos.
+  // Routing (WHICH skills): always from Synalux /api/v1/skills/routing.
+  // Content (WHAT): paid tier → Synalux /api/v1/skills/content (batch fetch,
+  // single source of truth). Free tier / offline → local SQLite fallback.
   const { resolveSkillsForProject } = await import("./skillRouting.js");
   const skillsToLoad = await resolveSkillsForProject(project);
 
+  // Paid tier: batch-fetch all skill content from Synalux portal in one request.
+  let synaluxContent: Record<string, string> = {};
+  if (SYNALUX_CONFIGURED && storage && typeof (storage as unknown as { fetchSkillContent?: unknown }).fetchSkillContent === "function") {
+    const missing = skillsToLoad.filter(n => !loadedSkills.includes(n));
+    synaluxContent = await (storage as unknown as { fetchSkillContent: (n: string[]) => Promise<Record<string,string>> })
+      .fetchSkillContent(missing).catch(() => ({}));
+    debugLog(`[session_load_context] Synalux skill content fetched: ${Object.keys(synaluxContent).join(", ") || "none"}`);
+  }
+
   for (const skillName of skillsToLoad) {
     if (loadedSkills.includes(skillName)) continue;
-    const content = await getSetting(`skill:${skillName}`, "");
+    // Prefer Synalux content (always up-to-date); fall back to local SQLite.
+    const content = synaluxContent[skillName] || await getSetting(`skill:${skillName}`, "");
     if (content && content.trim()) {
+      const source = synaluxContent[skillName] ? "synalux" : "local";
       skillBlock += `\n\n[📜 SKILL: ${skillName}]\n${content.trim()}`;
       loadedSkills.push(skillName);
       skillLoaded = true;
-      debugLog(`[session_load_context] Skill "${skillName}" loaded for project="${project}"`);
+      debugLog(`[session_load_context] Skill "${skillName}" loaded (${source}) for project="${project}"`);
     }
   }
 

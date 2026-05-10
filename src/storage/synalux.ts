@@ -345,4 +345,28 @@ export class SynaluxStorage extends SupabaseStorage {
     const results = Array.isArray(result.results) ? result.results : [];
     return { count, results } as KnowledgeSearchResult;
   }
+
+  /**
+   * Fetch skill content from Synalux portal (paid-tier single source of truth).
+   * Returns a map of { skillName → SKILL.md content } for all names that exist.
+   * Missing skills are absent from the map — caller falls back to local SQLite.
+   *
+   * Uses a public GET (no auth required) since skill content is not sensitive
+   * and the route is already in synalux-private/portal at /api/v1/skills/content.
+   */
+  async fetchSkillContent(names: string[]): Promise<Record<string, string>> {
+    if (names.length === 0) return {};
+    const url = `${this.baseUrl}/api/v1/skills/content?names=${encodeURIComponent(names.join(","))}`;
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(3_000),
+      });
+      if (!res.ok) return {};
+      const body = await res.json() as { skills?: Record<string, string> };
+      return typeof body.skills === "object" && body.skills !== null ? body.skills : {};
+    } catch {
+      return {};
+    }
+  }
 }
