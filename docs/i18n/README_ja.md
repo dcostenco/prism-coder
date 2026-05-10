@@ -80,6 +80,23 @@ More setup details in [`docs/SETUP_GEMINI.md`](../SETUP_GEMINI.md).
 
 (35+ tools total — full TypeScript signatures in `src/tools/`. Architecture overview in [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md).)
 
+<details>
+<summary>🔄 How Prism handles context compaction and context loss</summary>
+
+The LLM context window is treated as ephemeral scratch space. All durable state lives in Prism's persistent store (SQLite / Supabase). Context compaction is a non-event.
+
+**Boot protocol** — every session (including post-compaction) begins with a mandatory `session_load_context` call, enforced via `CLAUDE.md`. The agent is fully oriented before writing a single byte of response.
+
+**Two persistent stores:**
+- `session_save_ledger` — immutable append-only work log (decisions, files changed, summaries)
+- `session_save_handoff` — versioned live-state snapshot (current task, TODOs, open context)
+
+**Ledger compaction** (`session_compact_ledger`) — when a project exceeds a threshold (default: 50 entries), Prism summarizes old entries via LLM into a rollup row, soft-archives originals, and links them via `spawned_from` graph edges. Runs on a 12-hour background scheduler.
+
+→ Full details: [`docs/COMPACTION.md`](../COMPACTION.md)
+
+</details>
+
 ---
 
 ## Plans
