@@ -203,40 +203,38 @@ As of v14.0.0, Prism's algorithm exports are a **stable public contract** under 
   CLIENTS
   ┌─────────────────────┐  ┌─────────────────────────────┐
   │  prism-aac (iOS/web)│  │  Claude Code · Cursor · IDE │
-  │  Vercel  —  free    │  │  MCP config → Railway URL   │
+  │  Vercel             │  │  MCP config → Railway URL   │
   └──────────┬──────────┘  └─────────────┬───────────────┘
              │ inference                  │ memory
              ▼                            ▼
   ┌──────────────────────┐  ┌─────────────────────────────┐
   │  SYNALUX ROUTER      │  │  prism-mcp SERVER           │
-  │  Vercel  (free)      │  │                             │
-  │                      │  │  ● Railway  $5/mo   primary │
-  │  • JWT auth          │  │  ● Fly.io   ~$0/mo  standby │
-  │  • complexity route  │  │  ● Supabase direct  fallback│
+  │  Vercel              │  │                             │
+  │                      │  │  Primary   — Railway        │
+  │  • JWT auth          │  │  Standby   — Fly.io         │
+  │  • complexity route  │  │  Fallback  — Supabase REST  │
   │  • tier enforcement  │  │                             │
-  │  • proxy to RunPod   │  │  failover: Railway → Fly.io │
-  └──────────┬───────────┘  │           → Supabase REST  │
-             │              └─────────────┬───────────────┘
-             ▼                            │
-  ┌──────────────────────┐                ▼
-  │  RUNPOD SERVERLESS   │  ┌─────────────────────────────┐
-  │                      │  │  SUPABASE                   │
-  │  Qwen3-14B  ~200ms   │  │  session ledgers            │
-  │  Qwen3-30B  ~500ms   │  │  knowledge graph            │
-  │  QwQ-32B    ~3-5s    │  │  handoffs & todos           │
-  │                      │  │  99.99% SLA · source of     │
-  │  $0 idle             │  │  truth — data never lost    │
+  │  • proxy to RunPod   │  │  auto-failover chain        │
+  └──────────┬───────────┘  └─────────────┬───────────────┘
+             │                            │
+             ▼                            ▼
+  ┌──────────────────────┐  ┌─────────────────────────────┐
+  │  RUNPOD SERVERLESS   │  │  SUPABASE                   │
+  │                      │  │  session ledgers            │
+  │  Qwen3-14B  ~200ms   │  │  knowledge graph            │
+  │  Qwen3-30B  ~500ms   │  │  handoffs & todos           │
+  │  QwQ-32B    ~3-5s    │  │                             │
+  │                      │  │  source of truth            │
   └──────────┬───────────┘  └─────────────────────────────┘
              │
              ▼
   ┌──────────────────────┐
-  │  ON-DEVICE  (free)   │
+  │  ON-DEVICE           │
   │  Qwen3-1.7B Q4_K_M   │
   │  iOS CoreML/Android  │
   │  ~50ms · offline     │
   └──────────────────────┘
 ```
-
 
 ## Synalux Inference Router — Architecture (v16)
 
