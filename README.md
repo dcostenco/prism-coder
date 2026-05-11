@@ -197,55 +197,57 @@ As of v14.0.0, Prism's algorithm exports are a **stable public contract** under 
 
 ## Production Infrastructure (v16)
 
-### Hosting & Reliability
+### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        CLIENT LAYER                                  │
-│  prism-aac PWA (iOS/web)  │  Claude Code  │  Cursor  │  VS Code     │
-│  Vercel — free             │       MCP config → Railway URL          │
-└────────────┬───────────────────────────┬────────────────────────────┘
+  CLIENTS
+  ┌─────────────────────┐  ┌─────────────────────────────┐
+  │  prism-aac (iOS/web)│  │  Claude Code · Cursor · IDE │
+  │  Vercel  —  free    │  │  MCP config → Railway URL   │
+  └──────────┬──────────┘  └─────────────┬───────────────┘
              │ inference                  │ memory
              ▼                            ▼
-┌────────────────────────┐   ┌──────────────────────────────────────┐
-│   SYNALUX ROUTER       │   │         prism-mcp SERVER             │
-│   Vercel (free)        │   │  Primary:  Railway  $5/mo  ✅ live   │
-│   /api/v1/prism-aac/   │   │  Standby:  Fly.io   ~$0/mo ✅ live  │
-│   inference            │   │  Fallback: Supabase direct (99.99%)  │
-│   ├─ auth check        │   │                                      │
-│   ├─ complexity route  │   │  Auto-failover chain:                │
-│   └─ proxy to RunPod   │   │  Railway → Fly.io → Supabase direct  │
-└────────────┬───────────┘   └──────────────┬─────────────────────┘
-             │                               │
-             ▼                               ▼
-┌────────────────────────────┐   ┌──────────────────────────┐
-│      RUNPOD SERVERLESS     │   │     SUPABASE (data)      │
-│  14B  A100 40GB  ~200ms    │   │  session ledgers         │
-│  30B  L40  46GB  ~500ms    │   │  knowledge graph         │
-│  QwQ  A100 80GB  ~3-5s     │   │  handoffs, todos         │
-│  $0 idle, pay per request  │   │  99.99% SLA              │
-└────────────────────────────┘   └──────────────────────────┘
+  ┌──────────────────────┐  ┌─────────────────────────────┐
+  │  SYNALUX ROUTER      │  │  prism-mcp SERVER           │
+  │  Vercel  (free)      │  │                             │
+  │                      │  │  ● Railway  $5/mo   primary │
+  │  • JWT auth          │  │  ● Fly.io   ~$0/mo  standby │
+  │  • complexity route  │  │  ● Supabase direct  fallback│
+  │  • tier enforcement  │  │                             │
+  │  • proxy to RunPod   │  │  failover: Railway → Fly.io │
+  └──────────┬───────────┘  │           → Supabase REST  │
+             │              └─────────────┬───────────────┘
+             ▼                            │
+  ┌──────────────────────┐                ▼
+  │  RUNPOD SERVERLESS   │  ┌─────────────────────────────┐
+  │                      │  │  SUPABASE                   │
+  │  Qwen3-14B  ~200ms   │  │  session ledgers            │
+  │  Qwen3-30B  ~500ms   │  │  knowledge graph            │
+  │  QwQ-32B    ~3-5s    │  │  handoffs & todos           │
+  │                      │  │  99.99% SLA · source of     │
+  │  $0 idle             │  │  truth — data never lost    │
+  └──────────┬───────────┘  └─────────────────────────────┘
              │
              ▼
-┌────────────────────────────┐
-│    ON-DEVICE (free)        │
-│  Qwen3-1.7B GGUF Q4_K_M   │
-│  iOS CoreML / Android ONNX │
-│  ~50ms, fully offline      │
-└────────────────────────────┘
+  ┌──────────────────────┐
+  │  ON-DEVICE  (free)   │
+  │  Qwen3-1.7B Q4_K_M   │
+  │  iOS CoreML/Android  │
+  │  ~50ms · offline     │
+  └──────────────────────┘
 ```
 
-**Monthly cost at <100 users: ~$5-25/mo total**
+### Monthly cost
 
-| Service | Provider | Cost |
+| Service | Provider | Cost/mo |
 |---|---|---|
-| prism-aac PWA | Vercel | Free |
-| synalux portal | Vercel | Free |
-| prism-mcp primary | Railway Hobby | $5/mo |
-| prism-mcp standby | Fly.io | ~$0 (idle) |
-| Model inference | RunPod serverless | ~$10-20/mo |
+| prism-aac + portal | Vercel | Free |
+| prism-mcp primary | Railway Hobby | $5 |
+| prism-mcp standby | Fly.io (auto-stop) | ~$0 |
+| AI inference | RunPod serverless | ~$10–20 |
 | Model weights | HuggingFace Hub | Free |
 | Database | Supabase | Free tier |
+| **Total <100 users** | | **~$15–25** |
 
 ## Synalux Inference Router — Architecture (v16)
 
