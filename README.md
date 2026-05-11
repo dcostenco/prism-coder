@@ -237,17 +237,6 @@ As of v14.0.0, Prism's algorithm exports are a **stable public contract** under 
   └──────────────────────┘
 ```
 
-### Monthly cost
-
-| Service | Provider | Cost/mo |
-|---|---|---|
-| prism-aac + portal | Vercel | Free |
-| prism-mcp primary | Railway Hobby | $5 |
-| prism-mcp standby | Fly.io (auto-stop) | ~$0 |
-| AI inference | RunPod serverless | ~$10–20 |
-| Model weights | HuggingFace Hub | Free |
-| Database | Supabase | Free tier |
-| **Total <100 users** | | **~$15–25** |
 
 ## Synalux Inference Router — Architecture (v16)
 
