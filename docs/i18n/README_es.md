@@ -4,7 +4,7 @@
 
 **Persistent memory + tool-calling intelligence for AI agents.** *(formerly Prism MCP)*
 
-A Model Context Protocol server that gives Claude, Cursor, and other AI tools a Mind Palace — long-term memory that survives across sessions, with semantic search, cognitive routing, a visual dashboard, and the open-weights `prism-coder:7b` / `prism-coder:14b` LLM fleet for offline tool-calling (BFCL Gold Certified, 100 % JSON validity).
+A Model Context Protocol server that gives Claude, Cursor, and other AI tools a Mind Palace — long-term memory that survives across sessions, with semantic search, cognitive routing, a visual dashboard, and the `prism-coder:7b` / `prism-coder:14b` LLM fleet for offline tool-calling.
 
 [![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm%20%E2%80%94%20prism-mcp-server)](https://www.npmjs.com/package/prism-mcp-server)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8)](https://github.com/modelcontextprotocol/servers)
@@ -115,25 +115,26 @@ The LLM context window is treated as ephemeral scratch space. All durable state 
 
 ## Models
 
-All Prism Coder inference uses **only fine-tuned Prism Coder models** — no Claude, no Gemini, no OpenRouter fallbacks. Models are exclusively accessible through the Synalux router (authentication + subscription required).
+Prism Coder inference cascades through fine-tuned models first, with Claude as a quality-gate fallback. Models route through the Synalux router (authentication + subscription required). Cascade: RunPod → Ollama local → Claude fallback.
 
 | Model | Where | Tier | Latency |
 |---|---|---|---|
 | **Qwen3-1.7B** (fine-tuned) | On-device — iOS CoreML / Android ONNX | Free | ~50ms offline |
-| **Qwen3-14B** (fine-tuned) | RunPod A100 via Synalux | Standard+ | ~200ms |
+| **Qwen2.5-Coder-7B** (fine-tuned) | Ollama local / Fireworks AI | Free (local) / Standard+ | ~100ms local |
+| **Qwen2.5-Coder-14B** (fine-tuned) | RunPod A100 via Synalux | Standard+ | ~200ms |
 | **QwQ-32B** (fine-tuned) | RunPod A100 80GB via Synalux | Pro/Enterprise | ~3–5s |
-| **Qwen3-30B-A3B** (fine-tuned MoE) | RunPod via Synalux | Enterprise | ~2–3s |
+| **Qwen2.5-30B-A3B** (fine-tuned MoE) | RunPod via Synalux | Enterprise | ~2–3s |
 
-Fine-tuned on the 3-layer corpus: AAC + BFCL tool-calling + clinical workflows. BFCL gate: ≥ 90% on all tiers before production promotion. Adapters stored at `dcostenco/prism-coder-*` (private HuggingFace).
+Fine-tuned on the Synalux SFT corpus (AAC + tool-calling + clinical workflows). Internal quality gate: ≥ 90% on private 30-prompt tool-calling eval before production promotion. Adapters stored at `dcostenco/prism-coder-*` (private HuggingFace). Note: these are NOT Berkeley BFCL V4 leaderboard scores — they are Synalux's internal domain-specific eval.
 
-**Eval results (private, May 2026):**
+**Eval results (Synalux private eval, May 2026):**
 
 | Model | Tool-call accuracy | Gate | Status |
 |---|---|---|---|
 | Qwen3-1.7B (on-device) | **90.0%** (27/30) | ≥90% | ✅ Passed |
-| Qwen3-14B (cloud) | pending | ≥90% | ⏳ Training |
+| Qwen2.5-Coder-14B (cloud) | pending | ≥90% | ⏳ Training |
 | QwQ-32B (reasoning) | pending | ≥90% | ⏳ Training |
-| Qwen3-30B-A3B (MoE) | pending | ≥90% | ⏳ Training |
+| Qwen2.5-30B-A3B (MoE) | pending | ≥90% | ⏳ Training |
 
 Eval methodology: 30 natural-language tool-call prompts, exact tool name + valid JSON argument structure required. Private eval — model weights never leave Synalux infrastructure.
 
@@ -142,9 +143,9 @@ Eval methodology: 30 natural-language tool-call prompts, exact tool name + valid
 | | Free | Standard $19/mo | Pro $49/mo | Enterprise $99/mo |
 |---|---|---|---|---|
 | Qwen3-1.7B on-device | ✅ unlimited | ✅ | ✅ | ✅ |
-| Qwen3-14B cloud | — | ✅ 200 req/day | ✅ 2K req/day | ✅ unlimited |
+| Qwen2.5-Coder-14B cloud | — | ✅ 200 req/day | ✅ 2K req/day | ✅ unlimited |
 | QwQ-32B reasoning | — | — | ✅ | ✅ priority |
-| Qwen3-30B-A3B MoE | — | — | — | ✅ |
+| Qwen2.5-30B-A3B MoE | — | — | — | ✅ |
 | Custom fine-tuning | — | — | — | ✅ |
 | HIPAA BAA | — | — | — | ✅ |
 
@@ -221,8 +222,8 @@ As of v14.0.0, Prism's algorithm exports are a **stable public contract** under 
   ┌──────────────────────┐  ┌─────────────────────────────┐
   │  RUNPOD SERVERLESS   │  │  SUPABASE                   │
   │                      │  │  session ledgers            │
-  │  Qwen3-14B  ~200ms   │  │  knowledge graph            │
-  │  Qwen3-30B  ~500ms   │  │  handoffs & todos           │
+  │  Qwen2.5-Coder-14B  ~200ms   │  │  knowledge graph            │
+  │  Qwen2.5-30B-A3B  ~500ms   │  │  handoffs & todos           │
   │  QwQ-32B    ~3-5s    │  │                             │
   │                      │  │  source of truth            │
   └──────────┬───────────┘  └─────────────────────────────┘
@@ -260,7 +261,7 @@ All Prism AAC model inference is protected behind Synalux as a mandatory router.
            │ tier=fast                            │ tier=reason
            ▼                                      ▼
   ┌──────────────────┐               ┌───────────────────────┐
-  │  Qwen3-14B       │               │  QwQ-32B              │
+  │  Qwen2.5-Coder-14B       │               │  QwQ-32B              │
   │  RunPod A100 40G │               │  RunPod A100 80G      │
   │  ~200ms          │               │  ~3–5s (reasoning)    │
   │  standard/pro    │               │  pro/enterprise only  │
@@ -278,7 +279,7 @@ On-device (free, zero latency, offline):
 | Plan | Cloud model | Daily limit | On-device |
 |---|---|---|---|
 | Free | — | unlimited local | Qwen3-1.7B |
-| Standard $5/mo | Qwen3-14B | 200 req | + cloud |
+| Standard $5/mo | Qwen2.5-Coder-14B | 200 req | + cloud |
 | Pro $15/mo | QwQ-32B | 2,000 req | + reasoning |
 | Enterprise | QwQ-32B priority | unlimited | full stack |
 
