@@ -135,7 +135,7 @@ Models trained on the Synalux SFT corpus (AAC + tool-calling + clinical workflow
 
 Eval methodology: 16 natural-language tool-call prompts across 4 categories (simple routing, hallucination resistance, relevance, parameter inference). Exact tool name + valid JSON argument structure required. Private eval — model weights never leave Synalux infrastructure.
 
-**iOS deployment:** The 1.7B runs on Mac via Ollama. iOS WKWebView app connects over local WiFi — set `OLLAMA_HOST=0.0.0.0` on Mac to expose. Native on-device CoreML conversion is handled separately.
+**iOS deployment:** On-device inference via **llama.cpp Swift SPM** (`ggerganov/llama.cpp`). Model: `prism-aac-1b7-q4km.gguf` (1.0 GB, ~1.6 GB RAM at runtime). CoreML is not viable — coremltools does not support Qwen3 attention ops. Integration: `LLMEngine.swift` → `prismNativeBridge.askAI()` → `window.prismNativeAIResult()` token stream. Fallback: Mac Ollama over local WiFi (`OLLAMA_HOST=0.0.0.0`).
 
 ## Plans
 
