@@ -60,13 +60,15 @@ ollama pull dcostenco/prism-coder:1b7   # 2.2 GB · ~0.5s · any machine
 ollama pull dcostenco/prism-coder:14b   # 9.3 GB · ~3s   · Mac M2+
 ollama pull dcostenco/prism-coder:32b   # 19 GB  · ~8s   · Mac M2 Ultra+
 ```
-Routing accuracy on the [100-case Prism eval](../../tests/benchmarks/prism-routing-100/README.md) (seed=2026, v25 system prompt):
+Routing accuracy — [100-case Prism eval](../../tests/benchmarks/prism-routing-100/README.md), 3 rounds, v25 system prompt:
 
-| Model | Accuracy | Invented tools | Avg latency |
+| Model | Accuracy | Avg latency | Invented tools |
 |---|---|---|---|
-| prism-coder:14b | **99%** | 0 | 9.0s |
-| prism-coder:32b | **99%** | 0 | 3.6s |
-| prism-coder:1b7 | **86%** | 0 | 6.0s |
+| Sonnet 4 (cloud) | **99%** | 3.2s | 0 |
+| prism-coder:14b (local) | **99%** | 9.0s | 0 |
+| Opus 4.7 (cloud) | **98%** | 3.0s | 0 |
+| prism-coder:32b (local) | **99%** | 3.6s | 0 |
+| prism-coder:1b7 (local) | **86%** | 6.0s | 0 |
 
 ### ⚡ Zero-search retrieval
 Holographic Reduced Representations (HRR) for instant similarity lookups without an index. ~5ms over 100K memories.
