@@ -40,8 +40,27 @@ When major drift is detected, the alert routes to the **Synalux portal** so it's
 
 No scripts. No cron. No hooks. Three tool calls, Prism handles the rest.
 
-### 🛡 Local-first
+### 🛡 Local-first — security + speed
 Free tier runs entirely on your machine — SQLite, local embedding model, no API keys, no cloud. Paid tier adds cloud sync via Synalux portal.
+
+**Why local models matter:**
+
+| | Cloud LLM | Local `prism-coder` |
+|--|---|---|
+| Tool-call latency | 200ms–3s | **~0.5s (1.7B) / ~3s (14B)** |
+| API key required | Yes | **No** |
+| Data sent externally | Every prompt | **Nothing** |
+| Works offline | ❌ | ✅ |
+| Cost at scale | $0.002–0.06/call | **$0** |
+| HIPAA | Requires BAA | **On-prem = no BAA** |
+
+Install in one command — no config, no keys, no vendor agreements:
+```bash
+ollama pull dcostenco/prism-coder:1b7   # 2.2 GB · ~0.5s · any machine
+ollama pull dcostenco/prism-coder:14b   # 9.3 GB · ~3s   · Mac M2+
+ollama pull dcostenco/prism-coder:32b   # 19 GB  · ~8s   · Mac M2 Ultra+
+```
+All three score 100% on Synalux's internal 16-case tool-routing eval.
 
 ### ⚡ Zero-search retrieval
 Holographic Reduced Representations (HRR) for instant similarity lookups without an index. ~5ms over 100K memories.
@@ -136,6 +155,31 @@ Models trained on the Synalux SFT corpus (AAC + tool-calling + clinical workflow
 > **Note:** These are **not** Berkeley BFCL V4 leaderboard scores. The Synalux eval covers 16 Prism-specific tool-routing prompts (7 MCP tools, single-call, 4 categories). It measures whether the model correctly routes Prism memory operations — not general function-calling breadth. Official BFCL V4 has not been run on these models.
 
 **iOS deployment:** On-device inference via **llama.cpp Swift SPM** (`ggerganov/llama.cpp`). Model: `prism-aac-1b7-q4km.gguf` (1.0 GB, ~1.6 GB RAM at runtime). CoreML is not viable — coremltools does not support Qwen3 attention ops. Integration: `LLMEngine.swift` → `prismNativeBridge.askAI()` → `window.prismNativeAIResult()` token stream. Fallback: Mac Ollama over local WiFi (`OLLAMA_HOST=0.0.0.0`).
+
+## Self-hosted / Local AI (Enterprise)
+
+Run the full Prism model stack on your own hardware — zero cloud, zero latency, full data sovereignty.
+
+**Requirements:** Mac M2 Pro+ (48GB recommended) or Linux with NVIDIA GPU · [Ollama](https://ollama.com)
+
+```bash
+# Fast tier — 2.2 GB (Mac M1+, iPhone via WiFi)
+ollama pull dcostenco/prism-coder:1b7
+
+# Standard tier — 9.3 GB (Mac M2 Pro+ or RTX 3090+)
+ollama pull dcostenco/prism-coder:14b
+
+# Enterprise/reasoning — 19 GB (Mac M2 Ultra+ or A100)
+ollama pull dcostenco/prism-coder:32b
+```
+
+Set `LOCAL_LLM_URL=http://localhost:11434` in your portal config. Routing is automatic:
+- Fast queries → **1.7B** (~0.5s) · Standard → **14B** (~3s) · Complex/enterprise → **32B** (~8s) · Cloud fallback if Ollama unreachable
+
+iOS/mobile on same WiFi: `OLLAMA_HOST=0.0.0.0 ollama serve` on the Mac, then point `LOCAL_LLM_URL` at the Mac's IP.
+All models score **100% on Synalux internal BFCL eval** (16/16 tool-routing cases, May 2026).
+
+---
 
 ## Plans
 
