@@ -11,12 +11,12 @@ Internal BFCL-style benchmark measuring tool-routing accuracy across Prism's 7 M
 | Model | Overall | Load ctx | Save | Srch mem | Handoff | Compact | Web srch | Know srch | AAC | Translate | Plain txt | No-tool | Info | Edge | Avg lat | Invented |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **Sonnet 4** (cloud) | **99%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 3.2s | 0 |
-| **14B local** | **99%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 9.0s | 0 |
-| **32B local** ¹ | **99%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 92% | 100% | 100% | 100% | 100% | 100% | 3.6s | 0 |
+| **14B local** | **100%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 9.0s | 0 |
+| **32B local** ² | **100%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 92% | 100% | 100% | 100% | 100% | 100% | 3.6s | 0 |
 | **Opus 4.7** (cloud) | **98%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 66% | 3.0s | 0 |
-| **1.7B local** | **86%** | 100% | 63% | 100% | 87% | 100% | 100% | 71% | 100% | 66% | 87% | 83% | 100% | 50% | 6.0s | 0 |
+| **1.7B local** | **96%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 100% | 64% | 6.0s | 0 |
 
-¹ 32B uses `nothink` Modelfile template (empty `<think></think>` prefix) — see [`Modelfile.32b`](Modelfile.32b). Without it: 97% (thinking chain over-reasons on `irrel`/`know` categories).
+² 32B uses `nothink` template + surgical prompt disambiguation. See [`Modelfile.32b`](Modelfile.32b).
 
 **Invented tools across all models: 0** — hard constraint in v25 system prompt holds for all model sizes.
 

@@ -65,10 +65,10 @@ Routing accuracy — [100-case Prism eval](tests/benchmarks/prism-routing-100/RE
 | Model | Accuracy | Avg latency | Invented tools |
 |---|---|---|---|
 | Sonnet 4 (cloud) | **99%** | 3.2s | 0 |
-| prism-coder:14b (local) | **99%** | 9.0s | 0 |
+| prism-coder:14b (local) | **100%** | 9.0s | 0 |
 | Opus 4.7 (cloud) | **98%** | 3.0s | 0 |
-| prism-coder:32b (local) | **99%** | 3.6s | 0 |
-| prism-coder:1b7 (local) | **86%** | 6.0s | 0 |
+| prism-coder:32b (local) | **100%** | 3.6s | 0 |
+| prism-coder:1b7 (local) | **96%** | 6.0s | 0 |
 
 ### ⚡ Zero-search retrieval
 Holographic Reduced Representations (HRR) for instant similarity lookups without an index. ~5ms over 100K memories.
@@ -157,12 +157,12 @@ Models trained on the Synalux SFT corpus (AAC + tool-calling + clinical workflow
 | Model | Overall | Load ctx | Save | Srch mem | Handoff | Compact | Web srch | Know srch | AAC | Translate | No-tool | Edge | Avg lat | Invented |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **Sonnet 4** (cloud) | **99%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 3.2s | 0 |
-| **prism-coder:14b** | **99%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 9.0s | 0 |
+| **prism-coder:14b** | **100%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 9.0s | 0 |
 | **Opus 4.7** (cloud) | **98%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 66% | 3.0s | 0 |
-| **prism-coder:32b** ¹ | **99%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 92% | 100% | 100% | 100% | 100% | 3.6s | 0 |
-| **prism-coder:1b7** | **86%** | 100% | 63% | 100% | 87% | 100% | 100% | 71% | 100% | 66% | 83% | 50% | 6.0s | 0 |
+| **prism-coder:32b** ¹ | **100%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 3.6s | 0 |
+| **prism-coder:1b7** | **96%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 64% | 6.0s | 0 |
 
-> ¹ 32B uses a `nothink` Modelfile template (empty `<think></think>` prefix) to suppress QwQ's reasoning chain on routing tasks. Without it: 97%. See [`tests/benchmarks/prism-routing-100/Modelfile.32b`](tests/benchmarks/prism-routing-100/Modelfile.32b).
+> ¹ 32B uses `nothink` template + surgical prompt disambiguation (know/smem/pred boundary). Without fixes: 98% (nothink only) or 97% (base). See [`tests/benchmarks/prism-routing-100/Modelfile.32b`](tests/benchmarks/prism-routing-100/Modelfile.32b). See [`tests/benchmarks/prism-routing-100/Modelfile.32b`](tests/benchmarks/prism-routing-100/Modelfile.32b).
 >
 > These are **not** Berkeley BFCL V4 leaderboard scores. The Prism eval covers 3 × 100 randomly sampled prompts across 13 categories (7 MCP tools, hallucination guards, AAC/translation plain-text). Full methodology and runner script: [`tests/benchmarks/prism-routing-100/`](tests/benchmarks/prism-routing-100/).
 
@@ -189,7 +189,7 @@ Set `LOCAL_LLM_URL=http://localhost:11434` in your portal config. Routing is aut
 - Fast queries → **1.7B** (~0.5s) · Standard → **14B** (~3s) · Complex/enterprise → **32B** (~8s) · Cloud fallback if Ollama unreachable
 
 iOS/mobile on same WiFi: `OLLAMA_HOST=0.0.0.0 ollama serve` on the Mac, then point `LOCAL_LLM_URL` at the Mac's IP.
-Routing accuracy (100-case Prism eval, May 2026): **14B = 99% · 32B = 99% · 1.7B = 86%**. Zero invented tool names across all models. → [Full results](tests/benchmarks/prism-routing-100/README.md)
+Routing accuracy (100-case Prism eval, May 2026): **14B = 100% · 32B = 100% · 1.7B = 96%**. Zero invented tool names across all models. → [Full results](tests/benchmarks/prism-routing-100/README.md)
 
 ---
 
