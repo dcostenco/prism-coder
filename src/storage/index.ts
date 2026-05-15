@@ -24,6 +24,12 @@ function isValidHttpUrl(url: string): boolean {
  */
 async function ensureSynaluxCredentials(): Promise<boolean> {
   if (SYNALUX_CONFIGURED) return true;
+  // Re-check process.env directly: SYNALUX_CONFIGURED is captured at module
+  // load, so credentials injected later by another caller would be invisible
+  // to it. Mirrors ensureSupabaseCredentials below.
+  const envUrl = process.env.PRISM_SYNALUX_BASE_URL?.trim();
+  const envKey = process.env.PRISM_SYNALUX_API_KEY?.trim();
+  if (envUrl && envKey && isValidHttpUrl(envUrl)) return true;
   const url = (await getSetting("PRISM_SYNALUX_BASE_URL"))?.trim();
   const key = (await getSetting("PRISM_SYNALUX_API_KEY"))?.trim();
   if (url && key && isValidHttpUrl(url)) {
@@ -83,11 +89,15 @@ export async function getStorage(): Promise<StorageBackend> {
 
   // ─── Validate explicit backend has credentials ────────────────
   if (requested === "synalux" && !(await ensureSynaluxCredentials())) {
-    console.error("[Prism Storage] Synalux requested but credentials missing. Falling back to local.");
+    console.error(
+      "[Prism Storage] Synalux backend requested but PRISM_SYNALUX_BASE_URL/PRISM_SYNALUX_API_KEY are missing or invalid. Falling back to local storage."
+    );
     requested = "local";
   }
   if (requested === "supabase" && !(await ensureSupabaseCredentials())) {
-    console.error("[Prism Storage] Supabase requested but credentials missing. Falling back to local.");
+    console.error(
+      "[Prism Storage] Supabase backend requested but SUPABASE_URL/SUPABASE_KEY are missing or invalid. Falling back to local storage."
+    );
     requested = "local";
   }
 
@@ -110,6 +120,10 @@ export async function getStorage(): Promise<StorageBackend> {
   await storageInstance.initialize(activeStorageBackend === "local");
 
   // ─── Cross-backend reconciliation (local + Supabase available) ─
+  // v9.2.4: when running on local SQLite but Supabase credentials exist, pull
+  // newer handoffs from Supabase into SQLite. Fixes the split-brain where one
+  // client (e.g. Claude Desktop) writes to Supabase but another (e.g.
+  // Antigravity) reads from SQLite and sees stale data.
   if (activeStorageBackend === "local" && await ensureSupabaseCredentials()) {
     try {
       const { reconcileHandoffs } = await import("./reconcile.js");
