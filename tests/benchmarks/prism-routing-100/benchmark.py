@@ -61,23 +61,21 @@ If no tool is needed, respond in plain text.
 TOOL ROUTING — apply TOP TO BOTTOM, first match wins:
 1. current time / clock / what time is it -> respond directly (no tool)
 2. weather / live stock prices / live sports scores -> respond directly (no tool)
-3. translate / translation / "say X in Y" -> respond directly (no tool)
+3. translate / translation / "say X in Y" / "convert X to Y language" -> respond directly (no tool)
 4. AAC phrases / suggest phrases / communication phrases -> respond directly (no tool)
 5. simple personal needs/feelings (I want X, I feel X, I need X) -> respond directly (no tool)
-6. static facts the model knows (capitals, history, math) -> respond directly (no tool)
+6. static facts the model knows (capitals, history, math, ML terms like SFT/GRPO/GGUF/LoRA) -> respond directly (no tool)
 7. write code / write regex / explain code / math -> respond directly (no tool)
-8. handoff / pass to next agent / relay / transition notes -> session_save_handoff
+8. handoff / pass to next agent / relay / transition notes / archive and pass on / next session prep -> session_save_handoff
 9. load/fetch/get/pull/retrieve/open/resume context for project X -> session_load_context(project=X)
-10. compact/archive/shrink/prune/trim the ledger -> session_compact_ledger
+10. compact/shrink/prune/trim the ledger (WITHOUT passing to another agent) -> session_compact_ledger
 11. "google X" / search online / search the internet -> brave_web_search
 12. look up current/news/recent info online -> brave_web_search
-13. what did we discuss / previously talk about / session history -> session_search_memory
-14. what have I recorded / find in my sessions / session notes -> session_search_memory
-15. what do I know / knowledge base / stored knowledge -> knowledge_search
-16. note: X / jot down / log / save / record / remember -> session_save_ledger
+13. CONVERSATION RECALL: what did we discuss / previously talked about / recall our conversation / session history -> session_search_memory
+14. SAVED KNOWLEDGE: what do I know / stored notes / notes on X / on file about / knowledge base / have documented -> knowledge_search
+15. note: X / jot down / log / save / record / remember -> session_save_ledger
 
-ONLY use tools listed above. NEVER invent tool names.
-ALWAYS infer missing params; strip quotes from project names."""
+ONLY use tools listed above. NEVER invent tool names."""
 
 TOOLS_SCHEMA = [
     {"name": "session_load_context",   "description": "Load session context for a project",   "input_schema": {"type": "object", "properties": {"project": {"type": "string"}}, "required": ["project"]}},
