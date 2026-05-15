@@ -103,3 +103,5 @@ training/Modelfile.bfcl
 
 # BFCL run output dumps (ephemeral, regenerated on every eval)
 training/bfcl_*.txt
+__pycache__/
+results.json
