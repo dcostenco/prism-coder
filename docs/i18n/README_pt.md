@@ -195,6 +195,33 @@ Models use the Synalux SFT corpus (AAC + Prism MCP tool taxonomy + clinical work
 
 **iOS deployment:** On-device inference via **llama.cpp Swift SPM**. Auto-selects by device RAM: 14B on iPad Pro 16GB (98%), 8B on iPhone/iPad 8GB (96%, OOM fallback to 1.7B at 88%). CoreML not viable — coremltools doesn't support Qwen3 attention ops. Integration: `LLMEngine.swift` → `prismNativeBridge.askAI()` → token stream. WiFi fallback: Mac Ollama (`OLLAMA_HOST=0.0.0.0`).
 
+### Prism Routing Benchmark — run it yourself
+
+The benchmark is open-source. Reproduce every number in this README:
+
+```bash
+git clone https://github.com/dcostenco/prism-coder
+cd prism-coder
+
+# Run the full eval (100 cases, 3 seeds)
+for seed in 2027 2028 2029; do
+  python3 tests/benchmarks/prism-routing-100/benchmark.py --models 14b 8b 32b 1b7 --seed $seed
+done
+```
+
+**Not a general function-calling benchmark.** This measures routing precision on 7 specific MCP tools — the task these models were built for. We don't claim to beat Claude on general capabilities. We match Claude on the ONE task that matters for offline AAC: getting the right tool, every time, in 1 second, with zero cloud.
+
+Methodology, prompt, scoring, and full test pool: [`tests/benchmarks/prism-routing-100/`](../../tests/benchmarks/prism-routing-100/)
+
+### Models on HuggingFace
+
+| Model | HuggingFace | Accuracy | Size |
+|---|---|---|---|
+| prism-coder:14b | [dcostenco/prism-coder-14b](https://huggingface.co/dcostenco/prism-coder-14b) | 98% | 8.4 GB |
+| prism-coder:8b | [dcostenco/prism-coder-8b](https://huggingface.co/dcostenco/prism-coder-8b) | 96% | 4.7 GB |
+| prism-coder:32b | [dcostenco/prism-coder-32b](https://huggingface.co/dcostenco/prism-coder-32b) | 97.3% | 19 GB |
+| prism-coder:1.7b | [dcostenco/prism-coder-1.7b](https://huggingface.co/dcostenco/prism-coder-1.7b) | 88% | 2.2 GB |
+
 ## Self-hosted / Local AI (Enterprise)
 
 Run the full Prism model stack on your own hardware — zero cloud, zero latency, full data sovereignty.
