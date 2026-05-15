@@ -166,13 +166,13 @@ The LLM context window is treated as ephemeral scratch space. All durable state 
 
 ## Models
 
-Prism Coder inference cascades through fine-tuned models first, with Claude as a quality-gate fallback. Models route through the Synalux router (authentication + subscription required). Cascade: RunPod → Ollama local → Claude fallback.
+Prism Coder inference cascades through fine-tuned models first, with Claude as a quality-gate fallback. Models route through the Synalux router (authentication + subscription required). Cascade: Cloud (OpenRouter) → Ollama local → Claude fallback.
 
 | Model | Ollama tag | Where | Tier | Latency |
 |---|---|---|---|---|
 | **prism-coder:1.7b** | `prism-coder:1b7-v19-q8` (published) | On-device (Mac/local) · iOS via local network | Free | ~50ms |
-| **prism-coder:14b** | `prism-coder:14b` (published v19) | RunPod A100 via Synalux | Standard+ | ~200ms |
-| **prism-coder:32b** | `prism-coder:32b` (published v19) | RunPod A100 80GB via Synalux | Pro/Enterprise | ~3–5s |
+| **prism-coder:14b** | `prism-coder:14b` (published v19) | Cloud (OpenRouter) A100 via Synalux | Standard+ | ~200ms |
+| **prism-coder:32b** | `prism-coder:32b` (published v19) | Cloud (OpenRouter) A100 80GB via Synalux | Pro/Enterprise | ~3–5s |
 
 Models use the Synalux SFT corpus (AAC + Prism MCP tool taxonomy + clinical workflows). **Internal quality gate: ≥ 90% on the Prism 100-case eval before production promotion.**
 
@@ -252,17 +252,14 @@ Routing accuracy (May 15 2026, 3-seed mean): **14B = 98% · 8B = 96% · 32B = 97
 
 ## Plans
 
-| | Free | Standard $19/mo | Pro $49/mo | Enterprise $99/mo |
-|---|---|---|---|---|
-| prism-coder:1.7b on-device (88%) | ✅ unlimited | ✅ | ✅ | ✅ |
-| prism-coder:8b on-device (96%) | ✅ unlimited | ✅ | ✅ | ✅ |
-| prism-coder:14b on-device (98%) | ✅ unlimited | ✅ | ✅ | ✅ |
-| prism-coder:14b cloud | — | ✅ 200 req/day | ✅ 2K req/day | ✅ unlimited |
-| prism-coder:32b reasoning | — | — | ✅ | ✅ priority |
-| Claude Sonnet 4 fallback | — | ✅ | ✅ | ✅ |
-| Offline translation (1,261 × 20 langs) | ✅ | ✅ | ✅ | ✅ |
-| Custom fine-tuning | — | — | — | ✅ |
-| HIPAA BAA | — | — | — | ✅ |
+| Plan | Cloud model | Daily limit | On-device |
+|---|---|---|---|
+| **Free** | — | unlimited local | prism-coder:1.7b (88%) + 8b (96%) + 14b (98%) |
+| **Standard $19/mo** | Claude Sonnet 4 | 200 req | + cloud fallback |
+| **Pro $49/mo** | prism-coder:32b | 2,000 req | + reasoning tier |
+| **Enterprise $99/mo** | prism-coder:32b priority | unlimited | + HIPAA BAA + custom fine-tuning |
+
+All on-device models are **free for every tier** — no subscription needed for local inference. Offline translation (1,261 phrases × 20 languages) included in all plans.
 
 [Subscribe →](https://synalux.ai/pricing)
 
@@ -377,12 +374,12 @@ node scripts/migrate-local-to-portal.mjs --include-scholar
   │  • JWT auth          │  │  Standby   — Fly.io         │
   │  • complexity route  │  │  Fallback  — Supabase REST  │
   │  • tier enforcement  │  │                             │
-  │  • proxy to RunPod   │  │  auto-failover chain        │
+  │  • proxy to Cloud (OpenRouter)   │  │  auto-failover chain        │
   └──────────┬───────────┘  └─────────────┬───────────────┘
              │                            │
              ▼                            ▼
   ┌───────────────────────────┐  ┌─────────────────────────────┐
-  │  RUNPOD SERVERLESS        │  │  SUPABASE                   │
+  │  CLOUD (OPENROUTER) SERVERLESS        │  │  SUPABASE                   │
   │                           │  │  session ledgers            │
   │  prism-coder:14b ~200ms│  │  knowledge graph            │
   │  prism-coder:32b   ~500ms│  │  handoffs & todos           │
@@ -417,14 +414,14 @@ All Prism AAC model inference is protected behind Synalux as a mandatory router.
 │  2. Check subscription tier                                 │
 │  3. Enforce rate limit (50–2000 req/day by plan)            │
 │  4. Route to model tier by complexity                       │
-│  5. Proxy → RunPod with SECRET key (never sent to client)   │
+│  5. Proxy → Cloud (OpenRouter) with SECRET key (never sent to client)   │
 │  6. Log → aac_inference_log (billing audit trail)           │
 └──────────┬─────────────────────────────────────┬────────────┘
            │ tier=fast                            │ tier=reason
            ▼                                      ▼
   ┌─────────────────────────┐      ┌───────────────────────┐
   │  prism-coder:14b     │      │  prism-coder:32b              │
-  │  RunPod A100 40G        │      │  RunPod A100 80G      │
+  │  Cloud (OpenRouter) A100 40G        │      │  Cloud (OpenRouter) A100 80G      │
   │  ~200ms                 │      │  ~3–5s (reasoning)    │
   │  standard/pro           │      │  pro/enterprise only  │
   └─────────────────────────┘      └───────────────────────┘
@@ -432,7 +429,7 @@ All Prism AAC model inference is protected behind Synalux as a mandatory router.
            └────────────────┬─────────────────────┘
                             ▼
                HuggingFace dcostenco/prism-coder-* (private)
-               RunPod pulls at pod start with server-side token
+               Cloud (OpenRouter) pulls at pod start with server-side token
 
 On-device (free, zero latency, offline):
   prism-coder:1.7b GGUF Q4_K_M → iOS CoreML / Android ONNX
