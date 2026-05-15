@@ -88,13 +88,15 @@ grep -E "MODEL_ID|base_model" my_train_script.py
 
 Before kicking off cloud training:
 
-- [ ] **Lineage**: `pytest tests/training/test_base_model_lineage.py` passes
+- [ ] **Script preflight**: `pytest tests/training/test_training_script_preflight.py -k <your-script>` passes (catches 4-bit base, wrong lineage, bad corpus, high iters — all at $0 before any GPU allocation)
+- [ ] **Lineage**: `pytest tests/lineage/test_base_model_lineage.py` passes
 - [ ] **Recipe is on the GOOD list above** OR you've explicitly justified the deviation
 - [ ] **Corpus composition check**: print bucket percentages; tool-call rows ≤ 50%
 - [ ] **Smoke train locally first**: 5 iters on the Mac (any tier ≤14B). If train_loss explodes or evaluation outputs are garbage, abort before launching cloud
 - [ ] **Pre-flight cost estimate**: `python3 tools/cost_estimator.py --hours X --gpu BB` shows expected spend. User confirms if >$15
 - [ ] **BFCL gate at iter 25 OR midway**: cancel run if score drops below 90% on the 16-case gate
 - [ ] **Convert + retest via Ollama**: NEVER ship a model where Ollama and MLX scores diverge >5 points
+- [ ] **Conversion pipeline check**: `pytest tests/conversion/test_gguf_conversion_pipeline.py` passes (catches 4-bit dequant slow GGUFs and TTFT regressions)
 
 ## The publishing-day checklist
 
@@ -102,6 +104,7 @@ After training succeeds:
 
 - [ ] Lineage check still passes (new adapter directory inspected)
 - [ ] `pytest tests/eval/test_mlx_vs_ollama_parity.py` passes (no harness regression)
+- [ ] `pytest tests/conversion/test_gguf_conversion_pipeline.py` passes (no 4-bit dequant slow GGUFs, TTFT within gate)
 - [ ] Eval 3 seeds on the new model, mean ± std written into the model card
 - [ ] Per-category breakdown surfaced — call out categories that regressed AND categories that gained
 - [ ] No "100%" claim in the model card — see [`RUNBOOK_LOCAL_EVAL.md`](./RUNBOOK_LOCAL_EVAL.md) for why this is structurally suspect

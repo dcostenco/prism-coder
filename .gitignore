@@ -74,7 +74,7 @@ test-results.txt
 # BFCL eval methodology, build_phase pipelines) in the public repo.
 # All training work belongs in synalux-private/prism-training/.
 # See ~/.agent/skills/no-public-leak/SKILL.md for the full rule.
-training/
+/training/
 bfcl-submission/
 
 # ─── Training runtime artifacts (do not commit) ───
