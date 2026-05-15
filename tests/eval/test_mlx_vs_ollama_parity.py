@@ -229,18 +229,11 @@ def _ollama_available() -> bool:
 
 @pytest.mark.skipif(not _ollama_available(), reason="Ollama not running on localhost:11434")
 def test_mlx_vs_ollama_parity_on_golden_set():
-    """The two paths must agree on ≥17/20 routing decisions (85%).
+    """The two paths must agree on ≥18/20 routing decisions (90%).
 
     MLX inference runs in a subprocess to avoid Metal OOM from pytest's
     182 loaded extension modules (torch MPS, scipy, sklearn) competing
     for GPU memory with the 14B model's Metal buffers.
-
-    Gate is 85% (not 90%) because Q4_K_M quantization introduces 2-3
-    edge-case routing divergences on categories where the system prompt's
-    rule descriptions can be misread as tool names (AAC phrases, weather).
-    MLX bf16 gets these right; the quantized GGUF hallucinates tool names
-    like "AAC phrase help/suggestions/prediction/generation". These are
-    documented in RUNBOOK_LOCAL_EVAL.md as a known Q4_K_M artifact.
     """
     model_path = str(MLX_MODEL_PATH) if MLX_MODEL_PATH.exists() else str(MLX_MODEL_FALLBACK)
     if not Path(model_path).exists():
@@ -260,8 +253,7 @@ def test_mlx_vs_ollama_parity_on_golden_set():
         else:
             disagreements.append((cat, prompt[:40], expected, mlx_tool, ollama_tool))
     n = len(GOLDEN_PROMPTS)
-    # 85% gate: Q4_K_M quantization introduces 2-3 edge-case divergences
-    min_agree = n - 3
+    min_agree = n - 2
     assert matches >= min_agree, (
         f"MLX↔Ollama agreement {matches}/{n} (must be ≥{min_agree}). "
         f"Disagreements:\n" + "\n".join(

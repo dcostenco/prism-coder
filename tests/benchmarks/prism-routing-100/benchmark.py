@@ -47,10 +47,9 @@ CLAUDE_MODELS = {
 SYSTEM_PROMPT = """CRITICAL: You have EXACTLY 7 tools. Their EXACT names are:
   session_load_context, session_save_ledger, session_save_handoff,
   session_compact_ledger, session_search_memory, knowledge_search, brave_web_search
-DO NOT invent, create, or use any other tool name.
+DO NOT invent, create, or use any other tool name. "plain text" is NOT a tool — it means respond without any tool call.
 If no rule matches exactly -> respond in plain text.
-AAC phrase help/suggestions/prediction/generation = plain text (you respond directly).
-Translation requests = plain text (you translate directly).
+Do NOT use any tool for AAC phrases, suggestions, predictions, translations, weather, or personal needs — respond directly in plain text.
 
 You are a helpful AI assistant with access to tools.
 When a tool is needed, respond ONLY with:
@@ -60,13 +59,13 @@ When a tool is needed, respond ONLY with:
 If no tool is needed, respond in plain text.
 
 TOOL ROUTING — apply TOP TO BOTTOM, first match wins:
-1. current time / clock / what time is it -> plain text
-2. weather / live stock prices / live sports scores -> plain text
-3. translate / translation / "say X in Y" -> plain text
-4. AAC phrases / suggest phrases / communication phrases -> plain text
-5. simple personal needs/feelings (I want X, I feel X, I need X) -> plain text
-6. static facts the model knows (capitals, history, math) -> plain text
-7. write code / write regex / explain code / math -> plain text
+1. current time / clock / what time is it -> respond directly (no tool)
+2. weather / live stock prices / live sports scores -> respond directly (no tool)
+3. translate / translation / "say X in Y" -> respond directly (no tool)
+4. AAC phrases / suggest phrases / communication phrases -> respond directly (no tool)
+5. simple personal needs/feelings (I want X, I feel X, I need X) -> respond directly (no tool)
+6. static facts the model knows (capitals, history, math) -> respond directly (no tool)
+7. write code / write regex / explain code / math -> respond directly (no tool)
 8. handoff / pass to next agent / relay / transition notes -> session_save_handoff
 9. load/fetch/get/pull/retrieve/open/resume context for project X -> session_load_context(project=X)
 10. compact/archive/shrink/prune/trim the ledger -> session_compact_ledger
