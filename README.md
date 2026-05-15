@@ -170,9 +170,9 @@ Prism Coder inference cascades through fine-tuned models first, with Claude as a
 
 | Model | Ollama tag | Where | Tier | Latency |
 |---|---|---|---|---|
-| **Qwen3-1.7B** | `prism-coder:1b7-v19-q8` (published) | On-device (Mac/local) · iOS via local network | Free | ~50ms |
-| **Qwen3-14B** | `prism-coder:14b` (published v19) | RunPod A100 via Synalux | Standard+ | ~200ms |
-| **QwQ-32B** | `prism-coder:32b` (published v19) | RunPod A100 80GB via Synalux | Pro/Enterprise | ~3–5s |
+| **prism-coder:1.7b** | `prism-coder:1b7-v19-q8` (published) | On-device (Mac/local) · iOS via local network | Free | ~50ms |
+| **prism-coder:14b** | `prism-coder:14b` (published v19) | RunPod A100 via Synalux | Standard+ | ~200ms |
+| **prism-coder:32b** | `prism-coder:32b` (published v19) | RunPod A100 80GB via Synalux | Pro/Enterprise | ~3–5s |
 
 Models use the Synalux SFT corpus (AAC + Prism MCP tool taxonomy + clinical workflows). **Internal quality gate: ≥ 90% on the Prism 100-case eval before production promotion.**
 
@@ -254,10 +254,13 @@ Routing accuracy (May 15 2026, 3-seed mean): **14B = 98% · 8B = 96% · 32B = 97
 
 | | Free | Standard $19/mo | Pro $49/mo | Enterprise $99/mo |
 |---|---|---|---|---|
-| Qwen3-1.7B on-device | ✅ unlimited | ✅ | ✅ | ✅ |
-| Qwen2.5-Coder-14B cloud | — | ✅ 200 req/day | ✅ 2K req/day | ✅ unlimited |
-| QwQ-32B reasoning | — | — | ✅ | ✅ priority |
-| Qwen2.5-30B-A3B MoE | — | — | — | ✅ |
+| prism-coder:1.7b on-device (88%) | ✅ unlimited | ✅ | ✅ | ✅ |
+| prism-coder:8b on-device (96%) | ✅ unlimited | ✅ | ✅ | ✅ |
+| prism-coder:14b on-device (98%) | ✅ unlimited | ✅ | ✅ | ✅ |
+| prism-coder:14b cloud | — | ✅ 200 req/day | ✅ 2K req/day | ✅ unlimited |
+| prism-coder:32b reasoning | — | — | ✅ | ✅ priority |
+| Claude Sonnet 4 fallback | — | ✅ | ✅ | ✅ |
+| Offline translation (1,261 × 20 langs) | ✅ | ✅ | ✅ | ✅ |
 | Custom fine-tuning | — | — | — | ✅ |
 | HIPAA BAA | — | — | — | ✅ |
 
@@ -381,16 +384,16 @@ node scripts/migrate-local-to-portal.mjs --include-scholar
   ┌───────────────────────────┐  ┌─────────────────────────────┐
   │  RUNPOD SERVERLESS        │  │  SUPABASE                   │
   │                           │  │  session ledgers            │
-  │  Qwen2.5-Coder-14B ~200ms│  │  knowledge graph            │
-  │  Qwen2.5-30B-A3B   ~500ms│  │  handoffs & todos           │
-  │  QwQ-32B            ~3-5s │  │                             │
+  │  prism-coder:14b ~200ms│  │  knowledge graph            │
+  │  prism-coder:32b   ~500ms│  │  handoffs & todos           │
+  │  prism-coder:32b            ~3-5s │  │                             │
   │                           │  │  source of truth            │
   └─────────────┬─────────────┘  └─────────────────────────────┘
                 │
                 ▼
   ┌───────────────────────────┐
   │  ON-DEVICE                │
-  │  Qwen3-1.7B Q4_K_M       │
+  │  prism-coder:1.7b Q4_K_M       │
   │  iOS CoreML / Android     │
   │  ~50ms · offline          │
   └───────────────────────────┘
@@ -420,7 +423,7 @@ All Prism AAC model inference is protected behind Synalux as a mandatory router.
            │ tier=fast                            │ tier=reason
            ▼                                      ▼
   ┌─────────────────────────┐      ┌───────────────────────┐
-  │  Qwen2.5-Coder-14B     │      │  QwQ-32B              │
+  │  prism-coder:14b     │      │  prism-coder:32b              │
   │  RunPod A100 40G        │      │  RunPod A100 80G      │
   │  ~200ms                 │      │  ~3–5s (reasoning)    │
   │  standard/pro           │      │  pro/enterprise only  │
@@ -432,15 +435,15 @@ All Prism AAC model inference is protected behind Synalux as a mandatory router.
                RunPod pulls at pod start with server-side token
 
 On-device (free, zero latency, offline):
-  Qwen3-1.7B GGUF Q4_K_M → iOS CoreML / Android ONNX
+  prism-coder:1.7b GGUF Q4_K_M → iOS CoreML / Android ONNX
 ```
 
 | Plan | Cloud model | Daily limit | On-device |
 |---|---|---|---|
-| Free | — | unlimited local | Qwen3-1.7B |
-| Standard $19/mo | Qwen2.5-Coder-14B | 200 req | + cloud |
-| Pro $49/mo | QwQ-32B | 2,000 req | + reasoning |
-| Enterprise $99/mo | QwQ-32B priority | unlimited | full stack |
+| Free | — | unlimited local | prism-coder:1.7b |
+| Standard $19/mo | prism-coder:14b | 200 req | + cloud |
+| Pro $49/mo | prism-coder:32b | 2,000 req | + reasoning |
+| Enterprise $99/mo | prism-coder:32b priority | unlimited | full stack |
 
 See [`docs/WOW_FEATURES.md`](docs/WOW_FEATURES.md) for the algorithm catalogue. Release notes in [`docs/releases/v14.0.0-prism-as-foundation.md`](docs/releases/v14.0.0-prism-as-foundation.md).
 
