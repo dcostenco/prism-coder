@@ -160,7 +160,7 @@ Prism Coder inference cascades through fine-tuned models first, with Claude as a
 
 Models use the Synalux SFT corpus (AAC + Prism MCP tool taxonomy + clinical workflows). **Internal quality gate: ≥ 90% on the Prism 100-case eval before production promotion.**
 
-> **Training note (May 14 2026)**: A v25-max retrain pass on a 40K-row composite corpus REGRESSED both 1.7B and 14B on the BFCL gate test (1.7B 100%→93.8%, 14B 100%→81.2%) because the corpus over-weighted tool-use density, causing the model to invoke tools for prompts like "write a Python function" that should be plain text. Reverted to v19 published adapters. Base Qwen3 models are strong tool-routers out of the box; future fine-tuning will use much sparser corpora focused on Synalux-specific tool names + AAC plain-text style.
+> **Training note**: Base Qwen3 models are strong tool-routers out of the box. Heavy fine-tuning regresses tool-vs-plain-text decisions; light-touch polish recipes (small corpus, balanced tool/plain-text split) are the published path. Production adapter selection and retrain methodology are managed in the Synalux portal.
 
 **Per-category breakdown — [Prism 100-case eval](../../tests/benchmarks/prism-routing-100/README.md) (3-seed mean, v26 system prompt + nothink template, May 14 2026):**
 
@@ -278,6 +278,35 @@ python3 tests/benchmarks/prism-routing-100/benchmark.py --models 1b7 14b 32b
 - Deep storage tier
 - Dashboard rendering
 - Routing benchmarks (100-case Prism eval) — see `tests/benchmarks/prism-routing-100/`
+
+## Migration
+
+### Local SQLite → Synalux portal
+
+If you've been running Prism on the free tier and want to move historical session data into the paid-tier portal, use the migration script:
+
+```bash
+# dry run first — prints what would be migrated, hits no network
+node scripts/migrate-local-to-portal.mjs --dry-run
+
+# real run — pushes ledger + handoff entries through POST /api/v1/prism/memory
+PRISM_SYNALUX_API_KEY=synalux_sk_... \
+  node scripts/migrate-local-to-portal.mjs
+
+# scope to one project
+node scripts/migrate-local-to-portal.mjs --project=my-project
+
+# include scholar entries (excluded by default — usually large + low-value)
+node scripts/migrate-local-to-portal.mjs --include-scholar
+```
+
+**What it does**: reads `~/.prism-mcp/data.db` via `@libsql/client` (already a runtime dep — no extra install), exchanges the refresh token for a JWT (cached + auto-refreshed before expiry), and POSTs each ledger entry and handoff to the portal. Failures are logged with the source row id; successes are counted at the end.
+
+**Credentials**: `PRISM_SYNALUX_API_KEY` from env. If unset, the script also checks `~/prism/.env` for `PRISM_SYNALUX_API_KEY=...` as a convenience for dev workflows.
+
+**Idempotency**: handoffs are written with the portal's CRDT merge (last-write-wins per project+role); ledger entries are append-only and de-duped server-side by `(project, conversation_id, summary)`. Re-running on the same DB is safe.
+
+**One-shot only**: this script is a migration tool, not a sync daemon. Once you've moved, set `PRISM_STORAGE=synalux` (or leave it on `auto` and let the resolver pick synalux when credentials are present) and the MCP server writes directly to the portal going forward.
 
 ## Production Infrastructure (v16)
 

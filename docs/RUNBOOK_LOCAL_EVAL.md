@@ -44,7 +44,7 @@ Pin: `tests/eval/test_mlx_vs_ollama_parity.py`. CI catches if a future Qwen toke
 
 1. **Baseline first**: Run `python3 eval_100case_mlx.py --model mlx_model_qwen3_<size> --seed 2027` against base. Note score per category.
 2. **Small smoke train**: Train 5-10 iters with your candidate recipe. Re-eval. If overall regresses >5 points, kill it — recipe is bad.
-3. **Full train only after smoke passes**: 50-100 iters max for v26-polish-class recipes. More than that risks mode collapse (see `RUNBOOK_TRAINING.md`).
+3. **Full train only after smoke passes**: keep iteration counts low (50-100) for light-touch polish recipes. More than that risks mode collapse on small tool-routing models.
 4. **BFCL gate at midpoint**: Run `bfcl_gate_mlx.py` at iter 25/50/100. If score drops below 90% on the 16-case gate, abort.
 5. **Convert + retest in Ollama**: After fuse+GGUF+import, run `benchmark.py --models <your-tag> --seed 2027`. Verify MLX↔Ollama parity holds (within ±3 of the MLX score from step 4).
 

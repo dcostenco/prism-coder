@@ -2,12 +2,11 @@
 """
 Base-model lineage test.
 
-This session burned ~$11 on a cloud B200 training run before catching that
-the new 32B LoRA adapter was being trained from Qwen/Qwen3-32B while the
-published v19 32B was trained from Qwen/QwQ-32B. The resulting v26-max
-adapter generated coherent text but failed to emit tool calls at all —
-because the system prompt + corpus were authored against QwQ-32B's
-behavior.
+A 32B adapter trained from Qwen/Qwen3-32B when the published 32B is
+trained from Qwen/QwQ-32B produces an adapter that generates coherent
+text but cannot emit tool calls — the system prompt and training corpus
+target QwQ-32B's behavior, so the wrong-base adapter is functionally
+broken even when training metrics look healthy.
 
 This test catches base-model lineage mismatches BEFORE any training:
 
@@ -37,9 +36,9 @@ MODELS_DIR = REPO_ROOT / "training" / "models"
 # tier's lineage entry. If you want to change a base, update this map
 # AND publish under a new versioned id (e.g. prism-coder-32b-v2-qwen3).
 BASE_MODEL_LINEAGE = {
-    "1b7": ["Qwen/Qwen3-1.7B"],          # current published v19
-    "14b": ["Qwen/Qwen3-14B"],           # current published v26-polish
-    "32b": ["Qwen/QwQ-32B"],             # current published v19
+    "1b7": ["Qwen/Qwen3-1.7B"],
+    "14b": ["Qwen/Qwen3-14B"],
+    "32b": ["Qwen/QwQ-32B"],
     # Historical bases we've used but no longer publish — kept here so
     # that orphan adapters on disk don't break the suite. Adding to this
     # list is OK; REMOVING from it requires deleting the adapter.
@@ -112,9 +111,10 @@ def test_adapter_base_matches_published_lineage(size, cfg_path):
         f"\n❌ LINEAGE MISMATCH at {cfg_path}\n"
         f"   Adapter base: {base!r}\n"
         f"   Allowed for tier '{size}': {allowed_with_legacy}\n\n"
-        f"This is the SAME class of mistake that wasted $11 on B200 in May 2026:\n"
-        f"training a 32B LoRA on Qwen/Qwen3-32B when v19 was Qwen/QwQ-32B,\n"
-        f"resulting in a model that couldn't emit tool calls.\n\n"
+        f"Training a tier from a non-published base produces an adapter whose\n"
+        f"system prompt and corpus expect a different model's behavior — the\n"
+        f"adapter generates coherent text but is functionally broken on the\n"
+        f"published interface (e.g. cannot emit tool calls).\n\n"
         f"To resolve:\n"
         f"  (a) Retrain from {allowed[0]!r}, OR\n"
         f"  (b) Add {base!r} to BASE_MODEL_LINEAGE['{size}'] AND publish\n"

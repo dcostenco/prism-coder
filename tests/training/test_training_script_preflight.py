@@ -3,18 +3,15 @@
 Training script pre-flight validation.
 
 Scans all train_*.sh scripts in training/ and validates them BEFORE any
-GPU-hours are burned. This catches the two costliest mistakes from the
-May 2026 session at $0:
-
-  $11 wrong-base:   Qwen3-32B != QwQ-32B for the 32B tier → adapter
-                    produces coherent text but zero tool calls
-  $25 slow-GGUF:   mlx-community/…-4bit base → fuse → dequant → Q4_K_M
-                    GGUF with 60s+ TTFT — unshippable
+GPU-hours are burned.
 
 Checks performed:
   1. 4-bit quantized bases are flagged for any tier that needs GGUF conversion
+     (4-bit → fuse → dequant → Q4_K_M produces unshippable GGUFs with high TTFT)
   2. 32B scripts must use QwQ-32B lineage, not Qwen3-32B
-  3. DATA_DIR referencing known-bad corpus (v25_max) is flagged
+     (mismatched base + published system prompt = adapter emits coherent text
+     but zero tool calls)
+  3. DATA_DIR referencing a known-bad corpus is flagged
   4. Extreme iteration counts (>200) are flagged
   5. Referenced data directories and config files must exist on disk
 
@@ -131,12 +128,11 @@ class TestTrainingScriptPreflight:
     def test_32b_uses_qwq_lineage(self, script):
         """The 32B tier MUST use QwQ-32B, not Qwen3-32B.
 
-        The v19 published 32B was trained on Qwen/QwQ-32B. The system prompt
-        and training corpus were authored against QwQ-32B's tool-call behavior.
-        Training on Qwen3-32B produces an adapter that generates coherent text
-        but cannot emit tool calls — a silent functional regression.
-
-        This was the $11 wrong-base mistake from May 2026.
+        The published prism-coder:32b is trained from Qwen/QwQ-32B. Its system
+        prompt and training corpus target QwQ-32B's tool-call behavior. Training
+        on Qwen3-32B instead produces an adapter that generates coherent text
+        but cannot emit tool calls — a silent functional regression caught only
+        post-train.
         """
         if script["tier"] != "32b":
             return
@@ -155,21 +151,16 @@ class TestTrainingScriptPreflight:
                 f"The published prism-coder:32b is trained from Qwen/QwQ-32B.\n"
                 f"Using Qwen3-32B instead produces an adapter that CANNOT emit\n"
                 f"tool calls (system prompt + corpus target QwQ behavior).\n\n"
-                f"This cost $11 on a B200 in May 2026 — burned before anyone\n"
-                f"noticed the adapter was functionally broken.\n\n"
                 f"Fix: BASE_MODEL=\"mlx-community/QwQ-32B\" (or the bf16 variant)"
             )
 
     def test_no_known_bad_corpus(self, script):
-        """The v25-max corpus (40K rows) caused tool-call mode collapse.
+        """A corpus listed in KNOWN_BAD_CORPORA caused tool-call mode collapse
+        in a prior fine-tune — over-saturating the model with tool-call
+        exemplars made it invoke tools for plain-text prompts.
 
-        14B went from 100% → 81% on the BFCL gate. The model invoked tools
-        for prompts like "Write a Python function" (should be plain text).
-        The failure is from over-saturating the fine-tune with too many
-        tool-call exemplars at too high a LoRA rank.
-
-        The corpus itself isn't deleted (pinned for regression detection),
-        but no new training should reference it.
+        Such corpora are kept on disk for regression detection but should not
+        be referenced by any new training run.
         """
         corpus = script.get("corpus_name")
         if not corpus or corpus not in KNOWN_BAD_CORPORA:
@@ -178,17 +169,15 @@ class TestTrainingScriptPreflight:
             f"\n\n❌ KNOWN-BAD CORPUS REFERENCED\n\n"
             f"  Script : {script['path'].name}\n"
             f"  Corpus : {corpus}\n\n"
-            f"This corpus is pinned in RUNBOOK_TRAINING.md as a known-bad recipe.\n"
-            f"The v25-max corpus (40K rows) caused tool-call mode collapse:\n"
-            f"14B 100% → 81% on the BFCL gate.\n\n"
-            f"Use the v26-polish corpus (576 rows, 44% tool / 56% plain) instead."
+            f"This corpus is pinned as a known-bad recipe — it caused tool-call\n"
+            f"mode collapse in a prior fine-tune. Use the current polish recipe\n"
+            f"instead (smaller corpus, balanced tool/plain-text split)."
         )
 
     def test_iters_under_safety_limit(self, script):
-        """Extreme iteration counts risk mode collapse on small tool-routing models.
-
-        The v26-polish recipe used 50 iters and gained +3 points without
-        regression. v25-max used 300 iters and regressed 19 points.
+        """Extreme iteration counts risk mode collapse on small tool-routing
+        models. Light-touch polish recipes (~50 iters) gain points without
+        regression; heavier touches commonly regress.
 
         >200 iters is suspicious. >400 is dangerous. This test flags >200
         to force a justification in the training script comments.
@@ -203,9 +192,9 @@ class TestTrainingScriptPreflight:
             f"\n\n❌ HIGH ITERATION COUNT — MODE COLLAPSE RISK\n\n"
             f"  Script : {script['path'].name}\n"
             f"  Iters  : {iters} (gate: {MAX_SAFE_ITERS})\n\n"
-            f"The v25-max recipe used 300 iters and regressed 14B from\n"
-            f"100% → 81% on the BFCL gate. The v26-polish recipe used\n"
-            f"50 iters and gained +3 points without regression.\n\n"
+            f"Heavy-touch fine-tunes on tool-routing models commonly regress.\n"
+            f"Light-touch recipes (~50 iters) reliably gain points without\n"
+            f"regression.\n\n"
             f"If high iters are intentional, add a comment to the script:\n"
             f"  # JUSTIFIED: <reason for high iters>"
         )

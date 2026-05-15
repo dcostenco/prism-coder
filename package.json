@@ -1,8 +1,8 @@
 {
   "name": "prism-mcp-server",
-  "version": "15.2.1",
+  "version": "15.3.0",
   "mcpName": "io.github.dcostenco/prism-coder",
-  "description": "Prism Coder — Cognitive memory + tool-calling intelligence for AI agents. Mind Palace persistent memory (BFCL Gold Certified, 100% Tool-Call Accuracy, 54 Agent Skills, Zero-Search HDC/HRR retrieval, HIPAA-hardened local-first storage, SLERP-optimized GRPO alignment) plus the prism-coder:7b / 14b open-weights LLM fleet.",
+  "description": "Prism Coder \u2014 Cognitive memory + tool-calling intelligence for AI agents. Mind Palace persistent memory (BFCL Gold Certified, 100% Tool-Call Accuracy, 54 Agent Skills, Zero-Search HDC/HRR retrieval, HIPAA-hardened local-first storage, SLERP-optimized GRPO alignment) plus the prism-coder:7b / 14b open-weights LLM fleet.",
   "module": "index.ts",
   "type": "module",
   "main": "dist/server.js",
@@ -97,7 +97,7 @@
     "url": "git+https://github.com/dcostenco/prism-coder.git"
   },
   "author": "Dmitri Costenco",
-  "license": "BUSL-1.1",
+  "license": "AGPL-3.0",
   "devDependencies": {
     "@huggingface/transformers": "3.1.0",
     "@types/bun": "latest",

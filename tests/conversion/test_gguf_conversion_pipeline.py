@@ -2,19 +2,19 @@
 """
 Conversion pipeline test.
 
-Pins the "MLX 4-bit → dequant → Q4_K_M GGUF = 60s+ inference" failure from May 2026.
+Pins the "MLX 4-bit → dequant → Q4_K_M GGUF = high-TTFT inference" failure mode.
 
 THE FAILURE
 -----------
-This was the most subtle breakage of the training cycle:
-  - Training succeeded (50 iters, loss converged normally)
-  - The MLX-eval unit tests passed (correct tool calls, accurate routing)
-  - The failure was only caught at 100-case eval scale when TTFT was 60s+
+This is a subtle breakage of the training-to-deploy cycle:
+  - Training succeeds, loss converges normally
+  - MLX-eval unit tests pass (correct tool calls, accurate routing)
+  - The failure is only caught at 100-case eval scale when TTFT is much
+    higher than expected for the model size
 
 Root cause:
-  The 32B v26-polish adapter was trained on `mlx-community/Qwen3-32B-4bit`
-  (a 4-bit quantized base). After training, the fuse step merged the LoRA
-  adapter into those 4-bit weights, producing a fused model whose config.json
+  When a fine-tuned adapter is fused into a 4-bit-quantized MLX base
+  (e.g. `mlx-community/<model>-4bit`), the fused model's config.json
   declares `quantization.bits = 4`. The conversion then:
     1. mlx_lm.convert --dequantize → bf16 safetensors (the -dq/ dir)
     2. convert_hf_to_gguf.py → raw GGUF
@@ -23,8 +23,8 @@ Root cause:
   The dequant step (step 1) inflates the 4-bit group statistics into bf16
   tensors whose weight distributions do NOT compress well under Q4_K_M's
   group quantization — they end up with non-uniform row magnitudes that
-  force llama.cpp into a slow sequential weight-access path. Result: 60s TTFT
-  vs the expected ~8s for a properly sourced 32B Q4_K_M GGUF.
+  force llama.cpp into a slow sequential weight-access path. Result is
+  multi-second TTFT vs the expected sub-10s for a properly sourced GGUF.
 
 WHY UNIT TESTS MISSED IT
 -------------------------
@@ -125,9 +125,9 @@ def _gguf_prefix(gguf_path: Path) -> str:
     """Strip quantization suffixes to get the base name prefix.
 
     Examples:
-      qwen3-32b-v26-polish-q4km.gguf      → qwen3-32b-v26-polish
-      qwen3-32b-v26-polish.gguf           → qwen3-32b-v26-polish
-      prism-coder-32b-q4_k_m.gguf        → prism-coder-32b
+      qwen3-32b-finetuned-q4km.gguf       → qwen3-32b-finetuned
+      qwen3-32b-finetuned.gguf            → qwen3-32b-finetuned
+      prism-coder-32b-q4_k_m.gguf         → prism-coder-32b
     """
     stem = gguf_path.stem
     # Strip known quantization suffixes (order matters — longest first)
@@ -245,12 +245,12 @@ _4bit_gguf_cases = _static_4bit_gguf_cases()
     ids=[f"{f.name}→{g.name}" for f, g in _4bit_gguf_cases],
 )
 def test_no_gguf_from_4bit_fused_source(fused_dir, gguf_path):
-    """A GGUF derived from a 4-bit-quantized MLX fused model will have 60s+ TTFT.
+    """A GGUF derived from a 4-bit-quantized MLX fused model will have high TTFT.
 
-    This is the May 2026 failure: the 32B v26-polish adapter was trained on
-    mlx-community/Qwen3-32B-4bit. After fusing, the fused model's config.json
-    declared quantization.bits=4. The dequant → Q4_K_M GGUF conversion produced
-    a model with 60s+ inference latency — unshippable.
+    Failure mode: when an adapter is fused into a 4-bit MLX base
+    (e.g. mlx-community/<model>-4bit), the fused config.json declares
+    quantization.bits=4. The dequant → Q4_K_M GGUF conversion produces a
+    model with multi-second TTFT — unshippable for production.
 
     The GGUF at {gguf_path.name} appears to be derived from {fused_dir.name}
     (shared name prefix), and {fused_dir.name}/config.json declares bits=4.

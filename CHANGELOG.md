@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [15.3.0] - 2026-05-14 — 🛡 Storage hardening + multi-region deploy + license switch
+
+> v15.2.1 was published as a stub version bump with no CHANGELOG entry. This release supersedes it and documents every commit since 15.2.0.
+
+### What's new
+
+**Three-layer storage reliability** — Synalux portal stays the paid-tier default, but `getStorage()` now falls back through synalux env vars → synalux dashboard config (`~/.prism-mcp/prism-config.db`) → direct Supabase env → direct Supabase dashboard config → local SQLite. Closes the silent-data-loss path where MCP clients (some VSCode extensions) didn't propagate `PRISM_SYNALUX_*` env vars and the server quietly demoted to local without ever picking up the dashboard credentials. Symmetric helpers `ensureSynaluxCredentials()` / `ensureSupabaseCredentials()` probe env then DB and inject into `process.env` so downstream constructors and `SyncBus` see them. (`aef54e5`, `ef7fdfd`, `c1384f5`, `2078642`, `b4c079b`)
+
+**Railway + Fly.io deployment stack** — `feat(railway)` ships `railway.toml`, `.railwayignore`, and an HTTP transport mode for the MCP server suitable for managed hosting. Fly.io standby config covers the Supabase outage scenario. (`0d56e59`, `b301b73`, `d0bfbef`, `b4c079b`)
+
+**Prism Coder 1.7B BFCL eval** — `prism-coder:1b7-v19-q8` ships at 90.0% tool-call accuracy on the public BFCL benchmark (eval methodology pinned in `tests/eval/`). Replaces the misleading "100% BFCL" claim from earlier docs with the verified internal-domain vs. public-benchmark split. (`c5db866`, `3d73b9e`, `ad440e5`)
+
+**Routing benchmark suite** — 100-case Prism routing eval covering the full model fleet (1.7B / 7B / 14B / 32B) plus Claude comparison. Includes a `nothink`-template fix for 32B and an MLX↔Ollama parity test that closed a 17-pt thinking-mode gap. 3-seed mean ± std with verified ~0% variance; per-category breakdown lives in `tests/benchmarks/prism-routing-100/README.md`. (`cc03853`, `70d6718`, `c32c83e`, `5f894ba`, `2ab3a19`, `604f4bc`, `133d27b`)
+
+**Local-to-portal migration script** — `scripts/migrate-local-to-portal.mjs` reads `~/.prism-mcp/data.db` and pushes ledger + handoff entries through `POST /api/v1/prism/memory`. Dry-run mode, project filter, JWT caching with refresh-leeway, rate-limit pacing. Uses `@libsql/client` (already a runtime dep) instead of `better-sqlite3` so it runs from a fresh checkout without an extra native build dep. The earlier bash version was dropped — its subshell counter and JWT-refresh both ran inside `| while read` pipes and silently lost updates.
+
+### Changed
+
+**License switch: BUSL-1.1 → AGPL-3.0** — `LICENSE`, `package.json`, `package-lock.json` now match the README badge and prism-aac. Commercial use moves to the Synalux subscription path for hosted/managed deployment. (`5b30807`, this release)
+
+### Fixed
+
+- `fix(ci)`: skip onnxruntime CUDA download on CI runners with no GPU (`596d8db`)
+- `fix(railway)`: `npm install` instead of `npm ci` to absorb lock-sync drift (`b301b73`); subsequent `package-lock.json` regeneration (`d0bfbef`)
+- `fix(32b)`: nothink-template fix lifts 32B routing accuracy 97% → 99% (`70d6718`)
+- `fix`: license string + Windows CI `hookTimeout` 30s → 60s (`5b30807`)
+- `fix(docs)`: ASCII diagram repairs, P0 README claims (model names, fallback cascade, eval caveats, 7B addition), infrastructure diagram cleanup (`0c6b8e3`, `cd9e011`, `5d32db9`, `d0d1d5b`, `e2301c0`, `747a7ef`)
+
+### Test coverage added
+
+- `test(eval)`: MLX↔Ollama parity test closes a 17-pt thinking-mode gap (`0c40be7`)
+- `test(conversion)`: pinned MLX-4bit → dequant → Q4_K_M GGUF regression that was producing 60s+ TTFT (`eb1bee6`)
+- `test(training)`: pre-flight validation of `train_*.sh` scripts as a $0 guardrail before paid GPU runs (`8972fd0`)
+- `test(training)`: pre-flight validation expanded — flags wrong-base lineage, known-bad corpora, and excessive iteration counts in `train_*.sh` scripts at `$0` before any GPU allocation (`66d99f2`)
+- `test(storage)`: dropped a divergent test-mirror that had been testing a frozen copy of the resolver instead of source; replaced with `tests/storage-resolver.test.ts` driving real `getStorage()` through mocked dashboard creds (`2078642`)
+
+### Docs
+
+- iOS deployment story corrected: llama.cpp Swift SPM, not CoreML (`011cbff`)
+- Local-AI security/speed/cost comparison table + install commands (`435ab13`)
+- Production infrastructure diagram with 3-layer reliability story (`e2301c0`)
+- Claude-comparison context for benchmark scores — what they mean, what they don't (`133d27b`)
+- README "honest current eval state" + retrain-regression note (`5316e8d`, `63d3d99`)
+
 ## [15.2.0] - 2026-05-10 — 🛡 Two-namespace skill architecture + Synalux dynamic content
 
 ### What's new
