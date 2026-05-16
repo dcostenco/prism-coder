@@ -43,6 +43,8 @@ import type {
   KnowledgeSearchResult,
   SemanticSearchResult,
   SpreadingActivationOptions,
+  HistorySnapshot,
+  HealthStats,
 } from "./interface.js";
 
 interface PortalResponse {
@@ -346,6 +348,69 @@ export class SynaluxStorage extends SupabaseStorage {
     const count = typeof result.count === "number" ? result.count : 0;
     const results = Array.isArray(result.results) ? result.results : [];
     return { count, results } as KnowledgeSearchResult;
+  }
+
+  // ─── Time Travel ─────────────────────────────────────────────
+  // Phase 3 Tier B: route memory_history through portal instead of
+  // falling through to SupabaseStorage (which requires a direct
+  // SUPABASE_URL that is no longer configured for paid-tier installs).
+
+  async getHistory(project: string, _userId: string, limit: number = 10): Promise<HistorySnapshot[]> {
+    const result = await this.portalPost("/api/v1/prism/memory", {
+      action: "memory_history",
+      project,
+      limit,
+    });
+    const versions = Array.isArray(result.versions) ? result.versions : [];
+    return versions.map((v: any, i: number) => ({
+      id: `${project}-v${v.version ?? i}`,
+      project,
+      user_id: _userId,
+      version: typeof v.version === "number" ? v.version : i + 1,
+      snapshot: v.snapshot ?? {},
+      branch: v.branch ?? "main",
+      created_at: v.created_at ?? new Date().toISOString(),
+    })) as HistorySnapshot[];
+  }
+
+  // ─── Health Check ─────────────────────────────────────────────
+  // Phase 3 Tier B: route health_check through portal. The portal
+  // returns summary counts only (no per-entry duplicate scan), so
+  // activeLedgerSummaries is returned empty — the hygiene handler
+  // skips duplicate detection gracefully when the array is empty.
+
+  async getHealthStats(_userId: string): Promise<HealthStats> {
+    try {
+      const result = await this.portalPost("/api/v1/prism/memory", {
+        action: "health_check",
+        project: "prism-mcp",
+      });
+      const inventory = result.inventory as Record<string, number> | undefined;
+      const totalActiveEntries = typeof inventory?.ledger_entries === "number" ? inventory.ledger_entries : 0;
+      const totalHandoffs = typeof inventory?.active_projects === "number" ? inventory.active_projects : 0;
+      return {
+        missingEmbeddings: 0,
+        activeLedgerSummaries: [],
+        orphanedHandoffs: [],
+        staleRollups: 0,
+        totalActiveEntries,
+        totalHandoffs,
+        totalRollups: 0,
+        totalCrdtMerges: 0,
+      };
+    } catch (e) {
+      debugLog("[SynaluxStorage] getHealthStats failed: " + (e instanceof Error ? e.message : String(e)));
+      return {
+        missingEmbeddings: 0,
+        activeLedgerSummaries: [],
+        orphanedHandoffs: [],
+        staleRollups: 0,
+        totalActiveEntries: 0,
+        totalHandoffs: 0,
+        totalRollups: 0,
+        totalCrdtMerges: 0,
+      };
+    }
   }
 
   /**
