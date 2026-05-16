@@ -1,11 +1,21 @@
 #!/bin/bash
-# Sync ~/.agent/skills/ into Prism MCP's settings database
-# so they're available via hivemind and auto-loaded on session_load_context
+# Sync synalux-private/skills → ~/.agent/skills → Prism DB
+# synalux-private is the single source of truth for all skills.
 
+SYNALUX_SKILLS="$HOME/synalux-private/skills"
 PRISM_DIR="$HOME/.prism-mcp"
 DB="$PRISM_DIR/prism-config.db"
 SKILLS_DIR="$HOME/.agent/skills"
 
+# Step 1: synalux → local (single source of truth)
+if [ -d "$SYNALUX_SKILLS" ]; then
+  rsync -a --delete "$SYNALUX_SKILLS/" "$SKILLS_DIR/"
+  echo "✓ Synced synalux-private/skills → ~/.agent/skills"
+else
+  echo "⚠ synalux-private/skills not found, using local skills as-is"
+fi
+
+# Step 2: local → Prism DB
 if [ ! -f "$DB" ]; then
   echo "Prism DB not found at $DB"
   exit 1
