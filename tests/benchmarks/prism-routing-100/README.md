@@ -6,19 +6,27 @@ Internal BFCL-style benchmark measuring tool-routing accuracy across Prism's 7 M
 
 ## Results — May 2026
 
-> v25 system prompt · 3 × 100 cases (seeds 2026/2027/2028) · 5 models
+> v25 system prompt · 3 × 102 cases (seeds 2027/2028/2029) · 3-seed mean
 
-| Model | Overall | Load ctx | Save | Srch mem | Handoff | Compact | Web srch | Know srch | AAC | Translate | Plain txt | No-tool | Info | Edge | Avg lat | Invented |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **Sonnet 4** (cloud) | **99%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 3.2s | 0 |
-| **14B local** | **100%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 9.0s | 0 |
-| **32B local** ² | **100%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 92% | 100% | 100% | 100% | 100% | 100% | 3.6s | 0 |
-| **Opus 4.7** (cloud) | **98%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 66% | 3.0s | 0 |
-| **1.7B local** | **96%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 100% | 64% | 6.0s | 0 |
+| Model | Overall | Load ctx | Save | Srch mem | Handoff | Compact | Know srch | AAC | Translate | No-tool | Info | Edge | Avg lat | Invented |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **prism-coder:32b** v33 | **99.0%** | 100% | 100% | 92% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 2.5s | 0 |
+| **prism-coder:8b** v35 | **98.0%** | 100% | 100% | 83% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 0.8s | 0 |
+| **prism-coder:14b** v33 | **97.1%** | 100% | 100% | 92% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 1.1s | 0 |
+| **Claude Opus 4.7** | **97.1%** | 100% | 100% | 83% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 3.0s | 0 |
+| **prism-coder:1.7b** v41 | **96.1%** | 89% | 100% | 100% | 100% | 83% | 100% | 100% | 100% | 90% | 100% | 83% | 1.6s | 0 |
 
-² 32B uses `nothink` template + surgical prompt disambiguation. See [`Modelfile.32b`](Modelfile.32b).
+**Invented tools across all models: 0** — hard constraint in system prompt holds for all model sizes.
 
-**Invented tools across all models: 0** — hard constraint in v25 system prompt holds for all model sizes.
+### 14B → 32B cascade eval
+
+→ **[Full cascade eval with Opus as etalon](../cascade-14b-32b-opus/README.md)**
+
+| | Cascade (14b→32b→Opus) | Opus-solo |
+|---|---|---|
+| Mean (3 seeds) | **99.0%** | 97.1% |
+| % traffic served locally | **99%** | 0% |
+| Opus engagement rate | **1%** | 100% |
 
 ## Category definitions
 

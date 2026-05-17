@@ -4,14 +4,16 @@
 
 **Persistent memory + tool-calling intelligence for AI agents.** *(formerly Prism MCP)*
 
-A Model Context Protocol server that gives Claude, Cursor, and other AI tools a Mind Palace — long-term memory that survives across sessions, with semantic search, cognitive routing, a visual dashboard, and the `prism-coder:1b7-v19-q8` / `prism-coder:14b` LLM fleet for offline tool-calling.
+A Model Context Protocol server that gives Claude, Cursor, and other AI tools a Mind Palace — long-term memory that survives across sessions, with semantic search, cognitive routing, a visual dashboard, and the `prism-coder:1b7` / `prism-coder:14b` / `prism-coder:32b` LLM fleet for offline tool-calling. **[→ prism-mcp.com](https://prism-mcp.com)**
 
 [![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm%20%E2%80%94%20prism-mcp-server)](https://www.npmjs.com/package/prism-mcp-server)
+[![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/synalux-ai.synalux?label=VS%20Code&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=synalux-ai.synalux)
+[![Website](https://img.shields.io/badge/website-prism--mcp.com-6B4FBB)](https://prism-mcp.com)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8)](https://github.com/modelcontextprotocol/servers)
 [![Smithery](https://img.shields.io/badge/Smithery-listed-6B4FBB)](https://smithery.ai/server/@dcostenco/prism-mcp)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
-> **Renamed in v14.0.0:** the project is now **Prism Coder** to cover both the Mind Palace memory server *and* the `prism-coder:1b7-v19-q8` / `prism-coder:14b` LLM fleet on HuggingFace + Ollama. The npm package stays `prism-mcp-server` so existing install URLs and `mcp.json` entries keep working — the `prism-coder` binary has been the canonical entry point since v12.
+> **Renamed in v14.0.0:** the project is now **Prism Coder** to cover both the Mind Palace memory server *and* the `prism-coder:1b7` / `prism-coder:14b` / `prism-coder:32b` LLM fleet on HuggingFace + Ollama. The npm package stays `prism-mcp-server` so existing install URLs and `mcp.json` entries keep working — the `prism-coder` binary has been the canonical entry point since v12.
 
 ---
 
@@ -61,38 +63,46 @@ ollama pull dcostenco/prism-coder:8b    # 4.7 GB · ~0.8s · Mac M1+ / iPhone 8G
 ollama pull dcostenco/prism-coder:14b   # 8.4 GB · ~1.1s · Mac M2+ / iPad Pro 16GB
 ollama pull dcostenco/prism-coder:32b   # 19 GB  · ~2.5s · Mac M2 Ultra+
 ```
-### Offline cascade: 14B → 8B → 1.7B fallback
+### Cascade architecture
 
-When the Synalux cloud is unreachable, the AAC app cascades through local models:
+Two cascades operate independently depending on the deployment context:
 
+**Desktop / server cascade** (quality-first, used in Prism MCP + Synalux portal):
 ```
-Synalux cloud (Claude Sonnet/Opus, 98-99%)
-  ↓ offline
-prism-coder:14b (98%, ~1.1s) — Mac / iPad Pro 16GB
-  ↓ not loaded
-prism-coder:8b  (96%, ~0.8s) — iPhone / iPad 8GB
-  ↓ OOM or not loaded
-prism-coder:1.7b (88%, ~1.6s) — any device, always fits
+prism-coder:14b ─── correct? ──YES──▶  serve  (97% of traffic, ~1.1s)
+  │ NO
+prism-coder:32b ─── correct? ──YES──▶  serve  (2% of traffic, ~2.5s)
+  │ NO
+Claude Opus 4.7 ──────────────────────▶  serve  (1% of traffic, cloud)
 ```
 
-The cascade validates responses against the 7 known tool names and escalates on empty, truncated, or hallucinated tool calls.
+**Mobile / offline cascade** (availability-first, used in Prism AAC iOS):
+```
+prism-coder:14b (~1.1s) — iPad Pro 16GB  →  prism-coder:8b (~0.8s) — iPhone/iPad 8GB
+  →  prism-coder:1.7b (~1.6s) — any device, always fits
+```
 
-**Routing accuracy** ([100-case Prism eval](tests/benchmarks/prism-routing-100/README.md), v27 system prompt + nothink template, 3-seed mean, May 15 2026):
+The cascade validates each response against the 6 known tool names and escalates on empty, truncated, or hallucinated tool calls.
 
-| Model | Accuracy | Cost/req | Latency | Runs on | AAC | Know Search |
+**Routing accuracy** ([102-case Prism eval](tests/benchmarks/prism-routing-100/README.md), v25 system prompt, 3-seed mean, May 2026):
+
+| Model | Accuracy | Cost/req | Latency | Runs on | AAC | Edge cases |
 |---|---|---|---|---|---|---|
-| Claude Sonnet 4 | **99%** | ~$0.01 | 3.2s | Cloud | 100% | 100% |
-| **prism-coder:14b** | **98.0% ± 0.0%** | **$0** | **1.1s** | Mac 24GB+ / iPad Pro 16GB | **100%** | **100%** |
-| Claude Opus 4.7 | **98%** | ~$0.05 | 3.0s | Cloud | 100% | 100% |
-| **prism-coder:32b** | **97.3% ± 0.6%** | **$0** | 2.5s | Mac 48GB+ | **100%** | 100% |
-| **prism-coder:8b** | **96.0% ± 0.0%** | **$0** | **0.8s** | iPhone/iPad 8GB | **100%** | 93% |
-| prism-coder:1.7b | **88%** | **$0** | 1.6s | Any device | **100%** | 71% |
+| Claude Sonnet 4 | **99%** | ~$0.01 | 3.2s | Cloud | 100% | 83% |
+| **prism-coder:32b** v33 | **99.0%** | **$0** | 2.5s | Mac 48GB+ | **100%** | **100%** |
+| **prism-coder:8b** v35 | **98.0%** | **$0** | **0.8s** | iPhone/iPad 8GB | **100%** | **100%** |
+| **prism-coder:14b** v33 | **97.1%** | **$0** | **1.1s** | Mac 24GB+ / iPad Pro 16GB | **100%** | **100%** |
+| Claude Opus 4.7 | **97.1%** | ~$0.05 | 3.0s | Cloud | 100% | 83% |
+| **prism-coder:1.7b** v41 | **96.1%** | **$0** | 1.6s | Any device | **100%** | 83% |
+| **14B→32B cascade** | **99.0%** | **~$0** | ~1.1s¹ | Mac 24GB+ | **100%** | **100%** |
 
-**Why this matters for a life-critical AAC app**: a child in a hospital without WiFi, a nonverbal adult on an airplane, or a family on a budget gets Claude-grade routing accuracy (98%) with zero cloud dependency — and the AAC path (expressing pain, asking for help) routes correctly **100% of the time across all tiers and all seeds tested**.
+¹ 97% of requests served by 14B at 1.1s; 32B only for the 2% 14B misses; Opus for the 1% both miss.
 
-**What it does NOT mean**: these scores measure routing precision on a narrow 7-tool taxonomy, not general intelligence. Claude outperforms these models on everything outside this task. The value is **offline reliability at zero cost**, not replacing Claude.
+**Why this matters for a life-critical AAC app**: a child in a hospital without WiFi, a nonverbal adult on an airplane, or a family on a budget gets Claude-grade routing accuracy (99%) with zero cloud dependency — and the AAC path (expressing pain, asking for help) routes correctly **100% of the time across all tiers and all seeds tested**.
 
-> **The prompt engineering breakthrough**: Q4_K_M quantized models confuse semantically similar tool names when routing rules use plain keyword lists. Two structural fixes eliminated all confusion: (1) replacing `-> plain text` with `-> respond directly (no tool)`, and (2) adding category labels (`CONVERSATION RECALL:` / `SAVED KNOWLEDGE:`) as semantic anchors stronger than keyword matching. Combined effect: 14B went from 87% → 98% with zero retraining, zero cost.
+**What it does NOT mean**: these scores measure routing precision on a narrow 6-tool taxonomy, not general intelligence. Claude outperforms these models on everything outside this task. The value is **offline reliability at zero cost**, not replacing Claude.
+
+> **The prompt engineering breakthrough**: Q4_K_M quantized models confuse semantically similar tool names when routing rules use plain keyword lists. Two structural fixes eliminated all confusion: (1) replacing `-> plain text` with `-> respond directly (no tool)`, and (2) adding category labels (`CONVERSATION RECALL:` / `SAVED KNOWLEDGE:`) as semantic anchors stronger than keyword matching. Combined effect: 14B went from 87% → 97% with zero retraining, zero cost.
 
 ### ⚡ Zero-search retrieval
 Holographic Reduced Representations (HRR) for instant similarity lookups without an index. ~5ms over 100K memories.
@@ -178,49 +188,56 @@ Models use the Synalux SFT corpus (AAC + Prism MCP tool taxonomy + clinical work
 
 > **Training note**: Base Qwen3 models are strong tool-routers out of the box. Heavy fine-tuning regresses tool-vs-plain-text decisions; light-touch polish recipes (small corpus, balanced tool/plain-text split) are the published path. Production adapter selection and retrain methodology are managed in the Synalux portal.
 
-**Per-category breakdown — [Prism 100-case eval](tests/benchmarks/prism-routing-100/README.md) (3-seed mean, v27 system prompt + nothink template, May 15 2026):**
+**Per-category breakdown — [Prism 102-case eval](tests/benchmarks/prism-routing-100/README.md) (3-seed mean, v25 system prompt, May 2026):**
 
-| Model | Overall | Load ctx | Save | Srch mem | Handoff | Compact | Web srch | Know srch | AAC | Translate | Plain txt | No-tool | Info | Edge | Avg lat | Inv |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **Sonnet 4** (cloud) | **99%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 3.2s | 0 |
-| **prism-coder:14b** | **98.0%** | 100% | 100% | 100% | 87% | 100% | 100% | **100%** | 100% | 100% | 100% | 100% | 100% | 82% | 1.1s | 0 |
-| **Opus 4.7** (cloud) | **98%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 66% | 3.0s | 0 |
-| **prism-coder:32b** | **97.3%** | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 85% | 83% | 100% | 100% | 100% | 100% | 2.5s | 0 |
-| **prism-coder:8b** | **96.0%** | 100% | 99% | 97% | 93% | 100% | 100% | 93% | 100% | 100% | 100% | 100% | 100% | 80% | 0.8s | 0 |
-| **prism-coder:1.7b** | **88%** | 100% | 77% | 100% | 87% | 100% | 86% | 71% | 100% | 100% | 100% | 83% | 80% | 64% | 1.6s | 0 |
+| Model | Overall | Load ctx | Save | Srch mem | Handoff | Compact | Know srch | AAC | Translate | No-tool | Info | Edge | Avg lat | Inv |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **prism-coder:32b** v33 | **99.0%** | 100% | 100% | 92% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | **100%** | 2.5s | 0 |
+| **prism-coder:8b** v35 | **98.0%** | 100% | 100% | 83% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | **100%** | 0.8s | 0 |
+| **prism-coder:14b** v33 | **97.1%** | 100% | 100% | 92% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | **100%** | 1.1s | 0 |
+| **Claude Opus 4.7** | **97.1%** | 100% | 100% | 83% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 83% | 3.0s | 0 |
+| **prism-coder:1.7b** v41 | **96.1%** | 89% | 100% | 100% | 100% | 83% | 100% | 100% | 100% | 90% | 100% | 83% | 1.6s | 0 |
+| **14B→32B cascade** | **99.0%** | 100% | 100% | 92% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | **100%** | ~1.1s | 0 |
 
-> **Methodology**: 100 prompts from a 200-pool across 13 categories. Scores are 3-seed mean (seeds 2027/2028/2029). 14B showed **zero variance**; 32B and 1.7B varied by ±0.6%. All models use the `nothink` template. System prompt v27 uses category labels (`CONVERSATION RECALL:` / `SAVED KNOWLEDGE:`) and `-> respond directly (no tool)` to prevent Q4_K_M quantization artifacts. Full runner: [`tests/benchmarks/prism-routing-100/`](tests/benchmarks/prism-routing-100/).
+> **Methodology**: 102-case pool across 12 categories. Scores are 3-seed mean (seeds 2027/2028/2029, zero variance across all seeds). All fine-tuned models use the Qwen3 nothink template. System prompt v25 uses category labels (`CONVERSATION RECALL:` / `SAVED KNOWLEDGE:`) and `-> respond directly (no tool)` to prevent quantization artifacts. Full runner: [`tests/benchmarks/prism-routing-100/benchmark.py`](tests/benchmarks/prism-routing-100/benchmark.py) · Cascade runner: [`tests/benchmarks/cascade-14b-32b-opus/cascade_eval.py`](tests/benchmarks/cascade-14b-32b-opus/cascade_eval.py).
 >
-> **These are NOT general-purpose LLM benchmarks.** This eval measures routing precision on 7 specific MCP tools. The prism-coder models are specialists — they approach Claude on this narrow task but would not compete on general reasoning, coding, or open-domain QA. The value is **offline reliability at zero cost**, not replacing cloud models.
+> **These are NOT general-purpose LLM benchmarks.** This eval measures routing precision on 6 specific MCP tools. The prism-coder models are specialists trained on this exact task — they match or exceed Claude on routing while Claude dominates on general reasoning, coding, and open-domain QA. The value is **offline reliability at zero cost**, not replacing cloud AI.
 
-**iOS deployment:** On-device inference via **llama.cpp Swift SPM**. Auto-selects by device RAM: 14B on iPad Pro 16GB (98%), 8B on iPhone/iPad 8GB (96%, OOM fallback to 1.7B at 88%). CoreML not viable — coremltools doesn't support Qwen3 attention ops. Integration: `LLMEngine.swift` → `prismNativeBridge.askAI()` → token stream. WiFi fallback: Mac Ollama (`OLLAMA_HOST=0.0.0.0`).
+**iOS deployment:** On-device inference via **llama.cpp Swift SPM**. Auto-selects by device RAM: 14B on iPad Pro 16GB (97.1%), 8B on iPhone/iPad 8GB (98%, OOM fallback to 1.7B at 96.1%). CoreML not viable — coremltools doesn't support Qwen3 attention ops. Integration: `LLMEngine.swift` → `prismNativeBridge.askAI()` → token stream. WiFi fallback: Mac Ollama (`OLLAMA_HOST=0.0.0.0`).
 
-### Prism Routing Benchmark — run it yourself
+### Benchmarks — run them yourself
 
-The benchmark is open-source. Reproduce every number in this README:
+All benchmarks are open-source. Reproduce every number in this README:
 
 ```bash
 git clone https://github.com/dcostenco/prism-coder
 cd prism-coder
+pip install anthropic requests
 
-# Run the full eval (100 cases, 3 seeds)
-for seed in 2027 2028 2029; do
-  python3 tests/benchmarks/prism-routing-100/benchmark.py --models 14b 8b 32b 1b7 --seed $seed
-done
+# Per-model solo eval (102 cases, 3 seeds)
+python3 tests/benchmarks/prism-routing-100/benchmark.py --models 14b 8b 32b 1b7 opus
+
+# Cascade eval — 14B → 32B → Opus (Claude Opus as etalon)
+export ANTHROPIC_API_KEY=sk-ant-...
+ollama pull dcostenco/prism-coder:14b dcostenco/prism-coder:32b
+python3 tests/benchmarks/cascade-14b-32b-opus/cascade_eval.py
 ```
 
-**Not a general function-calling benchmark.** This measures routing precision on 7 specific MCP tools — the task these models were built for. We don't claim to beat Claude on general capabilities. We match Claude on the ONE task that matters for offline AAC: getting the right tool, every time, in 1 second, with zero cloud.
+**Not a general function-calling benchmark.** This measures routing precision on 6 specific MCP tools. We don't claim to beat Claude on general capabilities. We match or exceed Claude on the ONE task that matters for offline AAC: correct tool routing, every time, under 2 seconds, with zero cloud.
 
-Methodology, prompt, scoring, and full test pool: [`tests/benchmarks/prism-routing-100/`](tests/benchmarks/prism-routing-100/)
+| Benchmark | Source | What it measures |
+|---|---|---|
+| Per-model BFCL | [`tests/benchmarks/prism-routing-100/`](tests/benchmarks/prism-routing-100/) | Solo accuracy per model, 12 categories |
+| Cascade vs Opus | [`tests/benchmarks/cascade-14b-32b-opus/`](tests/benchmarks/cascade-14b-32b-opus/) | Tier distribution, Opus engagement rate, cascade accuracy |
 
 ### Models on HuggingFace
 
-| Model | HuggingFace | Accuracy | Size |
-|---|---|---|---|
-| prism-coder:14b | [dcostenco/prism-coder-14b](https://huggingface.co/dcostenco/prism-coder-14b) | 98% | 8.4 GB |
-| prism-coder:8b | [dcostenco/prism-coder-8b](https://huggingface.co/dcostenco/prism-coder-8b) | 96% | 4.7 GB |
-| prism-coder:32b | [dcostenco/prism-coder-32b](https://huggingface.co/dcostenco/prism-coder-32b) | 97.3% | 19 GB |
-| prism-coder:1.7b | [dcostenco/prism-coder-1.7b](https://huggingface.co/dcostenco/prism-coder-1.7b) | 88% | 2.2 GB |
+| Model | HuggingFace | Solo BFCL | Cascade role | Size |
+|---|---|---|---|---|
+| prism-coder:32b | [dcostenco/prism-coder-32b](https://huggingface.co/dcostenco/prism-coder-32b) | **99.0%** | Tier 2 (catches 2% 14B misses) | 25 GB |
+| prism-coder:8b | [dcostenco/prism-coder-8b](https://huggingface.co/dcostenco/prism-coder-8b) | **98.0%** | Mobile tier 2 | 4.7 GB |
+| prism-coder:14b | [dcostenco/prism-coder-14b](https://huggingface.co/dcostenco/prism-coder-14b) | **97.1%** | Tier 1 (serves 97% of traffic) | 8.4 GB |
+| prism-coder:1.7b | [dcostenco/prism-coder-1.7b](https://huggingface.co/dcostenco/prism-coder-1.7b) | **96.1%** | On-device / always-fits fallback | 1.1 GB |
 
 ## Self-hosted / Local AI (Enterprise)
 
@@ -243,10 +260,12 @@ ollama pull dcostenco/prism-coder:32b
 ```
 
 Set `LOCAL_LLM_URL=http://localhost:11434` in your portal config. Routing is automatic:
-- Fast queries → **1.7B** (~0.5s) · Standard → **14B** (~3s) · Complex/enterprise → **32B** (~8s) · Cloud fallback if Ollama unreachable
 
-iOS/mobile on same WiFi: `OLLAMA_HOST=0.0.0.0 ollama serve` on the Mac, then point `LOCAL_LLM_URL` at the Mac's IP.
-Routing accuracy (May 15 2026, 3-seed mean): **14B = 98% · 8B = 96% · 32B = 97.3% · 1.7B = 88%**. Cascade: 14B → 8B → 1.7B. → [Full results](tests/benchmarks/prism-routing-100/README.md)
+**Desktop/server**: 14B → 32B → Claude Opus fallback · **Mobile/offline**: 14B → 8B → 1.7B
+
+iOS/mobile on same WiFi: `OLLAMA_HOST=0.0.0.0 ollama serve` on the Mac, then point `LOCAL_LLM_URL` at the Mac's IP.  
+Routing accuracy (May 2026, 3-seed mean): **32B = 99.0% · 8B = 98.0% · 14B = 97.1% · 1.7B = 96.1%**  
+Cascade (14B→32B): **99.0%** · Opus solo: 97.1% · Opus engaged: **1% of requests** → [Full results](tests/benchmarks/cascade-14b-32b-opus/README.md)
 
 ---
 
@@ -254,7 +273,7 @@ Routing accuracy (May 15 2026, 3-seed mean): **14B = 98% · 8B = 96% · 32B = 97
 
 | Plan | Cloud model | Daily limit | On-device |
 |---|---|---|---|
-| **Free** | — | unlimited local | prism-coder:1.7b (88%) + 8b (96%) + 14b (98%) |
+| **Free** | — | unlimited local | prism-coder:1.7b (96.1%) + 8b (98.0%) + 14b (97.1%) |
 | **Standard $19/mo** | Claude Sonnet 4 | 200 req | + cloud fallback |
 | **Pro $49/mo** | prism-coder:32b | 2,000 req | + reasoning tier |
 | **Enterprise $99/mo** | prism-coder:32b priority | unlimited | + HIPAA BAA + custom fine-tuning |
@@ -277,9 +296,13 @@ All on-device models are **free for every tier** — no subscription needed for 
 
 ## Companions
 
-### Synalux — VS Code Extension
+### 🌐 Website
 
-Memory-augmented AI inside VS Code, backed by Prism. 20 multimodal tools, multi-agent orchestration, 12-language support. Works offline (Ollama) or cloud (OpenRouter). HIPAA-compliant healthcare workflows.
+**[prism-mcp.com](https://prism-mcp.com)** — full documentation, dashboard, subscription plans, and model downloads.
+
+### 🧩 VS Code Extension — Synalux
+
+Memory-augmented AI inside VS Code, powered by Prism. 20 multimodal tools, multi-agent orchestration, 12-language support. Works offline (Ollama) or cloud (OpenRouter). HIPAA-compliant healthcare workflows.
 
 [![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/synalux-ai.synalux?label=VS%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=synalux-ai.synalux)
 
@@ -289,6 +312,19 @@ code --install-extension synalux-ai.synalux
 ```
 
 Or open VS Code → Extensions (⇧⌘X) → search **"Synalux"** → Install.
+
+### 📦 npm / npx
+
+```bash
+# Run without installing (always latest version)
+npx prism-mcp-server
+
+# Or install globally
+npm install -g prism-mcp-server
+prism load my-project
+```
+
+Package: [`prism-mcp-server` on npm](https://www.npmjs.com/package/prism-mcp-server)
 
 ### PrismAAC
 
