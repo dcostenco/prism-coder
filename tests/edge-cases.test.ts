@@ -49,6 +49,7 @@ import {
 import { buildVaultDirectory } from "../src/utils/vaultExporter.js";
 import { TurboQuantCompressor } from "../src/utils/turboquant.js";
 import { deepStoragePurgeHandler } from "../src/tools/hygieneHandlers.js";
+import { _setStorageForTesting } from "../src/storage/index.js";
 import { createTestDb } from "./helpers/fixtures.js";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -874,6 +875,7 @@ describe("Deep Storage — deepStoragePurgeHandler(): older_than_days = 0 guard"
   afterEach(() => {
     cleanup?.();
     cleanup = undefined;
+    _setStorageForTesting(null); // reset singleton so next test starts clean
   });
 
   it("older_than_days = 0 → returns isError=false (no purge, not an error)", async () => {
@@ -921,9 +923,14 @@ describe("Deep Storage — deepStoragePurgeHandler(): older_than_days = 0 guard"
      * WHY: The handler docs say older_than_days defaults to 30 when omitted.
      * 30 >= 7 so the storage layer MUST accept it. This test confirms the
      * default is wired correctly and doesn't accidentally produce an error.
+     *
+     * NOTE: We inject testDb.storage into the module singleton before calling
+     * the handler so it uses our ephemeral DB rather than trying to resolve
+     * a backend from env/config (which hangs in CI when no backend is set).
      */
     const testDb = await createTestDb("deep-storage-default-days");
     cleanup = testDb.cleanup;
+    _setStorageForTesting(testDb.storage);
 
     // Empty database — 0 entries eligible, but should succeed
     const result = await deepStoragePurgeHandler({

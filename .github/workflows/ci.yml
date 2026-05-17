@@ -30,9 +30,12 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm install --no-audit
+        run: npm install
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+      - name: Audit Dependencies
+        run: npm audit --audit-level=high
 
       - name: Build TypeScript
         run: npm run build

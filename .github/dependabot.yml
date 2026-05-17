@@ -1,0 +1,30 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    labels: ["dependencies", "automated"]
+    groups:
+      mcp-sdk:
+        patterns: ["@modelcontextprotocol/*"]
+      anthropic:
+        patterns: ["@anthropic-ai/*"]
+      testing:
+        patterns: ["vitest", "@vitest/*"]
+      types:
+        patterns: ["@types/*"]
+      security:
+        update-types: ["security"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "github-actions", "automated"]

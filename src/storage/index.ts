@@ -145,6 +145,11 @@ export async function closeStorage(): Promise<void> {
   }
 }
 
+/** Test-only: inject a pre-initialized storage instance into the singleton slot. */
+export function _setStorageForTesting(instance: StorageBackend | null): void {
+  storageInstance = instance;
+}
+
 export type { StorageBackend } from "./interface.js";
 export type {
   LedgerEntry,

@@ -7,6 +7,11 @@ creds.py
 .env.*
 !.env.example
 
+# Dev / internal scripts — not for public distribution
+gmail_auth_test.py
+gmail_list_latest_5.py
+REVIEW_PROMPT.md
+
 # MCP runtime config (contains API keys)
 .mcp.json
 
