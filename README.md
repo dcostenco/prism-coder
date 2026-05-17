@@ -503,10 +503,14 @@ HuggingFace: dcostenco/prism-coder-{14b,8b,32b,1.7b} (public GGUF weights)
 
 | Plan | Cloud model | Daily limit | On-device |
 |---|---|---|---|
-| Free | — | unlimited local | prism-coder:1.7b |
-| Standard $19/mo | prism-coder:14b | 200 req | + cloud |
-| Pro $49/mo | prism-coder:32b | 2,000 req | + reasoning |
-| Enterprise $99/mo | prism-coder:32b priority | unlimited | full stack |
+| **Free** | — | unlimited local | prism-coder:1.7b (96.1%) + 8b (98.0%) + 14b (97.1%) |
+| **Standard $19/mo** | Claude Sonnet 4 | 200 req | + cloud fallback |
+| **Pro $49/mo** | prism-coder:32b | 2,000 req | + reasoning tier |
+| **Enterprise $99/mo** | prism-coder:32b priority | unlimited | + HIPAA BAA + custom fine-tuning |
+
+All on-device models are **free for every tier** — no subscription needed for local inference. Offline translation (1,261 phrases × 20 languages) included in all plans.
+
+[Subscribe →](https://synalux.ai/pricing)
 
 See [`docs/WOW_FEATURES.md`](docs/WOW_FEATURES.md) for the algorithm catalogue. Release notes in [`docs/releases/v14.0.0-prism-as-foundation.md`](docs/releases/v14.0.0-prism-as-foundation.md).
 
