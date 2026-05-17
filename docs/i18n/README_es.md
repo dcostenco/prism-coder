@@ -439,8 +439,8 @@ node scripts/migrate-local-to-portal.mjs --include-scholar
 | Surface | Primary | Fallback |
 |---|---|---|
 | AI Chat `@search` | Firecrawl | — |
-| Prism MCP agents (cloud) | Firecrawl | Brave Search |
-| Prism MCP server (local) | Brave Search (via MCP tools) | — |
+| Prism MCP agents (cloud) | Firecrawl | — |
+| Prism MCP server (local) | Firecrawl (via MCP tools) | — |
 | Clinical research | PubMed + ERIC + Semantic Scholar | DuckDuckGo |
 
 **TTS (Text-to-Speech)**
