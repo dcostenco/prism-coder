@@ -885,12 +885,11 @@ describe("Deep Storage — deepStoragePurgeHandler(): older_than_days = 0 guard"
      * The handler must NOT forward 0 to the storage layer — it should
      * return a clean success response indicating nothing was purged.
      *
-     * This guards against the accidental footgun where a caller omits
-     * older_than_days entirely (defaults to 30) vs. explicitly sets 0.
+     * No DB needed: the handler short-circuits at the olderThanDays === 0
+     * guard before ever calling getStorage(). createTestDb() was previously
+     * here but caused 12+ second timeouts on Windows (native SQLite binding
+     * init) for a path that never touches storage.
      */
-    const testDb = await createTestDb("deep-storage-ttl-zero");
-    cleanup = testDb.cleanup;
-
     const result = await deepStoragePurgeHandler({
       older_than_days: 0,
       dry_run: false,
@@ -906,10 +905,8 @@ describe("Deep Storage — deepStoragePurgeHandler(): older_than_days = 0 guard"
     /**
      * WHY: Dry-run with TTL=0 must also be a clean no-op — it's a
      * preview call, so it definitely must not throw or return isError=true.
+     * No DB needed (same reason as above — handler returns before getStorage()).
      */
-    const testDb = await createTestDb("deep-storage-ttl-zero-dry");
-    cleanup = testDb.cleanup;
-
     const result = await deepStoragePurgeHandler({
       older_than_days: 0,
       dry_run: true,
