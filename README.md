@@ -90,9 +90,18 @@ prism-coder:14b (~1.1s) — iPad Pro 16GB  →  prism-coder:8b (~0.8s) — iPhon
   →  prism-coder:1.7b (~1.6s) — any device, always fits
 ```
 
-The cascade validates each response against the 6 known tool names and escalates on empty, truncated, or hallucinated tool calls.
+**Code generation cascade** (used in Prism Coder IDE + Agent Mode):
+```
+prism-ide:14b ─── quality OK? ──YES──▶  serve  (~1.1s, 22/22 TypeScript eval)
+  │ NO (complex / multi-file)
+prism-ide:32b ─── quality OK? ──YES──▶  serve  (~0.8s MoE, deep reasoning)
+  │ NO
+Claude Sonnet 4 ──────────────────────▶  serve  (cloud fallback)
+```
 
-**Routing accuracy** ([102-case Prism eval](tests/benchmarks/prism-routing-100/README.md), v25 system prompt, 3-seed mean, May 2026):
+The routing cascade validates each response against the 6 known tool names and escalates on empty, truncated, or hallucinated tool calls. The code generation cascade escalates on incomplete or syntactically invalid output.
+
+**Routing accuracy** ([102-case Prism eval](tests/benchmarks/prism-routing-100/README.md), v36/v7 system prompt, 3-seed mean, May 2026):
 
 | Model | Accuracy | Cost/req | Latency | Runs on | AAC | Edge cases |
 |---|---|---|---|---|---|---|
@@ -242,10 +251,12 @@ python3 tests/benchmarks/cascade-14b-32b-opus/cascade_eval.py
 
 | Model | HuggingFace | Solo BFCL | Cascade role | Size |
 |---|---|---|---|---|
-| prism-coder:32b | [dcostenco/prism-coder-32b](https://huggingface.co/dcostenco/prism-coder-32b) | **100.0%** (v7 MoE) | Tier 2 (catches ~1% 14B misses) | 16 GB |
-| prism-coder:8b | [dcostenco/prism-coder-8b](https://huggingface.co/dcostenco/prism-coder-8b) | **100.0%** (v36) | Mobile tier | 4.7 GB |
-| prism-coder:14b | [dcostenco/prism-coder-14b](https://huggingface.co/dcostenco/prism-coder-14b) | **100.0%** (v36) | Tier 1 (serves ~99% of traffic) | 8.4 GB |
-| prism-coder:1.7b | [dcostenco/prism-coder-1.7b](https://huggingface.co/dcostenco/prism-coder-1.7b) | **100.0%** (v42) | On-device / always-fits fallback | 1.1 GB |
+| prism-coder:32b | [dcostenco/prism-coder-32b](https://huggingface.co/dcostenco/prism-coder-32b) | **100.0%** routing (v7 MoE) | Tier 2 (catches ~1% 14B misses) | 16 GB |
+| prism-coder:8b | [dcostenco/prism-coder-8b](https://huggingface.co/dcostenco/prism-coder-8b) | **100.0%** routing (v36) | Mobile tier | 4.7 GB |
+| prism-coder:14b | [dcostenco/prism-coder-14b](https://huggingface.co/dcostenco/prism-coder-14b) | **100.0%** routing (v36) | Tier 1 (serves ~99% of traffic) | 8.4 GB |
+| prism-coder:1.7b | [dcostenco/prism-coder-1.7b](https://huggingface.co/dcostenco/prism-coder-1.7b) | **100.0%** routing (v42) | On-device / always-fits fallback | 1.1 GB |
+| prism-ide:14b | [dcostenco/prism-ide](https://huggingface.co/dcostenco/prism-ide) | **22/22** TypeScript eval (v1) | Code generation tier 1 (~1.1s) | 8.4 GB |
+| prism-ide:32b | [dcostenco/prism-ide](https://huggingface.co/dcostenco/prism-ide) | Complex code + multi-file (v3) | Code generation tier 2 (~0.8s MoE) | 16 GB |
 
 ## Self-hosted / Local AI (Enterprise)
 
