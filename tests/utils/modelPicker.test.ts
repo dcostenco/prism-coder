@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickLocalModel, MODEL_TIERS, fmtGb } from "../../src/utils/modelPicker.js";
+import { pickLocalModel, MODEL_TIERS, fmtGb, resolveOllamaName } from "../../src/utils/modelPicker.js";
 
 const GB = 1024 ** 3;
 
@@ -57,10 +57,53 @@ describe("pickLocalModel", () => {
         expect(pickLocalModel(30 * GB, undefined, available)).toBeNull();
     });
 
+    it("accepts namespaced HuggingFace-style tags (dcostenco/prism-coder:32b)", () => {
+        // README documents `ollama pull dcostenco/prism-coder:32b`, so /api/tags
+        // returns the namespaced form. The picker must accept it.
+        const available = new Set([
+            "dcostenco/prism-coder:32b",
+            "dcostenco/prism-coder:14b",
+        ]);
+        expect(pickLocalModel(30 * GB, undefined, available)?.tag).toBe("prism-coder:32b");
+        expect(pickLocalModel(15 * GB, undefined, available)?.tag).toBe("prism-coder:14b");
+    });
+
+    it("mixes bare and namespaced tags in the same `available` set", () => {
+        const available = new Set([
+            "prism-coder:14b",                  // bare
+            "dcostenco/prism-coder:8b",         // namespaced
+            "someuser/llama3:8b",               // unrelated namespaced
+        ]);
+        expect(pickLocalModel(30 * GB, undefined, available)?.tag).toBe("prism-coder:14b");
+        expect(pickLocalModel(10 * GB, undefined, available)?.tag).toBe("prism-coder:8b");
+    });
+
     it("MODEL_TIERS is ordered largest → smallest", () => {
         for (let i = 1; i < MODEL_TIERS.length; i++) {
             expect(MODEL_TIERS[i].minFreeGb).toBeLessThan(MODEL_TIERS[i - 1].minFreeGb);
         }
+    });
+});
+
+describe("resolveOllamaName", () => {
+    it("returns the bare tag when bare is installed", () => {
+        const installed = new Set(["prism-coder:32b", "prism-coder:14b"]);
+        expect(resolveOllamaName("prism-coder:32b", installed)).toBe("prism-coder:32b");
+    });
+
+    it("returns the namespaced tag when only namespaced is installed", () => {
+        const installed = new Set(["dcostenco/prism-coder:32b"]);
+        expect(resolveOllamaName("prism-coder:32b", installed)).toBe("dcostenco/prism-coder:32b");
+    });
+
+    it("prefers bare over namespaced when both are present", () => {
+        const installed = new Set(["prism-coder:32b", "dcostenco/prism-coder:32b"]);
+        expect(resolveOllamaName("prism-coder:32b", installed)).toBe("prism-coder:32b");
+    });
+
+    it("returns the input tag when nothing matches (let Ollama 404)", () => {
+        const installed = new Set(["llama3:8b"]);
+        expect(resolveOllamaName("prism-coder:32b", installed)).toBe("prism-coder:32b");
     });
 });
 

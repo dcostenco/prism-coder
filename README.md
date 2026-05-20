@@ -63,6 +63,14 @@ ollama pull dcostenco/prism-coder:8b    # 4.7 GB · ~0.8s · Mac M1+ / iPhone 8G
 ollama pull dcostenco/prism-coder:14b   # 8.4 GB · ~1.1s · Mac M2+ / iPad Pro 16GB
 ollama pull dcostenco/prism-coder:32b   # 16 GB  · ~2.5s · Mac M2 Ultra+
 ```
+
+Prism MCP detects both the namespaced (`dcostenco/prism-coder:14b`) and bare (`prism-coder:14b`) Ollama tag forms automatically — nothing else to configure. If you want the bare tags as aliases for direct `ollama run prism-coder:14b` use, run:
+
+```bash
+prism register-models           # aliases */prism-coder:* → prism-coder:* via `ollama cp`
+prism register-models --dry-run # preview what would be aliased
+```
+
 ### Cascade architecture
 
 Two cascades operate independently depending on the deployment context:

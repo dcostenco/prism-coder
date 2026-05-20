@@ -575,5 +575,76 @@ scmCmd
     }
   });
 
+// ─── prism register-models ────────────────────────────────────
+// Convenience: alias namespaced HF-style prism-coder tags
+// (`dcostenco/prism-coder:14b`) to the bare tags (`prism-coder:14b`)
+// some external tooling expects. The MCP picker handles both forms
+// natively as of v15.5, so this command is OPTIONAL — useful only
+// when a user wants to run `ollama run prism-coder:14b` directly,
+// or for tools that pre-date the picker's namespace fallback.
+
+program
+  .command('register-models')
+  .description('Alias namespaced prism-coder Ollama tags to bare tags (optional convenience)')
+  .option('-u, --url <url>', 'Ollama base URL', process.env.PRISM_LOCAL_LLM_URL || 'http://localhost:11434')
+  .option('--dry-run', 'Print what would be aliased without running ollama cp')
+  .action(async (options: { url: string; dryRun?: boolean }) => {
+    type OllamaModel = { name: string };
+    let installed: OllamaModel[] = [];
+    try {
+      const res = await fetch(`${options.url}/api/tags`, { signal: AbortSignal.timeout(3_000) });
+      if (!res.ok) {
+        console.error(`Ollama /api/tags returned HTTP ${res.status}. Is Ollama running at ${options.url}?`);
+        process.exit(1);
+      }
+      const data = (await res.json()) as { models?: OllamaModel[] };
+      installed = data.models ?? [];
+    } catch (err) {
+      console.error(`Cannot reach Ollama at ${options.url}: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+
+    const installedNames = new Set(installed.map(m => m.name));
+    const candidates = installed
+      .map(m => m.name)
+      .filter(n => /\/prism-coder:/.test(n))
+      .map(n => ({ from: n, to: n.replace(/^[^/]+\//, '') }))
+      .filter(({ to }) => !installedNames.has(to));
+
+    if (candidates.length === 0) {
+      console.log('Nothing to do — no namespaced prism-coder tags need aliasing.');
+      return;
+    }
+
+    console.log(`Found ${candidates.length} model(s) to alias:`);
+    for (const { from, to } of candidates) {
+      console.log(`  ${from}  →  ${to}`);
+    }
+
+    if (options.dryRun) {
+      console.log('\n(dry-run — no changes made)');
+      return;
+    }
+
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const exec = promisify(execFile);
+
+    let ok = 0;
+    let fail = 0;
+    for (const { from, to } of candidates) {
+      try {
+        await exec('ollama', ['cp', from, to]);
+        console.log(`  ✓ aliased ${to}`);
+        ok++;
+      } catch (err) {
+        console.error(`  ✗ ${from} → ${to}: ${err instanceof Error ? err.message : String(err)}`);
+        fail++;
+      }
+    }
+    console.log(`\nDone. Aliased ${ok}, failed ${fail}.`);
+    if (fail > 0) process.exit(1);
+  });
+
 program.parse(process.argv);
 

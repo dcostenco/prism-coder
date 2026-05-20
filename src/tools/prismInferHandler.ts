@@ -21,7 +21,7 @@
  */
 
 import { type Tool } from "@modelcontextprotocol/sdk/types.js";
-import { pickLocalModel, fmtGb, MODEL_TIERS } from "../utils/modelPicker.js";
+import { pickLocalModel, fmtGb, MODEL_TIERS, resolveOllamaName } from "../utils/modelPicker.js";
 import { getSynaluxJwt, invalidateSynaluxJwt } from "../utils/synaluxJwt.js";
 import { getAvailableMemoryBytes } from "../utils/availableMemory.js";
 import {
@@ -316,13 +316,18 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
 
         for (let i = ceilStart; i < MODEL_TIERS.length; i++) {
             const tier = MODEL_TIERS[i];
-            if (!installed.has(tier.tag)) {
+            // Accept the tier whether Ollama reports it as bare (`prism-coder:32b`)
+            // or namespaced (`dcostenco/prism-coder:32b`, the form `ollama pull`
+            // produces from a HF repo). resolveOllamaName returns the actual
+            // name Ollama knows so /api/generate finds the model.
+            const ollamaName = resolveOllamaName(tier.tag, installed);
+            if (!installed.has(ollamaName)) {
                 attempts.push({ tier: tier.tag, reason: "not_pulled" });
                 continue;
             }
             // RAM gate — but skip the check if the tier is already warm in
             // Ollama. Reused models don't reallocate weight buffers.
-            const isWarm = loaded.has(tier.tag);
+            const isWarm = loaded.has(ollamaName);
             if (!isWarm && freeBytes < tier.minFreeGb * (1024 ** 3)) {
                 attempts.push({ tier: tier.tag, reason: "ram_insufficient" });
                 continue;
@@ -330,7 +335,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             anyViable = true;
             const timeout = args.timeout_ms ?? DEFAULT_TIMEOUTS[tier.tag] ?? 60_000;
             const result = await deps.callLocal(
-                deps.ollamaUrl, tier.tag, args.prompt, args.system, maxTokens, temperature, timeout,
+                deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout,
             );
             if (result.ok) {
                 return {

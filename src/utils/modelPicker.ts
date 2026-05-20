@@ -42,12 +42,25 @@ export const MODEL_TIERS: ReadonlyArray<ModelChoice> = [
 ];
 
 /**
+ * True when `installed` matches `tierTag` either as a bare tag
+ * (`prism-coder:32b`) or as a namespaced HuggingFace-style tag
+ * (`dcostenco/prism-coder:32b`). The README documents `ollama pull
+ * dcostenco/prism-coder:32b`, so Ollama's /api/tags returns the
+ * namespaced form — without this matcher the picker would never
+ * see them and silently fall through to cloud.
+ */
+function tagMatches(installed: string, tierTag: string): boolean {
+    return installed === tierTag || installed.endsWith(`/${tierTag}`);
+}
+
+/**
  * Pick the largest viable tier for the given free RAM.
  * Returns null when no tier fits (caller should go cloud-only).
  *
  * @param freeBytes  Result of os.freemem() — binary bytes
  * @param ceiling    Optional cap (e.g. "14b" to forbid 32B even if RAM allows)
- * @param available  Optional whitelist — only consider tags in this set
+ * @param available  Optional whitelist — only consider tags in this set. Accepts
+ *                   bare (`prism-coder:32b`) or namespaced (`dcostenco/prism-coder:32b`).
  */
 export function pickLocalModel(
     freeBytes: number,
@@ -64,10 +77,30 @@ export function pickLocalModel(
     for (let i = startIdx; i < MODEL_TIERS.length; i++) {
         const tier = MODEL_TIERS[i];
         if (freeBytes < tier.minFreeGb * GB) continue;
-        if (available && !available.has(tier.tag)) continue;
+        if (available) {
+            let found = false;
+            for (const a of available) {
+                if (tagMatches(a, tier.tag)) { found = true; break; }
+            }
+            if (!found) continue;
+        }
         return tier;
     }
     return null;
+}
+
+/**
+ * Resolve a tier tag to the actual Ollama name installed locally.
+ * If `installed` contains a namespaced match (e.g. `dcostenco/prism-coder:32b`),
+ * the namespaced form is returned so Ollama's /api/generate finds it.
+ * Falls back to the bare tag when only the bare form is present.
+ */
+export function resolveOllamaName(tierTag: string, installed: ReadonlySet<string>): string {
+    if (installed.has(tierTag)) return tierTag;
+    for (const a of installed) {
+        if (a.endsWith(`/${tierTag}`)) return a;
+    }
+    return tierTag;
 }
 
 /**
