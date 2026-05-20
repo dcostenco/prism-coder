@@ -1,0 +1,38 @@
+name: Publish prism-coder
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # npm provenance via OIDC
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+      - name: Check if version already published
+        id: check
+        working-directory: packages/prism-coder
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          if npm view "prism-coder@$VER" version 2>/dev/null | grep -q "^$VER$"; then
+            echo "Already published: prism-coder@$VER — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.check.outputs.skip != 'true'
+        working-directory: packages/prism-coder
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
