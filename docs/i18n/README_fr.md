@@ -4,11 +4,11 @@
 
 **Persistent memory + tool-calling intelligence for AI agents.** *(formerly Prism MCP)*
 
-A Model Context Protocol server that gives Claude, Cursor, and other AI tools a Mind Palace — long-term memory that survives across sessions, with semantic search, cognitive routing, a visual dashboard, and the `prism-coder:1b7` / `prism-coder:8b` / `prism-coder:14b` / `prism-coder:32b` LLM fleet for offline tool-calling. **[→ prism-mcp.com](https://prism-mcp.com)**
+A Model Context Protocol server that gives Claude, Cursor, and other AI tools a Mind Palace — long-term memory that survives across sessions, with semantic search, cognitive routing, a visual dashboard, and the `prism-coder:1b7` / `prism-coder:8b` / `prism-coder:14b` / `prism-coder:32b` LLM fleet for offline tool-calling.
 
 [![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm%20%E2%80%94%20prism-mcp-server)](https://www.npmjs.com/package/prism-mcp-server)
 [![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/synalux-ai.synalux?label=VS%20Code&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=synalux-ai.synalux)
-[![Website](https://img.shields.io/badge/website-prism--mcp.com-6B4FBB)](https://prism-mcp.com)
+[![Website](https://img.shields.io/badge/website-synalux.ai%2Fprism--mcp-6B4FBB)](https://synalux.ai/prism-mcp)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8)](https://github.com/modelcontextprotocol/servers)
 [![Smithery](https://img.shields.io/badge/Smithery-listed-6B4FBB)](https://smithery.ai/server/@dcostenco/prism-mcp)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](../../LICENSE)
@@ -317,7 +317,7 @@ All on-device models are **free for every tier** — no subscription needed for 
 
 ### 🌐 Website
 
-**[prism-mcp.com](https://prism-mcp.com)** — full documentation, dashboard, subscription plans, and model downloads.
+**[synalux.ai/prism-mcp](https://synalux.ai/prism-mcp)** — full documentation, dashboard, subscription plans, and model downloads.
 
 ### 🧩 VS Code Extension — Synalux
 
