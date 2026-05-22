@@ -315,9 +315,21 @@ All on-device models are **free for every tier** — no subscription needed for 
 
 ## Companions
 
-### 🌐 Website
+### 🌐 Website & Docs
 
 **[synalux.ai/prism-mcp](https://synalux.ai/prism-mcp)** — full documentation, dashboard, subscription plans, and model downloads.
+
+### 💻 Web IDE — Synalux Coder
+
+Use Prism Coder directly in your browser — no install required. Local-first IDE with the prism-coder agent built in. Connects to GitHub repos, Synalux Mail, Drive, and Source for cross-product workflows.
+
+**[synalux.ai/coder](https://synalux.ai/coder)** · also reachable at **[synalux.ai/prism-ide](https://synalux.ai/prism-ide)**
+
+| Feature | Detail |
+|---|---|
+| Agent | prism-coder:7b offline · Claude Sonnet 4 (Standard+) · Claude Opus 4 (Enterprise) |
+| Integrations | GitHub repos, Synalux Mail, Drive, Source — same OAuth, no separate accounts |
+| Compliance | Audit log on every turn · PHI redaction · air-gapped offline mode (HIPAA) |
 
 ### 🧩 VS Code Extension — Synalux
 
