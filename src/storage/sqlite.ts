@@ -829,6 +829,17 @@ export class SqliteStorage implements StorageBackend {
   // This parser converts those into SQL WHERE clauses + args so
   // handlers work identically with both Supabase and SQLite.
 
+  // Bug 8.1: column names in WHERE clauses are interpolated directly into SQL.
+  // Values are parameterized (safe), but an unvalidated key like
+  // "1=1 OR summary" would inject arbitrary SQL into the condition.
+  // This allowlist is the same defense-in-depth pattern used in patchLedger.
+  private static readonly ALLOWED_FILTER_COLUMNS = new Set([
+    "id", "project", "user_id", "conversation_id", "summary",
+    "archived_at", "deleted_at", "is_rollup", "role", "event_type",
+    "created_at", "updated_at", "session_date", "importance", "title",
+    "agent_name", "last_accessed_at", "confidence_score", "rollup_count",
+  ]);
+
   private parsePostgRESTFilters(
     params: Record<string, string>
   ): { where: string; args: InValue[]; select: string; order: string; limit: number | null } {
@@ -882,6 +893,15 @@ export class SqliteStorage implements StorageBackend {
       if (key === "limit") {
         limit = parseInt(value, 10);
         continue;
+      }
+
+      // Bug 8.1 guard: reject any key that isn't in the known column allowlist.
+      // Prevents SQL injection via column-name interpolation.
+      if (!SqliteStorage.ALLOWED_FILTER_COLUMNS.has(key)) {
+        throw new Error(
+          `[SqliteStorage] parsePostgRESTFilters: rejected unknown filter column "${key}". ` +
+          `Allowed: ${[...SqliteStorage.ALLOWED_FILTER_COLUMNS].join(", ")}`
+        );
       }
 
       // PostgREST filter operators
