@@ -124,15 +124,23 @@ export async function knowledgeSearchHandler(args: unknown) {
 
   // Phase 1: Capture total start time for latency measurement
   const totalStart = performance.now();
-  const searchKeywords = query ? toKeywordArray(query) : [];
   const storage = await getStorage();
+
+  // NOTE: do NOT auto-derive keywords from the free-text query. The portal
+  // applies keywords as a hard .overlaps() AND-filter; deriving them from
+  // the query (via toKeywordArray) turns "BFCL" into keywords=['bfcl']
+  // which excludes every row whose keywords[] column doesn't contain
+  // 'bfcl' — even when the summary clearly matches "BFCL" via textSearch.
+  // Free-text search must rely on textSearch alone. Callers who want a
+  // keyword overlap filter should pass keywords explicitly via a future
+  // input-schema field, not via implicit extraction.
 
   // Phase 1: Capture storage-specific start time to isolate DB latency
   // from keyword extraction and other overhead
   const storageStart = performance.now();
   const data = await storage.searchKnowledge({
     project: project || null,
-    keywords: searchKeywords,
+    keywords: [],
     category: category || null,
     queryText: query || null,
     limit: Math.min(limit, 50),
