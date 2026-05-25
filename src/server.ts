@@ -136,6 +136,8 @@ import {
   SESSION_VIEW_IMAGE_TOOL,
   // ─── v2.2.0: Health Check tool definition ───
   SESSION_HEALTH_CHECK_TOOL,
+  // ─── Hygiene: embedding backfill (orphaned but handler-wired) ───
+  SESSION_BACKFILL_EMBEDDINGS_TOOL,
   // ─── Phase 2: GDPR Memory Deletion tool definition ───
   SESSION_FORGET_MEMORY_TOOL,
   // ─── Phase 2: GDPR Export tool definition ───
@@ -296,6 +298,7 @@ function buildSessionMemoryTools(autoloadList: string[]): Tool[] {
     SESSION_VIEW_IMAGE_TOOL,     // session_view_image — retrieve image from vault (v2.0)
     // ─── v2.2.0: Health Check tool ───
     SESSION_HEALTH_CHECK_TOOL,   // session_health_check — brain integrity checker (v2.2.0)
+    SESSION_BACKFILL_EMBEDDINGS_TOOL,  // session_backfill_embeddings — repair NULL embeddings (handler+route already wired)
     // ─── Phase 2: GDPR Memory Deletion tool ───
     SESSION_FORGET_MEMORY_TOOL,  // session_forget_memory — GDPR-compliant memory deletion (Phase 2)
     // ─── v3.1: TTL Retention tool ───
