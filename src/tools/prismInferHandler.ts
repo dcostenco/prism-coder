@@ -97,10 +97,10 @@ export const PRISM_INFER_TOOL: Tool = {
             verify: {
                 type: "boolean",
                 description:
-                    "Enable the L3 grounding verifier. Default false. When true, the model's draft " +
-                    "is checked by a different model (prism-coder:1b7 by default) against the " +
-                    "supplied `evidence`. Drafts with NEUTRAL or CONTRADICTED claims are refused.",
-                default: false,
+                    "Enable the L3 grounding verifier. Default: true when `evidence` is provided, " +
+                    "false otherwise. When enabled, the model's draft is checked by a different model " +
+                    "(prism-coder:1b7 by default) against the supplied `evidence`. Drafts with " +
+                    "NEUTRAL or CONTRADICTED claims are refused.",
             },
             verifier_model: {
                 type: "string",
@@ -130,8 +130,9 @@ export interface PrismInferArgs {
      *  When `verify: true`, every assertive claim in the draft must be
      *  ENTAILED by one of these snippets or the draft is refused. */
     evidence?: EvidenceSnippet[];
-    /** Enable the L3 grounding verifier. Default false — opt-in so
-     *  callers that don't need accountability don't pay the latency. */
+    /** Enable the L3 grounding verifier. Default: true when `evidence`
+     *  is provided, false otherwise. Pass `verify: false` explicitly
+     *  to skip verification even when evidence is supplied. */
     verify?: boolean;
     /** Override verifier model. Default: prism-coder:1b7. */
     verifier_model?: string;
@@ -461,7 +462,8 @@ async function applyVerification(
     deps: InferDeps,
     partial: Omit<PrismInferResult, "output" | "verification">,
 ): Promise<PrismInferResult> {
-    if (!args.verify) {
+    const shouldVerify = args.verify ?? (args.evidence !== undefined && args.evidence.length > 0);
+    if (!shouldVerify) {
         return { ...partial, output: draft };
     }
     const verifier = deps.callVerifier ?? verifyGrounding;

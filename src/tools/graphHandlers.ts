@@ -287,6 +287,17 @@ export async function knowledgeSearchHandler(args: unknown) {
     debugLog(`[knowledge_search] Graph expansion failed (non-fatal): ${graphErr instanceof Error ? graphErr.message : String(graphErr)}`);
   }
 
+  // Machine-readable evidence snippets for direct pass-through to prism_infer
+  if (data.results && Array.isArray(data.results) && (data.results as any[]).length > 0) {
+    const evidenceSnippets = (data.results as any[]).map((r: any, i: number) => ({
+      source: `knowledge_search:${r.id ?? i}`,
+      content: (r.content ?? r.summary ?? r.text ?? "").slice(0, 1000),
+    })).filter((s: any) => s.content);
+    if (evidenceSnippets.length > 0) {
+      contentBlocks.push({ type: "text", text: JSON.stringify({ evidence_snippets: evidenceSnippets }) });
+    }
+  }
+
   return { content: contentBlocks, isError: false };
 }
 
@@ -701,6 +712,17 @@ export async function sessionSearchMemoryHandler(args: unknown) {
         actrCompositeMean: actrMetrics ? mean(actrMetrics.composites) : undefined,
       });
       contentBlocks.push(traceToContentBlock(trace));
+    }
+
+    // Machine-readable evidence snippets for direct pass-through to prism_infer
+    {
+      const evidenceSnippets = results.map((r: any, i: number) => ({
+        source: `session_search_memory:${r.id ?? i}`,
+        content: (r.summary ?? "").slice(0, 1000),
+      })).filter((s: any) => s.content);
+      if (evidenceSnippets.length > 0) {
+        contentBlocks.push({ type: "text", text: JSON.stringify({ evidence_snippets: evidenceSnippets }) });
+      }
     }
 
     // ── v6.0 Phase 3: 1-Hop Graph Expansion ──────────────────
