@@ -1204,6 +1204,72 @@ export function createSandboxServer() {
  * responses to stdout. Log messages go to stderr.
  */
 export async function startServer() {
+  // Stale-dist guard. Catches the failure mode where src/ commits land but
+  // `npm run build` is skipped, so Claude Desktop runs an outdated
+  // dist/server.js (silent — tool fixes invisible in the running binary).
+  // Read-only probe; safe to run before acquireLock(). No-ops in npm
+  // installs where src/ isn't shipped alongside dist/.
+  try {
+    const { statSync, readdirSync, existsSync, readFileSync } = await import("fs");
+    const { dirname, join, basename } = await import("path");
+    const { fileURLToPath } = await import("url");
+
+    // Derive layout from package.json so we don't hardcode "src" / "server.js"
+    // / "node_modules". Falls back to sane defaults only if package.json is
+    // missing (e.g. in unusual install layouts).
+    const here = dirname(fileURLToPath(import.meta.url));
+    const repoRoot = join(here, "..");
+    let distEntry = "server.js";
+    let srcSubdir = "src";
+    const skipDirPrefixes: readonly string[] = ["."]; // dotfile dirs (.git, .cache, …)
+    const skipDirNames = new Set<string>(["node_modules"]); // npm convention
+    try {
+      const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+      if (typeof pkg.main === "string" && pkg.main.length > 0) {
+        distEntry = basename(pkg.main);
+      }
+    } catch { /* keep fallback */ }
+    try {
+      const tsconfig = JSON.parse(readFileSync(join(repoRoot, "tsconfig.json"), "utf8"));
+      const rootDir = tsconfig?.compilerOptions?.rootDir;
+      if (typeof rootDir === "string" && rootDir.length > 0) {
+        srcSubdir = rootDir.replace(/^\.\//, "");
+      }
+    } catch { /* keep fallback */ }
+
+    const distPath = join(here, distEntry);
+    const srcDir = join(repoRoot, srcSubdir);
+    if (existsSync(distPath) && existsSync(srcDir)) {
+      const distMtime = statSync(distPath).mtimeMs;
+      const walk = (d: string): number => {
+        let newest = 0;
+        for (const e of readdirSync(d, { withFileTypes: true })) {
+          if (e.isDirectory()) {
+            if (skipDirNames.has(e.name)) continue;
+            if (skipDirPrefixes.some(p => e.name.startsWith(p))) continue;
+            newest = Math.max(newest, walk(join(d, e.name)));
+          } else if (e.isFile()) {
+            newest = Math.max(newest, statSync(join(d, e.name)).mtimeMs);
+          }
+        }
+        return newest;
+      };
+      const srcMtime = walk(srcDir);
+      if (srcMtime > distMtime) {
+        const msPerDay = 24 * 60 * 60 * 1000;
+        const lagDays = Math.round((srcMtime - distMtime) / msPerDay);
+        const bar = "═".repeat(72);
+        console.error(
+          `\n${bar}\n[Prism] ⚠️  STALE DIST — ${srcSubdir}/ is ${lagDays}d newer than ${distEntry}\n` +
+          `[Prism]    Running binary may be missing fixes/tools.\n` +
+          `[Prism]    Fix: cd ${repoRoot} && npm run build, then restart Claude Desktop.\n${bar}\n`
+        );
+      }
+    }
+  } catch {
+    // Never block server boot on the freshness probe.
+  }
+
   // MUST BE FIRST: Kill any zombie processes and acquire the singleton PID lock
   // before touching SQLite. This prevents lock contention on prism-config.db.
   acquireLock();
