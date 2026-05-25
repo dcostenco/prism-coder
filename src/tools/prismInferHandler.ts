@@ -29,6 +29,7 @@ import {
     PRISM_LOCAL_LLM_URL,
 } from "../config.js";
 import { debugLog } from "../utils/logger.js";
+import { verifyGrounding, type EvidenceSnippet, type GroundingOutcome } from "../utils/groundingVerifier.js";
 
 // ─── Tool Definition ────────────────────────────────────────────
 
@@ -77,6 +78,39 @@ export const PRISM_INFER_TOOL: Tool = {
                 type: "number",
                 description: "Override per-call timeout. Default scales with model size: 32B=120s, 14B=60s, 8B=30s, 1.7B=15s.",
             },
+            evidence: {
+                type: "array",
+                description:
+                    "Optional evidence snippets the model output must be grounded in. " +
+                    "When supplied with `verify: true`, every assertive claim in the draft " +
+                    "(numbers, names, dates, codes, $ amounts) must be ENTAILED by one of " +
+                    "these snippets or the draft is refused.",
+                items: {
+                    type: "object",
+                    properties: {
+                        source: { type: "string", description: "Label for the snippet (e.g. 'tool:knowledge_search#3')." },
+                        content: { type: "string", description: "The evidence text itself." },
+                    },
+                    required: ["source", "content"],
+                },
+            },
+            verify: {
+                type: "boolean",
+                description:
+                    "Enable the L3 grounding verifier. Default false. When true, the model's draft " +
+                    "is checked by a different model (prism-coder:1b7 by default) against the " +
+                    "supplied `evidence`. Drafts with NEUTRAL or CONTRADICTED claims are refused.",
+                default: false,
+            },
+            verifier_model: {
+                type: "string",
+                description: "Override the verifier model. Default: prism-coder:1b7.",
+            },
+            verifier_timeout_ms: {
+                type: "number",
+                description: "Override the verifier hard timeout. Default 2000 ms.",
+                default: 2000,
+            },
         },
         required: ["prompt"],
     },
@@ -92,6 +126,17 @@ export interface PrismInferArgs {
     model_ceiling?: "32b" | "14b" | "8b" | "1b7";
     cloud_fallback?: boolean;
     timeout_ms?: number;
+    /** Evidence snippets the model is expected to be grounded in.
+     *  When `verify: true`, every assertive claim in the draft must be
+     *  ENTAILED by one of these snippets or the draft is refused. */
+    evidence?: EvidenceSnippet[];
+    /** Enable the L3 grounding verifier. Default false — opt-in so
+     *  callers that don't need accountability don't pay the latency. */
+    verify?: boolean;
+    /** Override verifier model. Default: prism-coder:1b7. */
+    verifier_model?: string;
+    /** Verifier hard timeout (ms). Default 2000. */
+    verifier_timeout_ms?: number;
 }
 
 export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
@@ -105,6 +150,17 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (a.timeout_ms !== undefined && typeof a.timeout_ms !== "number") return false;
     if (a.model_ceiling !== undefined &&
         !["32b", "14b", "8b", "1b7"].includes(a.model_ceiling as string)) return false;
+    if (a.verify !== undefined && typeof a.verify !== "boolean") return false;
+    if (a.verifier_model !== undefined && typeof a.verifier_model !== "string") return false;
+    if (a.verifier_timeout_ms !== undefined && typeof a.verifier_timeout_ms !== "number") return false;
+    if (a.evidence !== undefined) {
+        if (!Array.isArray(a.evidence)) return false;
+        for (const e of a.evidence) {
+            if (!e || typeof e !== "object") return false;
+            const es = e as Record<string, unknown>;
+            if (typeof es.source !== "string" || typeof es.content !== "string") return false;
+        }
+    }
     return true;
 }
 
@@ -268,6 +324,12 @@ export interface PrismInferResult {
     latency_ms: number;
     used_cloud: boolean;
     attempts: Array<{ tier: string; reason: string }>;
+    /** Populated when `verify: true` was supplied. */
+    verification?: {
+        action: GroundingOutcome["action"];
+        verifierChain: GroundingOutcome["verifierChain"];
+        refusalClaim?: string;
+    };
 }
 
 /**
@@ -281,6 +343,9 @@ export interface InferDeps {
     callLocal: typeof callOllamaGenerate;
     callCloud: typeof callSynaluxInference;
     ollamaUrl: string;
+    /** Injectable so tests can pass a passthrough verifier without
+     *  needing a live Ollama. Defaults to the real `verifyGrounding`. */
+    callVerifier?: typeof verifyGrounding;
 }
 
 export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<PrismInferResult> {
@@ -338,15 +403,14 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout,
             );
             if (result.ok) {
-                return {
-                    output: result.text,
+                return await applyVerification(result.text, args, deps, {
                     backend: `ollama-${tier.tag.replace("prism-coder:", "")}`,
                     model_picked: tier.tag,
                     ram_free_mb: ramFreeMb,
                     latency_ms: Date.now() - t0,
                     used_cloud: false,
                     attempts,
-                };
+                });
             }
             attempts.push({ tier: tier.tag, reason: result.reason });
         }
@@ -362,15 +426,14 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         const cloudTimeout = args.timeout_ms ?? 90_000;
         const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout);
         if (cloud.ok && cloud.output) {
-            return {
-                output: cloud.output,
+            return await applyVerification(cloud.output, args, deps, {
                 backend: cloud.backend ?? "synalux",
                 model_picked: null,
                 ram_free_mb: ramFreeMb,
                 latency_ms: Date.now() - t0,
                 used_cloud: true,
                 attempts,
-            };
+            });
         }
         attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
     } else {
@@ -383,6 +446,41 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     );
     (err as unknown as { attempts: typeof attempts }).attempts = attempts;
     throw err;
+}
+
+/**
+ * Wraps a successful inference result with the L3 grounding verifier
+ * when the caller opted in via `verify: true`. The verifier substitutes
+ * the model's draft with a refusal string if any claim is not entailed
+ * by the supplied evidence; we surface that as a non-null `verification`
+ * field so callers can route refusals separately from successes.
+ */
+async function applyVerification(
+    draft: string,
+    args: PrismInferArgs,
+    deps: InferDeps,
+    partial: Omit<PrismInferResult, "output" | "verification">,
+): Promise<PrismInferResult> {
+    if (!args.verify) {
+        return { ...partial, output: draft };
+    }
+    const verifier = deps.callVerifier ?? verifyGrounding;
+    const outcome = await verifier({
+        draft,
+        evidence: args.evidence ?? [],
+        verifierModel: args.verifier_model,
+        timeoutMs: args.verifier_timeout_ms,
+        ollamaUrl: deps.ollamaUrl,
+    });
+    return {
+        ...partial,
+        output: outcome.finalText,
+        verification: {
+            action: outcome.action,
+            verifierChain: outcome.verifierChain,
+            refusalClaim: outcome.refusalClaim,
+        },
+    };
 }
 
 /**
@@ -413,6 +511,7 @@ export async function prismInferHandler(args: unknown): Promise<{
             ` free_ram=${result.ram_free_mb}MB` +
             ` latency=${result.latency_ms}ms` +
             ` used_cloud=${result.used_cloud}` +
+            (result.verification ? ` verify=${result.verification.action}` : "") +
             (result.attempts.length ? ` attempts=${JSON.stringify(result.attempts)}` : "");
 
         return {

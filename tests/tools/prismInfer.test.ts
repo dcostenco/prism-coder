@@ -207,3 +207,97 @@ describe("runInfer — warm-model bypass", () => {
         expect(r.model_picked).toBe("prism-coder:14b");
     });
 });
+
+// ─── L3 verifier integration ────────────────────────────────────────────
+
+describe("runInfer — L3 grounding verifier integration", () => {
+    function verifierMock(outcome: {
+        action: "served" | "refused_fabricated" | "refused_no_evidence" | "refused_timeout";
+        finalText: string;
+        refusalClaim?: string;
+    }) {
+        return vi.fn(async () => ({
+            action: outcome.action,
+            finalText: outcome.finalText,
+            claims: [],
+            verifierChain: [{ model: "prism-coder:1b7", verdict: "ENTAILED" as const, latencyMs: 50 }],
+            refusalClaim: outcome.refusalClaim,
+        }));
+    }
+
+    it("bypasses the verifier entirely when verify is omitted (default false)", async () => {
+        const callVerifier = vi.fn();
+        const deps = makeDeps({
+            callLocal: async () => ({ ok: true as const, text: "You have 8 patients." }),
+            callVerifier: callVerifier as any,
+        });
+        const r = await runInfer(args(), deps);
+        expect(callVerifier).not.toHaveBeenCalled();
+        expect(r.output).toBe("You have 8 patients.");
+        expect(r.verification).toBeUndefined();
+    });
+
+    it("calls the verifier when verify=true and substitutes a refusal for fabricated claims", async () => {
+        const deps = makeDeps({
+            callLocal: async () => ({ ok: true as const, text: "You have 8 patients." }),
+            callVerifier: verifierMock({
+                action: "refused_fabricated",
+                finalText: 'I can\'t ground "8 patients" in the evidence provided.',
+                refusalClaim: "8 patients",
+            }) as any,
+        });
+        const r = await runInfer(args({ verify: true, evidence: [{ source: "x", content: "count: 0" }] }), deps);
+        expect(r.output).toMatch(/can't ground "8 patients"/);
+        expect(r.verification?.action).toBe("refused_fabricated");
+        expect(r.verification?.refusalClaim).toBe("8 patients");
+    });
+
+    it("serves the draft unchanged when the verifier returns served", async () => {
+        const deps = makeDeps({
+            callLocal: async () => ({ ok: true as const, text: "You have 0 patients." }),
+            callVerifier: verifierMock({ action: "served", finalText: "You have 0 patients." }) as any,
+        });
+        const r = await runInfer(args({ verify: true, evidence: [{ source: "x", content: "count: 0" }] }), deps);
+        expect(r.output).toBe("You have 0 patients.");
+        expect(r.verification?.action).toBe("served");
+    });
+
+    it("applies verification to cloud fallback output too", async () => {
+        const callVerifier = verifierMock({
+            action: "refused_fabricated",
+            finalText: 'I can\'t ground "Jane Doe".',
+            refusalClaim: "Jane Doe",
+        });
+        const deps = makeDeps({
+            listTags: async () => new Set<string>(), // no local tiers
+            callCloud: async () => ({ ok: true as const, output: "Jane Doe is your next appointment.", backend: "synalux-claude" }),
+            callVerifier: callVerifier as any,
+        });
+        const r = await runInfer(args({ verify: true, cloud_fallback: true, evidence: [{ source: "x", content: "rows: []" }] }), deps);
+        expect(r.used_cloud).toBe(true);
+        expect(r.output).toMatch(/can't ground "Jane Doe"/);
+        expect(r.verification?.action).toBe("refused_fabricated");
+    });
+
+    it("passes verifier_model + verifier_timeout_ms through to the verifier", async () => {
+        const callVerifier = vi.fn(async (opts: any) => ({
+            action: "served" as const,
+            finalText: opts.draft,
+            claims: [],
+            verifierChain: [],
+        }));
+        const deps = makeDeps({
+            callLocal: async () => ({ ok: true as const, text: "draft" }),
+            callVerifier: callVerifier as any,
+        });
+        await runInfer(args({
+            verify: true,
+            evidence: [{ source: "x", content: "y" }],
+            verifier_model: "prism-coder:8b",
+            verifier_timeout_ms: 5000,
+        }), deps);
+        const call = callVerifier.mock.calls[0][0] as any;
+        expect(call.verifierModel).toBe("prism-coder:8b");
+        expect(call.timeoutMs).toBe(5000);
+    });
+});
