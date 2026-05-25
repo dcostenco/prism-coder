@@ -341,7 +341,7 @@ export class SynaluxStorage extends SupabaseStorage {
       project: params.project ?? undefined,
       keywords: params.keywords ?? [],
       category: params.category ?? undefined,
-      queryText: params.queryText ?? undefined,
+      query: params.queryText ?? undefined,
       limit: params.limit ?? 10,
       role: params.role ?? undefined,
     });

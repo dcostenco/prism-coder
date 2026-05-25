@@ -80,7 +80,7 @@ describe("SynaluxStorage — searchKnowledge (knowledge_search action)", () => {
       project: "demo",
       keywords: ["alpha", "beta"],
       category: "debugging",
-      queryText: "regression",
+      query: "regression",
       limit: 7,
       role: "dev",
     });
@@ -99,8 +99,27 @@ describe("SynaluxStorage — searchKnowledge (knowledge_search action)", () => {
     expect(body.keywords).toEqual([]);
     expect(body.project).toBeUndefined();
     expect(body.category).toBeUndefined();
-    expect(body.queryText).toBeUndefined();
+    expect(body.query).toBeUndefined();
     expect(body.role).toBeUndefined();
+  });
+
+  // Regression: the portal expects `query`, not `queryText`. Sending the
+  // wrong field name produced HTTP 500 {status:error, error:"Failed to
+  // search knowledge"} silently — reproduced 2026-05-24 against
+  // https://synalux.ai when a free-text knowledge_search was issued.
+  // The internal storage interface keeps `queryText`; only the JSON
+  // sent on the wire must be `query`.
+  it("regression: wire payload uses `query`, never `queryText` (portal rejects queryText)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(freshJwtResp())
+      .mockResolvedValueOnce(jsonResponse(200, { status: "success", count: 0, results: [] }));
+
+    const s = new SynaluxStorage();
+    await s.searchKnowledge({ queryText: "recent project work" });
+
+    const body = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string);
+    expect(body.query).toBe("recent project work");
+    expect(body).not.toHaveProperty("queryText");
   });
 
   it("returns {count:0, results:[]} when portal omits fields", async () => {
