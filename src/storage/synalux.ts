@@ -35,6 +35,7 @@
 import { SupabaseStorage } from "./supabase.js";
 import { debugLog } from "../utils/logger.js";
 import { PRISM_SYNALUX_BASE_URL, PRISM_SYNALUX_API_KEY } from "../config.js";
+import { KnowledgeSearchRequestSchema } from "./portalContracts.js";
 import type {
   LedgerEntry,
   HandoffEntry,
@@ -336,7 +337,7 @@ export class SynaluxStorage extends SupabaseStorage {
     role?: string | null;
     [key: string]: unknown;
   }): Promise<KnowledgeSearchResult | null> {
-    const result = await this.portalPost("/api/v1/prism/memory", {
+    const wireBody = KnowledgeSearchRequestSchema.parse({
       action: "knowledge_search",
       project: params.project ?? undefined,
       keywords: params.keywords ?? [],
@@ -345,6 +346,7 @@ export class SynaluxStorage extends SupabaseStorage {
       limit: params.limit ?? 10,
       role: params.role ?? undefined,
     });
+    const result = await this.portalPost("/api/v1/prism/memory", wireBody as Record<string, unknown>);
     const count = typeof result.count === "number" ? result.count : 0;
     const results = Array.isArray(result.results) ? result.results : [];
     return { count, results } as KnowledgeSearchResult;
