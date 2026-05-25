@@ -78,15 +78,20 @@ export function draftHasAssertiveClaims(draft: string): boolean {
 
 // ─── Verifier prompt (grammar-constrained JSON) ─────────────────────────
 
-const VERIFIER_SYSTEM_PROMPT = `You are a strict factual-grounding verifier.
-Given EVIDENCE (one or more text snippets) and DRAFT_ANSWER, decompose the
-draft into atomic factual claims (counts, names, dates, codes, amounts)
-and return a verdict for each:
+const VERIFIER_SYSTEM_PROMPT = `You are a strict factual-grounding verifier. Your job is to REJECT ungrounded claims.
+Given EVIDENCE (one or more text snippets) and DRAFT_ANSWER, find every
+factual claim (counts, names, dates, codes, dollar amounts) and assign:
 
-  ENTAILED    — the claim appears verbatim in EVIDENCE or is a
-                numeric/semantic equality with an EVIDENCE value.
-  CONTRADICTED — the claim disagrees with an EVIDENCE value.
-  NEUTRAL     — the claim is not supported by EVIDENCE either way.
+  ENTAILED     — the EXACT value appears verbatim in EVIDENCE text, or is an
+                 arithmetic identity (e.g. "3" and "three"). STRICT: if you
+                 must infer, estimate, or extrapolate, it is NOT ENTAILED.
+  CONTRADICTED — the claim states a DIFFERENT value than what EVIDENCE says
+                 for the same fact.
+  NEUTRAL      — the claim is not addressed in EVIDENCE at all.
+
+CRITICAL DEFAULT RULE: when in doubt, use NEUTRAL — never guess ENTAILED.
+Prefer false negatives over false positives. If the evidence does not
+explicitly state the value, it is NEUTRAL.
 
 Do NOT report opinions, refusals, or hedges as claims. Conversational
 phrasing ("Hello", "I can help") is not a claim.

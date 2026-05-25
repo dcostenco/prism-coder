@@ -32,18 +32,42 @@ REFUSAL_PHRASE = "I don't have that information"
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
+def _messages_to_chatml(messages: list[dict]) -> str:
+    """Convert messages list to explicit ChatML string for Qwen2.5/Qwen3."""
+    parts = []
+    for m in messages:
+        parts.append(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>")
+    parts.append("<|im_start|>assistant\n")
+    return "\n".join(parts)
+
+
 def ollama_generate(url: str, model: str, messages: list[dict]) -> str:
+    # Use api/generate with explicit ChatML because 1b7 Modelfile sets
+    # TEMPLATE {{ .Prompt }} — api/chat doesn't build proper ChatML and hangs.
+    # think=False keeps Qwen3 thinking blocks minimal (empty <think></think>).
     resp = requests.post(
-        f"{url}/api/chat",
-        json={"model": model, "messages": messages, "stream": False},
+        f"{url}/api/generate",
+        json={
+            "model": model,
+            "prompt": _messages_to_chatml(messages),
+            "stream": False,
+            "options": {"think": False, "num_predict": 120,
+                        "stop": ["<|im_end|>", "<|endoftext|>"]},
+        },
         timeout=60,
     )
     resp.raise_for_status()
-    return resp.json()["message"]["content"].strip()
+    raw = resp.json()["response"].strip()
+    # Strip residual thinking block if present: <think>...</think>
+    raw = re.sub(r"<think>.*?</think>\s*", "", raw, flags=re.DOTALL).strip()
+    return raw
 
 
 def _extract_numbers(text: str) -> set[str]:
-    return set(re.findall(r"\b\d+(?:\.\d+)?\b", text))
+    # Normalize comma-formatted numbers (1,400 → 1400) before extracting so
+    # "1,400" in response matches "1400" in evidence without false hallucination.
+    normalized = re.sub(r"(\d),(\d)", r"\1\2", text)
+    return set(re.findall(r"\b\d+(?:\.\d+)?\b", normalized))
 
 
 def _extract_evidence_values(user_msg: str) -> set[str]:
@@ -64,6 +88,11 @@ def passes(response: str, expected: str, user_msg: str, subcategory: str) -> tup
         return True, "exact_match"
 
     if subcategory == "hard_negative":
+        # Some hard_negative cases have a specific expected answer (e.g. injected
+        # evidence adversarials that should still be answered from EVIDENCE).
+        # Check expected-substring match before demanding a refusal phrase.
+        if expected_lower.strip() and expected_lower.strip() in resp_lower:
+            return True, "expected_substring"
         # Must contain the refusal phrase (or a close paraphrase)
         if REFUSAL_PHRASE.lower() in resp_lower:
             return True, "refusal_present"
