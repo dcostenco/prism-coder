@@ -48,6 +48,24 @@ import type {
   HealthStats,
 } from "./interface.js";
 
+/**
+ * Resolve the knowledge_search scope without baking a policy default here.
+ * Precedence: caller-supplied value > PRISM_KNOWLEDGE_SCOPE env > undefined
+ * (lets the portal apply its own default). Unrecognised env values are
+ * ignored rather than coerced, so misconfiguration fails open to portal default.
+ */
+type KnowledgeScope = "user" | "workspace";
+function resolveKnowledgeScope(callerScope: unknown): KnowledgeScope | undefined {
+  if (callerScope === "user" || callerScope === "workspace") {
+    return callerScope;
+  }
+  const envScope = process.env.PRISM_KNOWLEDGE_SCOPE;
+  if (envScope === "user" || envScope === "workspace") {
+    return envScope;
+  }
+  return undefined;
+}
+
 interface PortalResponse {
   status: "success" | "error";
   error?: string;
@@ -345,6 +363,9 @@ export class SynaluxStorage extends SupabaseStorage {
       query: params.queryText ?? undefined,
       limit: params.limit ?? 10,
       role: params.role ?? undefined,
+      // Scope precedence: explicit caller param > PRISM_KNOWLEDGE_SCOPE env
+      // > undefined (portal decides). No hardcoded default here.
+      scope: resolveKnowledgeScope(params.scope),
     });
     const result = await this.portalPost("/api/v1/prism/memory", wireBody as Record<string, unknown>);
     const count = typeof result.count === "number" ? result.count : 0;

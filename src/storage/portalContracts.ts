@@ -31,6 +31,11 @@ export const KnowledgeSearchRequestSchema = z.object({
   query: z.string().optional(),
   limit: z.number().int().min(1).max(50).default(10),
   role: z.string().optional(),
+  /** 'user' returns only the caller's entries; 'workspace' broadens to all
+   *  workspace_members rows after server-side membership verification.
+   *  Optional with no default — the portal applies its own default (currently
+   *  'user') so this schema doesn't impose a policy on the wire format. */
+  scope: z.enum(["user", "workspace"]).optional(),
 });
 export type KnowledgeSearchRequest = z.infer<typeof KnowledgeSearchRequestSchema>;
 
