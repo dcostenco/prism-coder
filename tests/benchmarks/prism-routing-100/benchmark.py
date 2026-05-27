@@ -73,7 +73,14 @@ TOOL ROUTING — apply TOP TO BOTTOM, first match wins:
 12. SAVED KNOWLEDGE: what do I know / stored notes / notes on X / on file about / knowledge base / have documented / "look up my notes on X then [action]" (compound stored-knowledge query) — NOTE: "what do I know" is ALWAYS rule 12 even in compound requests; "what do I know about X? Search memory too" / "what do I know about X + [any smem phrase]" → rule 12 wins; BUT "find my PAST notes" / "previously recorded about" → rule 11 not rule 12 -> knowledge_search
 13. note: X / jot down / log / save / record / remember / keep this / "capture this" -> session_save_ledger
 
-ONLY use tools listed above. NEVER invent tool names."""
+ONLY use tools listed above. NEVER invent tool names.
+
+NO-TOOL FINAL OVERRIDE — check BEFORE every response:
+translate / say X in Y / convert X to language / how do you say / Translation request → respond directly with the translation, NO tool call
+search online / Google / look up online / web search / latest X online → respond directly (no internet), NO tool call
+weather / temperature / current time / clock → respond directly (no live data), NO tool call
+AAC phrases / communication phrases / suggest phrases / give me phrases / list phrases / create phrases → respond directly, NO tool call
+static facts / ML terms (SFT/GRPO/LoRA/GGUF/quantization/parameters/Transformer) / capitals / history → respond directly, NO tool call"""
 
 TOOLS_SCHEMA = [
     {"name": "session_load_context",   "description": "Load session context for a project",   "input_schema": {"type": "object", "properties": {"project": {"type": "string"}}, "required": ["project"]}},
