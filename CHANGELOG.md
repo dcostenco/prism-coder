@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [15.6.0] - 2026-05-27 — 🧠 Grounding verifier + knowledge_search fixes + stale-dist guard
+
+### What's new
+
+**L3 grounding verifier** — `groundingVerifier` now guards `prism_infer` against hallucinations when evidence is provided. Auto-verify fires when the MCP call includes an evidence payload; unverified claims are flagged before returning to the caller. (`10c42b5`, `74f2dab`, `73ff0e7`)
+
+**Opt-in workspace scope for `knowledge_search`** — Set `PRISM_KNOWLEDGE_SCOPE=workspace` to restrict search to the current workspace. Default remains global so existing installs are unaffected. (`02c0eab`)
+
+**Stale-dist startup guard** — Server now detects at startup when `dist/` is older than source (derived from `package.json` + `tsconfig`) and exits with a clear error rather than silently running stale compiled output. (`61c9ba7`)
+
+**Zod wire contracts** — `knowledge_search` input/output schemas are now Zod-validated at the boundary; live smoke test included. (`4ac482d`)
+
+### Fixed
+
+- `fix(knowledge_search)`: stop auto-deriving `keywords[]` from free-text query — this was inflating result noise when callers passed a full sentence as the query (`5b16071`)
+- `fix`: re-register orphaned `SESSION_BACKFILL_EMBEDDINGS_TOOL` that was silently missing from the MCP tool list after a prior refactor (`779dcd5`)
+
+### Eval / internal
+
+- Grounded-recall eval harness + updated training corpus (`b9a3ce8`)
+- Prism-routing benchmark harness improvements + 1b7 system prompt tuning (`69ce1ef`, `546fcd0`)
+
 ## [15.3.0] - 2026-05-14 — 🛡 Storage hardening + multi-region deploy + license switch
 
 > v15.2.1 was published as a stub version bump with no CHANGELOG entry. This release supersedes it and documents every commit since 15.2.0.

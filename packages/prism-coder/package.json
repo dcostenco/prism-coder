@@ -1,6 +1,6 @@
 {
   "name": "prism-coder",
-  "version": "15.5.0",
+  "version": "15.6.0",
   "description": "Prism Coder — Local LLM fleet + MCP cognitive memory for AI agents. Wraps prism-mcp-server with the prism-coder brand CLI. Install once, run anywhere.",
   "type": "module",
   "bin": {
@@ -12,7 +12,7 @@
     "bin"
   ],
   "dependencies": {
-    "prism-mcp-server": "^15.5.0"
+    "prism-mcp-server": "^15.6.0"
   },
   "keywords": [
     "mcp",
