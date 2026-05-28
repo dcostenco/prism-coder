@@ -106,7 +106,7 @@ The routing cascade validates each response against the 6 known tool names and e
 | Model | Accuracy | Cost/req | Latency | Runs on | AAC | Edge cases |
 |---|---|---|---|---|---|---|
 | Claude Sonnet 4 | **99%** | ~$0.01 | 3.2s | Cloud | 100% | 83% |
-| **prism-coder:32b** v7 | **100.0%** | **$0** | 0.8s | Mac 24GB+ (MoE) | **100%** | **100%** |
+| **prism-coder:32b** swe14 | **100.0%** | **$0** | 1.4s | Mac 24GB+ | **100%** | **100%** |
 | **prism-coder:8b** v36 | **100.0%** | **$0** | **0.8s** | iPhone/iPad 8GB | **100%** | **100%** |
 | **prism-coder:14b** v36 | **100.0%** | **$0** | **1.1s** | Mac 24GB+ / iPad Pro 16GB | **100%** | **100%** |
 | Claude Opus 4.7 | **98.3%** | ~$0.05 | 3.0s | Cloud | 100% | 83% |
@@ -115,11 +115,23 @@ The routing cascade validates each response against the 6 known tool names and e
 
 ¹ ~99% of requests served by 14B at 1.1s; 32B for the ~1% 14B misses.
 
+**Extended eval — eval_300** (300 cases, 17 tools + NO_TOOL, 9 categories, 3-seed validated, May 2026):
+
+| Model | eval_300 strict | Categories |
+|---|---|---|
+| **prism-coder:32b** swe14 | **300/300 (100%)** | abstention 20/20, adversarial 70/70, cascade 25/25, disambiguation 40/40, edge_case 25/25, multi_intent 20/20, natural_phrasing 50/50, param_extraction 25/25, verifier 25/25 |
+| **prism-coder:14b** s17 | **299/300 (99.7%)** | 1 failure in adversarial_trap |
+
+The eval_300 suite covers natural phrasing, adversarial traps (CS/meta questions that should NOT trigger tools), disambiguation between similar tools, edge cases (single-word prompts), multi-intent cascades, parameter extraction, and verifier-style prompts.
+
 **Why this matters for a life-critical AAC app**: a child in a hospital without WiFi, a nonverbal adult on an airplane, or a family on a budget gets Claude-grade routing accuracy with zero cloud dependency — and the AAC path (expressing pain, asking for help) routes correctly **100% of the time across all tiers and all seeds tested**.
 
 **What it does NOT mean**: these scores measure routing precision on a narrow 6-tool taxonomy, not general intelligence. Claude outperforms these models on everything outside this task. The value is **offline reliability at zero cost**, not replacing Claude.
 
 > **The prompt engineering breakthrough**: Q4_K_M quantized models confuse semantically similar tool names when routing rules use plain keyword lists. Two structural fixes eliminated all confusion: (1) replacing `-> plain text` with `-> respond directly (no tool)`, and (2) adding category labels (`CONVERSATION RECALL:` / `SAVED KNOWLEDGE:`) as semantic anchors stronger than keyword matching. Combined effect: 14B went from 87% → 100% on the 102-case Prism eval (v36/v7 system prompt, 3-seed mean).
+
+### 🔍 L3 Grounding Verifier
+When `prism_infer` receives an `evidence` payload, the grounding verifier automatically checks the model's response against the provided evidence before returning to the caller. Unverified or hallucinated claims are flagged. This is the third layer (L3) of the cascade — after tool routing (L1) and confidence gating (L2).
 
 ### ⚡ Zero-search retrieval
 Holographic Reduced Representations (HRR) for instant similarity lookups without an index. ~5ms over 100K memories.

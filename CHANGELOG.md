@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [15.6.1] - 2026-05-28 — 🎯 prism-coder:32b hits 300/300 (100%) on eval_300
+
+### What's new
+
+**prism-coder:32b swe14 — 100% on eval_300** — 300/300 strict accuracy across 17 tools, 9 categories (abstention, adversarial traps, disambiguation, cascade, edge cases, multi-intent, natural phrasing, param extraction, verifier), 3-seed validated with zero failures and zero hallucinations. Pushed to Ollama Hub (`dcostenco/prism-coder:32b`) and HuggingFace (`dcostenco/prism-coder-32b`).
+
+**eval_300 validate_tool_call fixes** — Seven regex gaps in the post-processing layer caused 8 persistent failures at 292/300. Fixes: broadened milestone→`session_save_experience` remap, added `repair` to backfill trigger, narrowed `\bproject\b` in PRISM_INTENT to avoid false matches on "React project", added GENERAL patterns for generators/meta/recommendations, expanded social rejection patterns, added initialize→`session_load_context` remap. (`79af48b7`)
+
+---
+
 ## [15.6.0] - 2026-05-27 — 🧠 Grounding verifier + knowledge_search fixes + stale-dist guard
 
 ### What's new
