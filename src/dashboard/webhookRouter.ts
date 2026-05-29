@@ -26,6 +26,31 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
 const PRISM_INGEST_API_KEY = process.env.PRISM_INGEST_API_KEY || "";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
+// ─── Rate Limiting (in-memory, per-IP) ─────────────────────────
+
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 10;
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  entry.count++;
+  return entry.count <= RATE_LIMIT_MAX;
+}
+
+// Cleanup stale entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimitMap) {
+    if (now > entry.resetAt) rateLimitMap.delete(ip);
+  }
+}, 300_000);
+
 // ─── Signature Verification ────────────────────────────────────
 
 function verifySignature(payload: string, signature: string | undefined): boolean {
@@ -144,6 +169,12 @@ export async function handleWebhookRequest(
 
   // ── GitHub Webhook ─────────────────────────────────────────
   if (pathname === "/api/github/webhook" && req.method === "POST") {
+    const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
+    if (!checkRateLimit(`wh:${ip}`)) {
+      res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "60" });
+      res.end(JSON.stringify({ error: "Rate limit exceeded" }));
+      return true;
+    }
     try {
       const body = await readBody(req);
       const signature = req.headers["x-hub-signature-256"] as string | undefined;
@@ -180,6 +211,12 @@ export async function handleWebhookRequest(
 
   // ── Generic Ingest API (open interface) ────────────────────
   if (pathname === "/api/v1/prism/ingest" && req.method === "POST") {
+    const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
+    if (!checkRateLimit(`ingest:${ip}`)) {
+      res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "60" });
+      res.end(JSON.stringify({ error: "Rate limit exceeded" }));
+      return true;
+    }
     try {
       const auth = req.headers["authorization"] || "";
       if (!verifyIngestAuth(auth)) {
