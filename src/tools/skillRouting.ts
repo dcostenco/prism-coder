@@ -56,7 +56,7 @@ let inflight: Promise<SkillRoutingTable> | null = null;
 
 async function fetchOnce(): Promise<SkillRoutingTable> {
   try {
-    const res = await fetch(`${SYNALUX_BASE}/api/v1/skills/routing`, {
+    const res = await fetch(`${SYNALUX_BASE}/.well-known/prism/skills-routing.json`, {
       headers: { Accept: 'application/json' },
       // Routing is on every session_load_context, must not block long.
       signal: AbortSignal.timeout(2_500),
