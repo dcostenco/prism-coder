@@ -225,15 +225,174 @@ const MAX_INJECT_CHARS = 25_000;  // compactionHandler.ts:81 — same prompt-bud
 
 ---
 
-## 7. The recipe: combining all of the above
+## 7. HRR zero-search retrieval
 
-The audit hooks framework at `~/.agent/skills/hooks/` is the canonical example. Its design:
+**Where:** [`synalux-private/portal/src/lib/hrr/`](https://github.com/dcostenco/synalux-private/tree/main/portal/src/lib/hrr) (engine) + [`packages/hrr-wasm/`](https://github.com/dcostenco/synalux-private/tree/main/packages/hrr-wasm) (Rust WASM)
+**Stable since:** v16.0.0
 
-1. **Postflight** harvests outcomes from session transcripts → stores `Experience(level, gotchas, fingerprint)` rows.
-2. **Pre-execution gate** queries the corpus by fingerprint, applies `MIN_SAMPLES=5` cold-start gate (#3), then `synthesis_failure_warning > 0.20` ratio (#4), then ACT-R decay on each gotcha (#1, lesson rate `d=0.25`), then `PRISM_GRAPH_PRUNE_MIN_STRENGTH=0.15` cutoff (#5).
-3. **Score blend** uses the spreading-activation hybridScore coefficients (#2): 0.7 × user_text_signal + 0.3 × graph_signal.
-4. **Output budget** caps clarification context at 25KB (#6).
-5. **Tier escalation** maps the cited ratios (#4) onto turn-counts.
+Holographic Reduced Representations encode key-value pairs into a single fixed-size vector via circular convolution. Retrieval is a mathematical unbind — no index, no database, no network. ~0.2ms per probe.
+
+### Equations
+
+```
+Encode:  hologram += FFT⁻¹(FFT(key) ⊙ FFT(value))
+Probe:   result   = FFT⁻¹(FFT(hologram) ⊙ conj(FFT(query)))
+Cleanup: argmax cosine_similarity(result, known_concepts)
+```
+
+Based on Tony Plate's HRR (1995). The WASM implementation uses `rustfft` for O(n log n) convolution.
+
+### Constants (cited)
+
+| Constant | Value | Source | What it controls |
+|---|---|---|---|
+| `DIM` | 1024 | hrrContext.ts:17, engine.ts:106 | Holographic vector dimension. Capacity ≈ √dim ≈ 32 concepts before interference. |
+| `MAX_CONCEPTS` | 10,000 | engine.ts:149 | LRU eviction threshold for concept→summary map. |
+| `MIN_PHRASE_WORDS` | 2 | hrrContext.ts:18 | Single-word phrases skip n-gram encoding (no bigram signal). |
+| `MAX_PHRASE_LEN` | 500 | hrrContext.ts:19 | Input length cap for AAC phrase encoding. |
+| `SAVE_DEBOUNCE_MS` | 5,000 | engine.ts:22, hrrContext.ts:190 | Persistence debounce (localStorage / Supabase). |
+| `confidenceThreshold` | 0.15 | types.ts:16 | Minimum similarity for HRR to short-circuit FTS5 fallback. |
+
+### Retrieval cascade
+
+HRR is Tier 0 in a 3-tier cascade:
+
+```
+Query → HRR probe (~0.2ms)
+         ├─ confidence > 0.15 → return (skip tiers 1-2)
+         └─ confidence < 0.15 → fall through
+       → FTS5 keyword search (~50ms)
+       → Supabase vector search (~200ms)
+```
+
+### Embedding strategies
+
+The adaptive strategy picker (adaptive.ts) selects the best embedding for HRR encoding:
+
+| Strategy | When | Accuracy | Latency | Source |
+|---|---|---|---|---|
+| GloVe (50K words, 50-dim) | Offline, model loaded | 87% Top-1 | ~0.2ms | embeddings.ts:loadGlove |
+| API (Gemini/Voyage pre-computed) | Online, embedding available | 90%+ | 0ms | embeddings.ts:apiEmbeddingToHrr |
+| NeurIPS 2021 projection | Always (additive, stacks on top) | +20% boost | +0.05ms | embeddings.ts:neuripsProjection |
+| Hash fallback | No GloVe, no API | ~30% | ~0.1ms | embeddings.ts:hashEmbed |
+
+### AAC n-gram encoding
+
+For word prediction, spoken phrases are encoded as bigrams + trigrams:
+
+```
+Phrase: "I want water"
+→ phrase:  "I want water" → "I want water"
+→ bigram:  "w:i"          → "want"
+→ bigram:  "w:want"       → "water"
+→ trigram: "w:i want"     → "water"
+```
+
+Probe returns the concept KEY; use `get_summary(key)` to retrieve the actual next word.
+
+### Benchmark (10 scenarios, 69 tests)
+
+| Scenario | Baseline Top-1 | +HRR Top-1 | MRR Lift |
+|---|---|---|---|
+| Core AAC phrases (1×) | 36.7% | 46.7% | +6.0% |
+| Personal vocabulary (3×) | 70.4% | 81.5% | +9.2% |
+| Mixed (all phrases) | 47.2% | 56.9% | +5.7% |
+
+Top-1 = correct word is the first tile. MRR = Mean Reciprocal Rank. Zero Top-5 regressions across all scenarios. HRR inserts max 1 suggestion at tile slot 1 (never displaces slot 0 / emergency vocabulary).
+
+### Cascade latency benchmark (15 queries, 8 tests)
+
+| Metric | Without HRR | With HRR | Impact |
+|---|---|---|---|
+| Precision | 68.2% | 68.6% | +0.6% |
+| Avg Latency | 46.7ms | 29.2ms | **-37.5%** |
+| False Positive Rate | — | 0.0% | Zero false positives |
+| HRR Hit Rate | — | 35.0% | 35% of results from Tier 0 |
+
+### Safety hardening (28 fixes across 4 sweeps)
+
+- Init mutex (promise lock, retry on WASM failure)
+- Corruption detection (validate dimension, NaN, Infinity)
+- LRU eviction (delete-then-set for correct Map iteration order)
+- Rate limiting (60 req/min per user)
+- Input validation (type + length on all API inputs)
+- Sanitization (HTML entities stripped from system prompt injection)
+- Emergency vocab preservation (HRR at slot 1, never slot 0)
+- Cross-language filter (isAllowedInLang on HRR word suggestions)
+- Offline resilience (WASM failure → graceful degradation, iOS 1.5s race timeout)
+- iPadOS persistence (visibilitychange + beforeunload flush)
+- Production logging (errors always log, HRR_DEBUG for verbose)
+- Mock/WASM parity (probe returns keys, get_summary for values)
+
+### Reuse pattern
+
+```typescript
+// Encode a concept
+import { hrrEncode } from '@/lib/hrr';
+hrrEncode('patient prefers mornings', 'scheduling preference noted during intake');
+
+// Probe (synchronous, ~0.2ms)
+import { hrrProbe, hrrGetSummary } from '@/lib/hrr';
+const results = hrrProbe('when does the patient prefer', 5);
+results.forEach(r => console.log(hrrGetSummary(r.concept), r.similarity));
+
+// REST API (browser/iOS)
+POST /api/v1/hrr { action: "encode", concept: "...", summary: "..." }
+POST /api/v1/hrr { action: "probe", query: "...", top_k: 5 }
+GET  /api/v1/hrr → { ready, count, strategies, dimension }
+```
+
+### WASM binary
+
+229KB, built from Rust with `wasm-pack`. Package: `synalux-hrr` (npm). Dependencies: `wasm-bindgen`, `rustfft`, `serde`.
+
+---
+
+## 8. Embedding LRU cache with in-flight deduplication
+
+**Where:** [`src/utils/llm/adapters/gemini.ts`](../src/utils/llm/adapters/gemini.ts), [`src/utils/llm/adapters/openai.ts`](../src/utils/llm/adapters/openai.ts)
+**Stable since:** v16.0.0
+
+Caches embedding API responses in a 256-entry LRU Map with 5-minute TTL. Concurrent requests for the same text await the same in-flight promise instead of making duplicate API calls.
+
+### Constants
+
+| Constant | Value | Source | What it controls |
+|---|---|---|---|
+| `EMBED_CACHE_MAX` | 256 | gemini.ts:102, openai.ts:128 | Maximum cache entries before LRU eviction. |
+| `EMBED_CACHE_TTL_MS` | 300,000 | gemini.ts:103, openai.ts:129 | Cache entry lifetime (5 minutes). |
+
+### Cache key format
+
+```
+{model}|{text.substring(0, 500)}|L{text.length}
+```
+
+Model name is included (OpenAI) to prevent cross-model collisions when users switch embedding models mid-session. Length suffix prevents collisions on texts with identical 500-char prefixes.
+
+### LRU behavior
+
+- **On write**: delete-then-set moves key to Map tail (correct eviction order)
+- **On read**: same delete-then-set promotes recently-accessed entries
+- **Eviction**: `Map.keys().next().value` targets the true LRU entry
+
+### Impact
+
+Saves 50-2000ms per cache hit on embedding generation (Gemini API latency varies by load).
+
+---
+
+## 9. The recipe: combining all of the above
+
+The audit hooks framework at `~/.agent/skills/hooks/` is the canonical example. Its design (now with HRR as Tier 0):
+
+1. **HRR pre-filter** (#7) probes the hologram in ~0.2ms. If confidence > 0.15, short-circuits FTS5/vector search entirely.
+2. **Postflight** harvests outcomes from session transcripts → stores `Experience(level, gotchas, fingerprint)` rows.
+3. **Pre-execution gate** queries the corpus by fingerprint, applies `MIN_SAMPLES=5` cold-start gate (#3), then `synthesis_failure_warning > 0.20` ratio (#4), then ACT-R decay on each gotcha (#1, lesson rate `d=0.25`), then `PRISM_GRAPH_PRUNE_MIN_STRENGTH=0.15` cutoff (#5).
+4. **Score blend** uses the spreading-activation hybridScore coefficients (#2): 0.7 × user_text_signal + 0.3 × graph_signal.
+5. **Output budget** caps clarification context at 25KB (#6).
+6. **Tier escalation** maps the cited ratios (#4) onto turn-counts.
+7. **Embedding cache** (#8) deduplicates concurrent embedding requests and caches results for 5 minutes.
 
 Every threshold cited. No magic constants. Behavior changes when Prism's CHANGELOG announces them, with deprecation cycles.
 
