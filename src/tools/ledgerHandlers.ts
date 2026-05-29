@@ -190,6 +190,7 @@ export async function sessionSaveLedgerHandler(args: unknown) {
     role: effectiveRole,  // v3.0: Hivemind role scoping (dashboard fallback)
   });
 
+
   // ─── Fire-and-forget embedding generation ───
   if (result) {
     const embeddingText = [summary, ...(decisions || [])].join("\n");

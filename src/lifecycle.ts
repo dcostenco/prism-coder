@@ -208,6 +208,7 @@ export function registerShutdownHandlers() {
 
       const storage = await getStorage();
 
+
       // 1. Flush pending SDM matrices to disk
       try {
         const { getAllActiveSdmProjects, getSdmEngine } = await import("./sdm/sdmEngine.js");

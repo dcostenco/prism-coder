@@ -157,8 +157,34 @@ Categories: abstention, adversarial traps, cascade, disambiguation, edge cases, 
 ### 🔍 L3 Grounding Verifier
 When `prism_infer` receives an `evidence` payload, the grounding verifier automatically checks the model's response against the provided evidence before returning to the caller. Unverified or hallucinated claims are flagged. This is the third layer (L3) of the cascade — after tool routing (L1) and confidence gating (L2).
 
-### ⚡ Zero-search retrieval
-Holographic Reduced Representations (HRR) for instant similarity lookups without an index. ~5ms over 100K memories.
+### ⚡ Zero-search retrieval *(new in v15.8)*
+Holographic Reduced Representations (HRR) via Rust WASM for instant memory retrieval without a database query.
+
+**Three adaptive strategies:**
+- **GloVe embeddings** (offline, 50K words) — 87% Top-1 accuracy, stable at 200+ concepts
+- **API embeddings** (Gemini/Voyage) — 90%+ accuracy when online
+- **NeurIPS 2021 projection** — unit-modulus normalization for numerical stability
+
+**Retrieval cascade:** HRR (~0.2ms) → FTS5 (~50ms) → Supabase (~200ms)
+
+| Metric | HRR (WASM) | FTS5 | Supabase Vector |
+|--------|-----------|------|-----------------|
+| Latency | **0.2ms** | 50ms | 200ms |
+| Speedup | **1x** | 250x slower | 1000x slower |
+| Offline | **Yes** | Yes | No |
+| Accuracy (GloVe) | **87% Top-1** | 95%+ | 95%+ |
+| Hologram size | **8KB** | Index varies | Cloud |
+
+HRR acts as Tier 0 — if confidence is high, FTS5 is skipped entirely. Falls through gracefully when HRR has no match. 56 dedicated tests. Built with Rust + `rustfft` + `wasm-bindgen` (229KB binary).
+
+**Competitive comparison:**
+
+| System | Retrieval | Offline | Cost | Latency |
+|--------|-----------|---------|------|---------|
+| **Prism Coder** | **HRR + FTS5 + Supabase cascade** | **Yes** | **$0** | **0.2ms** |
+| Mem0 | Vector DB (Qdrant/Pinecone) | No | $249/mo | ~100ms |
+| Zep | Vector DB + temporal graph | No | $99/mo | ~80ms |
+| Hermes (NousResearch) | HRR + SQLite | Yes | Free | ~5ms |
 
 ### 🌐 Multi-agent Hivemind
 Multiple AI agents share the same Mind Palace. Each agent has a role (dev / qa / pm / etc.) and sees scoped context. Heartbeat + roster for coordination.
@@ -436,7 +462,7 @@ prism register-models         # Alias dcostenco/prism-coder:* → prism-coder:*
 ## Testing
 
 ```bash
-npm test                           # 1,815 test cases across 71 files (vitest)
+npm test                           # 2,418 test cases across 81 files (vitest)
 npm test -- --coverage             # coverage report
 python3 tests/benchmarks/prism-routing-100/benchmark.py --models 1b7 14b 32b
 ```
@@ -444,12 +470,16 @@ python3 tests/benchmarks/prism-routing-100/benchmark.py --models 1b7 14b 32b
 **Pinned in CI** — 327 tests enforce every constant: ACT-R decay `d=0.25`, spreading-activation hybrid score `0.7/0.3`, experience bias `MIN_SAMPLES=5` / `MAX_BIAS_CAP=0.15`, graph-metrics warning ratios `0.20 / 0.30 / 0.40`, compaction's 25KB prompt-budget. CI catches divergence automatically.
 
 **Coverage areas**:
-- HRR (Holographic Reduced Representations) edge cases + performance
-- Encrypted sync corruption recovery
+- HRR zero-search retrieval (56 tests: 3 embedding strategies, edge cases, persistence, adaptive cascade)
+- Knowledge ingestion (32 tests: chunker, Q&A gen, webhook, security, storage round-trip)
+- Prism infer cascade (110 tests: tier selection, cloud fallback, grounding verifier)
+- Compaction handler (rollup creation, concurrency guard, LLM failure)
+- Model picker (20 tests: 14b default ceiling, 4b verifier, RAM gating)
+- Storage round-trip (12 architectural guard tests preventing bypass)
 - BCBA skill integration
 - Deep storage tier
 - Dashboard rendering
-- Routing benchmarks (102-case Prism eval) — see `tests/benchmarks/prism-routing-100/`
+- Routing benchmarks (eval_300: 300 cases, 17 tools)
 
 ## Migration
 

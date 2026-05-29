@@ -79,7 +79,7 @@ export const RULE7_VSCODE = [
 // ─── Assemblers ─────────────────────────────────────────────────
 
 /** Assemble the full ABA protocol for Cloud Portal */
-export function buildCloudPrompt(toolsSection: string): string {
+function _unused_buildCloudPrompt(toolsSection: string): string {
   return [
     toolsSection,
     '',
@@ -120,7 +120,7 @@ export function sanitizeUserInput(text: string): string {
 }
 
 /** Wrap user input in <user_input> tags after sanitization */
-export function wrapUserInput(text: string): string {
+function _unused_wrapUserInput(text: string): string {
   const safe = sanitizeUserInput(text);
   return `<user_input>\n${safe}\n</user_input>`;
 }

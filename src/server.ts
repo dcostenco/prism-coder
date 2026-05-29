@@ -1421,6 +1421,7 @@ export async function startServer() {
     }
   }
 
+
   // ─── v2.0 Step 6: Initialize SyncBus (Telepathy) ───
   // Fire-and-forget — SyncBus is non-critical for startup.
   // Awaiting getSyncBus() + startListening() could block the event loop

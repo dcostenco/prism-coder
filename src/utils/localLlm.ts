@@ -268,7 +268,7 @@ export async function callLocalLlm(
  *
  * @returns true if Ollama responds to /api/tags within 3 seconds.
  */
-export async function isLocalLlmAvailable(): Promise<boolean> {
+async function _unused_isLocalLlmAvailable(): Promise<boolean> {
   if (!PRISM_LOCAL_LLM_ENABLED) return false;
 
   try {

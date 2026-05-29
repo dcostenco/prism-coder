@@ -78,7 +78,7 @@ function estimateTokens(text: string): number {
  * Call this from server.ts after each tool handler completes.
  * Uses a write buffer to avoid per-call SQLite overhead.
  */
-export function recordInvocation(
+function _unused_recordInvocation(
     tool: string,
     project: string,
     args: unknown,

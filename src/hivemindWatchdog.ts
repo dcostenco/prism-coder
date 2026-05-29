@@ -105,7 +105,7 @@ export function drainAlerts(project: string): WatchdogAlert[] {
 /**
  * Get count of pending alerts (for testing/debugging).
  */
-export function getPendingAlertCount(): number {
+function _unused_getPendingAlertCount(): number {
   return pendingAlerts.size;
 }
 

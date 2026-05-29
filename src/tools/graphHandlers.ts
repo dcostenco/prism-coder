@@ -122,6 +122,7 @@ export async function knowledgeSearchHandler(args: unknown) {
 
   debugLog(`[knowledge_search] Searching: project=${project || "all"}, query="${query || ""}", category=${category || "any"}, limit=${limit}`);
 
+
   // Phase 1: Capture total start time for latency measurement
   const totalStart = performance.now();
   const storage = await getStorage();
