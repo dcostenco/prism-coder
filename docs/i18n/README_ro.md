@@ -124,47 +124,35 @@ Three entry points:
 
 See [KNOWLEDGE_INGESTION.md](../KNOWLEDGE_INGESTION.md) for full setup guide.
 
-### Cost comparison
+### Routing accuracy
 
-Benchmark: 19 queries (routing + code knowledge + clinical), May 2026:
+**Head-to-head: prism-coder:14b vs Claude Opus** (25-case benchmark, production system prompt, May 2026):
 
-| Architecture | Routing | Code Knowledge | Clinical | Annual Cost (1K/day) |
-|---|---|---|---|---|
-| **Prism cascade** (14b→RAG→Sonnet) | 100% (local) | RAG-powered | Sonnet | **~$330/yr** |
-| Claude Opus for everything | ~30% (no tools) | Training data | Opus | ~$10,600/yr |
-
-**84% cost savings.** Routing is free and 100% accurate. Cloud only for the 20% of queries that need deep reasoning.
-
-The routing cascade validates each response against the known tool names and escalates on empty, truncated, or hallucinated tool calls.
-
-**Routing accuracy** ([102-case Prism eval](../../tests/benchmarks/prism-routing-100/README.md), v36/v7 system prompt, 3-seed mean, May 2026):
-
-| Model | Accuracy | Cost/req | Latency | Runs on | AAC | Edge cases |
-|---|---|---|---|---|---|---|
-| Claude Sonnet 4 | **99%** | ~$0.01 | 3.2s | Cloud | 100% | 83% |
-| **prism-coder:32b** swe14 | **100.0%** | **$0** | 1.4s | Mac 24GB+ | **100%** | **100%** |
-| **prism-coder:8b** v36 | **100.0%** | **$0** | **0.8s** | iPhone/iPad 8GB | **100%** | **100%** |
-| **prism-coder:14b** v36 | **100.0%** | **$0** | **1.1s** | Mac 24GB+ / iPad Pro 16GB | **100%** | **100%** |
-| Claude Opus 4.7 | **98.3%** | ~$0.05 | 3.0s | Cloud | 100% | 83% |
-| **prism-coder:1.7b** v42 | **100.0%** | **$0** | 1.6s | Any device | **100%** | **100%** |
-| **14B→32B cascade** | **100.0%** | **~$0** | ~1.1s¹ | Mac 24GB+ | **100%** | **100%** |
-
-¹ ~99% of requests served by 14B at 1.1s; 32B for the ~1% 14B misses.
-
-**Extended eval — eval_300** (300 cases, 17 tools + NO_TOOL, 9 categories, 3-seed validated, May 2026):
-
-| Model | eval_300 strict | Categories |
+| Metric | prism-coder:14b | Claude Opus 4 |
 |---|---|---|
-| **prism-coder:32b** swe14 | **300/300 (100%)** | abstention 20/20, adversarial 70/70, cascade 25/25, disambiguation 40/40, edge_case 25/25, multi_intent 20/20, natural_phrasing 50/50, param_extraction 25/25, verifier 25/25 |
-| **prism-coder:14b** s17 | **299/300 (99.7%)** | 1 failure in adversarial_trap |
+| **Overall accuracy** | **96% (24/25)** | 88% (22/25) |
+| **Tool routing** (15 tests) | **93% (14/15)** | 80% (12/15) |
+| **Abstention** (10 tests) | **100% (10/10)** | **100% (10/10)** |
+| **Avg latency** | **0.8s** | 5.5s |
+| **Cost per query** | **$0** | ~$0.017 |
+| **Annual @ 1K/day** | **$0** | ~$6,100 |
 
-The eval_300 suite covers natural phrasing, adversarial traps (CS/meta questions that should NOT trigger tools), disambiguation between similar tools, edge cases (single-word prompts), multi-intent cascades, parameter extraction, and verifier-style prompts.
+prism-coder:14b beats Opus on tool routing — 7x faster, free, runs offline.
 
-**Why this matters for a life-critical AAC app**: a child in a hospital without WiFi, a nonverbal adult on an airplane, or a family on a budget gets Claude-grade routing accuracy with zero cloud dependency — and the AAC path (expressing pain, asking for help) routes correctly **100% of the time across all tiers and all seeds tested**.
+**eval_300** (300 cases, 17 tools + NO_TOOL, 9 categories, 3-seed validated):
 
-**What it does NOT mean**: these scores measure routing precision on a narrow 6-tool taxonomy, not general intelligence. Claude outperforms these models on everything outside this task. The value is **offline reliability at zero cost**, not replacing Claude.
+| Model | eval_300 strict | Size | Latency |
+|---|---|---|---|
+| **prism-coder:32b** | **300/300 (100%)** | 19 GB | ~1.4s |
+| **prism-coder:14b** | **299/300 (99.7%)** | 9 GB | ~0.8s |
+| **prism-coder:4b** | **300/300 (100%)** | 2.5 GB | ~0.5s |
+| **prism-coder:1.7b** | **300/300 (100%)** | 2.2 GB | ~1.6s |
 
-> **The prompt engineering breakthrough**: Q4_K_M quantized models confuse semantically similar tool names when routing rules use plain keyword lists. Two structural fixes eliminated all confusion: (1) replacing `-> plain text` with `-> respond directly (no tool)`, and (2) adding category labels (`CONVERSATION RECALL:` / `SAVED KNOWLEDGE:`) as semantic anchors stronger than keyword matching. Combined effect: 14B went from 87% → 100% on the 102-case Prism eval (v36/v7 system prompt, 3-seed mean).
+Categories: abstention, adversarial traps, cascade, disambiguation, edge cases, multi-intent, natural phrasing, parameter extraction, verifier prompts.
+
+**What this means**: a child in a hospital without WiFi, a nonverbal adult on an airplane, or a family on a budget gets Claude-grade routing accuracy with zero cloud dependency — the AAC path routes correctly **100% of the time across all tiers**.
+
+**What it does NOT mean**: these scores measure routing precision on a 17-tool taxonomy, not general intelligence. Claude outperforms on everything outside this task. The value is **offline reliability at zero cost**, not replacing Claude. Code and clinical knowledge come from RAG via `knowledge_search`.
 
 ### 🔍 L3 Grounding Verifier
 When `prism_infer` receives an `evidence` payload, the grounding verifier automatically checks the model's response against the provided evidence before returning to the caller. Unverified or hallucinated claims are flagged. This is the third layer (L3) of the cascade — after tool routing (L1) and confidence gating (L2).
