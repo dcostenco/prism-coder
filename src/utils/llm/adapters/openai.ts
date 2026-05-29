@@ -135,7 +135,8 @@ export class OpenAIAdapter implements LLMProvider {
     }
 
     const trimmedText = text.trim();
-    const cacheKey = `${trimmedText.substring(0, 500)}|L${trimmedText.length}`;
+    const model = getSettingSync("openai_embedding_model", "text-embedding-3-small");
+    const cacheKey = `${model}|${trimmedText.substring(0, 500)}|L${trimmedText.length}`;
     const entry = OpenAIAdapter._embeddingCache.get(cacheKey);
     if (entry && Date.now() - entry.ts < OpenAIAdapter.EMBED_CACHE_TTL_MS) {
       debugLog(`[OpenAIAdapter] Embedding cache HIT`);
@@ -152,7 +153,7 @@ export class OpenAIAdapter implements LLMProvider {
       return inflight;
     }
 
-    const promise = this._generateEmbeddingImpl(trimmedText, cacheKey);
+    const promise = this._generateEmbeddingImpl(trimmedText, cacheKey, model);
     OpenAIAdapter._inflight.set(cacheKey, promise);
     try {
       return await promise;
@@ -161,8 +162,7 @@ export class OpenAIAdapter implements LLMProvider {
     }
   }
 
-  private async _generateEmbeddingImpl(inputTextRaw: string, cacheKey: string): Promise<number[]> {
-    const model = getSettingSync("openai_embedding_model", "text-embedding-3-small");
+  private async _generateEmbeddingImpl(inputTextRaw: string, cacheKey: string, model: string): Promise<number[]> {
 
     // ── Truncation Guard ───────────────────────────────────────────────────
     // text-embedding-3-small accepts up to 8191 tokens.
