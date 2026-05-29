@@ -411,6 +411,28 @@ As of v14.0.0, Prism's algorithm exports are a **stable public contract** under 
 | [PrismAAC](https://github.com/dcostenco/prism-aac) | Spreading-activation phrase ranking (recency × frequency × per-user history). Caregiver corrections auto-harvest into the personalization corpus via the audit-hooks postflight harvester. The on-device 7B model + this algorithm stack is what makes PrismAAC defensible. |
 | Synalux portal | Tier-aware model routing using experience bias on prior outcomes per fingerprint. HIPAA-compliant clinical scribe with on-device-first privacy guarantees. |
 
+## CLI Reference
+
+Prism Coder includes a CLI for session management, code review, and sync operations.
+
+```bash
+prism load <project>          # Load session context (same as session_load_context MCP tool)
+prism save                    # Save session state (ledger + handoff)
+prism ledger <project>        # Save a session log entry (same as session_save_ledger)
+prism handoff <project>       # Update live project state for next session
+prism push                    # Push local SQLite data to Supabase cloud
+prism sync                    # Cross-backend data synchronization
+prism search <query>          # Search code across repos (exact, regex, symbol, semantic)
+prism review <files...>       # AI code review — security, performance, style
+prism scan <files...>         # Security scan — secrets, licenses, Dockerfile
+prism dora                    # Show DORA metrics for current project
+prism scm                     # Source control, AI review, security scanning
+prism verify                  # Manage the verification harness
+prism status                  # Check verification state and config drift
+prism generate                # Bless current rubric as canonical
+prism register-models         # Alias dcostenco/prism-coder:* → prism-coder:*
+```
+
 ## Testing
 
 ```bash
