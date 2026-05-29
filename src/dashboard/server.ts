@@ -1401,6 +1401,14 @@ self.addEventListener('message', (e) => {
         }
       }
 
+      // ─── v15.5: Knowledge Ingestion Webhook ───
+      // GitHub webhook + open REST API for code ingestion
+      if (url.pathname.startsWith("/api/github/webhook") || url.pathname === "/api/v1/prism/ingest") {
+        const { handleWebhookRequest } = await import("./webhookRouter.js");
+        const handled = await handleWebhookRequest(req, res, url.pathname);
+        if (handled) return;
+      }
+
       // ─── 404 ───
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not found");

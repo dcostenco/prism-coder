@@ -161,6 +161,8 @@ import {
   BACKUP_DATABASE_TOOL,
   CONFIGURE_NOTIFICATIONS_TOOL,
   QUERY_MEMORY_NATURAL_TOOL,
+  // v15.5: Knowledge Ingestion
+  KNOWLEDGE_INGEST_TOOL,
 
   sessionSaveLedgerHandler,
   sessionSaveHandoffHandler,
@@ -222,6 +224,8 @@ import {
   backupDatabaseHandler,
   configureNotificationsHandler,
   queryMemoryNaturalHandler,
+  // v15.5: Knowledge Ingestion handler
+  knowledgeIngestHandler,
   // v15.4: prism_infer — local-first inference (RAM-gated cascade)
   PRISM_INFER_TOOL,
   prismInferHandler,
@@ -327,6 +331,8 @@ function buildSessionMemoryTools(autoloadList: string[]): Tool[] {
     BACKUP_DATABASE_TOOL,          // backup_database — scheduled SQLite backup/restore
     CONFIGURE_NOTIFICATIONS_TOOL,  // configure_notifications — webhook/Slack/email alerts
     QUERY_MEMORY_NATURAL_TOOL,     // query_memory_natural — NL → structured memory search
+    // ─── v15.5: Knowledge Ingestion ───
+    KNOWLEDGE_INGEST_TOOL,         // knowledge_ingest — chunk code, gen Q&A, store in graph
   ];
 }
 
@@ -1044,6 +1050,10 @@ export function createServer() {
           case "query_memory_natural":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
             result = await queryMemoryNaturalHandler(args); break;
+
+          case "knowledge_ingest":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
+            result = await knowledgeIngestHandler(args); break;
 
           default:
             result = {

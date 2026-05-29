@@ -1,0 +1,75 @@
+#!/bin/bash
+# Git post-commit hook for Prism Knowledge Ingestion
+# Automatically indexes changed code files into the Prism knowledge graph.
+#
+# Install:
+#   ln -sf ~/.prism/hooks/post-commit /path/to/repo/.git/hooks/post-commit
+#
+# Or install globally:
+#   git config --global core.hooksPath ~/.prism/hooks
+#
+# Requirements:
+#   - ANTHROPIC_API_KEY (or ~/.anthropic_key)
+#   - SYNALUX_API_KEY (or ~/prism/.env with PRISM_SYNALUX_API_KEY)
+#   - python3 + anthropic pip package
+#   - node 18+
+
+set -euo pipefail
+
+HOOKS_DIR="${PRISM_HOOKS_DIR:-$HOME/.prism/hooks}"
+QA_DIR="${PRISM_QA_DIR:-/tmp/prism_qa_$(basename "$(git rev-parse --show-toplevel)")}"
+PROJECT_NAME="${PRISM_PROJECT:-$(basename "$(git rev-parse --show-toplevel)")}"
+
+# File extensions to index
+EXTENSIONS='*.ts *.tsx *.py *.swift *.js *.jsx *.mjs *.md *.rs *.go'
+
+# Get changed files in this commit
+CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD -- $EXTENSIONS 2>/dev/null || true)
+
+if [ -z "$CHANGED" ]; then
+    exit 0
+fi
+
+FILE_COUNT=$(echo "$CHANGED" | wc -l | tr -d ' ')
+
+# Skip if too many files (likely a merge/rebase)
+if [ "$FILE_COUNT" -gt 50 ]; then
+    echo "[prism-ingest] Skipping: $FILE_COUNT files changed (likely merge/rebase)"
+    exit 0
+fi
+
+mkdir -p "$QA_DIR"
+
+# Concatenate changed files
+COMBINED=$(mktemp)
+trap "rm -f $COMBINED" EXIT
+
+for f in $CHANGED; do
+    if [ -f "$f" ]; then
+        echo "// === $f ===" >> "$COMBINED"
+        cat "$f" >> "$COMBINED"
+        echo "" >> "$COMBINED"
+    fi
+done
+
+COMBINED_SIZE=$(wc -c < "$COMBINED" | tr -d ' ')
+if [ "$COMBINED_SIZE" -lt 200 ]; then
+    exit 0
+fi
+
+echo "[prism-ingest] Indexing $FILE_COUNT files from $PROJECT_NAME ($COMBINED_SIZE bytes)..."
+
+# Generate Q&A pairs (background, non-blocking)
+(
+    python3 "$HOOKS_DIR/gen_qa.py" "$COMBINED" "$PROJECT_NAME" 2>/dev/null
+
+    # Ingest to knowledge graph
+    if [ -f "$HOOKS_DIR/ingest.mjs" ]; then
+        node "$HOOKS_DIR/ingest.mjs" --dir "$QA_DIR" 2>/dev/null
+    fi
+
+    echo "[prism-ingest] Done: $PROJECT_NAME indexed"
+) &
+
+# Don't block the commit
+disown

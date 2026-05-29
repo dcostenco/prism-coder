@@ -12,6 +12,7 @@
  *   tag                 weights   need free   ctx
  *   prism-coder:32b     ~19 GB    ≥ 24 GB     32K
  *   prism-coder:14b     ~ 9 GB    ≥ 12 GB     32K
+ *   prism-coder:4b      ~ 2.5 GB  ≥  4 GB      8K
  *   prism-coder:8b      ~ 5 GB    ≥  7 GB     32K
  *   prism-coder:1b7     ~ 2 GB    ≥  3 GB      8K
  *
@@ -38,6 +39,7 @@ export const MODEL_TIERS: ReadonlyArray<ModelChoice> = [
     { tag: 'prism-coder:32b',  weightsGb: 19, minFreeGb: 24, ctxTokens: 32_768 },
     { tag: 'prism-coder:14b',  weightsGb:  9, minFreeGb: 12, ctxTokens: 32_768 },
     { tag: 'prism-coder:8b',   weightsGb:  5, minFreeGb:  7, ctxTokens: 32_768 },
+    { tag: 'prism-coder:4b',   weightsGb:  2.5, minFreeGb: 4, ctxTokens:  8_192 },
     { tag: 'prism-coder:1b7',  weightsGb:  2, minFreeGb:  3, ctxTokens:  8_192 },
 ];
 
