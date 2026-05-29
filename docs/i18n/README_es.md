@@ -175,7 +175,18 @@ Holographic Reduced Representations (HRR) via Rust WASM for instant memory retri
 | Accuracy (GloVe) | **87% Top-1** | 95%+ | 95%+ |
 | Hologram size | **8KB** | Index varies | Cloud |
 
-HRR acts as Tier 0 — if confidence is high, FTS5 is skipped entirely. Falls through gracefully when HRR has no match. 56 dedicated tests. Built with Rust + `rustfft` + `wasm-bindgen` (229KB binary).
+HRR acts as Tier 0 — if confidence is high, FTS5 is skipped entirely. Falls through gracefully when HRR has no match. 97 dedicated tests (72 system + 25 API/client). Built with Rust + `rustfft` + `wasm-bindgen` (229KB binary).
+
+**HRR AAC prediction benchmark** — real-world impact on Prism AAC word prediction (10 scenarios, 54 integration tests):
+
+| Scenario | Baseline Top-1 | +HRR Top-1 | Top-1 Lift | MRR Lift |
+|----------|---------------|------------|-----------|----------|
+| Core AAC phrases | 36.7% | 46.7% | **+27.3%** | +6.0% |
+| Personal vocabulary | 70.4% | 81.5% | **+15.8%** | +9.2% |
+| Mixed (all phrases) | 47.2% | 56.9% | **+20.6%** | +5.7% |
+| Cross-session recall | 80.0% | 80.0% | +0.0% | +0.0% |
+
+Top-1 = correct word is tile #1. MRR = Mean Reciprocal Rank. Zero Top-5 regressions in any scenario. HRR encodes bigrams + trigrams from every spoken phrase; probes take ~0.2ms — safe on every keystroke. All Synalux apps (clinical, AAC, PrismCoach) share HRR via the portal `/api/v1/hrr` endpoint.
 
 **Competitive comparison:**
 
@@ -470,7 +481,7 @@ python3 tests/benchmarks/prism-routing-100/benchmark.py --models 1b7 14b 32b
 **Pinned in CI** — 327 tests enforce every constant: ACT-R decay `d=0.25`, spreading-activation hybrid score `0.7/0.3`, experience bias `MIN_SAMPLES=5` / `MAX_BIAS_CAP=0.15`, graph-metrics warning ratios `0.20 / 0.30 / 0.40`, compaction's 25KB prompt-budget. CI catches divergence automatically.
 
 **Coverage areas**:
-- HRR zero-search retrieval (56 tests: 3 embedding strategies, edge cases, persistence, adaptive cascade)
+- HRR zero-search retrieval (97 tests: 3 embedding strategies, edge cases, persistence, adaptive cascade, API client, chat integration)
 - Knowledge ingestion (32 tests: chunker, Q&A gen, webhook, security, storage round-trip)
 - Prism infer cascade (110 tests: tier selection, cloud fallback, grounding verifier)
 - Compaction handler (rollup creation, concurrency guard, LLM failure)

@@ -96,6 +96,34 @@ export class GeminiAdapter implements LLMProvider {
 
   // ─── Embedding Generation ────────────────────────────────────────────────
 
+  private static _embeddingCache = new Map<string, { embedding: number[]; ts: number }>();
+  private static _inflight = new Map<string, Promise<number[]>>();
+  private static readonly EMBED_CACHE_MAX = 256;
+  private static readonly EMBED_CACHE_TTL_MS = 5 * 60 * 1000;
+
+  private getCachedEmbedding(key: string): number[] | null {
+    const entry = GeminiAdapter._embeddingCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.ts > GeminiAdapter.EMBED_CACHE_TTL_MS) {
+      GeminiAdapter._embeddingCache.delete(key);
+      return null;
+    }
+    // Move to tail for LRU on read
+    GeminiAdapter._embeddingCache.delete(key);
+    GeminiAdapter._embeddingCache.set(key, entry);
+    return entry.embedding;
+  }
+
+  private setCachedEmbedding(key: string, embedding: number[]): void {
+    // Delete-then-set moves the key to tail for correct LRU eviction
+    GeminiAdapter._embeddingCache.delete(key);
+    if (GeminiAdapter._embeddingCache.size >= GeminiAdapter.EMBED_CACHE_MAX) {
+      const oldest = GeminiAdapter._embeddingCache.keys().next().value;
+      if (oldest !== undefined) GeminiAdapter._embeddingCache.delete(oldest);
+    }
+    GeminiAdapter._embeddingCache.set(key, { embedding, ts: Date.now() });
+  }
+
   async generateEmbedding(text: string): Promise<number[]> {
     // Guard: empty string would produce a useless/degenerate embedding.
     // Better to fail loudly here than store a zero-vector in the DB.
@@ -103,11 +131,37 @@ export class GeminiAdapter implements LLMProvider {
       throw new Error("Cannot generate embedding for empty text.");
     }
 
+    const trimmedText = text.trim();
+    const cacheKey = `${trimmedText.substring(0, 500)}|L${trimmedText.length}`;
+    const cached = this.getCachedEmbedding(cacheKey);
+    if (cached) {
+      debugLog(`[GeminiAdapter] Embedding cache HIT`);
+      return cached;
+    }
+
+    // In-flight dedup: if another call is already generating this embedding, await it
+    const inflight = GeminiAdapter._inflight.get(cacheKey);
+    if (inflight) {
+      debugLog(`[GeminiAdapter] Embedding in-flight dedup HIT`);
+      return inflight;
+    }
+
+    const promise = this._generateEmbeddingImpl(trimmedText, cacheKey);
+    GeminiAdapter._inflight.set(cacheKey, promise);
+    try {
+      return await promise;
+    } finally {
+      GeminiAdapter._inflight.delete(cacheKey);
+    }
+  }
+
+  private async _generateEmbeddingImpl(inputTextRaw: string, cacheKey: string): Promise<number[]> {
+
     // ── Truncation Guard ───────────────────────────────────────────────────
     // gemini-embedding-001 has a ~2048 token context window.
     // Long session summaries (esp. code-heavy ones) can easily exceed this.
     // We truncate proactively rather than let the API return a 400 error.
-    let inputText = text;
+    let inputText = inputTextRaw;
     if (inputText.length > MAX_EMBEDDING_CHARS) {
       debugLog(
         `[GeminiAdapter] Embedding input truncated from ${inputText.length}` +
@@ -165,6 +219,7 @@ export class GeminiAdapter implements LLMProvider {
       );
     }
 
+    this.setCachedEmbedding(cacheKey, values);
     return values;
   }
 

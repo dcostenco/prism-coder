@@ -123,20 +123,52 @@ export class OpenAIAdapter implements LLMProvider {
 
   // ─── Embedding Generation ────────────────────────────────────────────────
 
+  private static _embeddingCache = new Map<string, { embedding: number[]; ts: number }>();
+  private static _inflight = new Map<string, Promise<number[]>>();
+  private static readonly EMBED_CACHE_MAX = 256;
+  private static readonly EMBED_CACHE_TTL_MS = 5 * 60 * 1000;
+
   async generateEmbedding(text: string): Promise<number[]> {
     // Guard: empty input produces a degenerate embedding — fail loudly.
     if (!text || !text.trim()) {
       throw new Error("Cannot generate embedding for empty text.");
     }
 
-    // Read embedding model at call time for hot-swap support.
+    const trimmedText = text.trim();
+    const cacheKey = `${trimmedText.substring(0, 500)}|L${trimmedText.length}`;
+    const entry = OpenAIAdapter._embeddingCache.get(cacheKey);
+    if (entry && Date.now() - entry.ts < OpenAIAdapter.EMBED_CACHE_TTL_MS) {
+      debugLog(`[OpenAIAdapter] Embedding cache HIT`);
+      // Move to tail for LRU on read
+      OpenAIAdapter._embeddingCache.delete(cacheKey);
+      OpenAIAdapter._embeddingCache.set(cacheKey, entry);
+      return entry.embedding;
+    }
+
+    // In-flight dedup
+    const inflight = OpenAIAdapter._inflight.get(cacheKey);
+    if (inflight) {
+      debugLog(`[OpenAIAdapter] Embedding in-flight dedup HIT`);
+      return inflight;
+    }
+
+    const promise = this._generateEmbeddingImpl(trimmedText, cacheKey);
+    OpenAIAdapter._inflight.set(cacheKey, promise);
+    try {
+      return await promise;
+    } finally {
+      OpenAIAdapter._inflight.delete(cacheKey);
+    }
+  }
+
+  private async _generateEmbeddingImpl(inputTextRaw: string, cacheKey: string): Promise<number[]> {
     const model = getSettingSync("openai_embedding_model", "text-embedding-3-small");
 
     // ── Truncation Guard ───────────────────────────────────────────────────
     // text-embedding-3-small accepts up to 8191 tokens.
     // We apply the same preventive truncation as GeminiAdapter so behavior
     // is consistent regardless of which provider is active.
-    let inputText = text;
+    let inputText = inputTextRaw;
     if (inputText.length > MAX_EMBEDDING_CHARS) {
       debugLog(
         `[OpenAIAdapter] Embedding input truncated from ${inputText.length}` +
@@ -180,6 +212,12 @@ export class OpenAIAdapter implements LLMProvider {
       );
     }
 
+    OpenAIAdapter._embeddingCache.delete(cacheKey);
+    if (OpenAIAdapter._embeddingCache.size >= OpenAIAdapter.EMBED_CACHE_MAX) {
+      const oldest = OpenAIAdapter._embeddingCache.keys().next().value;
+      if (oldest !== undefined) OpenAIAdapter._embeddingCache.delete(oldest);
+    }
+    OpenAIAdapter._embeddingCache.set(cacheKey, { embedding, ts: Date.now() });
     return embedding;
   }
 
