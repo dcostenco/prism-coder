@@ -1675,7 +1675,8 @@ export async function sessionExportMemoryHandler(args: unknown) {
 
       // Serialize
       const ext = format === "markdown" ? "md" : format === "vault" ? "zip" : "json";
-      const filename = `prism-export-${project}-${dateSuffix}.${ext}`;
+      const safeProject = project.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const filename = `prism-export-${safeProject}-${dateSuffix}.${ext}`;
       const outputPath = join(output_dir, filename);
 
       let content: string | Buffer;
