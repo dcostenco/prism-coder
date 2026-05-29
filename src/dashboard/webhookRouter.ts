@@ -20,6 +20,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import { handleGitHubWebhook } from "../tools/ingestHandler.js";
 import { debugLog } from "../utils/logger.js";
+import { ddInfo, ddError, ddWarn } from "../utils/ddLogger.js";
 
 const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
@@ -171,6 +172,7 @@ export async function handleWebhookRequest(
   if (pathname === "/api/github/webhook" && req.method === "POST") {
     const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
     if (!checkRateLimit(`wh:${ip}`)) {
+      ddWarn("webhook.rate_limited", { ip, endpoint: "github" });
       res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "60" });
       res.end(JSON.stringify({ error: "Rate limit exceeded" }));
       return true;
@@ -195,6 +197,7 @@ export async function handleWebhookRequest(
       }
 
       debugLog(`[webhook] GitHub event: ${event}, repo: ${payload.repository.full_name}`);
+      ddInfo("webhook.github.received", { event, repo: payload.repository.full_name });
 
       const result = await handleGitHubWebhook(event, payload, fetchFileFromGitHub);
 
