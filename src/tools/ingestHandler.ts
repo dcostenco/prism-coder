@@ -139,8 +139,20 @@ export async function ingestKnowledge(args: IngestArgs): Promise<IngestResult> {
   } = args;
 
   let content = args.content || "";
-  if (args.file_path && existsSync(args.file_path)) {
-    content = readFileSync(args.file_path, "utf-8");
+  if (args.file_path) {
+    const resolved = require("path").resolve(args.file_path);
+    const blocked = ["/etc", "/var", "/usr", "/sys", "/proc", "/dev", "/root",
+      "/.ssh", "/.env", "/.git/config", "/private/etc"].some(p => resolved.startsWith(p) || resolved.includes("/."));
+    if (blocked) {
+      return {
+        project, source: source_label || "unknown", chunks_processed: 0,
+        entries_created: 0, status: "failed",
+        errors: ["Path not allowed: system/hidden files are blocked"],
+      };
+    }
+    if (existsSync(resolved)) {
+      content = readFileSync(resolved, "utf-8");
+    }
   }
 
   if (!content || content.trim().length < 100) {
