@@ -4,15 +4,18 @@ import { pickLocalModel, MODEL_TIERS, fmtGb, resolveOllamaName } from "../../src
 const GB = 1024 ** 3;
 
 describe("pickLocalModel", () => {
-    it("picks 32B when ≥24 GB free", () => {
+    it("default ceiling is 14b — picks 14B even with 30GB free", () => {
         const choice = pickLocalModel(30 * GB);
-        expect(choice?.tag).toBe("prism-coder:32b");
+        expect(choice?.tag).toBe("prism-coder:14b");
+    });
+
+    it("picks 32B only with explicit ceiling='32b'", () => {
+        expect(pickLocalModel(30 * GB, "32b")?.tag).toBe("prism-coder:32b");
     });
 
     it("picks 14B when 12–23 GB free", () => {
         expect(pickLocalModel(12 * GB)?.tag).toBe("prism-coder:14b");
         expect(pickLocalModel(20 * GB)?.tag).toBe("prism-coder:14b");
-        expect(pickLocalModel(23 * GB)?.tag).toBe("prism-coder:14b");
     });
 
     it("picks 8B when 7–11 GB free", () => {
@@ -20,9 +23,13 @@ describe("pickLocalModel", () => {
         expect(pickLocalModel(11 * GB)?.tag).toBe("prism-coder:8b");
     });
 
-    it("picks 1.7B when 3–6 GB free", () => {
+    it("picks 4B when 4–6 GB free", () => {
+        expect(pickLocalModel(4 * GB)?.tag).toBe("prism-coder:4b");
+        expect(pickLocalModel(6 * GB)?.tag).toBe("prism-coder:4b");
+    });
+
+    it("picks 1.7B when 3–3.9 GB free", () => {
         expect(pickLocalModel(3 * GB)?.tag).toBe("prism-coder:1b7");
-        expect(pickLocalModel(6 * GB)?.tag).toBe("prism-coder:1b7");
     });
 
     it("returns null below 3 GB free", () => {
@@ -58,13 +65,14 @@ describe("pickLocalModel", () => {
     });
 
     it("accepts namespaced HuggingFace-style tags (dcostenco/prism-coder:32b)", () => {
-        // README documents `ollama pull dcostenco/prism-coder:32b`, so /api/tags
-        // returns the namespaced form. The picker must accept it.
         const available = new Set([
             "dcostenco/prism-coder:32b",
             "dcostenco/prism-coder:14b",
         ]);
-        expect(pickLocalModel(30 * GB, undefined, available)?.tag).toBe("prism-coder:32b");
+        // Default ceiling=14b, so 30GB picks 14b not 32b
+        expect(pickLocalModel(30 * GB, undefined, available)?.tag).toBe("prism-coder:14b");
+        // Explicit ceiling=32b allows 32b
+        expect(pickLocalModel(30 * GB, "32b", available)?.tag).toBe("prism-coder:32b");
         expect(pickLocalModel(15 * GB, undefined, available)?.tag).toBe("prism-coder:14b");
     });
 
