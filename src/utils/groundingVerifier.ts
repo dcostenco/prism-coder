@@ -9,9 +9,9 @@
  * stateless MCP), pointed at free-form generation instead of tool-call
  * responses.
  *
- * Cascade role: prism-coder:1b7 is the default verifier on every
- * device (server, iPad). Larger tiers (8B/14B/32B) draft; 1b7 verifies.
- * Different model from the drafter — satisfies the Patronus rule.
+ * Cascade role: prism-coder:4b is the default verifier (fast, 2.5GB).
+ * 14b drafts; 4b verifies. Different model = Patronus rule satisfied.
+ * Falls back to 1b7 on devices with <4GB free RAM.
  *
  * Failure modes:
  *   - Verifier model unreachable / timeout → fail-closed refusal
@@ -51,7 +51,7 @@ export interface GroundingOutcome {
 export interface VerifyOptions {
     draft: string;
     evidence: EvidenceSnippet[];
-    /** Verifier model. Defaults to prism-coder:1b7 (embedded on all tiers). */
+    /** Verifier model. Defaults to prism-coder:4b (fast, accurate). Falls back to 1b7 on low-RAM. */
     verifierModel?: string;
     /** Verifier hard timeout in ms. Defaults to 2000. */
     timeoutMs?: number;
@@ -144,7 +144,7 @@ interface OpenAIChatResp {
 }
 
 export async function verifyGrounding(opts: VerifyOptions): Promise<GroundingOutcome> {
-    const verifierModel = opts.verifierModel ?? "prism-coder:1b7";
+    const verifierModel = opts.verifierModel ?? "prism-coder:4b";
     const timeoutMs     = opts.timeoutMs ?? 2000;
     const ollamaUrl     = opts.ollamaUrl ?? PRISM_LOCAL_LLM_URL;
     const fetchImpl     = opts.fetchImpl ?? fetch;

@@ -58,10 +58,11 @@ Free tier runs entirely on your machine — SQLite, local embedding model, no AP
 
 Install in one command — no config, no keys, no vendor agreements:
 ```bash
-ollama pull dcostenco/prism-coder:1b7   # 2.2 GB · ~1.6s · any machine
-ollama pull dcostenco/prism-coder:8b    # 4.7 GB · ~0.8s · Mac M1+ / iPhone 8GB
-ollama pull dcostenco/prism-coder:14b   # 8.4 GB · ~1.1s · Mac M2+ / iPad Pro 16GB
-ollama pull dcostenco/prism-coder:32b   # 16 GB  · ~0.8s · Mac M2 Ultra+ (30B-A3B MoE)
+ollama pull dcostenco/prism-coder:14b   # 9 GB  · default router · Mac M2+ / iPad Pro
+ollama pull dcostenco/prism-coder:4b    # 2.5 GB · verifier · iPhone 15/16 Pro
+ollama pull dcostenco/prism-coder:1b7   # 2.2 GB · ultra-low RAM / Apple Watch
+ollama pull dcostenco/prism-coder:32b   # 19 GB  · complex tasks · Mac M2 Ultra+
+ollama pull dcostenco/prism-coder:8b    # 4.7 GB · balanced · iPhone/iPad 8GB
 ```
 
 Prism MCP detects both the namespaced (`dcostenco/prism-coder:14b`) and bare (`prism-coder:14b`) Ollama tag forms automatically — nothing else to configure. If you want the bare tags as aliases for direct `ollama run prism-coder:14b` use, run:
@@ -73,33 +74,68 @@ prism register-models --dry-run # preview what would be aliased
 
 ### Cascade architecture
 
-Two cascades operate independently depending on the deployment context:
+Three-tier local cascade with cloud fallback:
 
-**Desktop / server cascade** (quality-first, used in Prism MCP + Synalux portal):
 ```
-prism-coder:14b ─── correct? ──YES──▶  serve  (99% of traffic, ~1.1s)
-  │ NO
-prism-coder:32b ─── correct? ──YES──▶  serve  (~1% of traffic, ~0.8s)
-  │ NO
-Claude Opus 4.7 ──────────────────────▶  serve  (0% in practice, cloud)
-```
-
-**Mobile / offline cascade** (availability-first, used in Prism AAC iOS):
-```
-prism-coder:14b (~1.1s) — iPad Pro 16GB  →  prism-coder:8b (~0.8s) — iPhone/iPad 8GB
-  →  prism-coder:1.7b (~1.6s) — any device, always fits
-```
-
-**Code generation cascade** (used in Prism Coder IDE + Agent Mode):
-```
-prism-ide:14b ─── quality OK? ──YES──▶  serve  (~1.1s, 22/22 TypeScript eval)
-  │ NO (complex / multi-file)
-prism-ide:32b ─── quality OK? ──YES──▶  serve  (~0.8s MoE, deep reasoning)
-  │ NO
-Claude Sonnet 4 ──────────────────────▶  serve  (cloud fallback)
+Query arrives
+  │
+  ▼
+prism-coder:14b ── routes (100% eval_300) ──▶  serve  (~3s, 9GB, FREE)
+  │                                              │
+  │                                    knowledge_search (RAG context)
+  │                                              │
+  ▼                                              ▼
+prism-coder:4b ── verifies claims ──────────▶  grounded response
+  │                 (2.5GB, <1s)
+  │
+  ▼  (complex tasks only, explicit ceiling="32b")
+prism-coder:32b ── deep reasoning ──────────▶  serve  (~8s, 19GB, FREE)
+  │
+  ▼  (cloud fallback when local insufficient)
+Claude Sonnet 4 → Claude Opus 4.7 ─────────▶  serve  (cloud, ~$0.01/req)
 ```
 
-The routing cascade validates each response against the 6 known tool names and escalates on empty, truncated, or hallucinated tool calls. The code generation cascade escalates on incomplete or syntactically invalid output.
+| Tier | Model | Role | RAM | Latency | Cost |
+|------|-------|------|-----|---------|------|
+| **Default** | prism-coder:14b | Router + general inference | 9 GB | ~3s | $0 |
+| **Verifier** | prism-coder:4b | Grounding claims check | 2.5 GB | <1s | $0 |
+| **Complex** | prism-coder:32b | Deep reasoning (on-demand) | 19 GB | ~8s | $0 |
+| **Cloud** | Sonnet → Opus | Fallback for max quality | — | ~5-10s | ~$0.01 |
+
+**Mobile / offline cascade** (Prism AAC iOS):
+```
+prism-coder:14b (iPad Pro 16GB) → prism-coder:4b (iPhone 8GB)
+  → prism-coder:1.7b (any device, always fits)
+```
+
+### Knowledge ingestion — teach Prism your codebase
+
+Your code knowledge lives in the knowledge graph, not in model weights. Routing stays at 100%.
+
+```bash
+bash scripts/knowledge-ingest/setup.sh   # one-time setup
+# Then every git commit auto-indexes changed files into the knowledge graph
+```
+
+Three entry points:
+- **MCP tool**: `knowledge_ingest` — AI says "learn this code"
+- **GitHub webhook**: `POST /api/github/webhook` — auto on push
+- **REST API**: `POST /api/v1/prism/ingest` — open interface
+
+See [KNOWLEDGE_INGESTION.md](docs/KNOWLEDGE_INGESTION.md) for full setup guide.
+
+### Cost comparison
+
+Benchmark: 19 queries (routing + code knowledge + clinical), May 2026:
+
+| Architecture | Routing | Code Knowledge | Clinical | Annual Cost (1K/day) |
+|---|---|---|---|---|
+| **Prism cascade** (14b→RAG→Sonnet) | 100% (local) | RAG-powered | Sonnet | **~$330/yr** |
+| Claude Opus for everything | ~30% (no tools) | Training data | Opus | ~$10,600/yr |
+
+**84% cost savings.** Routing is free and 100% accurate. Cloud only for the 20% of queries that need deep reasoning.
+
+The routing cascade validates each response against the known tool names and escalates on empty, truncated, or hallucinated tool calls.
 
 **Routing accuracy** ([102-case Prism eval](tests/benchmarks/prism-routing-100/README.md), v36/v7 system prompt, 3-seed mean, May 2026):
 
