@@ -82,7 +82,7 @@ describe("verifyGrounding — NLI verifier path", () => {
         });
         expect(outcome.action).toBe("served");
         expect(outcome.verifierChain[0]).toMatchObject({
-            model: "prism-coder:1b7",
+            model: "prism-coder:4b",
             verdict: "ENTAILED",
         });
     });
@@ -166,7 +166,7 @@ describe("verifyGrounding — failure modes (fail-closed)", () => {
 });
 
 describe("verifyGrounding — verifier model defaults", () => {
-    it("defaults to prism-coder:1b7", async () => {
+    it("defaults to prism-coder:4b", async () => {
         const fetchImpl = mockOllama({
             claims: [{ text: "0 items", verdict: "ENTAILED", evidence_span: "0" }],
         });
@@ -177,7 +177,7 @@ describe("verifyGrounding — verifier model defaults", () => {
         });
         const call = (fetchImpl as any).mock.calls[0];
         const body = JSON.parse(call[1].body);
-        expect(body.model).toBe("prism-coder:1b7");
+        expect(body.model).toBe("prism-coder:4b");
     });
 
     it("honours an explicit verifier model override", async () => {
