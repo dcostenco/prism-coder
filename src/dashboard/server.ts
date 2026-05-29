@@ -905,11 +905,10 @@ return false;}
             return res.end(JSON.stringify({ error: "filename and content are required" }));
           }
 
-          // Write uploaded content to a temp file
-          const tmpDir = path.join(os.tmpdir(), "prism-import");
-          fs.mkdirSync(tmpDir, { recursive: true });
-          const safeFilename = path.basename(filename); // prevent path traversal
-          const tmpFile = path.join(tmpDir, `upload-${Date.now()}-${safeFilename}`);
+          // Write uploaded content to a secure temp directory
+          const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "prism-import-"));
+          const safeFilename = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, "_");
+          const tmpFile = path.join(tmpDir, safeFilename);
           fs.writeFileSync(tmpFile, content, "utf-8");
 
           try {

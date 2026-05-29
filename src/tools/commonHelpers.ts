@@ -62,6 +62,7 @@ export function applySentinelBlock(existingContent: string, rulesBlock: string):
 export function redactSettings(settings: Record<string, string>): Record<string, string> {
   const redacted: Record<string, string> = {};
   for (const [k, v] of Object.entries(settings || {})) {
+    if (typeof k !== "string" || k === "__proto__" || k === "constructor" || k === "prototype") continue;
     redacted[k] = REDACT_PATTERNS.some(p => p.test(k)) ? "**REDACTED**" : v;
   }
   return redacted;

@@ -127,7 +127,7 @@ export async function setSetting(key: string, value: string): Promise<void> {
         args: [key, value],
       });
       // Keep the cache in sync so getSettingSync() reflects the new value immediately.
-      if (settingsCache) {
+      if (settingsCache && typeof key === "string" && !["__proto__", "constructor", "prototype"].includes(key)) {
         settingsCache[key] = value;
       }
       return; // Success — exit
