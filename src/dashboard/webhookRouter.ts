@@ -23,12 +23,18 @@ import { debugLog } from "../utils/logger.js";
 
 const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
+const PRISM_INGEST_API_KEY = process.env.PRISM_INGEST_API_KEY || "";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 // ─── Signature Verification ────────────────────────────────────
 
 function verifySignature(payload: string, signature: string | undefined): boolean {
   if (!WEBHOOK_SECRET) {
-    debugLog("[webhook] GITHUB_WEBHOOK_SECRET not set — accepting all requests (dev mode)");
+    if (IS_PRODUCTION) {
+      debugLog("[webhook] GITHUB_WEBHOOK_SECRET not set in production — rejecting");
+      return false;
+    }
+    debugLog("[webhook] GITHUB_WEBHOOK_SECRET not set — accepting (dev mode only)");
     return true;
   }
   if (!signature) return false;
@@ -44,6 +50,37 @@ function verifySignature(payload: string, signature: string | undefined): boolea
   }
 }
 
+// ─── Input Validation ──────────────────────────────────────────
+
+const REPO_NAME_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+const SAFE_PATH_RE = /^[a-zA-Z0-9._\-\/]+$/;
+
+function validateRepoName(name: string): boolean {
+  return REPO_NAME_RE.test(name) && !name.includes("..");
+}
+
+function validateFilePath(path: string): boolean {
+  return SAFE_PATH_RE.test(path) && !path.includes("..") && !path.startsWith("/");
+}
+
+// ─── Ingest API Auth ───────────────────────────────────────────
+
+function verifyIngestAuth(authHeader: string): boolean {
+  if (!authHeader) return false;
+  if (!PRISM_INGEST_API_KEY && !WEBHOOK_SECRET) {
+    if (IS_PRODUCTION) return false;
+    return true;
+  }
+  const expectedKey = PRISM_INGEST_API_KEY || WEBHOOK_SECRET;
+  const token = authHeader.replace(/^Bearer\s+/i, "");
+  if (token.length !== expectedKey.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(token), Buffer.from(expectedKey));
+  } catch {
+    return false;
+  }
+}
+
 // ─── Fetch File Content from GitHub API ─────────────────────────
 
 async function fetchFileFromGitHub(
@@ -51,6 +88,15 @@ async function fetchFileFromGitHub(
   filePath: string,
   ref: string,
 ): Promise<string | null> {
+  if (!validateRepoName(repoFullName)) {
+    debugLog(`[webhook] Invalid repo name rejected: ${repoFullName}`);
+    return null;
+  }
+  if (!validateFilePath(filePath)) {
+    debugLog(`[webhook] Invalid file path rejected: ${filePath}`);
+    return null;
+  }
+
   const headers: Record<string, string> = {
     "Accept": "application/vnd.github.v3.raw",
     "User-Agent": "prism-mcp-webhook",
@@ -60,8 +106,8 @@ async function fetchFileFromGitHub(
   }
 
   try {
-    const url = `https://api.github.com/repos/${repoFullName}/contents/${filePath}?ref=${ref}`;
-    const res = await fetch(url, { headers });
+    const url = `https://api.github.com/repos/${encodeURIComponent(repoFullName.split("/")[0])}/${encodeURIComponent(repoFullName.split("/")[1])}/contents/${filePath.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`;
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
     if (!res.ok) return null;
     return await res.text();
   } catch {
@@ -111,7 +157,13 @@ export async function handleWebhookRequest(
       const event = req.headers["x-github-event"] as string || "unknown";
       const payload = JSON.parse(body);
 
-      debugLog(`[webhook] GitHub event: ${event}, repo: ${payload.repository?.full_name}`);
+      if (!payload.repository?.full_name || !validateRepoName(payload.repository.full_name)) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid repository name" }));
+        return true;
+      }
+
+      debugLog(`[webhook] GitHub event: ${event}, repo: ${payload.repository.full_name}`);
 
       const result = await handleGitHubWebhook(event, payload, fetchFileFromGitHub);
 
@@ -121,7 +173,7 @@ export async function handleWebhookRequest(
       const msg = err instanceof Error ? err.message : String(err);
       debugLog(`[webhook] Error: ${msg}`);
       res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, message: msg }));
+      res.end(JSON.stringify({ ok: false, message: "Internal error" }));
     }
     return true;
   }
@@ -129,16 +181,15 @@ export async function handleWebhookRequest(
   // ── Generic Ingest API (open interface) ────────────────────
   if (pathname === "/api/v1/prism/ingest" && req.method === "POST") {
     try {
-      const body = await readBody(req);
-      const payload = JSON.parse(body);
-
-      // Minimal auth: require API key or JWT in Authorization header
       const auth = req.headers["authorization"] || "";
-      if (!auth && WEBHOOK_SECRET) {
+      if (!verifyIngestAuth(auth)) {
         res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Authorization required" }));
+        res.end(JSON.stringify({ error: "Invalid or missing API key" }));
         return true;
       }
+
+      const body = await readBody(req);
+      const payload = JSON.parse(body);
 
       const { ingestKnowledge } = await import("../tools/ingestHandler.js");
       const result = await ingestKnowledge({
@@ -154,7 +205,7 @@ export async function handleWebhookRequest(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, message: msg }));
+      res.end(JSON.stringify({ ok: false, message: "Internal error" }));
     }
     return true;
   }
@@ -166,14 +217,7 @@ export async function handleWebhookRequest(
       status: "ready",
       secret_configured: !!WEBHOOK_SECRET,
       github_token_configured: !!GITHUB_TOKEN,
-      setup_instructions: {
-        step1: "Set GITHUB_WEBHOOK_SECRET environment variable",
-        step2: "In GitHub: Settings → Webhooks → Add webhook",
-        step3: "Payload URL: https://your-domain/api/github/webhook",
-        step4: "Content type: application/json",
-        step5: "Secret: (same as GITHUB_WEBHOOK_SECRET)",
-        step6: "Events: Just the push event",
-      },
+      ingest_key_configured: !!PRISM_INGEST_API_KEY,
     }));
     return true;
   }

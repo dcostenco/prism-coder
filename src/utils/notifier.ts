@@ -98,6 +98,43 @@ function meetsMinSeverity(severity: NotificationSeverity): boolean {
 
 // ─── SSRF Protection ─────────────────────────────────────────
 
+function isPrivateIP(ip: string): boolean {
+    // Normalize: strip brackets for IPv6
+    const clean = ip.replace(/^\[|\]$/g, "").toLowerCase();
+
+    // IPv6 loopback and unspecified
+    if (clean === "::1" || clean === "::" || clean === "0:0:0:0:0:0:0:1" || clean === "0:0:0:0:0:0:0:0") return true;
+
+    // IPv4-mapped IPv6 (::ffff:127.0.0.1)
+    const v4mapped = clean.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    const ipv4 = v4mapped ? v4mapped[1] : clean;
+
+    // Parse as IPv4 — handles decimal, but reject octal/hex by requiring standard dotted-quad
+    const parts = ipv4.split(".");
+    if (parts.length === 4) {
+        const nums = parts.map(p => {
+            if (!/^\d{1,3}$/.test(p)) return -1;
+            return parseInt(p, 10);
+        });
+        if (nums.every(n => n >= 0 && n <= 255)) {
+            const [a, b] = nums;
+            if (a === 0) return true;                              // 0.0.0.0/8
+            if (a === 10) return true;                             // 10.0.0.0/8
+            if (a === 127) return true;                            // 127.0.0.0/8 (all loopback)
+            if (a === 172 && b >= 16 && b <= 31) return true;     // 172.16.0.0/12
+            if (a === 192 && b === 168) return true;               // 192.168.0.0/16
+            if (a === 169 && b === 254) return true;               // 169.254.0.0/16 link-local
+            if (a === 100 && b >= 64 && b <= 127) return true;    // 100.64.0.0/10 CGNAT
+        }
+    }
+
+    // Reject non-standard IP formats (octal 0177.0.0.1, hex 0x7f000001, decimal 2130706433)
+    // If it looks like a number or has 0x/0 prefix, block it
+    if (/^0x[0-9a-f]+$/i.test(clean) || /^0\d+$/.test(clean) || /^\d{4,}$/.test(clean)) return true;
+
+    return false;
+}
+
 function isAllowedUrl(url: string): boolean {
     try {
         const parsed = new URL(url);
@@ -107,28 +144,21 @@ function isAllowedUrl(url: string): boolean {
 
         const hostname = parsed.hostname.toLowerCase();
 
-        // Block localhost and loopback
-        if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]") return false;
+        // Block localhost variants
+        if (hostname === "localhost" || hostname === "localhost.localdomain") return false;
 
-        // Block .internal and .local TLDs
-        if (hostname.endsWith(".internal") || hostname.endsWith(".local")) return false;
+        // Block .internal, .local, .arpa TLDs
+        if (hostname.endsWith(".internal") || hostname.endsWith(".local") || hostname.endsWith(".arpa")) return false;
 
-        // Block private IP ranges
-        const ipParts = hostname.split(".").map(Number);
-        if (ipParts.length === 4 && ipParts.every(p => Number.isFinite(p))) {
-            // 10.0.0.0/8
-            if (ipParts[0] === 10) return false;
-            // 172.16.0.0/12
-            if (ipParts[0] === 172 && ipParts[1] >= 16 && ipParts[1] <= 31) return false;
-            // 192.168.0.0/16
-            if (ipParts[0] === 192 && ipParts[1] === 168) return false;
-            // 169.254.0.0/16 (link-local)
-            if (ipParts[0] === 169 && ipParts[1] === 254) return false;
-        }
+        // Block private/loopback IPs (covers 0.0.0.0, 127.x, 10.x, 172.16-31.x, 192.168.x, ::1, etc.)
+        if (isPrivateIP(hostname)) return false;
+
+        // Block bracketed IPv6
+        if (hostname.startsWith("[") && isPrivateIP(hostname)) return false;
 
         return true;
     } catch {
-        return false; // Malformed URL
+        return false;
     }
 }
 
