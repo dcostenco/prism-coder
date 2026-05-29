@@ -1843,8 +1843,8 @@ function loadPipelines() {
             var maxIter = (p.parsedSpec && p.parsedSpec.maxIterations) ? p.parsedSpec.maxIterations : '?';
             html += '<div style="padding:0.75rem 1rem;background:rgba(15,23,42,0.6);border-radius:8px;border-left:3px solid ' + statusColor + ';">';
             html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem">';
-            html += '<span style="font-weight:600;color:var(--text-primary)">' + emoji + ' ' + p.status + '</span>';
-            html += '<span style="font-size:0.7rem;font-family:var(--font-mono);color:var(--text-muted)">' + p.id.slice(0, 8) + '…</span>';
+            html += '<span style="font-weight:600;color:var(--text-primary)">' + emoji + ' ' + escapeHtml(p.status) + '</span>';
+            html += '<span style="font-size:0.7rem;font-family:var(--font-mono);color:var(--text-muted)">' + escapeHtml(p.id.slice(0, 8)) + '…</span>';
             html += '</div>';
             html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.35rem">' + escapeHtml(objective) + '</div>';
             html += '<div style="display:flex;gap:1rem;font-size:0.72rem;color:var(--text-muted);flex-wrap:wrap">';
@@ -1857,7 +1857,7 @@ function loadPipelines() {
                 html += '<div style="font-size:0.72rem;color:var(--accent-rose);margin-top:0.35rem;padding:0.3rem 0.5rem;background:rgba(244,63,94,0.08);border-radius:4px">⚠ ' + escapeHtml(p.error.slice(0, 200)) + '</div>';
             }
             if (isActive) {
-                html += '<div style="margin-top:0.5rem"><button onclick="abortPipeline(this.dataset.id)" data-id="' + p.id + '" class="cleanup-btn" style="font-size:0.72rem">🛑 Abort Pipeline</button></div>';
+                html += '<div style="margin-top:0.5rem"><button onclick="abortPipeline(this.dataset.id)" data-id=''' + escapeHtml(p.id) + ''' class="cleanup-btn" style="font-size:0.72rem">🛑 Abort Pipeline</button></div>';
             }
             html += '</div>';
         }
@@ -4022,7 +4022,7 @@ function loadSchedulerStatus() {
                         parts.push('</div>');
                         errors = [t.ttlSweep.error, t.importanceDecay.error, t.compaction.error, t.deepPurge.error].filter(Boolean);
                         if (errors.length > 0) {
-                            parts.push('<div style="color:var(--accent-rose);margin-top:0.3rem;font-size:0.7rem">⚠️ ' + errors.join(' | ') + '</div>');
+                            parts.push('<div style="color:var(--accent-rose);margin-top:0.3rem;font-size:0.7rem">⚠️ ' + errors.map(escapeHtml).join(' | ') + '</div>');
                         }
                         parts.push('</div>');
                     }
@@ -4200,7 +4200,7 @@ function loadGraphMetrics() {
                             lastRoute = m.cognitive.last_route || '—';
                             lastConcept = m.cognitive.last_concept || '(none)';
                             lastConf = m.cognitive.last_confidence !== null ? Math.round(m.cognitive.last_confidence * 100) + '%' : '—';
-                            parts.push('<br>Last: ' + lastRoute + ' → ' + lastConcept + ' (' + lastConf + ')');
+                            parts.push('<br>Last: ' + escapeHtml(lastRoute) + ' → ' + escapeHtml(lastConcept) + ' (' + lastConf + ')');
                             parts.push('<br><span style="color:var(--text-muted)">' + timeAgo(m.cognitive.last_run_at) + '</span>');
                         }
                         parts.push('</div>');

@@ -105,9 +105,19 @@ function isPrivateIP(ip: string): boolean {
     // IPv6 loopback and unspecified
     if (clean === "::1" || clean === "::" || clean === "0:0:0:0:0:0:0:1" || clean === "0:0:0:0:0:0:0:0") return true;
 
-    // IPv4-mapped IPv6 (::ffff:127.0.0.1)
+    // IPv4-mapped IPv6 — two forms:
+    // Dotted: ::ffff:127.0.0.1 → extract IPv4 directly
+    // Hex:    ::ffff:7f00:1 (Node normalizes dotted to this) → decode hex groups
     const v4mapped = clean.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    const ipv4 = v4mapped ? v4mapped[1] : clean;
+    const v4hex = clean.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    let ipv4 = clean;
+    if (v4mapped) {
+        ipv4 = v4mapped[1];
+    } else if (v4hex) {
+        const hi = parseInt(v4hex[1], 16);
+        const lo = parseInt(v4hex[2], 16);
+        ipv4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+    }
 
     // Parse as IPv4 — handles decimal, but reject octal/hex by requiring standard dotted-quad
     const parts = ipv4.split(".");
