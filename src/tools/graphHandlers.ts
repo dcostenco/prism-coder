@@ -616,7 +616,7 @@ export async function sessionSearchMemoryHandler(args: unknown) {
     // so we only log access for results actually delivered to the LLM.
     results.splice(limit);
 
-    if (results.length > 0) {
+    if (PRISM_HDC_ENABLED && results.length > 0) {
       const topScore = PRISM_ACTR_ENABLED ? (results[0] as any)._actr_composite : results[0].similarity;
       const secondScore = results.length > 1 ? (PRISM_ACTR_ENABLED ? (results[1] as any)._actr_composite : results[1].similarity) : 0;
       const gapDistance = (topScore || 0) - (secondScore || 0);

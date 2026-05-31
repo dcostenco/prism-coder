@@ -375,6 +375,11 @@ export interface StorageBackend {
   getHandoffAtVersion(project: string, version: number, userId?: string): Promise<Record<string, unknown> | null>;
 
   /**
+   * Patch handoff fields by project + userId (used for embedding backfill).
+   */
+  patchHandoff(project: string, userId: string, data: Record<string, unknown>): Promise<void>;
+
+  /**
    * Delete handoff state for a project (used by knowledge_forget with clear_handoff).
    */
   deleteHandoff(project: string, userId: string): Promise<void>;

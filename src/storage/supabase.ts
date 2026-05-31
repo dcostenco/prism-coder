@@ -216,6 +216,13 @@ export class SupabaseStorage implements StorageBackend {
     }
   }
 
+  async patchHandoff(project: string, userId: string, data: Record<string, unknown>): Promise<void> {
+    await supabasePatch("session_handoffs", data, {
+      project: `eq.${project}`,
+      user_id: `eq.${userId}`,
+    });
+  }
+
   async deleteHandoff(project: string, userId: string): Promise<void> {
     await supabaseDelete("session_handoffs", {
       project: `eq.${project}`,
@@ -368,13 +375,39 @@ export class SupabaseStorage implements StorageBackend {
         if (params.project) queryParams.project = `eq.${params.project}`;
         if (params.role)    queryParams.role    = `eq.${params.role}`;
 
-        const rows = await supabaseGet("session_ledger", queryParams) as Record<string, unknown>[];
+        const ledgerRows = await supabaseGet("session_ledger", queryParams) as Record<string, unknown>[];
+
+        // Also fetch handoff entries with embeddings
+        const handoffParams: Record<string, string> = {
+          user_id: `eq.${params.userId}`,
+          embedding_compressed: "not.is.null",
+          select: "id,project,last_summary,active_decisions,updated_at,embedding_compressed,embedding_turbo_radius",
+          limit: "500",
+        };
+        if (params.project) handoffParams.project = `eq.${params.project}`;
+        if (params.role)    handoffParams.role    = `eq.${params.role}`;
+
+        const handoffRows = await supabaseGet("session_handoffs", handoffParams) as Record<string, unknown>[];
+
+        // Normalize handoff rows to match ledger shape for scoring
+        const normalizedHandoffs: Record<string, unknown>[] = (Array.isArray(handoffRows) ? handoffRows : []).map(h => ({
+          ...h,
+          summary: h.last_summary || "",
+          decisions: h.active_decisions || [],
+          files_changed: [] as string[],
+          session_date: h.updated_at,
+          created_at: h.updated_at,
+        }));
+
+        const rows = [
+          ...(Array.isArray(ledgerRows) ? ledgerRows : []),
+          ...normalizedHandoffs,
+        ];
 
         const scored: (SemanticSearchResult & { _residualNorm?: number })[] = [];
-        // v9.3: Import tiebreaker config for optional residualNorm ranking
         const { PRISM_TURBOQUANT_TIEBREAKER_EPSILON } = await import("../config.js");
         const eps = PRISM_TURBOQUANT_TIEBREAKER_EPSILON;
-        for (const row of (Array.isArray(rows) ? rows : [])) {
+        for (const row of rows) {
           try {
             const compressedBase64 = row.embedding_compressed as string;
             const buf = Buffer.from(compressedBase64, "base64");
@@ -398,7 +431,6 @@ export class SupabaseStorage implements StorageBackend {
           }
         }
 
-        // Sort by similarity descending, with optional residualNorm tiebreaker
         scored.sort((a, b) => {
           const diff = b.similarity - a.similarity;
           if (eps > 0 && Math.abs(diff) < eps && a._residualNorm != null && b._residualNorm != null) {
@@ -407,8 +439,8 @@ export class SupabaseStorage implements StorageBackend {
           return diff;
         });
         debugLog(
-          `[SupabaseStorage] Tier-2 TurboQuant fallback: scored ${rows.length} entries, ` +
-          `${scored.length} above threshold`
+          `[SupabaseStorage] Tier-2 TurboQuant fallback: scored ${rows.length} entries ` +
+          `(${ledgerRows.length} ledger + ${handoffRows.length} handoff), ${scored.length} above threshold`
         );
         const results = scored.slice(0, params.limit);
         // Strip internal tiebreaker field before returning

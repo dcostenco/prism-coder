@@ -1312,6 +1312,33 @@ export class SqliteStorage implements StorageBackend {
     };
   }
 
+  async patchHandoff(project: string, userId: string, data: Record<string, unknown>): Promise<void> {
+    const ALLOWED_COLUMNS = new Set([
+      'embedding', 'embedding_compressed', 'embedding_format', 'embedding_turbo_radius',
+    ]);
+    const sets: string[] = [];
+    const args: InValue[] = [];
+
+    for (const [key, value] of Object.entries(data)) {
+      if (!ALLOWED_COLUMNS.has(key)) {
+        throw new Error(`[SqliteStorage] patchHandoff: rejected unknown column "${key}".`);
+      }
+      if (key === "embedding") {
+        sets.push(`${key} = vector(?)`);
+        args.push((typeof value === "string" ? value : JSON.stringify(value)) as InValue);
+      } else {
+        sets.push(`${key} = ?`);
+        args.push((typeof value === "object" && value !== null ? JSON.stringify(value) : value) as InValue);
+      }
+    }
+    if (sets.length === 0) return;
+    args.push(project, userId);
+    await this.db.execute({
+      sql: `UPDATE session_handoffs SET ${sets.join(", ")} WHERE project = ? AND user_id = ?`,
+      args,
+    });
+  }
+
   async deleteHandoff(project: string, userId: string): Promise<void> {
     await this.db.execute({
       sql: "DELETE FROM session_handoffs WHERE project = ? AND user_id = ?",

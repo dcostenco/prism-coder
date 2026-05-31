@@ -2,6 +2,69 @@
 
 All notable changes to this project will be documented in this file.
 
+## [16.1.1] - 2026-05-30 — 🔍 Handoff semantic search + uncertainty gate fix
+
+### What's new
+
+**Handoff semantic search** — `session_search_memory` now finds handoff content, not just ledger entries. Previously, `session_save_handoff` never generated embeddings and `semantic_search_ledger` only queried `session_ledger`, making all handoff data invisible to semantic search. This affected all users.
+
+### Fixed
+
+- `fix(session_save_handoff)`: add fire-and-forget embedding generation (float32 + TurboQuant) matching the existing ledger handler pattern
+- `fix(semantic_search_ledger)`: RPC now UNION ALLs `session_handoffs` alongside `session_ledger` — zero caller changes needed. Dropped stale 5-param overload that shadowed the fix
+- `fix(Tier-2 fallback)`: TurboQuant JS-side search in `supabase.ts` now also scans `session_handoffs` with compressed embeddings
+- `fix(search)`: HDC uncertainty rejection gate (0.85 threshold) now only fires when `PRISM_HDC_ENABLED=true` — was rejecting relevant results (0.847 similarity) even with HDC disabled
+- `fix(migration)`: drop stale 5-param `semantic_search_ledger` overload that shadowed the new 6-param UNION ALL version — callers were silently hitting the old ledger-only function
+- `feat(storage)`: add `patchHandoff(project, userId, data)` to interface + Supabase + SQLite backends for embedding backfill
+- `migration(042)`: adds `embedding vector(768)`, `embedding_compressed`, `embedding_format`, `embedding_turbo_radius` columns + HNSW index to `session_handoffs`
+
+### Root cause
+
+Bug introduced in v0.4.0 (`8047226`, 2026-03-19) — `session_handoffs` and semantic search were built in the same release but never wired together. Handoff embedding generation was simply never added. Undetected for 72 days because the normal workflow (`session_save_handoff` → `session_load_context`) reads by project name and never touches search.
+
+---
+
+## [16.0.0] - 2026-05-30 — 🧪 E2E test suite + embedding cache + Datadog + security sweep
+
+### What's new
+
+**Comprehensive E2E test suite** — 161 tests covering full workflow + correctness/stability across handlers and storage (`522b87a`)
+
+**Embedding LRU cache + in-flight dedup** — Gemini/OpenAI adapters now cache embeddings and deduplicate concurrent requests for the same text. Cache key includes model name to prevent cross-model collisions (`be17500`, `0aec029`)
+
+**Datadog server-side logging** — HTTP intake, no agent required (`64765f3`)
+
+**Rate limiting** — webhook + ingest endpoints now enforce request limits (`a60d5b0`)
+
+### Fixed
+
+- `chore`: remove 3,000 lines of dead code + fix console.log/telemetry (`1676d54`)
+
+---
+
+## [15.7.4] - 2026-05-29 — 🛡 Security sweep + knowledge ingestion + CLI docs
+
+### What's new
+
+**Knowledge ingestion** — open interface for codebase RAG (`c57ab6b`)
+
+**CLI reference** — all 15 commands documented (`38fa3fc`)
+
+### Fixed
+
+- `security`: fix 4 critical vulnerabilities in webhook + notifier (`8f8afdd`)
+- `security`: fix SSRF bypass + 4 dashboard XSS issues (`01ccc88`)
+- `security`: fix CodeQL alerts — log injection, property injection, temp files (`9b1fdd8`)
+- `security`: sanitize export filename to prevent path traversal (`1987da0`)
+- `security`: block path traversal in knowledge_ingest file_path (`8c3dcc9`)
+- `fix(deps)`: update qs to fix DoS vulnerability (`56c03c8`)
+- `fix(prism-mcp)`: fetch skills from .well-known static JSON (`d0f5457`)
+- `fix`: cascade default to 14b, verifier to 4b (`c4b6e4b`, `2d506a7`, `3fddf51`)
+- `test`: military-grade storage round-trip tests — 12 cases (`214d6d0`)
+- `test`: prismInferHandler + compactionHandler coverage — 110 tests (`a58f624`)
+
+---
+
 ## [15.6.1] - 2026-05-28 — 🎯 prism-coder:32b hits 300/300 (100%) on eval_300
 
 ### What's new

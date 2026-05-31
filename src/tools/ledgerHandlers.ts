@@ -512,6 +512,44 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     );
   }
 
+  // ─── Fire-and-forget embedding generation (enables semantic search on handoffs) ───
+  if (data.status === "created" || data.status === "updated") {
+    const embeddingText = [
+      last_summary || "",
+      key_context || "",
+      ...(open_todos || []),
+    ].filter(Boolean).join("\n");
+
+    if (embeddingText.trim()) {
+      getLLMProvider().generateEmbedding(embeddingText)
+        .then(async (embedding) => {
+          const patchData: Record<string, unknown> = {
+            embedding: JSON.stringify(embedding),
+          };
+
+          try {
+            const { getDefaultCompressor, serialize } = await import("../utils/turboquant.js");
+            const compressor = getDefaultCompressor();
+            const compressed = compressor.compress(embedding);
+            const buf = serialize(compressed);
+
+            patchData.embedding_compressed = buf.toString("base64");
+            patchData.embedding_format = `turbo${compressor.bits}`;
+            patchData.embedding_turbo_radius = compressed.radius;
+            debugLog(`[session_save_handoff] TurboQuant compressed: ${buf.length} bytes`);
+          } catch (turboErr: any) {
+            console.error(`[session_save_handoff] TurboQuant compression failed (non-fatal): ${turboErr.message}`);
+          }
+
+          await storage.patchHandoff(project, PRISM_USER_ID, patchData);
+          debugLog(`[session_save_handoff] Embedding saved for project "${project}"`);
+        })
+        .catch((err) => {
+          console.error(`[session_save_handoff] Embedding generation failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        });
+    }
+  }
+
   // ─── Trigger resource subscription notification ───
   if (server && (data.status === "created" || data.status === "updated")) {
     try {
@@ -644,6 +682,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
       (last_summary ? `Last summary: ${last_summary}\n` : "") +
       (open_todos?.length ? `Open TODOs: ${open_todos.length} items\n` : "") +
       (active_branch ? `Active branch: ${active_branch}\n` : "") +
+      `📊 Embedding generation queued for semantic search.\n` +
       `\n🔑 Remember: pass expected_version: ${newVersion} on your next save ` +
       `to maintain concurrency control.`;
 
