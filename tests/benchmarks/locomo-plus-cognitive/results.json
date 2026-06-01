@@ -1,0 +1,75 @@
+{
+  "benchmark": "LoCoMo-Plus Cognitive",
+  "date": "2026-06-01",
+  "dataset": "unified_cognitive_only.json (401 samples)",
+  "judge": "gemini-2.5-flash (temperature=0.0)",
+  "source": "https://github.com/dcostenco/Locomo-Plus",
+  "results": [
+    {
+      "config": "Gemini-2.5-flash (Baseline)",
+      "model": "gemini-2.5-flash",
+      "samples": 401,
+      "score": 278.0,
+      "accuracy": 0.6933,
+      "correct": 278,
+      "wrong": 123
+    },
+    {
+      "config": "Prism-MCP (Gemini-2.5-flash + Memory)",
+      "model": "gemini-2.5-flash",
+      "memory": "prism-mcp",
+      "samples": 401,
+      "score": 361.0,
+      "accuracy": 0.9002,
+      "correct": 361,
+      "wrong": 40
+    },
+    {
+      "config": "Gemini-3.1-pro-preview (Baseline)",
+      "model": "gemini-3.1-pro-preview",
+      "samples": 401,
+      "score": 272.0,
+      "accuracy": 0.6783,
+      "correct": 272,
+      "wrong": 129
+    },
+    {
+      "config": "Prism-MCP (Gemini-3.1-pro + Memory)",
+      "model": "gemini-3.1-pro-preview",
+      "memory": "prism-mcp",
+      "samples": 401,
+      "score": 382.0,
+      "accuracy": 0.9526,
+      "correct": 382,
+      "wrong": 19
+    },
+    {
+      "config": "Gemini-3.5-flash (Baseline)",
+      "model": "gemini-3.5-flash",
+      "samples": 401,
+      "score": 237.0,
+      "accuracy": 0.5910,
+      "correct": 237,
+      "wrong": 158
+    },
+    {
+      "config": "Prism-MCP (Gemini-3.5-flash + Memory)",
+      "model": "gemini-3.5-flash",
+      "memory": "prism-mcp",
+      "samples": 401,
+      "score": 388.0,
+      "accuracy": 0.9676,
+      "correct": 388,
+      "wrong": 11
+    },
+    {
+      "config": "Claude Sonnet 4.6 (Baseline)",
+      "model": "claude-sonnet-4-6",
+      "samples": 401,
+      "score": 290.0,
+      "accuracy": 0.7232,
+      "correct": 290,
+      "wrong": 111
+    }
+  ]
+}

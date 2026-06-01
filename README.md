@@ -364,7 +364,7 @@ python3 tests/benchmarks/cascade-14b-32b-opus/cascade_eval.py
 |---|---|---|
 | Per-model BFCL | [`tests/benchmarks/prism-routing-100/`](tests/benchmarks/prism-routing-100/) | Solo accuracy per model, 12 categories |
 | Cascade vs Opus | [`tests/benchmarks/cascade-14b-32b-opus/`](tests/benchmarks/cascade-14b-32b-opus/) | Tier distribution, Opus engagement rate, cascade accuracy |
-| LoCoMo-Plus (Cognitive) | `/tmp/Locomo-Plus/` | Long-context dialogue coherence and historical memory retention |
+| LoCoMo-Plus (Cognitive) | [`dcostenco/Locomo-Plus`](https://github.com/dcostenco/Locomo-Plus) | Long-context dialogue coherence and historical memory retention |
 
 ### Cognitive Dialogue Memory (LoCoMo-Plus Benchmark)
 
@@ -380,10 +380,12 @@ The **Cognitive** subset (401 multi-day dialogue scenarios) was evaluated head-t
 | **Prism-MCP (Gemini-3.1-pro + Memory)** | 401 | 382.0 / 401 | **95.26%** | **+27.43%** | **85.27%** |
 | **Gemini-3.5-flash (Baseline)** | 401 | 237.0 / 401 | **59.10%** | — | — |
 | **Prism-MCP (Gemini-3.5-flash + Memory)** | 401 | 388.0 / 401 | **96.76%** | **+37.66%** | **92.08%** |
+| **Claude Sonnet 4.6 (Baseline)** | 401 | 290.0 / 401 | **72.32%** | — | — |
 
 **Key Takeaways**:
-* **Pure attention limits**: Larger frontier models (Gemini 3.1 Pro baseline at **67.83%**) and newer fast models (Gemini 3.5 Flash baseline at **59.10%**) suffer from attention dilution (the "needle in a haystack" problem) when parsing massive multi-day transcripts directly in active context.
+* **Pure attention limits**: Even the best frontier model tested without memory — Claude Sonnet 4.6 at **72.32%** — still misses over a quarter of cognitive memory cues. Gemini 3.5 Flash baseline sits at **59.10%**. Both suffer from attention dilution when parsing massive multi-day transcripts directly in active context.
 * **Semantic database synergy**: Equipping a model with Prism-MCP's structured semantic memory retrieval yields extraordinary performance (**96.76%** for Gemini 3.5 Flash + Memory), proving that structured semantic recall is critical for next-generation AI agents.
+* **Claude vs Gemini (raw)**: Claude Sonnet 4.6 outperforms all Gemini baselines by a wide margin (+13.22pp over Gemini 3.5 Flash, +4.49pp over Gemini 3.1 Pro), confirming stronger native long-context recall — yet still falls 24pp short of the Prism-augmented result.
 
 <details>
 <summary>🔍 View Test Case Schema & Sample</summary>
@@ -433,7 +435,16 @@ PYTHONPATH=/tmp/Locomo-Plus python3 evaluation_framework/task_eval/evaluate_qa.p
   --backend call_prism \
   --concurrency 1
 
-# 4. Grade results using the LLM-as-a-Judge script
+# 4. Run Claude Sonnet 4.6 Baseline Evaluation (concurrency 3, rate-limit safe)
+export ANTHROPIC_API_KEY="your-api-key"
+PYTHONPATH=/tmp/Locomo-Plus python3 evaluation_framework/task_eval/evaluate_qa.py \
+  --data-file data/unified_cognitive_only.json \
+  --out-file output/claude_sonnet46_pred.json \
+  --model claude-sonnet-4-6 \
+  --backend call_claude \
+  --concurrency 3
+
+# 5. Grade results using the LLM-as-a-Judge script
 PYTHONPATH=/tmp/Locomo-Plus python3 evaluation_framework/task_eval/llm_as_judge.py \
   --input-file output/prism_gemini_3.1_pro_pred.json \
   --out-file output/prism_gemini_3.1_pro_judged.json \
