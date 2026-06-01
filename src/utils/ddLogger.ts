@@ -1,16 +1,17 @@
 /**
- * Datadog Server-Side Logger
+ * Telemetry Logger — Prism MCP Server
  *
- * Sends structured logs to Datadog HTTP Logs API.
- * No agent needed — direct HTTPS POST to intake.
+ * Sends structured events to Synalux portal (/api/v1/telemetry)
+ * which stores in Supabase with 15-day retention.
  *
- * Env: DD_API_KEY, DD_SITE (default datadoghq.com)
+ * Falls back to Datadog HTTP Logs if DD_API_KEY is set.
+ * Env: PRISM_SYNALUX_BASE_URL (default https://synalux.ai)
  */
 
+const SYNALUX_BASE = process.env.PRISM_SYNALUX_BASE_URL || "https://synalux.ai";
 const DD_API_KEY = process.env.DD_API_KEY || "";
 const DD_SITE = process.env.DD_SITE || "datadoghq.com";
 const SERVICE = "prism-mcp";
-const INTAKE_URL = `https://http-intake.logs.${DD_SITE}/api/v2/logs`;
 
 const queue: Array<Record<string, unknown>> = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -24,21 +25,41 @@ function scheduleFlush() {
 
 async function flush() {
     flushTimer = null;
-    if (queue.length === 0 || !DD_API_KEY) return;
+    if (queue.length === 0) return;
 
     const batch = queue.splice(0, MAX_BATCH);
+
+    // Primary: Synalux portal → Supabase (always available)
     try {
-        await fetch(INTAKE_URL, {
+        await fetch(`${SYNALUX_BASE}/api/v1/telemetry`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "DD-API-KEY": DD_API_KEY,
-            },
-            body: JSON.stringify(batch),
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(batch.map(e => ({
+                service: SERVICE,
+                event_type: e.status === "error" ? "error" : "action",
+                message: e.message,
+                context: { ...e, service: undefined, message: undefined },
+                user_id: e.user_id,
+                user_plan: e.user_plan,
+            }))),
             signal: AbortSignal.timeout(5_000),
         });
     } catch {
-        // Silent — don't crash the app if DD is unreachable
+        // Silent — don't crash the MCP server
+    }
+
+    // Secondary: Datadog Logs (if API key is set AND Logs product is enabled)
+    if (DD_API_KEY) {
+        try {
+            await fetch(`https://http-intake.logs.${DD_SITE}/api/v2/logs`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "DD-API-KEY": DD_API_KEY },
+                body: JSON.stringify(batch),
+                signal: AbortSignal.timeout(5_000),
+            });
+        } catch {
+            // Silent
+        }
     }
 
     if (queue.length > 0) scheduleFlush();
@@ -49,8 +70,6 @@ export function ddLog(
     message: string,
     context?: Record<string, unknown>,
 ) {
-    if (!DD_API_KEY) return;
-
     queue.push({
         ddsource: "nodejs",
         ddtags: `env:${process.env.NODE_ENV || "development"},service:${SERVICE}`,
