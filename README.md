@@ -229,6 +229,14 @@ That's it. Open Claude / Cursor and your AI now has memory.
 
 More setup details in [`docs/SETUP_GEMINI.md`](docs/SETUP_GEMINI.md).
 
+### Monitoring
+
+| Dashboard | What it tracks |
+|-----------|---------------|
+| [Prism MCP — Server Analytics](https://app.datadoghq.com/dashboard/tdm-92f-myh/prism-mcp--server-analytics) | Tool call volume, latency per tool (avg/p95), errors by tool, project activity, knowledge search/ingest, session memory ops, log volume |
+
+Instrumentation: `src/utils/ddLogger.ts` (structured logs to Datadog HTTP intake) + OpenTelemetry tracing on all 50 tool handlers (`src/utils/telemetry.ts`). Set `DD_API_KEY` + `PRISM_OTEL_ENABLED=true` on Railway to activate.
+
 ---
 
 ## How AI agents use it

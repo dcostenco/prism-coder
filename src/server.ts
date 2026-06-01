@@ -98,6 +98,7 @@ import { getSettingSync, initConfigStorage } from "./storage/configStorage.js";
 import { sanitizeMcpOutput } from "./utils/sanitizer.js";
 import { getTracer, initTelemetry } from "./utils/telemetry.js";
 import { context as otelContext, trace, SpanStatusCode } from "@opentelemetry/api";
+import { ddInfo, ddError as ddLogError } from "./utils/ddLogger.js";
 
 // ─── Import Tool Definitions (schemas) and Handlers (implementations) ─────
 
@@ -816,6 +817,7 @@ export function createServer() {
     // through await chains — including fire-and-forget workers launched
     // within the handler body (e.g. imageCaptioner, embeddings backfill).
     return otelContext.with(trace.setSpan(otelContext.active(), rootSpan), async () => {
+      const _ddStart = Date.now();
       try {
         if (!args) {
           throw new Error("No arguments provided");
@@ -1063,6 +1065,7 @@ export function createServer() {
         }
 
         rootSpan.setStatus({ code: SpanStatusCode.OK });
+        ddInfo("mcp.tool.success", { tool: name, project: (args as Record<string, unknown>)?.project, durationMs: Date.now() - _ddStart });
 
         // ═══ v5.3: Hivemind Watchdog Alert Injection (Telepathy) ═══
         // CRITICAL: Append alerts DIRECTLY to tool response content
@@ -1109,6 +1112,7 @@ export function createServer() {
 
       } catch (error) {
         console.error(`Error in tool handler: ${error instanceof Error ? error.message : String(error)}`);
+        ddLogError("mcp.tool.error", error instanceof Error ? error : undefined, { tool: name, project: (args as Record<string, unknown>)?.project, durationMs: Date.now() - _ddStart });
         rootSpan.recordException(error instanceof Error ? error : new Error(String(error)));
         rootSpan.setStatus({
           code: SpanStatusCode.ERROR,
