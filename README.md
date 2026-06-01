@@ -386,7 +386,7 @@ The **Cognitive** subset (401 multi-day dialogue scenarios) was evaluated head-t
 <details>
 <summary>🔍 View Test Case Schema & Sample</summary>
 
-A representative test sample from the [unified_cognitive_only.json](file:///tmp/Locomo-Plus/data/unified_cognitive_only.json) ([GitHub source](https://github.com/dcostenco/Locomo-Plus/blob/main/data/unified_cognitive_only.json)) dataset contains a multi-turn chat history with a memory "needle" placed days prior, followed by a cued dialogue prompt:
+A representative test sample from the `unified_cognitive_only.json` ([GitHub source](https://github.com/dcostenco/Locomo-Plus/blob/main/data/unified_cognitive_only.json)) dataset contains a multi-turn chat history with a memory "needle" placed days prior, followed by a cued dialogue prompt:
 
 ```json
 {
@@ -406,7 +406,7 @@ When evaluated:
 <details>
 <summary>💻 View How to Reproduce Publicly (Test Source & Guide)</summary>
 
-To run and review the evaluation suite on your local setup using the benchmark runner scripts ([evaluate_qa.py](file:///tmp/Locomo-Plus/evaluation_framework/task_eval/evaluate_qa.py) and [llm_as_judge.py](file:///tmp/Locomo-Plus/evaluation_framework/task_eval/llm_as_judge.py)):
+To run and review the evaluation suite on your local setup using the benchmark runner scripts (`evaluate_qa.py` and `llm_as_judge.py`):
 
 ```bash
 # 1. Clone the LoCoMo-Plus evaluation codebase
