@@ -372,16 +372,18 @@ LoCoMo-Plus is a long-context, multi-day dialogue benchmark designed to test an 
 
 The **Cognitive** subset (401 multi-day dialogue scenarios) was evaluated head-to-head comparing raw baseline models against the **Prism-MCP** framework (using local SQLite semantic memory). Graded by a neutral `gemini-2.5-flash` model acting as judge (scoring on coherence, continuity, and fact accuracy):
 
-| Configuration | Total Samples | Total Score | Average Score | Absolute Delta | Relative Error Reduction |
+| Configuration | Samples | Total Score | Average Score | Absolute Delta | Relative Error Reduction |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Gemini-2.5-flash (Baseline)** | 401 | 278.0 / 401 | **69.33%** | — | — |
 | **Prism-MCP (Gemini-2.5-flash + Memory)** | 401 | 361.0 / 401 | **90.02%** | **+20.69%** | **67.46%** |
 | **Gemini-3.1-pro-preview (Baseline)** | 401 | 272.0 / 401 | **67.83%** | — | — |
 | **Prism-MCP (Gemini-3.1-pro + Memory)** | 401 | 382.0 / 401 | **95.26%** | **+27.43%** | **85.27%** |
+| **Gemini-3.5-flash (Baseline)** | 401 | 237.0 / 401 | **59.10%** | — | — |
+| **Prism-MCP (Gemini-3.5-flash + Memory)** | 401 | 388.0 / 401 | **96.76%** | **+37.66%** | **92.08%** |
 
 **Key Takeaways**:
-* **Pure attention limits**: Larger raw frontier models (Gemini 3.1 Pro baseline at **67.83%**) suffer from attention dilution (the "needle in a haystack" problem) when parsing massive multi-day transcripts directly in active context.
-* **Semantic database synergy**: Equipping a model with Prism-MCP's structured semantic memory retrieval yields state-of-the-art performance (**95.26%** for Gemini 3.1 Pro + Memory), proving that structured semantic recall is far more accurate than raw model scaling alone.
+* **Pure attention limits**: Larger frontier models (Gemini 3.1 Pro baseline at **67.83%**) and newer fast models (Gemini 3.5 Flash baseline at **59.10%**) suffer from attention dilution (the "needle in a haystack" problem) when parsing massive multi-day transcripts directly in active context.
+* **Semantic database synergy**: Equipping a model with Prism-MCP's structured semantic memory retrieval yields extraordinary performance (**96.76%** for Gemini 3.5 Flash + Memory), proving that structured semantic recall is critical for next-generation AI agents.
 
 <details>
 <summary>🔍 View Test Case Schema & Sample</summary>
