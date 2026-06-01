@@ -229,13 +229,50 @@ That's it. Open Claude / Cursor and your AI now has memory.
 
 More setup details in [`docs/SETUP_GEMINI.md`](../SETUP_GEMINI.md).
 
-### Monitoring
+### Monitoring & Observability *(new in v16.2)*
+
+Built-in Datadog integration — every tool call is logged with tool name, project, and latency. Zero config for self-hosted users (logs to stdout); set `DD_API_KEY` to send structured logs to Datadog HTTP intake.
+
+```bash
+# Enable Datadog logging (optional)
+export DD_API_KEY=your_datadog_api_key
+
+# Enable OpenTelemetry tracing (optional — works with Jaeger, Zipkin, Datadog, Grafana Tempo)
+export PRISM_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+```
+
+**What's tracked automatically:**
+- `mcp.tool.success` — tool name, project, duration (ms) on every successful call
+- `mcp.tool.error` — tool name, error message, stack trace on failures
+- OpenTelemetry spans with `tool.name` and `project` attributes on all 50 tool handlers
 
 | Dashboard | What it tracks |
 |-----------|---------------|
-| [Prism MCP — Server Analytics](https://app.datadoghq.com/dashboard/tdm-92f-myh/prism-mcp--server-analytics) | Tool call volume, latency per tool (avg/p95), errors by tool, project activity, knowledge search/ingest, session memory ops, log volume |
+| [Prism MCP — Server Analytics](https://app.datadoghq.com/dashboard/tdm-92f-myh/prism-mcp--server-analytics) | Tool call volume, latency per tool (avg/p95), errors by tool, project activity, knowledge search/ingest, session memory ops |
 
-Instrumentation: `src/utils/ddLogger.ts` (structured logs to Datadog HTTP intake) + OpenTelemetry tracing on all 50 tool handlers (`src/utils/telemetry.ts`). Set `DD_API_KEY` + `PRISM_OTEL_ENABLED=true` on Railway to activate.
+### In-app analytics for paid users *(new in v16.2)*
+
+Paid Synalux subscribers get a built-in analytics dashboard at `/app/memory-analytics`:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Analytics                              [standard] plan │
+├─────────────────────────────────────────────────────────┤
+│  📝 Sessions: 147  🔄 Handoffs: 23  📚 Knowledge: 89  │
+│  📁 Projects: 5    💾 Memory: 42 KB                    │
+├─────────────────────────────────────────────────────────┤
+│  Today's Usage    🧠 47/200  🔎 12/50  💬 85/200       │
+├─────────────────────────────────────────────────────────┤
+│  30-Day Trend     ▂▃▅▇▆▄▃▅▆▇█▇▅▃▂▃▅▆▇▅▃▂▁▂▃▅▇▆▅▃    │
+├─────────────────────────────────────────────────────────┤
+│  Top Projects     prism-mcp (45) · portal (32) · ...   │
+│  Compaction       3 entries > 5KB — run compact_ledger  │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **Free tier**: paywall with upgrade CTA
+- **Standard+**: session counts, handoffs, knowledge entries, daily quotas with tier limits, 30-day activity trend, project breakdown, compaction candidates
 
 ---
 
