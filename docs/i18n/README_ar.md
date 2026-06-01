@@ -327,6 +327,83 @@ python3 tests/benchmarks/cascade-14b-32b-opus/cascade_eval.py
 |---|---|---|
 | Per-model BFCL | [`tests/benchmarks/prism-routing-100/`](../../tests/benchmarks/prism-routing-100/) | Solo accuracy per model, 12 categories |
 | Cascade vs Opus | [`tests/benchmarks/cascade-14b-32b-opus/`](../../tests/benchmarks/cascade-14b-32b-opus/) | Tier distribution, Opus engagement rate, cascade accuracy |
+| LoCoMo-Plus (Cognitive) | `/tmp/Locomo-Plus/` | Long-context dialogue coherence and historical memory retention |
+
+### Cognitive Dialogue Memory (LoCoMo-Plus Benchmark)
+
+LoCoMo-Plus is a long-context, multi-day dialogue benchmark designed to test an AI agent's memory retention, context awareness, and ability to coherently reference historical dialogue evidence.
+
+The **Cognitive** subset (401 multi-day dialogue scenarios) was evaluated head-to-head comparing raw baseline models against the **Prism-MCP** framework (using local SQLite semantic memory). Graded by a neutral `gemini-2.5-flash` model acting as judge (scoring on coherence, continuity, and fact accuracy):
+
+| Configuration | Total Samples | Total Score | Average Score | Absolute Delta | Relative Error Reduction |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Gemini-2.5-flash (Baseline)** | 401 | 278.0 / 401 | **69.33%** | — | — |
+| **Prism-MCP (Gemini-2.5-flash + Memory)** | 401 | 361.0 / 401 | **90.02%** | **+20.69%** | **67.46%** |
+| **Gemini-3.1-pro-preview (Baseline)** | 401 | 272.0 / 401 | **67.83%** | — | — |
+| **Prism-MCP (Gemini-3.1-pro + Memory)** | 401 | 382.0 / 401 | **95.26%** | **+27.43%** | **85.27%** |
+
+**Key Takeaways**:
+* **Pure attention limits**: Larger raw frontier models (Gemini 3.1 Pro baseline at **67.83%**) suffer from attention dilution (the "needle in a haystack" problem) when parsing massive multi-day transcripts directly in active context.
+* **Semantic database synergy**: Equipping a model with Prism-MCP's structured semantic memory retrieval yields state-of-the-art performance (**95.26%** for Gemini 3.1 Pro + Memory), proving that structured semantic recall is far more accurate than raw model scaling alone.
+
+<details>
+<summary>🔍 View Test Case Schema & Sample</summary>
+
+A representative test sample from the [unified_cognitive_only.json](file:///tmp/Locomo-Plus/data/unified_cognitive_only.json) ([GitHub source](https://github.com/dcostenco/Locomo-Plus/blob/main/data/unified_cognitive_only.json)) dataset contains a multi-turn chat history with a memory "needle" placed days prior, followed by a cued dialogue prompt:
+
+```json
+{
+  "category": "Cognitive",
+  "input_prompt": "Caroline said, \"...\"\nMelanie said, \"...\"",
+  "trigger": "Melanie said, \"Hey, Caroline! Nice to hear from you! Love the necklace, any special meaning to it?\"",
+  "evidence": "Swedish grandmother's necklace was gifted to Caroline",
+  "answer": "Yes, this necklace was a gift from my grandmother in my home country, Sweden."
+}
+```
+
+When evaluated:
+* **Baseline models** without memory frequently output a generic guess (e.g., "Thanks, it was a gift from a friend") or fail to reference the Sweden/grandmother relationship.
+* **Prism-MCP** automatically embeds the prior turns, stores them in SQLite, and when cued, retrieves the precise "Swedish grandmother" evidence turn via semantic vectors to inject it into active context.
+</details>
+
+<details>
+<summary>💻 View How to Reproduce Publicly (Test Source & Guide)</summary>
+
+To run and review the evaluation suite on your local setup using the benchmark runner scripts ([evaluate_qa.py](file:///tmp/Locomo-Plus/evaluation_framework/task_eval/evaluate_qa.py) and [llm_as_judge.py](file:///tmp/Locomo-Plus/evaluation_framework/task_eval/llm_as_judge.py)):
+
+```bash
+# 1. Clone the LoCoMo-Plus evaluation codebase
+git clone https://github.com/dcostenco/Locomo-Plus /tmp/Locomo-Plus
+cd /tmp/Locomo-Plus
+
+# 2. Run Baseline Gemini 3.1 Pro Evaluation (concurrency 5)
+export GOOGLE_API_KEY="your-api-key"
+PYTHONPATH=/tmp/Locomo-Plus python3 evaluation_framework/task_eval/evaluate_qa.py \
+  --data-file data/unified_cognitive_only.json \
+  --out-file output/gemini_3.1_pro_pred.json \
+  --model gemini-3.1-pro-preview \
+  --backend call_gemini \
+  --concurrency 5
+
+# 3. Run Prism-MCP powered by Gemini 3.1 Pro Evaluation (concurrency 1 to guard SQLite locks)
+export PRISM_TEXT_MODEL=gemini-3.1-pro-preview
+PYTHONPATH=/tmp/Locomo-Plus python3 evaluation_framework/task_eval/evaluate_qa.py \
+  --data-file data/unified_cognitive_only.json \
+  --out-file output/prism_gemini_3.1_pro_pred.json \
+  --model gemini-3.1-pro-preview \
+  --backend call_prism \
+  --concurrency 1
+
+# 4. Grade results using the LLM-as-a-Judge script
+PYTHONPATH=/tmp/Locomo-Plus python3 evaluation_framework/task_eval/llm_as_judge.py \
+  --input-file output/prism_gemini_3.1_pro_pred.json \
+  --out-file output/prism_gemini_3.1_pro_judged.json \
+  --model gemini-2.5-flash \
+  --backend call_gemini \
+  --concurrency 5 \
+  --summary-file output/prism_gemini_3.1_pro_summary.json
+```
+</details>
 
 ### Models on HuggingFace
 

@@ -45,7 +45,7 @@ import type { LLMProvider } from "../provider.js";
 // Defined as constants (not hardcoded strings) so external reviewers can see
 // all model choices at a glance, and future changes only need one edit.
 
-const TEXT_MODEL = "gemini-2.5-flash";        // chat/instruction-following model
+const TEXT_MODEL = process.env.PRISM_TEXT_MODEL || "gemini-2.5-flash";        // chat/instruction-following model
 const EMBEDDING_MODEL = "gemini-embedding-001"; // vector embedding model (MRL-enabled)
 const EMBEDDING_DIMS = 768;                     // fixed output dims — must match DB schema
 

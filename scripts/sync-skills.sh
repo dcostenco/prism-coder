@@ -32,5 +32,17 @@ for skill_dir in "$SYNALUX_SKILLS"/*/; do
   fi
 done
 
+# Prune orphans — skills in DB but no longer on filesystem
+db_keys=$(sqlite3 "$DB" "SELECT key FROM system_settings WHERE key LIKE 'skill:%';" 2>/dev/null)
+pruned=0
+for key in $db_keys; do
+  name="${key#skill:}"
+  if [ ! -f "$SYNALUX_SKILLS/$name/SKILL.md" ]; then
+    sqlite3 "$DB" "DELETE FROM system_settings WHERE key='$key';" 2>/dev/null
+    echo "  🗑 $name (orphan removed)"
+    pruned=$((pruned + 1))
+  fi
+done
+
 echo ""
-echo "Synced $count skills to $DB"
+echo "Synced $count skills to $DB${pruned:+ ($pruned orphans pruned)}"
