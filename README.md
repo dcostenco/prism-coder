@@ -375,17 +375,19 @@ The **Cognitive** subset (401 multi-day dialogue scenarios) was evaluated head-t
 | Configuration | Samples | Total Score | Average Score | Absolute Delta | Relative Error Reduction |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Gemini-2.5-flash (Baseline)** | 401 | 278.0 / 401 | **69.33%** | — | — |
-| **Prism-MCP (Gemini-2.5-flash + Memory)** | 401 | 361.0 / 401 | **90.02%** | **+20.69%** | **67.46%** |
+| **Prism-MCP (Gemini-2.5-flash + Memory)** | 401 | 361.0 / 401 | **90.02%** | **+20.69pp** | **67.5%** |
 | **Gemini-3.1-pro-preview (Baseline)** | 401 | 272.0 / 401 | **67.83%** | — | — |
-| **Prism-MCP (Gemini-3.1-pro + Memory)** | 401 | 382.0 / 401 | **95.26%** | **+27.43%** | **85.27%** |
+| **Prism-MCP (Gemini-3.1-pro + Memory)** | 401 | 382.0 / 401 | **95.26%** | **+27.43pp** | **85.3%** |
 | **Gemini-3.5-flash (Baseline)** | 401 | 237.0 / 401 | **59.10%** | — | — |
-| **Prism-MCP (Gemini-3.5-flash + Memory)** | 401 | 388.0 / 401 | **96.76%** | **+37.66%** | **92.08%** |
+| **Prism-MCP (Gemini-3.5-flash + Memory)** | 401 | 388.0 / 401 | **96.76%** | **+37.66pp** | **92.1%** |
 | **Claude Sonnet 4.6 (Baseline)** | 401 | 290.0 / 401 | **72.32%** | — | — |
+| **Prism-MCP (Claude Sonnet 4.6 + Memory)** | 401 | 357.0 / 401 | **89.03%** | **+16.71pp** | **60.4%** |
 
 **Key Takeaways**:
-* **Pure attention limits**: Even the best frontier model tested without memory — Claude Sonnet 4.6 at **72.32%** — still misses over a quarter of cognitive memory cues. Gemini 3.5 Flash baseline sits at **59.10%**. Both suffer from attention dilution when parsing massive multi-day transcripts directly in active context.
-* **Semantic database synergy**: Equipping a model with Prism-MCP's structured semantic memory retrieval yields extraordinary performance (**96.76%** for Gemini 3.5 Flash + Memory), proving that structured semantic recall is critical for next-generation AI agents.
-* **Claude vs Gemini (raw)**: Claude Sonnet 4.6 outperforms all Gemini baselines by a wide margin (+13.22pp over Gemini 3.5 Flash, +4.49pp over Gemini 3.1 Pro), confirming stronger native long-context recall — yet still falls 24pp short of the Prism-augmented result.
+* **Pure attention limits**: Even the strongest frontier model tested — Claude Sonnet 4.6 at **72.32%** — misses over a quarter of cognitive memory cues without external memory. Gemini 3.5 Flash baseline sits at **59.10%**. Both suffer from attention dilution when parsing massive multi-day transcripts directly in active context.
+* **Prism lifts every model**: Prism-MCP yields large gains regardless of base model — from +16.71pp (Claude) to +37.66pp (Gemini 3.5 Flash). Even Claude's stronger native recall benefits from structured retrieval, jumping from 72.32% to **89.03%**.
+* **Best overall**: Prism-MCP + Gemini 3.5 Flash achieves the highest score (**96.76%**), eliminating 92.1% of baseline errors. This makes the cheapest model + Prism more accurate than the most expensive model alone.
+* **Claude vs Gemini (raw)**: Claude Sonnet 4.6 outperforms all Gemini baselines by a wide margin (+13.22pp over Flash 3.5, +4.49pp over Pro 3.1), confirming stronger native long-context recall.
 
 <details>
 <summary>🔍 View Test Case Schema & Sample</summary>

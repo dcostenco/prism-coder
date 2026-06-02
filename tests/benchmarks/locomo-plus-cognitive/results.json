@@ -70,6 +70,16 @@
       "accuracy": 0.7232,
       "correct": 290,
       "wrong": 111
+    },
+    {
+      "config": "Prism-MCP (Claude Sonnet 4.6 + Memory)",
+      "model": "claude-sonnet-4-6",
+      "memory": "prism-mcp",
+      "samples": 401,
+      "score": 357.0,
+      "accuracy": 0.8903,
+      "correct": 357,
+      "wrong": 44
     }
   ]
 }

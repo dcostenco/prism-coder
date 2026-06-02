@@ -8,15 +8,16 @@ Each sample contains a ~65K-char multi-day conversation with an embedded memory 
 
 Judge: `gemini-2.5-flash` (temperature=0.0, scoring: correct=1, wrong=0)
 
-| Configuration | Score | Accuracy |
-|---|---|---|
-| Gemini-2.5-flash (Baseline) | 278/401 | 69.33% |
-| Prism-MCP (Gemini-2.5-flash + Memory) | 361/401 | 90.02% |
-| Gemini-3.1-pro-preview (Baseline) | 272/401 | 67.83% |
-| Prism-MCP (Gemini-3.1-pro + Memory) | 382/401 | 95.26% |
-| Gemini-3.5-flash (Baseline) | 237/401 | 59.10% |
-| Prism-MCP (Gemini-3.5-flash + Memory) | 388/401 | 96.76% |
-| Claude Sonnet 4.6 (Baseline) | 290/401 | 72.32% |
+| Configuration | Score | Accuracy | Delta |
+|---|---|---|---|
+| Gemini-2.5-flash (Baseline) | 278/401 | 69.33% | — |
+| Prism-MCP (Gemini-2.5-flash + Memory) | 361/401 | 90.02% | +20.69pp |
+| Gemini-3.1-pro-preview (Baseline) | 272/401 | 67.83% | — |
+| Prism-MCP (Gemini-3.1-pro + Memory) | 382/401 | 95.26% | +27.43pp |
+| Gemini-3.5-flash (Baseline) | 237/401 | 59.10% | — |
+| Prism-MCP (Gemini-3.5-flash + Memory) | 388/401 | 96.76% | +37.66pp |
+| Claude Sonnet 4.6 (Baseline) | 290/401 | 72.32% | — |
+| Prism-MCP (Claude Sonnet 4.6 + Memory) | 357/401 | 89.03% | +16.71pp |
 
 ## Reproduce
 
