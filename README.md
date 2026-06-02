@@ -157,6 +157,18 @@ Categories: abstention, adversarial traps, cascade, disambiguation, edge cases, 
 ### 🔍 L3 Grounding Verifier
 When `prism_infer` receives an `evidence` payload, the grounding verifier automatically checks the model's response against the provided evidence before returning to the caller. Unverified or hallucinated claims are flagged. This is the third layer (L3) of the cascade — after tool routing (L1) and confidence gating (L2).
 
+### 🧠 HRR Semantic Drift Detection (v17.0)
+Detects when long AI agent sessions drift from their original goal — using Holographic Reduced Representations for temporal trajectory encoding and anomaly detection.
+
+**Three domains, one detector:**
+| Domain | Signals | Safety |
+|---|---|---|
+| **BCBA/Clinical** | Client specificity decay, function-intervention alignment (4 functions), contraindication detection (epilepsy/pica/dysphagia/diabetes) | PHI-safe, deterministic |
+| **Coding** | File scope entropy, summary vagueness, test coverage ratio, trajectory HRR divergence | Adaptive threshold for refactors |
+| **AAC** | Prediction accuracy, vocabulary stagnation, topic divergence | Emergency phrases always ≥ 0.95 |
+
+**Research-backed:** trajectory association (Frady et al. 2018), HDAD anomaly detection (Wang et al. 2021), unit-modulus projection (Ganesan et al. NeurIPS 2021). 306 tests across 8 files, zero failures. Use `session_detect_drift` with optional `domain` parameter.
+
 ### ⚡ Zero-search retrieval *(new in v15.8)*
 Holographic Reduced Representations (HRR) via Rust WASM for instant memory retrieval without a database query.
 

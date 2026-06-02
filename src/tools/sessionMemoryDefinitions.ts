@@ -1887,3 +1887,105 @@ export function isQueryMemoryNaturalArgs(
   return true;
 }
 
+
+// ─── Session Detect Drift ──────────────────────────────────────────
+
+export const SESSION_DETECT_DRIFT_TOOL: Tool = {
+  name: "session_detect_drift",
+  description:
+    "Detect whether the current agent session has semantically drifted from its " +
+    "original goal. Scores recent ledger entries against the goal using synalux's " +
+    "HRR embedding stack (GloVe → Gemini/Voyage → cosine similarity), then runs " +
+    "the rolling-window drift detector algorithm.\n\n" +
+    "**Triggers:**\n" +
+    "- `goal-drift` — cumulative alignment loss is high and monotonic (not random tangents)\n" +
+    "- `context-collapse` — average output quality has dropped below floor\n\n" +
+    "**Pre-warning:**\n" +
+    "- `quality-degrading` — quality slope steeply negative before collapse\n\n" +
+    "**Returns:** drifted, reason, warning, drift_score (0..1), goal_alignment, " +
+    "quality_avg, sample_count, adaptive_threshold, recommendation.\n\n" +
+    "Use alongside GATE 5 (60-minute drift check): call this tool instead of " +
+    "session_cognitive_route for goal-alignment drift detection.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project: {
+        type: "string",
+        description: "Project identifier. Must match the project used in session_save_ledger.",
+      },
+      goal: {
+        type: "string",
+        description:
+          "The original session goal — the task you started this session to accomplish. " +
+          "Used as the semantic reference vector. Be specific: 'implement drift detection for prism-mcp' " +
+          "is better than 'work on prism'.",
+      },
+      window_hours: {
+        type: "number",
+        description:
+          "How many hours of ledger history to evaluate. Default 1. Range 0.083–24 (5 min to 24 h).",
+      },
+      min_directional_ratio: {
+        type: "number",
+        description:
+          "Directional ratio floor for the tremor filter (0..1). " +
+          "Random topic tangents that return to the goal are suppressed below this threshold. " +
+          "Default 0.2. Set to 0 to disable filter.",
+      },
+      domain: {
+        type: "string",
+        enum: ["coder", "bcba", "aac"],
+        description:
+          "Optional domain for domain-specific drift signals. " +
+          "'coder' adds file_entropy, summary_vagueness, test_coverage_ratio, trajectory_divergence. " +
+          "'bcba' adds clinical_specificity, function_aligned, contraindication_safe (requires behavior_functions, contraindications, client_descriptors params). " +
+          "'aac' is reserved for future AAC prediction drift (use the AAC-specific endpoint instead).",
+      },
+      behavior_functions: {
+        type: "array",
+        items: { type: "string" },
+        description: "BCBA domain only: identified behavior functions for this client (e.g. ['escape-maintained', 'attention-maintained']).",
+      },
+      contraindications: {
+        type: "array",
+        items: { type: "string" },
+        description: "BCBA domain only: known medical conditions (e.g. ['epilepsy', 'pica']).",
+      },
+      client_descriptors: {
+        type: "array",
+        items: { type: "string" },
+        description: "BCBA domain only: client-specific terms to check for specificity (e.g. ['7-year-old', 'aggression at transitions']).",
+      },
+      assessment_type: {
+        type: "string",
+        description: "BCBA domain only: assessment instrument name (e.g. 'vb-mapp', 'vineland', 'ablls-r').",
+      },
+    },
+    required: ["project", "goal"],
+  },
+};
+
+export interface SessionDetectDriftArgs {
+  project: string;
+  goal: string;
+  window_hours?: number;
+  min_directional_ratio?: number;
+  domain?: "coder" | "bcba" | "aac";
+  behavior_functions?: string[];
+  contraindications?: string[];
+  client_descriptors?: string[];
+  assessment_type?: string;
+}
+
+export function isSessionDetectDriftArgs(
+  args: unknown
+): args is SessionDetectDriftArgs {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  if (typeof a.project !== "string" || !a.project.trim()) return false;
+  if (typeof a.goal !== "string" || !a.goal.trim()) return false;
+  if (a.window_hours !== undefined && typeof a.window_hours !== "number") return false;
+  if (a.min_directional_ratio !== undefined && typeof a.min_directional_ratio !== "number") return false;
+  if (a.domain !== undefined && !["coder", "bcba", "aac"].includes(a.domain as string)) return false;
+  return true;
+}

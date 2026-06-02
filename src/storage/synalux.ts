@@ -437,6 +437,26 @@ export class SynaluxStorage extends SupabaseStorage {
   }
 
   /**
+   * Detect semantic drift between the session goal and recent ledger entries.
+   * Delegates embedding + detection to the Synalux portal (source of truth for
+   * the HRR/GloVe/cosine stack). Prism-mcp never does NLP directly.
+   */
+  async detectDrift(
+    project: string,
+    goal: string,
+    windowHours?: number,
+    minDirectionalRatio?: number,
+    extraParams?: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = { action: "detect_drift", project, goal };
+    if (typeof windowHours === "number") body.window_hours = windowHours;
+    if (typeof minDirectionalRatio === "number") body.min_directional_ratio = minDirectionalRatio;
+    if (extraParams) Object.assign(body, extraParams);
+    const result = await this.portalPost("/api/v1/prism/memory", body);
+    return result as Record<string, unknown>;
+  }
+
+  /**
    * Fetch skill content from Synalux portal (paid-tier single source of truth).
    * Returns a map of { skillName → SKILL.md content } for all names that exist.
    * Missing skills are absent from the map — caller falls back to local SQLite.

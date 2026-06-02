@@ -110,6 +110,10 @@ export {
   queryMemoryNaturalHandler,
 } from "./v12Handlers.js";
 
+// ── Session Drift Detection ──
+export { SESSION_DETECT_DRIFT_TOOL, isSessionDetectDriftArgs } from "./sessionMemoryDefinitions.js";
+export { sessionDetectDriftHandler } from "./sessionDriftHandler.js";
+
 // ── Knowledge Ingestion (v15.5 — Open Interface) ──
 // Chunks source code, generates Q&A via Claude Haiku, stores in knowledge graph.
 // Three entry points: MCP tool, REST API, GitHub webhook.

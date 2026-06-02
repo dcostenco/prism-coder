@@ -155,6 +155,9 @@ import {
   SESSION_COGNITIVE_ROUTE_TOOL,
   // v7.1: Task Router
   SESSION_TASK_ROUTE_TOOL,
+  // Session Drift Detection
+  SESSION_DETECT_DRIFT_TOOL,
+  isSessionDetectDriftArgs,
   // v12: Developer Onboarding & Enterprise Observability
   ONBOARDING_WIZARD_TOOL,
   EXTRACT_ENTITIES_TOOL,
@@ -211,6 +214,8 @@ import {
   agentListTeamHandler,
   // v7.1: Task Router
   sessionTaskRouteHandler,
+  // Session Drift Detection
+  sessionDetectDriftHandler,
   // v7.3: Dark Factory Pipeline tools
   SESSION_START_PIPELINE_TOOL,
   SESSION_CHECK_PIPELINE_STATUS_TOOL,
@@ -322,6 +327,7 @@ function buildSessionMemoryTools(autoloadList: string[]): Tool[] {
     SESSION_BACKFILL_LINKS_TOOL,   // session_backfill_links — retroactive graph edge creation
     SESSION_SYNTHESIZE_EDGES_TOOL, // session_synthesize_edges — inferred semantic graph enrichment
     SESSION_COGNITIVE_ROUTE_TOOL,  // session_cognitive_route — HDC policy-gated concept routing (v6.5)
+    SESSION_DETECT_DRIFT_TOOL,     // session_detect_drift — semantic goal drift detection (synalux)
     // ─── v6.1: Storage Hygiene tool ───
     MAINTENANCE_VACUUM_TOOL,       // maintenance_vacuum — reclaim SQLite disk space post-purge
     // ─── v12.1: Developer Onboarding & Framework Bridge ───
@@ -1007,6 +1013,12 @@ export function createServer() {
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
             if (getSettingSync("task_router_enabled", String(PRISM_TASK_ROUTER_ENABLED_ENV)) !== "true") throw new Error("Task router not enabled. Enable it in the dashboard or set PRISM_TASK_ROUTER_ENABLED=true.");
             result = await sessionTaskRouteHandler(args); break;
+
+          // ─── Session Drift Detection ───
+
+          case "session_detect_drift":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
+            result = await sessionDetectDriftHandler(args); break;
 
           // ─── v7.3: Dark Factory Pipeline Tools ───
 

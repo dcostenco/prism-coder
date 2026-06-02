@@ -1,8 +1,8 @@
 {
   "name": "prism-mcp-server",
-  "version": "16.2.0",
+  "version": "17.0.0",
   "mcpName": "io.github.dcostenco/prism-coder",
-  "description": "Prism Coder — Cognitive memory + tool-calling intelligence for AI agents. Mind Palace persistent memory (BFCL Gold Certified, 100% Tool-Call Accuracy, 54 Agent Skills, Zero-Search HDC/HRR retrieval, HIPAA-hardened local-first storage, SLERP-optimized GRPO alignment) plus the prism-coder:7b / 14b open-weights LLM fleet.",
+  "description": "Prism Coder — Cognitive memory + tool-calling intelligence for AI agents. Mind Palace persistent memory (BFCL Gold Certified, 100% Tool-Call Accuracy, 54 Agent Skills, Zero-Search HDC/HRR retrieval, HRR Semantic Drift Detection across BCBA/Coding/AAC domains, HIPAA-hardened local-first storage, SLERP-optimized GRPO alignment) plus the prism-coder:7b / 14b open-weights LLM fleet.",
   "module": "index.ts",
   "type": "module",
   "main": "dist/server.js",

@@ -1,0 +1,10 @@
+{
+  "output": { "filePath": "training/repomix-output.txt" },
+  "ignore": {
+    "customPatterns": [
+      "node_modules", "*.lock", "dist", ".git", "training/data/",
+      "training/venv/", "*.safetensors", "*.gguf", "training/repomix-r*.txt",
+      "vertex-ai/", "bfcl-submission/", "repomix-output.txt"
+    ]
+  }
+}
