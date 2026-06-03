@@ -14,7 +14,8 @@
  *   // `redacted` is safe to store/log; `detections` lists what was found
  */
 
-import { debugLog } from './logger.js';
+// PHI detection ALWAYS logs — not gated by PRISM_DEBUG_LOGGING.
+// This is a critical security metric for HIPAA compliance.
 
 export interface PHIDetection {
   type: string;
@@ -90,7 +91,7 @@ export function scanAndRedactPHI(text: string): PHIScanResult {
       return acc;
     }, {} as Record<string, number>);
     const summaryStr = Object.entries(summary).map(([k, v]) => `${k}=${v}`).join(' ');
-    debugLog(`[PHI-GUARD] Detected and redacted PHI: ${summaryStr}`);
+    console.error(`[PHI-GUARD] Detected and redacted PHI: ${summaryStr}`);
   }
 
   return {

@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { sanitizeMemoryInput } from '../src/tools/ledgerHandlers';
+import { scanAndRedactPHI } from '../src/utils/phiGuard';
 
 /**
  * Integration tests — verify PHI guard is wired into the save pipeline.
@@ -78,5 +79,63 @@ describe('PHI Guard Integration — sanitizeMemoryInput pipeline', () => {
       expect(result).not.toMatch(/\b(Sarah|John)\s+(Connor)\b/); // No names
       expect(result).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{4}/); // No DOB (in context)
     }
+  });
+});
+
+/**
+ * DD Logging tests — verify PHI detection events are logged to stderr
+ * for Datadog agent pickup. These are CRITICAL compliance metrics.
+ */
+describe('PHI Guard — DD logging (stderr)', () => {
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    stderrSpy.mockRestore();
+  });
+
+  it('logs [PHI-GUARD] to stderr when PHI detected', () => {
+    scanAndRedactPHI('Patient: John Doe, SSN 123-45-6789');
+    expect(stderrSpy).toHaveBeenCalled();
+    const logMsg = stderrSpy.mock.calls[0][0] as string;
+    expect(logMsg).toContain('[PHI-GUARD]');
+  });
+
+  it('logs type counts, never raw values', () => {
+    scanAndRedactPHI('Patient: Jane Smith, DOB: 01/15/1990, MRN#12345678');
+    const logMsg = stderrSpy.mock.calls[0][0] as string;
+    expect(logMsg).toContain('PATIENT_NAME=1');
+    expect(logMsg).toContain('DOB=1');
+    expect(logMsg).toContain('MRN=1');
+    // CRITICAL: raw values never in log
+    expect(logMsg).not.toContain('Jane Smith');
+    expect(logMsg).not.toContain('01/15/1990');
+    expect(logMsg).not.toContain('12345678');
+  });
+
+  it('does NOT log when no PHI detected', () => {
+    scanAndRedactPHI('Fixed build error in PrismApp.tsx');
+    expect(stderrSpy).not.toHaveBeenCalled();
+  });
+
+  it('ALWAYS logs regardless of PRISM_DEBUG_LOGGING setting', () => {
+    const orig = process.env.PRISM_DEBUG_LOGGING;
+    process.env.PRISM_DEBUG_LOGGING = 'false';
+    scanAndRedactPHI('Patient: Test User, SSN 999-88-7777');
+    expect(stderrSpy).toHaveBeenCalled();
+    expect((stderrSpy.mock.calls[0][0] as string)).toContain('[PHI-GUARD]');
+    process.env.PRISM_DEBUG_LOGGING = orig;
+  });
+
+  it('logs through sanitizeMemoryInput pipeline', () => {
+    sanitizeMemoryInput('Client: Alex Rivera, diagnosed with F84.0');
+    expect(stderrSpy).toHaveBeenCalled();
+    const logMsg = stderrSpy.mock.calls[0][0] as string;
+    expect(logMsg).toContain('[PHI-GUARD]');
+    expect(logMsg).toContain('PATIENT_NAME=1');
+    expect(logMsg).not.toContain('Alex Rivera');
   });
 });
