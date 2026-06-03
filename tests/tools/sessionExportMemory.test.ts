@@ -111,6 +111,10 @@ vi.mock("../../src/config.js", () => ({
   // ACT-R v7.0 config — required by backgroundScheduler.ts transitive import
   PRISM_ACTR_ENABLED:                     false,
   PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS:   90,
+  // Synalux portal integration — required by synaluxSearch.ts transitive import
+  SYNALUX_CONFIGURED:                     false,
+  PRISM_SYNALUX_BASE_URL:                 "",
+  PRISM_SYNALUX_API_KEY:                  "",
 }));
 
 vi.mock("../../src/utils/logger.js", () => ({
