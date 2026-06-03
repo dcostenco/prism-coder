@@ -29,6 +29,8 @@ export interface SkillRoutingTable {
   universal: string[];
   /** project-name substring → list of skill names */
   projects: Record<string, string[]>;
+  /** regex pattern → list of skill names. Matched against user prompt. */
+  prompt_keywords?: Record<string, string[]>;
   /**
    * User-local skill policy. Disabled by default — user must explicitly
    * request local skill loading (user_local=true on session_load_context,
@@ -112,6 +114,49 @@ export async function resolveSkillsForProject(project: string): Promise<Resolved
     names: Array.from(out),
     user_local: table.user_local ?? OFFLINE_FALLBACK.user_local,
   };
+}
+
+/**
+ * Resolve skills based on user prompt keywords. Matches prompt text
+ * against the routing table's prompt_keywords regex patterns.
+ * Returns deduplicated skill names (excluding any already in baseSkills).
+ */
+export async function resolveSkillsForPrompt(
+  prompt: string,
+  baseSkills: string[] = [],
+): Promise<string[]> {
+  const now = Date.now();
+  if (!cached || now - cached.fetchedAt > CACHE_TTL_MS) {
+    if (!inflight) {
+      inflight = fetchOnce().then((table) => {
+        cached = { table, fetchedAt: Date.now() };
+        return table;
+      }).finally(() => { inflight = null; });
+    }
+    await inflight;
+  }
+  const table = cached!.table;
+  if (!table.prompt_keywords) return [];
+
+  const existing = new Set(baseSkills);
+  const matched: string[] = [];
+
+  for (const [pattern, skills] of Object.entries(table.prompt_keywords)) {
+    try {
+      const re = new RegExp(pattern, 'i');
+      if (re.test(prompt)) {
+        for (const s of skills) {
+          if (!existing.has(s)) {
+            existing.add(s);
+            matched.push(s);
+          }
+        }
+      }
+    } catch {
+      // Invalid regex in routing table — skip silently
+    }
+  }
+  return matched;
 }
 
 /** Force a re-fetch on the next call. Exposed for tests + admin tooling. */
