@@ -3,6 +3,7 @@ import * as nodePath from "node:path";
 import * as os from "node:os";
 import { randomUUID } from "node:crypto";
 import { redactSettings, toMarkdown } from "./commonHelpers.js";
+import { scanAndRedactPHI } from "../utils/phiGuard.js";
 import * as fflate from "fflate";
 import { buildVaultDirectory } from "../utils/vaultExporter.js";
 /**
@@ -100,9 +101,11 @@ import { notifyResourceUpdate } from "../server.js";
  * Zero-latency (pure regex, no API calls). Runs on every save.
  */
 export function sanitizeMemoryInput(text: string): string {
-  return text
+  const stripped = text
     .replace(/<\/?(?:system|user_input|instruction|anti_pattern|desired_pattern|assistant|tool_call|prism_memory)[^>]*>/gi, '')
     .trim();
+  // HIPAA: redact PHI before storage — SSN, DOB, MRN, patient names, etc.
+  return scanAndRedactPHI(stripped).redacted;
 }
 
 /** Sanitize each string in an array (for decisions[], todos[], etc.) */
