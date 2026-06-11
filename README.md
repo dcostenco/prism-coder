@@ -214,6 +214,72 @@ Multiple AI agents share the same Mind Palace. Each agent has a role (dev / qa /
 
 ---
 
+## Why Prism Coder
+
+### vs AI coding assistants
+
+| Feature | Prism Coder | GitHub Copilot | Cursor | Windsurf | Amazon Q | Tabnine | Devin |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Local inference (1.7B–32B) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Works offline | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Open-weight models (HuggingFace) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Data stays on your machine | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Persistent cross-session memory | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Cognitive routing (episodic/semantic/procedural) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Session drift detection (HRR) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| L3 grounding verifier | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Multi-agent hivemind | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Native MCP server | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Works with Claude Code | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Cloud fallback (14b → 32b → Opus) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Web IDE | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ |
+| VS Code extension | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
+| HIPAA / air-gapped (no BAA needed) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Flat-rate pricing (not per-seat) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+### vs local AI tools
+
+| Feature | Prism Coder | Ollama | LM Studio | Jan.ai | Mem0 | Zep |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| Local inference (1.7B–32B cascade) | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Automatic cloud fallback | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Persistent cross-session memory | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Knowledge ingestion (MCP + webhook + REST) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Cognitive routing (3-store) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| L3 grounding verifier | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Session drift detection | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Native MCP server | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Web IDE + VS Code extension | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Analytics dashboard | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+
+### Pricing — flat-rate, not per-seat
+
+| | **Prism Coder** | GitHub Copilot | Cursor | Windsurf | Amazon Q | Tabnine |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Individual** | **$19/mo** | $10/mo | $20/mo | $15–20/mo | $19/mo | $39/mo |
+| **Team (5 devs)** | **$49/mo flat** | $95/mo | $200/mo | $200/mo | $95/mo | $295/mo |
+| **Enterprise** | **$99/mo flat** | $195/mo | $1,000/mo | Custom | Custom | Custom |
+
+---
+
+## Plans
+
+| | **Free** | **Standard $19/mo** | **Advanced $49/mo** | **Enterprise $99/mo** |
+|---|---|---|---|---|
+| **Local model ceiling** | up to 4b | up to 14b | up to 32b | up to 32b |
+| **Daily inference limit** | 50 | 200 | 2,000 | 100,000 |
+| **Max output tokens** | 512 | 1,024 | 2,048 | 4,096 |
+| **Cloud fallback** | — | 14b → 32b | 14b → 32b → Claude Opus | Priority + Claude Opus |
+| **L3 grounding verifier** | — | ✅ | ✅ | ✅ |
+| **Knowledge search** | limited | unlimited | unlimited | unlimited |
+| **Session memory** | limited | unlimited | unlimited | unlimited |
+| **Analytics dashboard** | — | ✅ | ✅ | ✅ |
+| **HIPAA BAA** | — | — | — | ✅ |
+
+All on-device models are open-weight and free to run locally via Ollama. The subscription gates cloud features, higher model tiers, and increased limits. 14-day free trial on all paid plans. [Subscribe →](https://synalux.ai/pricing)
+
+---
+
 ## Get started
 
 ```bash
@@ -507,104 +573,6 @@ Set `LOCAL_LLM_URL=http://localhost:11434` in your portal config. Routing is aut
 iOS/mobile on same WiFi: `OLLAMA_HOST=0.0.0.0 ollama serve` on the Mac, then point `LOCAL_LLM_URL` at the Mac's IP.  
 Routing accuracy (May 2026, v36/v7 system prompt, 3-seed mean): 32B v7 = **100.0%** · 8B v36 = **100.0%** · 14B v36 = **100.0%** · 1.7B v42 = **100.0%**  
 Cascade (14B→32B): **100.0%** · Opus solo: 98.3% · Opus engaged: **0% of requests** → [Full results](tests/benchmarks/cascade-14b-32b-opus/README.md)
-
----
-
-## Plans
-
-| | **Free** | **Standard $19/mo** | **Advanced $49/mo** | **Enterprise $99/mo** |
-|---|---|---|---|---|
-| **Local model ceiling** | up to 4b | up to 14b | up to 32b | up to 32b |
-| **Daily inference limit** | 50 | 200 | 2,000 | 100,000 |
-| **Max output tokens** | 512 | 1,024 | 2,048 | 4,096 |
-| **Cloud fallback** | — | Portal cascade (14b → 32b) | Portal cascade (14b → 32b → Claude Opus) | Priority cascade + Claude Opus |
-| **L3 grounding verifier** | — | ✓ | ✓ | ✓ |
-| **Knowledge search** | limited | unlimited | unlimited | unlimited |
-| **Session memory** | limited | unlimited | unlimited | unlimited |
-| **Analytics dashboard** | — | ✓ | ✓ | ✓ |
-| **HIPAA BAA** | — | — | — | ✓ |
-
-### What free users get
-
-- Local Ollama inference with models up to 4b (prism-coder:1b7 and prism-coder:4b)
-- 50 calls/day, 512 max output tokens per call
-- Local SQLite storage for session memory and knowledge
-- All open-weight models available to pull via `ollama pull`
-
-### What paid users get
-
-- **Higher model ceilings** — Standard unlocks 14b, Advanced/Enterprise unlock 32b
-- **Cloud fallback** — when local Ollama is down or underpowered, inference routes through the Synalux portal cascade (14b → 32b → Claude Opus)
-- **L3 grounding verifier** — evidence-based claim verification that rejects hallucinated outputs
-- **Unlimited knowledge search and session memory** — no caps on stored context
-- **Analytics dashboard** — usage metrics, latency tracking, model performance
-- **Higher daily limits and token caps** — see table above
-
-All on-device models are open-weight and free to run locally via Ollama. The subscription gates cloud features, higher model tiers, and increased limits.
-
-14-day free trial on all paid plans. [Subscribe →](https://synalux.ai/pricing)
-
-### Why Prism MCP
-
-**Pricing — flat-rate, not per-seat:**
-
-| | **Prism MCP** | GitHub Copilot | Cursor | Windsurf | Amazon Q | Tabnine |
-|---|---|---|---|---|---|---|
-| **Individual** | **$19/mo** | $10/mo | $20/mo | $15-20/mo | $19/mo | $39/mo |
-| **Team (5 devs)** | **$49/mo flat** | $95/mo | $200/mo | $200/mo | $95/mo | $295/mo |
-| **Enterprise** | **$99/mo flat** | $195/mo | $1,000/mo | Custom | Custom | Custom |
-
-**Features — full stack vs single-purpose:**
-
-| | **Prism MCP** | GitHub Copilot | Cursor | Windsurf | Amazon Q | Tabnine | Devin |
-|---|---|---|---|---|---|---|---|
-| **Web IDE** | **Synalux Coder** | github.dev | — | — | Console | — | Browser |
-| **VS Code extension** | **Yes** | Yes | N/A (is a fork) | N/A (is a fork) | Yes | Yes | No |
-| **MCP server** | **Native** | No | Partial | No | No | No | No |
-| **Works with Claude Code** | **Yes** | No | N/A | No | No | No | No |
-| **Local inference (Ollama)** | **1.7B–32B fleet** | No | No | No | No | No | No |
-| **Cloud fallback** | **14b→32b→Opus** | Cloud only | Cloud only | Cloud only | Cloud only | Cloud only | Cloud only |
-| **Works offline** | **Yes** | No | No | No | No | No | No |
-| **Open-weight models** | **HuggingFace** | Proprietary | Proprietary | Proprietary | Proprietary | Proprietary | Proprietary |
-| **Persistent memory** | **Cross-session** | No | No | No | No | No | Partial |
-| **Cognitive routing** | **Episodic/semantic/procedural** | No | No | No | No | No | No |
-| **Session drift detection** | **HRR-based** | No | No | No | No | No | No |
-| **Codebase indexing** | **Knowledge ingest (MCP + webhook + REST)** | Partial | Yes | Yes | Yes | Yes | Yes |
-| **L3 grounding verifier** | **Evidence-based** | No | No | No | No | No | No |
-| **Multi-agent hivemind** | **Shared Mind Palace** | No | No | No | No | No | No |
-| **Analytics dashboard** | **Yes** | No | Yes | Yes | Yes | No | Yes |
-| **HIPAA / air-gapped** | **On-prem, no BAA needed** | Requires BAA | No | No | Partial | No | No |
-| **Data stays local** | **Yes** | No | No | No | No | No | No |
-
-**vs local AI tools:**
-
-| | **Prism MCP** | Ollama | LM Studio | Jan.ai | Mem0 | Zep |
-|---|---|---|---|---|---|---|
-| **Local inference** | 1.7B–32B cascade | Any GGUF | Any GGUF | Any GGUF | No | No |
-| **Cloud fallback** | Automatic | No | No | Partial | Cloud only | Cloud only |
-| **Persistent memory** | Cross-session | No | No | No | Yes | Yes |
-| **Knowledge ingestion** | MCP + GitHub webhook + REST | No | No | No | Partial | No |
-| **Cognitive routing** | 3-store (episodic/semantic/procedural) | No | No | No | No | Temporal graph |
-| **Grounding verifier** | L3 evidence-based | No | No | No | No | No |
-| **Drift detection** | HRR-based | No | No | No | No | No |
-| **MCP server** | Native | No | No | No | No | No |
-| **Web IDE** | Synalux Coder | No | No | No | No | No |
-| **VS Code extension** | Yes | No | No | No | No | No |
-| **Analytics** | Dashboard + Datadog | No | No | No | Yes | Yes |
-| **Price** | $0–99/mo flat | Free | Free/$10/user | Free | $249/mo | $99/mo |
-
-**Why developers choose Prism:**
-- **Full IDE experience** — Synalux Coder (web) + VS Code extension + MCP for Claude Code, Cursor, JetBrains
-- **Local-first** — your code and context never leave your machine unless you opt in to cloud
-- **Flat-rate pricing** — $49/mo for your whole team, not $40/seat/mo
-- **Works offline** — airplane, hospital, air-gapped classified environments
-- **Open models** — prism-coder weights are on HuggingFace, not locked behind an API
-- **Memory that persists** — cognitive routing stores episodic, semantic, and procedural memory across sessions
-- **Drift detection** — HRR-based session monitoring catches when your AI agent goes off-track
-- **Grounding verification** — L3 verifier rejects hallucinated outputs before they reach you
-- **Codebase indexing** — knowledge ingestion via MCP tool, GitHub webhooks, or REST API
-- **Multi-agent ready** — Hivemind lets multiple agents share the same Mind Palace with role-scoped context
-- **HIPAA without paperwork** — local inference means no BAA required, PHI never leaves the device
 
 ---
 
