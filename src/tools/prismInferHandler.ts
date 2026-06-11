@@ -30,6 +30,8 @@ import {
 } from "../config.js";
 import { debugLog } from "../utils/logger.js";
 import { verifyGrounding, type EvidenceSnippet, type GroundingOutcome } from "../utils/groundingVerifier.js";
+import { getEntitlements, clampCeiling, type PrismEntitlements, FREE_ENTITLEMENTS } from "../utils/entitlements.js";
+import { ddLog } from "../utils/ddLogger.js";
 
 // ─── Tool Definition ────────────────────────────────────────────
 
@@ -325,6 +327,7 @@ export interface PrismInferResult {
     latency_ms: number;
     used_cloud: boolean;
     attempts: Array<{ tier: string; reason: string }>;
+    plan?: string;
     /** Populated when `verify: true` was supplied. */
     verification?: {
         action: GroundingOutcome["action"];
@@ -347,17 +350,63 @@ export interface InferDeps {
     /** Injectable so tests can pass a passthrough verifier without
      *  needing a live Ollama. Defaults to the real `verifyGrounding`. */
     callVerifier?: typeof verifyGrounding;
+    /** Injectable entitlements for testing. When omitted, fetched live. */
+    entitlements?: PrismEntitlements;
 }
 
 export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<PrismInferResult> {
     const t0 = Date.now();
-    const maxTokens = Math.min(args.max_tokens ?? 1024, 8192);
     const temperature = args.temperature ?? 0;
-    const allowCloud = args.cloud_fallback === true;
+
+    // ── Entitlement enforcement ──────────────────────────────────
+    // Fetch user's plan limits (cached 1hr). Free users without auth
+    // get 4b ceiling, 50 calls/day, 512 max tokens.
+    const ent = deps.entitlements ?? await getEntitlements();
+
+    // Clamp model ceiling to what the plan allows
+    const effectiveCeiling = clampCeiling(args.model_ceiling, ent.model_ceiling);
+
+    // Clamp max_tokens to plan limit
+    const maxTokens = Math.min(args.max_tokens ?? 1024, ent.max_tokens, 8192);
+
+    // Cloud fallback only for paid plans
+    const allowCloud = args.cloud_fallback === true && ent.features.cloud_fallback;
+
+    // Verification only for paid plans (free users skip L3 grounding)
+    const canVerify = ent.features.grounding_verifier;
 
     const freeBytes = deps.freemem();
     const ramFreeMb = Math.round(freeBytes / (1024 * 1024));
     const attempts: Array<{ tier: string; reason: string }> = [];
+
+    // Strip verification args if plan lacks grounding_verifier
+    const gatedArgs = canVerify ? args : { ...args, verify: false, evidence: undefined };
+
+    debugLog(`[prism_infer] plan=${ent.plan} ceiling=${effectiveCeiling} max_tokens=${maxTokens} cloud=${allowCloud} verify=${canVerify}`);
+
+    // Log tier enforcement to Datadog for monetization visibility
+    const ceilingClamped = effectiveCeiling !== (args.model_ceiling ?? ent.model_ceiling);
+    const tokensClamped = maxTokens < (args.max_tokens ?? 1024);
+    const cloudBlocked = args.cloud_fallback === true && !allowCloud;
+    const verifierBlocked = (args.verify === true || (args.evidence?.length ?? 0) > 0) && !canVerify;
+
+    if (ceilingClamped || tokensClamped || cloudBlocked || verifierBlocked) {
+        ddLog("info", "prism_infer.tier_enforcement", {
+            plan: ent.plan,
+            requested_ceiling: args.model_ceiling,
+            effective_ceiling: effectiveCeiling,
+            ceiling_clamped: ceilingClamped,
+            requested_tokens: args.max_tokens,
+            effective_tokens: maxTokens,
+            tokens_clamped: tokensClamped,
+            cloud_requested: args.cloud_fallback,
+            cloud_allowed: allowCloud,
+            cloud_blocked: cloudBlocked,
+            verify_requested: args.verify,
+            verify_allowed: canVerify,
+            verify_blocked: verifierBlocked,
+        });
+    }
 
     // Discover which tags Ollama actually has + which are already warm.
     // Already-loaded models don't need RAM headroom — they're reusing
@@ -373,9 +422,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // so the caller can see exactly why each tier was bypassed.
     if (installed) {
         // Find start index from ceiling — if no ceiling, start at the top (32B).
-        const ceilStart = args.model_ceiling
+        const ceilStart = effectiveCeiling
             ? Math.max(0, MODEL_TIERS.findIndex(
-                  t => t.tag.endsWith(args.model_ceiling!) || t.tag === args.model_ceiling,
+                  t => t.tag.endsWith(effectiveCeiling) || t.tag === effectiveCeiling,
               ))
             : 0;
         let anyViable = false;
@@ -404,13 +453,14 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout,
             );
             if (result.ok) {
-                return await applyVerification(result.text, args, deps, {
+                return await applyVerification(result.text, gatedArgs, deps, {
                     backend: `ollama-${tier.tag.replace("prism-coder:", "")}`,
                     model_picked: tier.tag,
                     ram_free_mb: ramFreeMb,
                     latency_ms: Date.now() - t0,
                     used_cloud: false,
                     attempts,
+                    plan: ent.plan,
                 });
             }
             attempts.push({ tier: tier.tag, reason: result.reason });
@@ -427,13 +477,14 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         const cloudTimeout = args.timeout_ms ?? 90_000;
         const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout);
         if (cloud.ok && cloud.output) {
-            return await applyVerification(cloud.output, args, deps, {
+            return await applyVerification(cloud.output, gatedArgs, deps, {
                 backend: cloud.backend ?? "synalux",
                 model_picked: null,
                 ram_free_mb: ramFreeMb,
                 latency_ms: Date.now() - t0,
                 used_cloud: true,
                 attempts,
+                plan: ent.plan,
             });
         }
         attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
@@ -510,6 +561,7 @@ export async function prismInferHandler(args: unknown): Promise<{
         const header =
             `[prism_infer] backend=${result.backend}` +
             ` model=${result.model_picked ?? "n/a"}` +
+            ` plan=${result.plan ?? "unknown"}` +
             ` free_ram=${result.ram_free_mb}MB` +
             ` latency=${result.latency_ms}ms` +
             ` used_cloud=${result.used_cloud}` +
