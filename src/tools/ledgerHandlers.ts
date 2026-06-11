@@ -949,11 +949,15 @@ export async function sessionLoadContextHandler(args: unknown) {
         const eff = computeEffectiveImportance(s.importance, s.last_accessed_at, s.created_at, Boolean(s.is_rollup));
         impStr = ` [Imp: ${eff}]`;
       }
-      return `  [${s.session_date?.split("T")[0]}]${impStr} ${s.summary}`;
+      const dateStr = (s.session_date || s.created_at || s.date || "unknown").split("T")[0];
+      return `  [${dateStr}]${impStr} ${s.summary}`;
     }).join("\n") + `\n`;
   }
   if (d.session_history?.length) {
-    formattedContext += `\n📂 Session History (${d.session_history.length} entries):\n` + d.session_history.map((s: any) => `  [${s.session_date?.split("T")[0]}] ${s.summary}`).join("\n") + `\n`;
+    formattedContext += `\n📂 Session History (${d.session_history.length} entries):\n` + d.session_history.map((s: any) => {
+      const dateStr = (s.session_date || s.created_at || s.date || "unknown").split("T")[0];
+      return `  [${dateStr}] ${s.summary}`;
+    }).join("\n") + `\n`;
   }
   if (d.recent_validations?.length) {
     formattedContext += `\n🔬 Recent Validations:\n` + d.recent_validations.map((v: any) => {
