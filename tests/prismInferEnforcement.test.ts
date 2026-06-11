@@ -32,6 +32,7 @@ const STANDARD: PrismEntitlements = {
     model_ceiling: "14b",
     daily_infer_limit: 200,
     max_tokens: 1024,
+    max_seats: 1,
     features: {
         cloud_fallback: true,
         grounding_verifier: true,
@@ -47,6 +48,7 @@ const ADVANCED: PrismEntitlements = {
     model_ceiling: "32b",
     daily_infer_limit: 2000,
     max_tokens: 2048,
+    max_seats: 5,
     features: {
         cloud_fallback: true,
         grounding_verifier: true,
@@ -62,6 +64,7 @@ const ENTERPRISE: PrismEntitlements = {
     model_ceiling: "32b",
     daily_infer_limit: 100_000,
     max_tokens: 4096,
+    max_seats: 25,
     features: {
         cloud_fallback: true,
         grounding_verifier: true,

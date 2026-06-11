@@ -20,6 +20,7 @@ export interface PrismEntitlements {
     model_ceiling: "1b7" | "4b" | "8b" | "14b" | "32b";
     daily_infer_limit: number;
     max_tokens: number;
+    max_seats: number;
     features: {
         cloud_fallback: boolean;
         grounding_verifier: boolean;
@@ -37,6 +38,7 @@ export const FREE_ENTITLEMENTS: PrismEntitlements = {
     model_ceiling: "4b",
     daily_infer_limit: 50,
     max_tokens: 512,
+    max_seats: 1,
     features: {
         cloud_fallback: false,
         grounding_verifier: false,
