@@ -1009,16 +1009,28 @@ export async function sessionLoadContextHandler(args: unknown) {
     debugLog(`[session_load_context] Synalux skill content fetched: ${Object.keys(synaluxContent).join(", ") || "none"}`);
   }
 
+  const SKILL_BLOCK_CAP = 30_000;
+  const skippedSkills: string[] = [];
   for (const skillName of skillsToLoad) {
     if (loadedSkills.includes(skillName)) continue;
-    // Synalux (paid) → platform fallback skill:<name> (free/offline). Never user_skill:.
+    if (skillBlock.length >= SKILL_BLOCK_CAP) {
+      skippedSkills.push(skillName);
+      debugLog(`[session_load_context] Skill "${skillName}" skipped — block cap ${SKILL_BLOCK_CAP} reached`);
+      continue;
+    }
     const content = synaluxContent[skillName] || await getSetting(`skill:${skillName}`, "");
     if (content && content.trim()) {
+      const trimmed = content.trim();
+      if (skillBlock.length + trimmed.length > SKILL_BLOCK_CAP && loadedSkills.length > 0) {
+        skippedSkills.push(skillName);
+        debugLog(`[session_load_context] Skill "${skillName}" skipped — would exceed cap (${skillBlock.length}+${trimmed.length} > ${SKILL_BLOCK_CAP})`);
+        continue;
+      }
       const source = synaluxContent[skillName] ? "synalux" : "local-platform";
-      skillBlock += `\n\n[📜 SKILL: ${skillName}]\n${content.trim()}`;
+      skillBlock += `\n\n[📜 SKILL: ${skillName}]\n${trimmed}`;
       loadedSkills.push(skillName);
       skillLoaded = true;
-      debugLog(`[session_load_context] Skill "${skillName}" loaded (${source}) for project="${project}"`);
+      debugLog(`[session_load_context] Skill "${skillName}" loaded (${source}) for project="${project}" [${skillBlock.length}/${SKILL_BLOCK_CAP} chars]`);
     }
   }
 
@@ -1031,9 +1043,12 @@ export async function sessionLoadContextHandler(args: unknown) {
     const allSettings = await storage.getAllSettings?.() || {};
     for (const [k, v] of Object.entries(allSettings)) {
       if (!k.startsWith(prefix) || !v) continue;
+      if (skillBlock.length >= SKILL_BLOCK_CAP) break;
       const skillName = k.replace(prefix, "");
       if (loadedSkills.includes(skillName)) continue;
-      skillBlock += `\n\n[📜 USER SKILL: ${skillName}]\n${(v as string).trim()}`;
+      const trimmed = (v as string).trim();
+      if (skillBlock.length + trimmed.length > SKILL_BLOCK_CAP && loadedSkills.length > 0) continue;
+      skillBlock += `\n\n[📜 USER SKILL: ${skillName}]\n${trimmed}`;
       loadedSkills.push(skillName);
       skillLoaded = true;
       debugLog(`[session_load_context] User-local skill "${skillName}" loaded`);
@@ -1043,19 +1058,29 @@ export async function sessionLoadContextHandler(args: unknown) {
   // ─── Memory-Based Skill Discovery ──────────────────────────
   // If recent handoff/ledger mentions a platform skill name, auto-load it.
   // Only scans platform skill: keys — user_skill: discovery is not automatic.
-  if (formattedContext.length > 0) {
+  if (formattedContext.length > 0 && skillBlock.length < SKILL_BLOCK_CAP) {
     const contextText = formattedContext.toLowerCase();
     const allSkillKeys = await storage.getAllSettings?.() || {};
     for (const [k, v] of Object.entries(allSkillKeys)) {
       if (!k.startsWith("skill:") || !v) continue;
+      if (skillBlock.length >= SKILL_BLOCK_CAP) break;
       const skillName = k.replace("skill:", "");
       if (loadedSkills.includes(skillName)) continue;
       if (contextText.includes(skillName.replace(/-/g, " ")) || contextText.includes(skillName)) {
-        skillBlock += `\n\n[📜 CONTEXT SKILL: ${skillName}]\n${v}`;
+        const trimmed = (v as string).trim();
+        if (skillBlock.length + trimmed.length > SKILL_BLOCK_CAP && loadedSkills.length > 0) {
+          skippedSkills.push(skillName);
+          continue;
+        }
+        skillBlock += `\n\n[📜 CONTEXT SKILL: ${skillName}]\n${trimmed}`;
         loadedSkills.push(skillName);
         debugLog(`[session_load_context] Context-triggered skill "${skillName}"`);
       }
     }
+  }
+
+  if (skippedSkills.length > 0) {
+    skillBlock += `\n\n[⏭️ ${skippedSkills.length} skills skipped (cap ${SKILL_BLOCK_CAP} chars): ${skippedSkills.join(", ")}]`;
   }
 
   // ─── Agent Greeting Block ────────────────────────────────────
