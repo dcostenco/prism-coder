@@ -92,7 +92,7 @@ prism-coder:4b ── verifies claims ──────────▶  grounde
 prism-coder:32b ── deep reasoning ──────────▶  serve  (~8s, 19GB, FREE)
   │
   ▼  (cloud fallback when local insufficient)
-Claude Sonnet 4 → Claude Opus 4.7 ─────────▶  serve  (cloud, ~$0.01/req)
+Claude Sonnet 4 ────────────────────────────▶  serve  (cloud, ~$0.01/req)
 ```
 
 | Tier | Model | Role | RAM | Latency | Cost |
@@ -100,7 +100,7 @@ Claude Sonnet 4 → Claude Opus 4.7 ─────────▶  serve  (clou
 | **Default** | prism-coder:14b | Router + general inference | 9 GB | ~3s | $0 |
 | **Verifier** | prism-coder:4b | Grounding claims check | 2.5 GB | <1s | $0 |
 | **Complex** | prism-coder:32b | Deep reasoning (on-demand) | 19 GB | ~8s | $0 |
-| **Cloud** | Sonnet → Opus | Fallback for max quality | — | ~5-10s | ~$0.01 |
+| **Cloud** | Claude Sonnet 4 | Fallback for max quality | — | ~5-10s | ~$0.01 |
 
 **Mobile / offline cascade** (Prism AAC iOS):
 ```
@@ -221,20 +221,19 @@ Multiple AI agents share the same Mind Palace. Each agent has a role (dev / qa /
 | Feature | Prism Coder | GitHub Copilot | Cursor | Windsurf | Amazon Q | Tabnine | Devin |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | Local inference (1.7B–32B) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Works offline | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Works offline (local-only mode) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Open-weight models (HuggingFace) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Data stays on your machine | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Persistent cross-session memory | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Cognitive routing (episodic/semantic/procedural) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Data stays on machine (local tier) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Persistent cross-session memory | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Cognitive routing (episodic/semantic) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Session drift detection (HRR) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | L3 grounding verifier | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Multi-agent hivemind | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Native MCP server | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Works with Claude Code | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Cloud fallback (14b → 32b → Opus) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| MCP server (tools + memory for agents) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Cloud fallback (14b → 32b → Sonnet) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Web IDE | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ |
 | VS Code extension | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
-| HIPAA / air-gapped (no BAA needed) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| HIPAA / air-gapped ready | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Flat-rate pricing (not per-seat) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ### vs local AI tools
@@ -272,7 +271,7 @@ Multiple AI agents share the same Mind Palace. Each agent has a role (dev / qa /
 | **Local model ceiling** | up to 4b | up to 14b | up to 32b | up to 32b |
 | **Daily inference limit** | 50 | 200 | 2,000 | 100,000 |
 | **Max output tokens** | 512 | 1,024 | 2,048 | 4,096 |
-| **Cloud fallback** | — | 14b → 32b | 14b → 32b → Claude Opus | Priority + Claude Opus |
+| **Cloud fallback** | — | Claude Sonnet 4 | Claude Sonnet 4 | Priority + Sonnet 4 |
 | **L3 grounding verifier** | — | ✅ | ✅ | ✅ |
 | **Knowledge search** | limited | unlimited | unlimited | unlimited |
 | **Session memory** | limited | unlimited | unlimited | unlimited |
@@ -571,7 +570,7 @@ ollama pull dcostenco/prism-coder:32b
 
 Set `LOCAL_LLM_URL=http://localhost:11434` in your portal config. Routing is automatic:
 
-**Desktop/server**: 14B → 32B → Claude Opus fallback · **Mobile/offline**: 14B → 8B → 1.7B
+**Desktop/server**: 14B → 32B → Claude Sonnet 4 fallback · **Mobile/offline**: 14B → 8B → 1.7B
 
 iOS/mobile on same WiFi: `OLLAMA_HOST=0.0.0.0 ollama serve` on the Mac, then point `LOCAL_LLM_URL` at the Mac's IP.  
 Routing accuracy (May 2026, v36/v7 system prompt, 3-seed mean): 32B v7 = **100.0%** · 8B v36 = **100.0%** · 14B v36 = **100.0%** · 1.7B v42 = **100.0%**  
@@ -595,17 +594,17 @@ Cascade (14B→32B): **100.0%** · Opus solo: 98.3% · Opus engaged: **0% of req
 
 **[synalux.ai/prism-mcp](https://synalux.ai/prism-mcp)** — full documentation, dashboard, subscription plans, and model downloads.
 
-### 💻 Web IDE — Synalux Coder
+### 💻 Web IDE — Prism Coder
 
-Use Prism Coder directly in your browser — no install required. Local-first IDE with the prism-coder agent built in. Connects to GitHub repos, Synalux Mail, Drive, and Source for cross-product workflows.
+Use Prism Coder directly in your browser — no install, no desktop app required. Standalone coding IDE with the prism-coder agent built in. Works with any Prism plan (no Synalux health subscription needed).
 
-**[synalux.ai/coder](https://synalux.ai/coder)** · also reachable at **[synalux.ai/prism-ide](https://synalux.ai/prism-ide)**
+**[synalux.ai/coder](https://synalux.ai/coder)**
 
 | Feature | Detail |
 |---|---|
-| Agent | prism-coder:7b offline · Claude Sonnet 4 (Standard+) · Claude Opus 4 (Enterprise) |
-| Integrations | GitHub repos, Synalux Mail, Drive, Source — same OAuth, no separate accounts |
-| Compliance | Audit log on every turn · PHI redaction · air-gapped offline mode (HIPAA) |
+| Agent | prism-coder:8b offline · Claude Sonnet 4 (Standard+) |
+| Integrations | GitHub repos · same Prism account, no separate sign-up |
+| Plans | Free (4b) · Standard $19/mo (14b) · Advanced $49/mo (32b) · Enterprise $99/mo |
 
 ### 🧩 VS Code Extension — Synalux
 
