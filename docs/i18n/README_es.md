@@ -258,7 +258,9 @@ Multiple AI agents share the same Mind Palace. Each agent has a role (dev / qa /
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | **Individual** | **$19/mo** | $10/mo | $20/mo | $15–20/mo | $19/mo | $39/mo |
 | **Team (5 devs)** | **$49/mo flat** | $95/mo | $200/mo | $200/mo | $95/mo | $295/mo |
-| **Enterprise** | **$99/mo flat** | $195/mo | $1,000/mo | Custom | Custom | Custom |
+| **Enterprise (25 devs)** | **$99/mo flat** | $195/mo | $1,000/mo | Custom | Custom | Custom |
+| **Cost per dev (team)** | **$9.80** | $19 | $40 | $40 | $19 | $59 |
+| **Annual savings (5 devs)** | — | **$552** | **$1,812** | **$1,812** | **$552** | **$2,952** |
 
 ---
 
@@ -266,6 +268,7 @@ Multiple AI agents share the same Mind Palace. Each agent has a role (dev / qa /
 
 | | **Free** | **Standard $19/mo** | **Advanced $49/mo** | **Enterprise $99/mo** |
 |---|---|---|---|---|
+| **Seats included** | 1 | 1 | up to 5 | up to 25 |
 | **Local model ceiling** | up to 4b | up to 14b | up to 32b | up to 32b |
 | **Daily inference limit** | 50 | 200 | 2,000 | 100,000 |
 | **Max output tokens** | 512 | 1,024 | 2,048 | 4,096 |
@@ -276,7 +279,7 @@ Multiple AI agents share the same Mind Palace. Each agent has a role (dev / qa /
 | **Analytics dashboard** | — | ✅ | ✅ | ✅ |
 | **HIPAA BAA** | — | — | — | ✅ |
 
-All on-device models are open-weight and free to run locally via Ollama. The subscription gates cloud features, higher model tiers, and increased limits. 14-day free trial on all paid plans. [Subscribe →](https://synalux.ai/pricing)
+All on-device models are open-weight and free to run locally via Ollama. The subscription gates cloud features, higher model tiers, and increased limits. Need 25+ seats? [Contact sales](https://synalux.ai/contact). 14-day free trial on all paid plans. [Subscribe →](https://synalux.ai/pricing)
 
 ---
 
