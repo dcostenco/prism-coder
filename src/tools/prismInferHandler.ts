@@ -101,12 +101,12 @@ export const PRISM_INFER_TOOL: Tool = {
                 description:
                     "Enable the L3 grounding verifier. Default: true when `evidence` is provided, " +
                     "false otherwise. When enabled, the model's draft is checked by a different model " +
-                    "(prism-coder:1b7 by default) against the supplied `evidence`. Drafts with " +
+                    "(prism-coder:4b by default) against the supplied `evidence`. Drafts with " +
                     "NEUTRAL or CONTRADICTED claims are refused.",
             },
             verifier_model: {
                 type: "string",
-                description: "Override the verifier model. Default: prism-coder:1b7.",
+                description: "Override the verifier model. Default: prism-coder:4b.",
             },
             verifier_timeout_ms: {
                 type: "number",
@@ -136,7 +136,7 @@ export interface PrismInferArgs {
      *  is provided, false otherwise. Pass `verify: false` explicitly
      *  to skip verification even when evidence is supplied. */
     verify?: boolean;
-    /** Override verifier model. Default: prism-coder:1b7. */
+    /** Override verifier model. Default: prism-coder:4b. */
     verifier_model?: string;
     /** Verifier hard timeout (ms). Default 2000. */
     verifier_timeout_ms?: number;

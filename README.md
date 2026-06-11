@@ -155,7 +155,58 @@ Categories: abstention, adversarial traps, cascade, disambiguation, edge cases, 
 **What it does NOT mean**: these scores measure routing precision on a 17-tool taxonomy, not general intelligence. Claude outperforms on everything outside this task. The value is **offline reliability at zero cost**, not replacing Claude. Code and clinical knowledge come from RAG via `knowledge_search`.
 
 ### 🔍 L3 Grounding Verifier
-When `prism_infer` receives an `evidence` payload, the grounding verifier automatically checks the model's response against the provided evidence before returning to the caller. Unverified or hallucinated claims are flagged. This is the third layer (L3) of the cascade — after tool routing (L1) and confidence gating (L2).
+
+Fail-closed fact-checking layer. When `prism_infer` receives an `evidence` payload, a separate verifier model (default: `prism-coder:4b`) checks every factual claim in the draft against the evidence before serving it. This is the third layer (L3) of the cascade — after tool routing (L1) and confidence gating (L2).
+
+**Three-tier pre-check:**
+
+| Tier | Condition | Action |
+|---|---|---|
+| **0 — Conversational** | Draft has no numbers, dates, names, codes, or $ amounts | Serve without verification |
+| **0a — No evidence** | Assertive draft + zero evidence snippets | Refuse (fail-closed) |
+| **2 — NLI** | Assertive draft + evidence provided | Verify each claim against evidence |
+
+**Per-claim verdicts:**
+- `ENTAILED` — claim matches evidence (including arithmetic identity: "3" ≈ "three")
+- `CONTRADICTED` — evidence states a different value for the same fact → **refuse**
+- `NEUTRAL` — claim not covered by evidence → **refuse** (fail-closed default)
+
+**Fail-closed guarantees:** HTTP errors, malformed JSON, timeouts → all treated as refusal. The caller gets the specific claim that failed and can retry with more evidence or fall back to cloud.
+
+**Usage with `prism_infer`:**
+```json
+{
+  "prompt": "What was the patient's last A1C?",
+  "evidence": [
+    { "source": "lab_2026-05-01", "content": "HbA1c: 6.8% (ref <7.0)" }
+  ]
+}
+```
+
+**Structured output:**
+```json
+{
+  "output": "The patient's last A1C was 6.8%.",
+  "verification": {
+    "action": "served",
+    "claims": [{ "text": "A1C was 6.8%", "verdict": "ENTAILED" }],
+    "verifierChain": [{ "model": "prism-coder:4b", "verdict": "ENTAILED", "latencyMs": 340 }]
+  }
+}
+```
+
+When a claim is contradicted or unsupported:
+```json
+{
+  "output": "⚠ Verification failed: claim 'A1C was 7.2%' is CONTRADICTED by evidence.",
+  "verification": {
+    "action": "refused_fabricated",
+    "refusalClaim": "A1C was 7.2%"
+  }
+}
+```
+
+The verifier model (`prism-coder:4b`) is intentionally different from the inference model — satisfying the independent-reviewer principle. Requires a paid plan (see [Plans](#plans)). Set `verify: false` to explicitly skip verification even when evidence is provided.
 
 ### 🧠 HRR Semantic Drift Detection (v17.0)
 Detects when long AI agent sessions drift from their original goal — using Holographic Reduced Representations for temporal trajectory encoding and anomaly detection.
