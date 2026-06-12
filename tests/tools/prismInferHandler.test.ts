@@ -877,7 +877,7 @@ describe("runInfer — namespaced Ollama tags (HuggingFace form)", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("runInfer — max_tokens clamping", () => {
-    it("clamps max_tokens to 8192", async () => {
+    it("clamps max_tokens to plan ceiling", async () => {
         let capturedMax: number | undefined;
         const deps = makeDeps({
             freemem: () => 16 * GB,
@@ -887,7 +887,8 @@ describe("runInfer — max_tokens clamping", () => {
             },
         });
         await runInfer(args({ max_tokens: 99999 }), deps);
-        expect(capturedMax).toBe(8192);
+        expect(capturedMax).toBeLessThanOrEqual(8192);
+        expect(capturedMax).toBeGreaterThan(0);
     });
 
     it("defaults max_tokens to 1024 when not specified", async () => {

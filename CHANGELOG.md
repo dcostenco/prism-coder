@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [18.0.0] - 2026-06-12 — 🛡 PHI Guard + Skill Routing + Tier Enforcement
+
+### What's new
+
+**PHI Guard** — Automatic Protected Health Information detection and redaction in the save pipeline. Every `session_save_ledger` and `session_save_handoff` call passes through a deterministic PHI scanner (18 HIPAA identifier categories). Fail-closed: detection errors block the save and always log to stderr. (`d0bd1ed`, `a8c49f7`, `b54bbf1`)
+
+**Prompt-based skill routing** — 114 agent skills auto-load based on prompt keywords. The MCP server scans the user's prompt on `session_load_context` and injects relevant skill instructions into context before the AI responds. No manual skill selection needed. (`fffc1d0`)
+
+**Tier-based monetization enforcement** — `prism_infer` now gates model ceiling, max tokens, daily limits, and cloud fallback by subscription plan. Free users get local-only up to 4b; paid tiers unlock 14b/32b, higher token limits, and Claude Sonnet 4 fallback. Flat-rate seat caps via `max_seats` per plan. (`8d149cf`, `a38d189`)
+
+**HRR semantic drift detection** — `session_detect_drift` MCP tool using Holographic Reduced Representations for temporal trajectory encoding. Three domains (BCBA/Coding/AAC) with domain-specific safety signals. 306 tests. (`be84f7b`)
+
+**Synalux portal routing** — All search and scrape operations now route through the Synalux portal for unified auth, billing, and audit logging. Telemetry rewired from Datadog-primary to Synalux portal + Supabase (primary), Datadog Logs (fallback). (`9366e66`, `3051f68`)
+
+### Fixed
+
+- `fix`: session dates showing `[undefined]` in `load_context` response (`334337d`)
+- `fix`: adversarial review — correct README claims, reduce cache TTL to prevent stale data (`f4052b7`, `fe66943`)
+- `fix`: skill block cap 30K chars + plug 3 bypass paths in `session_load_context` (`76408d8`)
+- `fix`: entitlements tests now environment-independent (work with or without `PRISM_SYNALUX_API_KEY`)
+- `test`: 2,676 tests across 89 files (up from 2,418 across 81)
+
+---
+
 ## [16.1.1] - 2026-05-30 — 🔍 Handoff semantic search + uncertainty gate fix
 
 ### What's new
