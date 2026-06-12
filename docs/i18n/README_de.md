@@ -28,12 +28,12 @@ Ask "what did I decide about the auth flow last month?" and get the answer with 
 ### 🧬 Cognitive routing
 Different memory types live in different stores: episodic (what happened), semantic (what's true), procedural (how to do X). The router picks where to store and where to retrieve.
 
-### 🔄 Proactive session drift detection *(new in v15)*
+### 🔄 Proactive session drift detection *(new in v15, HRR-powered in v17)*
 Your AI agent can now detect when it has drifted from your original goals — mid-session, automatically — and self-correct before you notice the problem.
 
 Three direct Prism calls:
 1. **`session_save_ledger`** — snapshot current state
-2. **`session_cognitive_route`** — compare current work against original goals, returns `on_track / minor_drift / major_drift`
+2. **`session_detect_drift`** — HRR-powered semantic comparison of current work vs original goals, returns `on_track / minor_drift / major_drift` with domain-specific signals (BCBA/Coding/AAC)
 3. **`session_compact_ledger`** — if drifted, compress and reload only what matters
 
 When major drift is detected, the alert routes to the **Synalux portal** so it's visible across sessions and devices — not just in the current conversation.
@@ -41,6 +41,19 @@ When major drift is detected, the alert routes to the **Synalux portal** so it's
 **Real example it caught:** A training session promised BFCL ≥90% for three AI models. The agent spent 3 hours debugging audio bugs instead. The drift check surfaced: "Training goal unmet. Layer3 corpus missing from all training sets. 0 BFCL scores measured." The session immediately re-aligned.
 
 No scripts. No cron. No hooks. Three tool calls, Prism handles the rest.
+
+### 🛡 PHI Guard *(new in v17)*
+Automatic Protected Health Information detection and redaction in the memory pipeline. Every `session_save_ledger` and `session_save_handoff` call passes through the PHI guard before storage.
+
+**What it catches:** Names, DOBs, SSNs, MRNs, phone numbers, email addresses, and 18 HIPAA identifier categories. Redaction is deterministic (regex + pattern matching, no LLM) — zero false negatives on structured identifiers.
+
+**Fail-closed:** PHI detection errors log to stderr (never suppressed) and block the save. Metric: `phi_guard.detected` count per category is always emitted for audit compliance.
+
+### ⚡ Prompt-based skill routing *(new in v17)*
+114 agent skills auto-load based on prompt keywords. No manual skill selection needed — the MCP server scans the user's prompt and injects the relevant skill instructions into the session context before the AI responds.
+
+### 💰 Tier enforcement *(new in v17.1)*
+`prism_infer` now enforces subscription-tier gates: model ceiling, max tokens, daily limits, and cloud fallback are all gated by your plan. Free users get local-only inference up to 4b; paid tiers unlock higher models, more tokens, and cloud fallback. Flat-rate seat caps via `max_seats` per plan.
 
 ### 🛡 Local-first — security + speed
 Free tier runs entirely on your machine — SQLite, local embedding model, no API keys, no cloud. Paid tier adds cloud sync via Synalux portal.
@@ -417,6 +430,7 @@ Paid Synalux subscribers get a built-in analytics dashboard at `/app/memory-anal
 | `knowledge_search` | Semantic + keyword search over all memories |
 | `query_memory_natural` | Natural-language Q&A over your Mind Palace |
 | `extract_entities` | Pull people / projects / decisions from text |
+| `session_detect_drift` | HRR-powered semantic drift detection (BCBA/Coding/AAC) |
 | `session_synthesize_edges` | Auto-link related memories into a graph |
 
 (35+ tools total — full TypeScript signatures in `src/tools/`. Architecture overview in [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md).)
@@ -726,7 +740,7 @@ prism register-models         # Alias dcostenco/prism-coder:* → prism-coder:*
 ## Testing
 
 ```bash
-npm test                           # 2,418 test cases across 81 files (vitest)
+npm test                           # 2,676 test cases across 89 files (vitest)
 npm test -- --coverage             # coverage report
 python3 tests/benchmarks/prism-routing-100/benchmark.py --models 1b7 14b 32b
 ```
