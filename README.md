@@ -171,9 +171,9 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 |---|---|---|---|---|
 | Seats | 1 | 1 | up to 5 | up to 25 |
 | Local model ceiling | up to 4b | up to 14b | up to 32b | up to 32b |
-| Daily cloud inference | — | 200 | 2,000 | unlimited |
-| Cloud Coder (Web IDE) | — | 100/day | 1,000/day | unlimited |
-| Cloud search | — | 50/day | 500/day | unlimited |
+| Daily cloud inference | — | 200 | 2,000 | 100,000 |
+| Cloud Coder (Web IDE) | — | 100/day | 1,000/day | 100,000/day |
+| Cloud search | — | 50/day | 500/day | 100,000/day |
 | Max output tokens | 512 | 1,024 | 2,048 | 4,096 |
 | Cloud fallback | — | Claude Sonnet 4 | Claude Sonnet 4 | Priority + Sonnet 4 |
 | Grounding verifier | — | ✅ | ✅ | ✅ |
@@ -256,20 +256,19 @@ With no variables set, Prism runs fully local. Set `PRISM_SYNALUX_API_KEY` (and 
 
 ### Web IDE — Prism Coder
 
-A full browser-based IDE at [synalux.ai/coder](https://synalux.ai/coder). No install, no desktop app. Import any GitHub repo and get:
+A browser-based IDE at [synalux.ai/coder](https://synalux.ai/coder). Import any GitHub repo and get:
 
 - **Monaco editor** with multi-tab, split view, syntax highlighting, and VS Code keybindings
-- **In-browser Node.js** via WebContainer (Bolt.new-style runtime — your code runs in the browser, not on a server)
-- **XTerm terminal** with real PTY shell via WebSocket
+- **In-browser Node.js** via WebContainer (your code runs in the browser sandbox, not on a server)
+- **Integrated terminal** — WebContainer shell in-browser; optional server PTY via WebSocket when connected to a dev server
 - **AI chat** powered by prism-coder models (local or cloud depending on plan)
 - **Source control** — commit, branch, push/pull, stash, blame, tag management
 - **Live Share** — real-time collaborative editing with session links
 - **Node.js debugger** via Chrome DevTools Protocol
 - **Tasks runner** (VS Code `tasks.json` compatible), **Problems panel** (Monaco diagnostics)
-- **Secrets manager**, **HTTP client**, and **deployment panel**
 - **12-language i18n** — full UI localization
 
-Standard+ plans get cloud AI and higher rate limits. Free tier works with local Ollama. All code runs client-side in the browser (WebContainer), not on Synalux servers.
+Standard+ plans get cloud AI and higher rate limits. Free tier works with local Ollama. Code execution uses the in-browser WebContainer by default; Live Share and the optional PTY terminal connect to external servers when explicitly enabled.
 
 ### VS Code Extension — Synalux
 
@@ -287,7 +286,7 @@ code --install-extension synalux-ai.synalux
 
 **Collaboration:** Team chat, direct messages, enterprise video calls (LiveKit), customer board, visual builder, DevContainers, Auth & Database panel.
 
-**Privacy note:** The extension routes AI requests through the `BackendRouter` — local Ollama by default for free tier, cloud for paid (user-configurable via `preferLocal`). Clinical features (SOAP notes, voice) route through the same backend. For HIPAA workloads, set `synalux.preferLocal=true` or use an Enterprise plan with BAA. Licensed under [BSL-1.1](https://marketplace.visualstudio.com/items?itemName=synalux-ai.synalux).
+**Privacy note:** The extension routes AI requests through the `BackendRouter` — local Ollama by default for free tier, cloud for paid (user-configurable via `preferLocal`). Clinical features (SOAP notes, voice) route through the same backend. `preferLocal=true` tries local first but can still fall back to cloud if the local model is unavailable. For regulated workloads where PHI must never leave the machine, use the free tier (no cloud key) or an Enterprise plan with BAA that covers cloud-bound data. Licensed under [BSL-1.1](https://marketplace.visualstudio.com/items?itemName=synalux-ai.synalux).
 
 ### Prism AAC
 
