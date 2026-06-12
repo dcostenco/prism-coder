@@ -13,7 +13,7 @@ import { getStorage } from "../storage/index.js";
 import { debugLog } from "../utils/logger.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { performWebSearchRaw } from "../utils/braveApi.js";
@@ -121,36 +121,44 @@ async function hasRecentResearch(topic: string, project: string, userId: string,
     }) as Array<{ summary?: string; created_at?: string }>;
     const cutoff = new Date(Date.now() - windowHours * 3600_000).toISOString();
     return entries.some(
-      e => (e.created_at ?? "") > cutoff && (e.summary ?? "").startsWith(`Research: ${topic}`)
+      e => (e.created_at ?? "") > cutoff && (e.summary ?? "").startsWith(`Research: ${topic}\n`)
     );
   } catch {
     return false;
   }
 }
 
+const LOCK_PATH = join(homedir(), ".prism-mcp", "scholar.lock");
+const LOCK_STALE_MS = 10 * 60_000;
+
 function acquireFileLock(): boolean {
   try {
-    const lockPath = join(homedir(), ".prism-mcp", "scholar.lock");
-    const lockDir = dirname(lockPath);
+    const lockDir = dirname(LOCK_PATH);
     if (!existsSync(lockDir)) mkdirSync(lockDir, { recursive: true });
 
-    if (existsSync(lockPath)) {
-      const stat = statSync(lockPath);
+    if (existsSync(LOCK_PATH)) {
+      const stat = statSync(LOCK_PATH);
       const ageMs = Date.now() - stat.mtimeMs;
-      if (ageMs < 10 * 60_000) return false;
-      unlinkSync(lockPath);
+      if (ageMs < LOCK_STALE_MS) return false;
+      unlinkSync(LOCK_PATH);
     }
-    writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}`);
+    // wx = exclusive create — throws EEXIST if another process won the race
+    writeFileSync(LOCK_PATH, `${process.pid}\n${new Date().toISOString()}`, { flag: "wx" });
     return true;
-  } catch {
+  } catch (err: any) {
+    if (err?.code === "EEXIST") return false;
     return false;
   }
 }
 
 function releaseFileLock(): void {
   try {
-    const lockPath = join(homedir(), ".prism-mcp", "scholar.lock");
-    if (existsSync(lockPath)) unlinkSync(lockPath);
+    if (!existsSync(LOCK_PATH)) return;
+    const content = readFileSync(LOCK_PATH, "utf-8");
+    const lockPid = parseInt(content.split("\n")[0], 10);
+    if (lockPid === process.pid) {
+      unlinkSync(LOCK_PATH);
+    }
   } catch {}
 }
 

@@ -1510,7 +1510,7 @@ export async function startServer() {
     });
   }
 
-  // ─── v5.4: Autonomous Web Scholar — REMOVED (v18.0.1) ───
+  // ─── v5.4: Autonomous Web Scholar — REMOVED (v18.0.0) ────
   // Auto-scheduler removed. Scholar now runs server-side via
   // Vercel cron (/api/v1/cron/scholar) every 6h. The client-side
   // scheduler caused 5,293 garbage entries when multiple MCP
