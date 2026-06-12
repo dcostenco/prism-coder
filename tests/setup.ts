@@ -24,6 +24,13 @@ import { config } from "dotenv";
 // Must happen before any other Prism module imports resolve config.ts
 config();
 
+// Unset Synalux cloud credentials AFTER dotenv loads them — tests must
+// never hit the live portal. This ensures SYNALUX_CONFIGURED=false in
+// config.ts and getEntitlements() falls back to FREE_ENTITLEMENTS.
+// (Without this, tests pass in CI but fail locally when .env has a key.)
+delete process.env.PRISM_SYNALUX_API_KEY;
+delete process.env.PRISM_SYNALUX_BASE_URL;
+
 /**
  * TEMP_DIR is where test SQLite databases are created.
  * Each test suite gets its own unique DB file within this directory

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [18.0.1] - 2026-06-12 — 🔧 External review fixes
+
+### Fixed
+
+- `fix`: Auto-Scholar file lock — atomic `wx` flag + PID-checked release (eliminates TOCTOU race)
+- `fix`: dedup delimiter — `"ai"` no longer false-matches `"ai agents"` entries
+- `fix`: removed dead `startScholarWatcher` code (10s polling loop, never called)
+- `fix`: restore strong test assertions — entitlements + max_tokens tests now pin exact values with env isolation via setup.ts (`PRISM_SYNALUX_API_KEY` deleted before tests)
+- `fix`: README PHI Guard claim — "Names" removed from "zero false negatives" (regex can't guarantee name detection)
+- `docs`: CHANGELOG 17.x entries added (17.0.0 → 17.1.1 were missing)
+- `docs`: version labels in README corrected (v17+ instead of "new in v17")
+
+---
+
 ## [18.0.0] - 2026-06-12 — 🛡 PHI Guard + Skill Routing + Tier Enforcement
 
 ### What's new
@@ -23,6 +37,51 @@ All notable changes to this project will be documented in this file.
 - `fix`: skill block cap 30K chars + plug 3 bypass paths in `session_load_context` (`76408d8`)
 - `fix`: entitlements tests now environment-independent (work with or without `PRISM_SYNALUX_API_KEY`)
 - `test`: 2,676 tests across 89 files (up from 2,418 across 81)
+
+---
+
+## [17.1.1] - 2026-06-10 — 🔒 Adversarial review security fixes
+
+### Fixed
+
+- `fix`: adversarial review — correct README claims, reduce cache TTL to prevent stale entitlement data (`f4052b7`, `fe66943`)
+- `fix`: session dates showing `[undefined]` in `load_context` response (`334337d`)
+
+---
+
+## [17.1.0] - 2026-06-08 — 💰 Tier enforcement + competitive positioning
+
+### What's new
+
+**Tier-based monetization enforcement** — `prism_infer` now gates model ceiling, max tokens, daily limits, and cloud fallback by subscription plan. Free users get local-only up to 4b. (`8d149cf`)
+
+**Max seats entitlement** — flat-rate seat caps per plan via `max_seats` field. (`a38d189`)
+
+### Fixed
+
+- `fix`: skill block cap 30K chars + plug 3 bypass paths in `session_load_context` (`76408d8`)
+
+---
+
+## [17.0.1] - 2026-06-05 — 🔗 Portal routing
+
+### What's new
+
+**Synalux portal routing** — All search and scrape operations now route through the portal for auth, billing, and audit. (`9366e66`)
+
+---
+
+## [17.0.0] - 2026-06-01 — 🧠 HRR Drift Detection + PHI Guard
+
+### What's new
+
+**HRR semantic drift detection** — `session_detect_drift` MCP tool using Holographic Reduced Representations for temporal trajectory encoding. Three domains (BCBA/Coding/AAC). 306 tests. (`be84f7b`)
+
+**PHI Guard** — Automatic Protected Health Information detection and redaction in the save pipeline. 18 HIPAA identifier categories, deterministic, fail-closed. (`d0bd1ed`, `a8c49f7`)
+
+**Prompt-based skill routing** — 114 agent skills auto-load based on prompt keywords. (`fffc1d0`)
+
+**Telemetry rewire** — Primary: Synalux portal + Supabase. Fallback: Datadog Logs. (`3051f68`)
 
 ---
 

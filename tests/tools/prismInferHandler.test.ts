@@ -10,7 +10,7 @@
  * on global fetch.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import {
     runInfer,
     isPrismInferArgs,
@@ -19,8 +19,34 @@ import {
     type PrismInferResult,
 } from "../../src/tools/prismInferHandler.js";
 import type { GroundingOutcome } from "../../src/utils/groundingVerifier.js";
+import { _setCacheForTest, _resetEntitlementsForTest, type PrismEntitlements } from "../../src/utils/entitlements.js";
 
 const GB = 1024 ** 3;
+
+const ENTERPRISE_ENTITLEMENTS: PrismEntitlements = {
+    plan: "enterprise",
+    model_ceiling: "32b",
+    daily_infer_limit: 100000,
+    max_tokens: 4096,
+    max_seats: 25,
+    features: {
+        cloud_fallback: true,
+        grounding_verifier: true,
+        knowledge_search_unlimited: true,
+        session_memory_unlimited: true,
+        analytics_dashboard: true,
+    },
+    upgrade_url: "https://synalux.ai/pricing",
+};
+
+// Tests assume enterprise-level access (32b ceiling, cloud fallback, verifier)
+beforeEach(() => {
+    _setCacheForTest(ENTERPRISE_ENTITLEMENTS, 60_000);
+});
+
+afterAll(() => {
+    _resetEntitlementsForTest();
+});
 
 // All five tiers installed in Ollama
 const INSTALLED_ALL = new Set([
@@ -877,7 +903,7 @@ describe("runInfer — namespaced Ollama tags (HuggingFace form)", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("runInfer — max_tokens clamping", () => {
-    it("clamps max_tokens to plan ceiling", async () => {
+    it("clamps max_tokens to enterprise ceiling (4096)", async () => {
         let capturedMax: number | undefined;
         const deps = makeDeps({
             freemem: () => 16 * GB,
@@ -887,8 +913,7 @@ describe("runInfer — max_tokens clamping", () => {
             },
         });
         await runInfer(args({ max_tokens: 99999 }), deps);
-        expect(capturedMax).toBeLessThanOrEqual(8192);
-        expect(capturedMax).toBeGreaterThan(0);
+        expect(capturedMax).toBe(4096);
     });
 
     it("defaults max_tokens to 1024 when not specified", async () => {

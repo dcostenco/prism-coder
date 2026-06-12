@@ -1,7 +1,32 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { runInfer, type InferDeps, type PrismInferArgs } from "../../src/tools/prismInferHandler.js";
+import { _setCacheForTest, _resetEntitlementsForTest, type PrismEntitlements } from "../../src/utils/entitlements.js";
 
 const GB = 1024 ** 3;
+
+const ENTERPRISE_ENTITLEMENTS: PrismEntitlements = {
+    plan: "enterprise",
+    model_ceiling: "32b",
+    daily_infer_limit: 100000,
+    max_tokens: 4096,
+    max_seats: 25,
+    features: {
+        cloud_fallback: true,
+        grounding_verifier: true,
+        knowledge_search_unlimited: true,
+        session_memory_unlimited: true,
+        analytics_dashboard: true,
+    },
+    upgrade_url: "https://synalux.ai/pricing",
+};
+
+beforeEach(() => {
+    _setCacheForTest(ENTERPRISE_ENTITLEMENTS, 60_000);
+});
+
+afterAll(() => {
+    _resetEntitlementsForTest();
+});
 
 const INSTALLED_ALL = new Set([
     "prism-coder:32b",
