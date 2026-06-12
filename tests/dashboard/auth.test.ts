@@ -282,10 +282,10 @@ describe("Bearer JWT / JWKS authentication", () => {
   } = {}) {
     let builder = new SignJWT(claims)
       .setProtectedHeader({ alg: "RS256" })
-      .setIssuedAt();
+      .setIssuedAt()
+      .setAudience(opts.audience ?? "prism-mcp")
+      .setIssuer(opts.issuer ?? "https://synalux.ai");
     if (opts.expiresIn) builder = builder.setExpirationTime(opts.expiresIn);
-    if (opts.audience) builder = builder.setAudience(opts.audience);
-    if (opts.issuer) builder = builder.setIssuer(opts.issuer);
     if (opts.subject) builder = builder.setSubject(opts.subject);
     return builder.sign(keyPair.privateKey);
   }

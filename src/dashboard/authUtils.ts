@@ -135,19 +135,24 @@ export async function isAuthenticated(
     try {
       const token = authHeader.slice(7);
       const verifyOpts: JWTVerifyOptions = {
-        clockTolerance: 30, // 30s clock skew tolerance
+        clockTolerance: 30,
+        // audience + issuer are REQUIRED when JWKS is configured — prevents
+        // cross-service token confusion (adversarial review H1, 2026-06-12).
+        audience: config.jwtAudience || "prism-mcp",
+        issuer: config.jwtIssuer || "https://synalux.ai",
       };
-      if (config.jwtAudience) verifyOpts.audience = config.jwtAudience;
-      if (config.jwtIssuer) verifyOpts.issuer = config.jwtIssuer;
 
       const { payload } = await jwtVerify(token, jwksCache, verifyOpts);
       const payloadDict = payload as Record<string, unknown>;
-      // Attach agent_id and AgentLair audit metadata to the request for downstream traceability
       const authReq = req as PrismAuthenticatedRequest;
       authReq.agent_id =
         payloadDict.agent_id as string || payload.sub;
       authReq.al_name = payloadDict.al_name as string;
-      authReq.al_audit_url = payloadDict.al_audit_url as string;
+      // al_audit_url is untrusted (attacker-influenceable via token) — do not
+      // act on it or call it. Stored for logging only, never fetched.
+      authReq.al_audit_url = typeof payloadDict.al_audit_url === "string"
+        ? payloadDict.al_audit_url.slice(0, 256)
+        : undefined;
       return true;
     } catch (err) {
       const code = (err as { code?: string }).code || "UNKNOWN";

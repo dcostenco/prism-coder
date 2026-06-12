@@ -145,7 +145,7 @@ export async function sessionSaveLedgerHandler(args: unknown) {
   const conversation_id = args.conversation_id;
   const summary = sanitizeMemoryInput(args.summary);
   const todos = args.todos ? sanitizeArray(args.todos) : undefined;
-  const files_changed = args.files_changed;
+  const files_changed = args.files_changed ? sanitizeArray(args.files_changed) : undefined;
   const decisions = args.decisions ? sanitizeArray(args.decisions) : undefined;
   const role = args.role;
   const storage = await getStorage();

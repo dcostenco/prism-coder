@@ -96,6 +96,11 @@ async function generateQAPairs(chunk: string, source: string): Promise<Array<{ p
     return [{ prompt: `What does this ${source} code do?`, response: chunk.slice(0, 500) }];
   }
 
+  // PHI redaction BEFORE sending to cloud LLM — the chunk may contain
+  // client names in file paths, inline identifiers, or clinical notes.
+  const { scanAndRedactPHI } = await import("../utils/phiGuard.js");
+  const redactedChunk = scanAndRedactPHI(chunk).redacted;
+
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -108,7 +113,7 @@ async function generateQAPairs(chunk: string, source: string): Promise<Array<{ p
         model: "claude-haiku-4-5-20251001",
         max_tokens: 2048,
         system: 'Generate 3 Q&A training pairs as JSON array: [{"prompt":"...","response":"..."}]. Focus on what the code does, how it works, and key patterns.',
-        messages: [{ role: "user", content: `Source: ${source}\n\`\`\`\n${chunk.slice(0, 5000)}\n\`\`\`` }],
+        messages: [{ role: "user", content: `Source: ${source}\n\`\`\`\n${redactedChunk.slice(0, 5000)}\n\`\`\`` }],
       }),
     });
 

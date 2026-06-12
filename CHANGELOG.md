@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [18.0.2] - 2026-06-12 — 🔒 Security: PHI, JWKS, ingest (adversarial review round 2)
+
+### Security
+
+- `fix(H1)`: JWKS audience + issuer now **required** (defaults to `prism-mcp` / `https://synalux.ai`). Prevents cross-service token confusion. `al_audit_url` treated as untrusted — truncated to 256 chars, never fetched.
+- `fix(H3)`: `files_changed` now passes through `sanitizeArray` → `scanAndRedactPHI` before portal POST. File paths with client names (e.g. `/clients/jane_smith/`) were previously sent raw.
+- `fix(H4)`: `knowledge_ingest` now redacts chunks BEFORE sending to cloud LLM. Previously sent raw source code (which may contain PHI in clinical codebases) to `api.anthropic.com`.
+- `fix(H2)`: README privacy table corrected — "Nothing" → "Nothing (free tier)" for data sent externally.
+
+---
+
 ## [18.0.1] - 2026-06-12 — 🔧 External review fixes
 
 ### Fixed
