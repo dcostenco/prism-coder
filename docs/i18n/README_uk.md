@@ -121,6 +121,48 @@ python3 tests/benchmarks/prism-routing-100/benchmark.py --models 1b7 8b 14b 32b
 
 ---
 
+## Why Prism Coder
+
+### vs AI coding assistants
+
+These tables are the maintainer's assessment as of June 2026. Verify claims that matter to you — products change fast.
+
+| Feature | Prism Coder | GitHub Copilot | Cursor | Windsurf | Amazon Q | Devin |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| Local inference (open-weight) | ✅ 1.7B–32B | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Works fully offline | ✅ (free tier) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Persistent cross-session memory | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Session drift detection | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| L3 grounding verifier | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| MCP server (tools + memory) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Web IDE | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| VS Code extension | ✅ | ✅ | N/A (is VS Code) | N/A | ✅ | ❌ |
+| Flat-rate team pricing | ✅ | ❌ (per-seat) | ❌ (per-seat) | ❌ | ❌ | ❌ |
+| HIPAA BAA available | ✅ (Enterprise) | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+### vs local AI / memory tools
+
+| Feature | Prism Coder | Ollama | LM Studio | Mem0 | Zep |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Local inference cascade | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Cloud fallback | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Persistent cross-session memory | ✅ | ❌ | ❌ | ✅ | ✅ |
+| Knowledge ingestion (MCP + webhook) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Cognitive routing (3-store) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Session drift detection | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Native MCP server | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Web IDE + VS Code extension | ✅ | ❌ | ❌ | ❌ | ❌ |
+
+### Pricing — flat-rate, not per-seat
+
+| | **Prism Coder** | GitHub Copilot | Cursor | Amazon Q |
+|---|:---:|:---:|:---:|:---:|
+| **Individual** | **$19/mo** | $10/mo | $20/mo | $19/mo |
+| **Team (5 devs)** | **$49/mo flat** | $95/mo | $200/mo | $95/mo |
+| **Enterprise (25 devs)** | **$99/mo flat** | $195/mo | $1,000/mo | Custom |
+
+---
+
 ## Plans
 
 All on-device models are free to run locally via Ollama on every tier. A subscription gates **cloud** features, higher model ceilings, and increased limits. Local model ceilings are advisory — on-device models run on your Ollama regardless of plan; the ceiling gates cloud inference and `prism_infer` routing.
@@ -129,10 +171,13 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 |---|---|---|---|---|
 | Seats | 1 | 1 | up to 5 | up to 25 |
 | Local model ceiling | up to 4b | up to 14b | up to 32b | up to 32b |
-| Daily cloud inference | 50 | 200 | 2,000 | 100,000 |
+| Daily cloud inference | — | 200 | 2,000 | unlimited |
+| Cloud Coder (Web IDE) | — | 100/day | 1,000/day | unlimited |
+| Cloud search | — | 50/day | 500/day | unlimited |
 | Max output tokens | 512 | 1,024 | 2,048 | 4,096 |
-| Cloud fallback | — | ✅ | ✅ | ✅ priority |
+| Cloud fallback | — | Claude Sonnet 4 | Claude Sonnet 4 | Priority + Sonnet 4 |
 | Grounding verifier | — | ✅ | ✅ | ✅ |
+| Memory sync (cloud) | — | ✅ | ✅ | ✅ |
 | Knowledge / session memory | limited | unlimited | unlimited | unlimited |
 | Analytics dashboard | — | ✅ | ✅ | ✅ |
 | HIPAA BAA | — | — | — | ✅ |
@@ -209,9 +254,46 @@ With no variables set, Prism runs fully local. Set `PRISM_SYNALUX_API_KEY` (and 
 
 ## Companions
 
-- **Web IDE** — the prism-coder agent in your browser, no install: [synalux.ai/coder](https://synalux.ai/coder)
-- **VS Code extension** — memory-augmented AI in the editor: `code --install-extension synalux-ai.synalux`
-- **Prism AAC** — communication app for non-speaking users, powered by the on-device fleet: [github.com/dcostenco/prism-aac](https://github.com/dcostenco/prism-aac)
+### Web IDE — Prism Coder
+
+A full browser-based IDE at [synalux.ai/coder](https://synalux.ai/coder). No install, no desktop app. Import any GitHub repo and get:
+
+- **Monaco editor** with multi-tab, split view, syntax highlighting, and VS Code keybindings
+- **In-browser Node.js** via WebContainer (Bolt.new-style runtime — your code runs in the browser, not on a server)
+- **XTerm terminal** with real PTY shell via WebSocket
+- **AI chat** powered by prism-coder models (local or cloud depending on plan)
+- **Source control** — commit, branch, push/pull, stash, blame, tag management
+- **Live Share** — real-time collaborative editing with session links
+- **Node.js debugger** via Chrome DevTools Protocol
+- **Tasks runner** (VS Code `tasks.json` compatible), **Problems panel** (Monaco diagnostics)
+- **Secrets manager**, **HTTP client**, and **deployment panel**
+- **12-language i18n** — full UI localization
+
+Standard+ plans get cloud AI and higher rate limits. Free tier works with local Ollama. All code runs client-side in the browser (WebContainer), not on Synalux servers.
+
+### VS Code Extension — Synalux
+
+Memory-augmented AI inside VS Code with clinical practice management features. Install from the marketplace:
+
+```bash
+code --install-extension synalux-ai.synalux
+```
+
+[![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/synalux-ai.synalux?label=VS%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=synalux-ai.synalux)
+
+**AI features:** Chat participant (`@synalux`), multi-agent pipeline, voice input with conversation mode, model switching (local Ollama / cloud / Gemini), 10 AI personality tones.
+
+**Clinical features (BCBA / healthcare):** SOAP note generator, role-based access, document signing, patient board. Voice recording with AES-256-GCM encryption (consent-gated, off by default, plaintext deleted after encryption).
+
+**Collaboration:** Team chat, direct messages, enterprise video calls (LiveKit), customer board, visual builder, DevContainers, Auth & Database panel.
+
+**Privacy note:** The extension routes AI requests through the `BackendRouter` — local Ollama by default for free tier, cloud for paid (user-configurable via `preferLocal`). Clinical features (SOAP notes, voice) route through the same backend. For HIPAA workloads, set `synalux.preferLocal=true` or use an Enterprise plan with BAA. Licensed under [BSL-1.1](https://marketplace.visualstudio.com/items?itemName=synalux-ai.synalux).
+
+### Prism AAC
+
+Communication app for non-speaking users, powered by the on-device prism-coder fleet for phrase prediction. macOS / iOS / web.
+
+→ [github.com/dcostenco/prism-aac](https://github.com/dcostenco/prism-aac)
 
 ---
 
@@ -242,4 +324,11 @@ It reads `~/.prism-mcp/data.db` and POSTs entries to the portal. Ledger entries 
 
 ## License
 
-[AGPL-3.0](../../LICENSE). Commercial hosted/managed deployment is available via the Synalux subscription.
+| Product | License |
+|---|---|
+| **prism-mcp-server** (this repo) | [AGPL-3.0](../../LICENSE) |
+| **VS Code extension** (synalux-ai.synalux) | BSL-1.1 |
+| **Web IDE** (synalux.ai/coder) | Synalux Terms of Service |
+| **Prism AAC** | AGPL-3.0 |
+
+The AGPL-3.0 license covers the MCP server and its source code. The VS Code extension and Web IDE are separate products with their own licenses. Commercial hosted/managed deployment of the MCP server is available via the Synalux subscription.
