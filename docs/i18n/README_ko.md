@@ -42,17 +42,17 @@ When major drift is detected, the alert routes to the **Synalux portal** so it's
 
 No scripts. No cron. No hooks. Three tool calls, Prism handles the rest.
 
-### 🛡 PHI Guard *(new in v17)*
+### 🛡 PHI Guard *(v17+)*
 Automatic Protected Health Information detection and redaction in the memory pipeline. Every `session_save_ledger` and `session_save_handoff` call passes through the PHI guard before storage.
 
-**What it catches:** Names, DOBs, SSNs, MRNs, phone numbers, email addresses, and 18 HIPAA identifier categories. Redaction is deterministic (regex + pattern matching, no LLM) — zero false negatives on structured identifiers.
+**What it catches:** DOBs, SSNs, MRNs, phone numbers, email addresses, and other structured HIPAA identifiers (18 categories). Redaction is deterministic (regex + pattern matching, no LLM) — zero false negatives on format-constrained identifiers (SSN, MRN, phone, email). Names require NER for reliable detection and are best-effort.
 
 **Fail-closed:** PHI detection errors log to stderr (never suppressed) and block the save. Metric: `phi_guard.detected` count per category is always emitted for audit compliance.
 
-### ⚡ Prompt-based skill routing *(new in v17)*
+### ⚡ Prompt-based skill routing *(v17+)*
 114 agent skills auto-load based on prompt keywords. No manual skill selection needed — the MCP server scans the user's prompt and injects the relevant skill instructions into the session context before the AI responds.
 
-### 💰 Tier enforcement *(new in v17.1)*
+### 💰 Tier enforcement *(v17.1+)*
 `prism_infer` now enforces subscription-tier gates: model ceiling, max tokens, daily limits, and cloud fallback are all gated by your plan. Free users get local-only inference up to 4b; paid tiers unlock higher models, more tokens, and cloud fallback. Flat-rate seat caps via `max_seats` per plan.
 
 ### 🛡 Local-first — security + speed
