@@ -64,7 +64,7 @@ Free tier runs entirely on your machine — SQLite, local embedding model, no AP
 |--|---|---|
 | Tool-call latency | 200ms–3s | **~1.6s (1.7B) / ~1.1s (14B)** |
 | API key required | Yes | **No** |
-| Data sent externally | Every prompt | **Nothing** |
+| Data sent externally | Every prompt | **Nothing (free tier)** |
 | Works offline | ❌ | ✅ |
 | Cost at scale | $0.002–0.06/call | **$0** |
 | HIPAA | Requires BAA | **On-prem = no BAA** |
