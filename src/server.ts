@@ -80,7 +80,7 @@ import {
   PRISM_DARK_FACTORY_ENABLED,
 } from "./config.js";
 import { startWatchdog, drainAlerts } from "./hivemindWatchdog.js";
-import { startScheduler, startScholarScheduler } from "./backgroundScheduler.js";
+import { startScheduler } from "./backgroundScheduler.js";
 import { startDarkFactoryRunner } from "./darkfactory/runner.js";
 import { getSyncBus } from "./sync/factory.js";
 import type { SyncBus, SyncEvent } from "./sync/index.js";
@@ -1510,16 +1510,12 @@ export async function startServer() {
     });
   }
 
-  // ─── v5.4: Autonomous Web Scholar Scheduler ──────────────
-  // Background LLM research pipeline. Independent from the
-  // maintenance scheduler — has its own interval and enable flag.
-  if (PRISM_SCHOLAR_ENABLED && SESSION_MEMORY_ENABLED) {
-    storageReady?.then(() => {
-      startScholarScheduler();
-    }).catch(err => {
-      console.error(`[WebScholar] Startup failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-    });
-  }
+  // ─── v5.4: Autonomous Web Scholar — REMOVED (v18.0.1) ───
+  // Auto-scheduler removed. Scholar now runs server-side via
+  // Vercel cron (/api/v1/cron/scholar) every 6h. The client-side
+  // scheduler caused 5,293 garbage entries when multiple MCP
+  // instances ran in parallel. Manual trigger via MCP tool still
+  // works for local/free-tier users. See: webScholar.ts
 
   // ─── v7.3: Dark Factory Background Runner ────────────────
   // Autonomous pipeline orchestration engine. Picks up RUNNING
