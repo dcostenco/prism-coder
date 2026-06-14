@@ -1,10 +1,6 @@
 # Prism Coder
 
-**Persistent memory and reliable tool-routing for AI agents.** *(formerly Prism MCP)*
-
-Prism Coder is a [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude, Cursor, and other AI tools long-term memory that survives across sessions — semantic search, cognitive routing, and a visual dashboard. It ships alongside the open-weight `prism-coder` model fleet (1.7B-32B) for fast, offline tool-routing when you don't want a cloud round-trip.
-
-It runs **fully local and free** on SQLite + Ollama with no API keys. A paid subscription adds cloud sync, higher model tiers, and team features through the Synalux portal.
+**Give your AI agent memory that lasts.** Persistent sessions, knowledge graphs, and offline tool-routing — fully local and free.
 
 [![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm)](https://www.npmjs.com/package/prism-mcp-server)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8)](https://github.com/modelcontextprotocol/servers)
@@ -15,7 +11,10 @@ It runs **fully local and free** on SQLite + Ollama with no API keys. A paid sub
   <img src="docs/v11_hivemind_multi_agent_dashboard.jpg" alt="Prism Coder — Mind Palace Dashboard with Knowledge Graph and Multi-Agent Hivemind" width="700" />
 </p>
 
-> **Renamed in v14:** the project is now **Prism Coder** to cover both the memory server and the model fleet. The npm package stays `prism-mcp-server`, so existing install URLs and `mcp.json` entries keep working.
+Prism Coder is an [MCP server](https://modelcontextprotocol.io) that gives Claude, Cursor, and other AI tools long-term memory that survives across sessions. It ships with the open-weight `prism-coder` model fleet (2B–32B) for fast, offline tool-routing — no cloud required.
+
+**No account needed. No API keys. Runs on your machine.**  
+A paid subscription adds cloud sync, higher model tiers, and team features through the [Synalux portal](https://synalux.ai).
 
 ---
 
@@ -51,6 +50,8 @@ Prism detects both the namespaced (`dcostenco/prism-coder:14b`) and bare (`prism
 
 ## What it does
 
+Your AI agent forgets everything between sessions. Prism fixes that — and adds verification, drift detection, and multi-agent coordination on top.
+
 ### Mind Palace — persistent memory that survives across sessions
 
 Every conversation feeds a persistent store. The next session loads the right context automatically — no re-explaining.
@@ -83,27 +84,17 @@ Long agent sessions can wander from their original goal. `session_detect_drift` 
 
 ### Behavioral Verification — catch bad edits before they happen
 
-AI agents pattern-match on checklists instead of thinking through user impact. The behavioral verifier challenges the agent with a domain-specific scenario **before** editing code — like an ABA antecedent intervention.
+AI agents apply patterns from checklists without understanding the real-world impact. The `verify_behavior` tool challenges the agent with a scenario it must answer **before** editing — forcing it to think through what the end user will experience.
 
 ```
-Agent: "I'll revert the KDS bump logic"
-Prism: "⚠️ Kitchen worker scenario: A cook has a 3-item ticket.
-        One item is voided. What should the cook see on the KDS?"
-Agent: "The ticket should stay visible with the remaining 2 items."
-Prism: "Correct — your revert would remove the ticket entirely. Don't revert."
+Agent: "I'll revert this kitchen display change"
+Prism: "⚠️ Scenario: A cook sees a 3-item ticket. One item is voided.
+        What should the cook see after the void?"
+Agent: "The ticket stays visible with the remaining 2 items."
+Prism: "Correct — your revert would hide the ticket entirely."
 ```
 
-**17 built-in domains**: KDS, billing, auth, voice ordering, webhooks, migrations, EU routing, clinical (HIPAA/FHIR), HR, accounting, chat, STT, privacy, loyalty, discounts, drawer operations, order lifecycle. Custom domains can be added per workspace.
-
-**How it works**: The `verify_behavior` tool calls the Synalux portal API, which matches the file path against domain scenarios stored in the database. The agent must answer the scenario concretely before editing. No local hooks required — works in Claude, Cursor, or any MCP client.
-
-**Why it matters**: In a single audit session, 47 bugs were found across 7 days of AI-generated code. Every bug was introduced by an agent that applied a "correct" pattern without simulating the end-user journey. The behavioral verifier would have caught all of them.
-
-| Tier | Coverage |
-|------|----------|
-| Free | Skill-based advisory (agent prompted to think before editing) |
-| Standard+ | `verify_behavior` tool with 17 domain scenarios via API |
-| Enterprise | Custom per-workspace scenarios |
+17 built-in domains (billing, auth, ordering, clinical, HR, and more). Custom domains per workspace on Enterprise. No hooks needed — works in any MCP client.
 
 ### Time Travel
 
@@ -156,7 +147,7 @@ The free tier runs entirely on your machine. Paid tiers add cloud sync through t
 
 The `prism-coder` fleet uses Qwen3.5 for MCP tool-routing. The 14B and 32B are fine-tuned from Qwen3; the 2B and 4B slots use stock Qwen3.5-4B with prompt engineering at different quantization levels (100% routing accuracy without fine-tuning). They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
 
-| Model | Ollama tag | Size | BFCL Accuracy | Role | Tier |
+| Model | Ollama tag | Size | [BFCL](https://gorilla.cs.berkeley.edu/blogs/12_bfcl_v3_multi_turn.html) Accuracy | Role | Tier |
 |---|---|---|---|---|---|
 | Qwen3.5-4B Q3_K_M | `prism-coder:2b` | 2.3 GB | 99.1% × 3 seeds | iPhone / mobile first gate | Free |
 | Qwen3.5-4B Q4_K_M | `prism-coder:4b` | 3.4 GB | 100% × 3 seeds | Verifier + 8 GB+ devices | Free |
@@ -323,6 +314,8 @@ prism register-models     # alias dcostenco/prism-coder:* -> prism-coder:*
 ---
 
 ## Companions
+
+Prism works alongside these tools — use whichever fits your workflow.
 
 ### Web IDE — Prism Coder
 
