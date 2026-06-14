@@ -1989,3 +1989,49 @@ export function isSessionDetectDriftArgs(
   if (a.domain !== undefined && !["coder", "bcba", "aac"].includes(a.domain as string)) return false;
   return true;
 }
+
+// ─── Behavioral Verifier ────────────────────────────────────────
+
+export const VERIFY_BEHAVIOR_TOOL: Tool = {
+  name: "verify_behavior",
+  description:
+    "Call BEFORE editing behavioral source files (API routes, ordering logic, billing, auth, migrations). " +
+    "Returns a domain-specific scenario you must answer to demonstrate understanding of the end-user impact. " +
+    "Example: editing a KDS route returns 'A cook has a 3-item ticket. One item is voided. What should the cook see?' " +
+    "Answer the scenario concretely before proceeding with the edit.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      file_path: {
+        type: "string",
+        description: "Path of the file about to be edited.",
+      },
+      change_summary: {
+        type: "string",
+        description: "Brief description of the intended change.",
+      },
+      project: {
+        type: "string",
+        description: "Optional project identifier for workspace-scoped scenarios.",
+      },
+      workspace_id: {
+        type: "string",
+        description: "Optional workspace ID for custom scenarios.",
+      },
+    },
+    required: ["file_path", "change_summary"],
+  },
+};
+
+export function isVerifyBehaviorArgs(a: unknown): a is {
+  file_path: string;
+  change_summary: string;
+  project?: string;
+  workspace_id?: string;
+} {
+  if (!a || typeof a !== "object") return false;
+  const o = a as Record<string, unknown>;
+  if (typeof o.file_path !== "string" || !o.file_path.trim()) return false;
+  if (typeof o.change_summary !== "string") return false;
+  return true;
+}

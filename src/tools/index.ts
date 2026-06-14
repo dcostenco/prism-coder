@@ -113,6 +113,8 @@ export {
 // ── Session Drift Detection ──
 export { SESSION_DETECT_DRIFT_TOOL, isSessionDetectDriftArgs } from "./sessionMemoryDefinitions.js";
 export { sessionDetectDriftHandler } from "./sessionDriftHandler.js";
+export { VERIFY_BEHAVIOR_TOOL, isVerifyBehaviorArgs } from "./sessionMemoryDefinitions.js";
+export { verifyBehaviorHandler } from "./behavioralVerifierHandler.js";
 
 // ── Knowledge Ingestion (v15.5 — Open Interface) ──
 // Chunks source code, generates Q&A via Claude Haiku, stores in knowledge graph.

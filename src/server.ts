@@ -86,6 +86,7 @@ import { getSyncBus } from "./sync/factory.js";
 import type { SyncBus, SyncEvent } from "./sync/index.js";
 import { startDashboardServer } from "./dashboard/server.js";
 import { acquireLock, registerShutdownHandlers } from "./lifecycle.js";
+import { verifyBehaviorHandler } from "./tools/behavioralVerifierHandler.js";
 
 // ─── v2.3.6 FIX: Use Storage Abstraction for Prompts/Resources ───
 // CRITICAL FIX: Previously imported supabaseRpc/supabaseGet directly,
@@ -158,6 +159,9 @@ import {
   // Session Drift Detection
   SESSION_DETECT_DRIFT_TOOL,
   isSessionDetectDriftArgs,
+  // Behavioral Verifier
+  VERIFY_BEHAVIOR_TOOL,
+  isVerifyBehaviorArgs,
   // v12: Developer Onboarding & Enterprise Observability
   ONBOARDING_WIZARD_TOOL,
   EXTRACT_ENTITIES_TOOL,
@@ -328,6 +332,7 @@ function buildSessionMemoryTools(autoloadList: string[]): Tool[] {
     SESSION_SYNTHESIZE_EDGES_TOOL, // session_synthesize_edges — inferred semantic graph enrichment
     SESSION_COGNITIVE_ROUTE_TOOL,  // session_cognitive_route — HDC policy-gated concept routing (v6.5)
     SESSION_DETECT_DRIFT_TOOL,     // session_detect_drift — semantic goal drift detection (synalux)
+    VERIFY_BEHAVIOR_TOOL,          // verify_behavior — behavioral verification via Synalux portal
     // ─── v6.1: Storage Hygiene tool ───
     MAINTENANCE_VACUUM_TOOL,       // maintenance_vacuum — reclaim SQLite disk space post-purge
     // ─── v12.1: Developer Onboarding & Framework Bridge ───
@@ -1019,6 +1024,10 @@ export function createServer() {
           case "session_detect_drift":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
             result = await sessionDetectDriftHandler(args); break;
+
+          case "verify_behavior":
+            if (!isVerifyBehaviorArgs(args)) throw new Error("file_path and change_summary required.");
+            result = await verifyBehaviorHandler(args); break;
 
           // ─── v7.3: Dark Factory Pipeline Tools ───
 
