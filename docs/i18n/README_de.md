@@ -252,7 +252,7 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 | Analytics dashboard | -- | ✅ | ✅ | ✅ |
 | HIPAA BAA | -- | -- | -- | ✅ |
 
-14-day free trial on paid plans. [Pricing](https://synalux.ai/pricing) | 25+ seats: [contact sales](https://synalux.ai/support)
+14-day free trial on paid plans. 25+ seats: [contact sales](https://synalux.ai/support)
 
 ---
 
