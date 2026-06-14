@@ -81,6 +81,30 @@ Every session is logged with files changed, decisions made, and TODOs. Search, f
 
 Long agent sessions can wander from their original goal. `session_detect_drift` compares current work against the stated goal and returns `on_track / minor_drift / major_drift` so the agent can self-correct.
 
+### Behavioral Verification — catch bad edits before they happen
+
+AI agents pattern-match on checklists instead of thinking through user impact. The behavioral verifier challenges the agent with a domain-specific scenario **before** editing code — like an ABA antecedent intervention.
+
+```
+Agent: "I'll revert the KDS bump logic"
+Prism: "⚠️ Kitchen worker scenario: A cook has a 3-item ticket.
+        One item is voided. What should the cook see on the KDS?"
+Agent: "The ticket should stay visible with the remaining 2 items."
+Prism: "Correct — your revert would remove the ticket entirely. Don't revert."
+```
+
+**17 built-in domains**: KDS, billing, auth, voice ordering, webhooks, migrations, EU routing, clinical (HIPAA/FHIR), HR, accounting, chat, STT, privacy, loyalty, discounts, drawer operations, order lifecycle. Custom domains can be added per workspace.
+
+**How it works**: The `verify_behavior` tool calls the Synalux portal API, which matches the file path against domain scenarios stored in the database. The agent must answer the scenario concretely before editing. No local hooks required — works in Claude, Cursor, or any MCP client.
+
+**Why it matters**: In a single audit session, 47 bugs were found across 7 days of AI-generated code. Every bug was introduced by an agent that applied a "correct" pattern without simulating the end-user journey. The behavioral verifier would have caught all of them.
+
+| Tier | Coverage |
+|------|----------|
+| Free | Skill-based advisory (agent prompted to think before editing) |
+| Standard+ | `verify_behavior` tool with 17 domain scenarios via API |
+| Enterprise | Custom per-workspace scenarios |
+
 ### Time Travel
 
 Roll back to any previous session state. Compare diffs between versions. Restore a known-good state with one click.
@@ -188,6 +212,7 @@ These tables are the maintainer's assessment as of June 2026. Verify claims that
 | Persistent cross-session memory | Yes | Yes | No | No | No | No |
 | Session drift detection | Yes | No | No | No | No | No |
 | L3 grounding verifier | Yes | No | No | No | No | No |
+| Behavioral verification (pre-edit) | Yes | No | No | No | No | No |
 | MCP server (tools + memory) | Yes | No | No | No | No | No |
 | Web IDE | Yes | Yes | No | No | Yes | Yes |
 | VS Code extension | Yes | Yes | N/A (is VS Code) | N/A | Yes | No |
@@ -252,6 +277,7 @@ Prism exposes 40+ MCP tools. The core memory loop:
 | `knowledge_search` | Semantic + keyword search over all memories |
 | `query_memory_natural` | Natural-language Q&A over the memory store |
 | `session_detect_drift` | Detect when a session has drifted from its goal |
+| `verify_behavior` | Pre-edit scenario challenge — catch bad changes before they happen |
 | `knowledge_ingest` | Teach Prism a codebase or document |
 
 Full TypeScript signatures live in [`src/tools/`](src/tools/); architecture in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
