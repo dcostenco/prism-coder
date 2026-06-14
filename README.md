@@ -1,8 +1,8 @@
-# 🧠 Prism Coder
+# Prism Coder
 
 **Persistent memory and reliable tool-routing for AI agents.** *(formerly Prism MCP)*
 
-Prism Coder is a [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude, Cursor, and other AI tools long-term memory that survives across sessions — semantic search, cognitive routing, and a visual dashboard. It ships alongside the open-weight `prism-coder` model fleet (1.7B–32B) for fast, offline tool-routing when you don't want a cloud round-trip.
+Prism Coder is a [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude, Cursor, and other AI tools long-term memory that survives across sessions — semantic search, cognitive routing, and a visual dashboard. It ships alongside the open-weight `prism-coder` model fleet (1.7B-32B) for fast, offline tool-routing when you don't want a cloud round-trip.
 
 It runs **fully local and free** on SQLite + Ollama with no API keys. A paid subscription adds cloud sync, higher model tiers, and team features through the Synalux portal.
 
@@ -10,6 +10,10 @@ It runs **fully local and free** on SQLite + Ollama with no API keys. A paid sub
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8)](https://github.com/modelcontextprotocol/servers)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Models on HuggingFace](https://img.shields.io/badge/🤗-prism--coder-yellow)](https://huggingface.co/dcostenco)
+
+<p align="center">
+  <img src="docs/v11_hivemind_multi_agent_dashboard.jpg" alt="Prism Coder — Mind Palace Dashboard with Knowledge Graph and Multi-Agent Hivemind" width="700" />
+</p>
 
 > **Renamed in v14:** the project is now **Prism Coder** to cover both the memory server and the model fleet. The npm package stays `prism-mcp-server`, so existing install URLs and `mcp.json` entries keep working.
 
@@ -35,10 +39,10 @@ Open Claude Desktop or Cursor and your agent now has memory backed by a local SQ
 **Optional — local model fleet** for offline tool-routing. Pull whichever fits your hardware:
 
 ```bash
-ollama pull dcostenco/prism-coder:1b7   # 1.1 GB · any device, always fits
-ollama pull qwen3.5:4b                  # 3.4 GB · iPhone/iPad 8 GB+, Mac M1+  (stock model, no fine-tune needed)
-ollama pull dcostenco/prism-coder:14b   # 8.4 GB · Mac 24 GB+, iPad Pro 16 GB  (default router)
-ollama pull dcostenco/prism-coder:32b   # 16 GB  · Mac M2 Ultra+  (complex tasks)
+ollama pull dcostenco/prism-coder:1b7   # 1.1 GB - any device, always fits
+ollama pull dcostenco/prism-coder:8b    # 4.7 GB - iPhone/iPad 8 GB+, Mac M1+
+ollama pull dcostenco/prism-coder:14b   # 8.4 GB - Mac 24 GB+, iPad Pro 16 GB  (default router)
+ollama pull dcostenco/prism-coder:32b   # 16 GB  - Mac M2 Ultra+  (complex tasks)
 ```
 
 Prism detects both the namespaced (`dcostenco/prism-coder:14b`) and bare (`prism-coder:14b`) Ollama tags automatically.
@@ -47,15 +51,63 @@ Prism detects both the namespaced (`dcostenco/prism-coder:14b`) and bare (`prism
 
 ## What it does
 
-**Memory that survives across sessions.** Every conversation feeds a persistent store. The next session loads the right context automatically — no re-explaining.
+### Mind Palace — persistent memory that survives across sessions
 
-**Semantic + keyword + graph search.** Ask "what did I decide about the auth flow last month?" and get an answer with citations, combining vector similarity, full-text search, and graph traversal.
+Every conversation feeds a persistent store. The next session loads the right context automatically — no re-explaining.
 
-**Cognitive routing.** Episodic (what happened), semantic (what's true), and procedural (how to do X) memories live in separate stores; a router decides where to write and where to read.
+<p align="center">
+  <img src="docs/mind-palace-dashboard.png" alt="Mind Palace Dashboard — project state, neural graph, pending TODOs" width="700" />
+</p>
 
-**Session drift detection.** Long agent sessions can wander from their original goal. `session_detect_drift` compares current work against the stated goal and returns `on_track / minor_drift / major_drift` so the agent can self-correct.
+The dashboard shows your current project state, pending TODOs, intent health, and a neural knowledge graph — all built automatically from your agent sessions.
 
-**Local tool-routing models.** The `prism-coder` fleet is fine-tuned to pick the right MCP tool quickly and offline, so agents don't burn a cloud call just to decide where to store a note.
+### Knowledge Graph — semantic + keyword + graph search
+
+Ask "what did I decide about the auth flow last month?" and get an answer with citations, combining vector similarity, full-text search, and graph traversal.
+
+<p align="center">
+  <img src="docs/knowledge-graph.jpg" alt="Knowledge Graph — 190 keywords, 47 edges, 12 projects visualized" width="500" />
+</p>
+
+### Session History — immutable audit trail
+
+Every session is logged with files changed, decisions made, and TODOs. Search, filter, and replay any past session.
+
+<p align="center">
+  <img src="docs/session-ledger.jpg" alt="Session Ledger — 93 sessions, 847 decisions logged across 12 projects" width="700" />
+</p>
+
+### Session Drift Detection
+
+Long agent sessions can wander from their original goal. `session_detect_drift` compares current work against the stated goal and returns `on_track / minor_drift / major_drift` so the agent can self-correct.
+
+### Time Travel
+
+Roll back to any previous session state. Compare diffs between versions. Restore a known-good state with one click.
+
+<p align="center">
+  <img src="docs/time-travel-timeline.jpg" alt="Time Travel — version timeline with diff view and one-click restore" width="500" />
+</p>
+
+### Cognitive Routing
+
+Episodic (what happened), semantic (what's true), and procedural (how to do X) memories live in separate stores; a router decides where to write and where to read.
+
+### Multi-Agent Hivemind
+
+Coordinate multiple AI agents working on the same project. Each agent has its own session, but they share memory through the knowledge graph. The Hivemind Radar shows real-time agent status, tasks, and activity.
+
+<p align="center">
+  <img src="docs/hivemind-radar.jpg" alt="Hivemind Radar — 5 agents with real-time status, tasks, and activity feed" width="500" />
+</p>
+
+### Neural Search
+
+Search across all memories with highlighted results, knowledge graph editing, and memory density metrics.
+
+<p align="center">
+  <img src="docs/v6_cognitive_load_dashboard.jpg" alt="Neural Search with Knowledge Graph Editor and Memory Density" width="500" />
+</p>
 
 ---
 
@@ -78,12 +130,12 @@ The free tier runs entirely on your machine. Paid tiers add cloud sync through t
 
 ## Models
 
-The `prism-coder` fleet are specialists for MCP tool-routing. The 14B and 32B are fine-tuned from Qwen3; the 4B slot uses stock Qwen3.5-4B with prompt engineering (100% routing accuracy without fine-tuning). They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
+The `prism-coder` fleet are specialists fine-tuned from Qwen3 for MCP tool-routing. They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
 
 | Model | Ollama tag | Size (GGUF Q4_K_M) | Role | Tier |
 |---|---|---|---|---|
 | prism-coder:1.7b | `prism-coder:1b7` | 1.1 GB | Always-fits fallback / on-device | Free |
-| Qwen3.5-4B | `qwen3.5:4b` | 3.4 GB | Verifier + mobile (stock, no fine-tune) | Free |
+| prism-coder:8b | `prism-coder:8b` | 4.7 GB | Mobile / balanced | Free |
 | prism-coder:14b | `prism-coder:14b` | 8.4 GB | Default router | Standard+ |
 | prism-coder:32b | `prism-coder:32b` | 16 GB | Complex tasks (MoE) | Advanced+ |
 
@@ -92,10 +144,10 @@ Weights: [huggingface.co/dcostenco](https://huggingface.co/dcostenco) (public GG
 ### Cascade
 
 ```
-query → prism-coder:14b (local router)
-          → grounding verifier (local, for evidence-backed claims)
-          → prism-coder:32b (complex tasks, on demand)
-          → cloud fallback (paid tiers, for max quality)
+query -> prism-coder:14b (local router)
+          -> grounding verifier (local, for evidence-backed claims)
+          -> prism-coder:32b (complex tasks, on demand)
+          -> cloud fallback (paid tiers, for max quality)
 ```
 
 ---
@@ -107,14 +159,14 @@ query → prism-coder:14b (local router)
 ```bash
 git clone https://github.com/dcostenco/prism-coder && cd prism-coder
 pip install anthropic requests
-python3 tests/benchmarks/prism-routing-100/benchmark.py --models 1b7 4b 14b 32b
+python3 tests/benchmarks/prism-routing-100/benchmark.py --models 1b7 8b 14b 32b
 ```
 
 **Routing eval (102 cases, 12 categories, 3-seed mean).** On this narrow tool-routing task the fine-tuned models are near-perfect across all sizes. Be honest with yourself about what that means: the eval is **near-saturated** for this taxonomy — it measures whether the right one of a small set of MCP tools is selected, not general capability. The useful takeaway is **offline routing reliability at zero cost**, not that a 1.1 GB model rivals a frontier model in general.
 
 | Model | Routing accuracy | Notes |
 |---|---|---|
-| prism-coder:1.7b / 4b / 14b / 32b | ~100% | Near-saturated on this 102-case taxonomy |
+| prism-coder:1.7b / 8b / 14b / 32b | ~100% | Near-saturated on this 102-case taxonomy |
 | Claude (frontier, same eval) | ~98% | Stronger everywhere outside this narrow task |
 
 **Memory uplift (LoCoMo-Plus, self-published).** A separate long-context dialogue benchmark ([dcostenco/Locomo-Plus](https://github.com/dcostenco/Locomo-Plus)) measures how much structured memory helps a base model retain multi-day context. Results show large gains when a model is paired with Prism memory versus running raw. Note this benchmark is authored, run, and LLM-judged by this project — treat it as a reproducible demonstration, not an independent third-party result, and run it yourself with the commands in that repo.
@@ -129,29 +181,29 @@ These tables are the maintainer's assessment as of June 2026. Verify claims that
 
 | Feature | Prism Coder | GitHub Copilot | Cursor | Windsurf | Amazon Q | Devin |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
-| Local inference (open-weight) | ✅ 1.7B–32B | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Works fully offline | ✅ (free tier) | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Persistent cross-session memory | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Session drift detection | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| L3 grounding verifier | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| MCP server (tools + memory) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Web IDE | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
-| VS Code extension | ✅ | ✅ | N/A (is VS Code) | N/A | ✅ | ❌ |
-| Flat-rate team pricing | ✅ | ❌ (per-seat) | ❌ (per-seat) | ❌ | ❌ | ❌ |
-| HIPAA BAA available | ✅ (Enterprise) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Local inference (open-weight) | Yes | No | No | No | No | No |
+| Works fully offline | Yes (free tier) | No | No | No | No | No |
+| Persistent cross-session memory | Yes | Yes | No | No | No | No |
+| Session drift detection | Yes | No | No | No | No | No |
+| L3 grounding verifier | Yes | No | No | No | No | No |
+| MCP server (tools + memory) | Yes | No | No | No | No | No |
+| Web IDE | Yes | Yes | No | No | Yes | Yes |
+| VS Code extension | Yes | Yes | N/A (is VS Code) | N/A | Yes | No |
+| Flat-rate team pricing | Yes | No (per-seat) | No (per-seat) | No | No | No |
+| HIPAA BAA available | Yes (Enterprise) | No | No | No | No | No |
 
 ### vs local AI / memory tools
 
 | Feature | Prism Coder | Ollama | LM Studio | Mem0 | Zep |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Local inference cascade | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Cloud fallback | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Persistent cross-session memory | ✅ | ❌ | ❌ | ✅ | ✅ |
-| Knowledge ingestion (MCP + webhook) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Cognitive routing (3-store) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Session drift detection | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Native MCP server | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Web IDE + VS Code extension | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Local inference cascade | Yes | Yes | Yes | No | No |
+| Cloud fallback | Yes | No | No | No | No |
+| Persistent cross-session memory | Yes | No | No | Yes | Yes |
+| Knowledge ingestion (MCP + webhook) | Yes | No | No | No | No |
+| Cognitive routing (3-store) | Yes | No | No | No | No |
+| Session drift detection | Yes | No | No | No | No |
+| Native MCP server | Yes | No | No | No | No |
+| Web IDE + VS Code extension | Yes | No | No | No | No |
 
 ### Pricing — flat-rate, not per-seat
 
@@ -171,18 +223,18 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 |---|---|---|---|---|
 | Seats | 1 | 1 | up to 5 | up to 25 |
 | Local model ceiling | up to 4b | up to 14b | up to 32b | up to 32b |
-| Daily cloud inference | — | 200 | 2,000 | 100,000 |
-| Cloud Coder (Web IDE) | — | 100/day | 1,000/day | 100,000/day |
-| Cloud search | — | 50/day | 500/day | 100,000/day |
+| Daily cloud inference | -- | 200 | 2,000 | 100,000 |
+| Cloud Coder (Web IDE) | -- | 100/day | 1,000/day | 100,000/day |
+| Cloud search | -- | 50/day | 500/day | 100,000/day |
 | Max output tokens | 512 | 1,024 | 2,048 | 4,096 |
-| Cloud fallback | — | Claude Sonnet 4 | Claude Sonnet 4 | Priority + Sonnet 4 |
-| Grounding verifier | — | ✅ | ✅ | ✅ |
-| Memory sync (cloud) | — | ✅ | ✅ | ✅ |
+| Cloud fallback | -- | Claude Sonnet 4 | Claude Sonnet 4 | Priority + Sonnet 4 |
+| Grounding verifier | -- | Yes | Yes | Yes |
+| Memory sync (cloud) | -- | Yes | Yes | Yes |
 | Knowledge / session memory | limited | unlimited | unlimited | unlimited |
-| Analytics dashboard | — | ✅ | ✅ | ✅ |
-| HIPAA BAA | — | — | — | ✅ |
+| Analytics dashboard | -- | Yes | Yes | Yes |
+| HIPAA BAA | -- | -- | -- | Yes |
 
-14-day free trial on paid plans. [Pricing →](https://synalux.ai/pricing) · 25+ seats: [contact sales](https://synalux.ai/support)
+14-day free trial on paid plans. [Pricing](https://synalux.ai/pricing) | 25+ seats: [contact sales](https://synalux.ai/support)
 
 ---
 
@@ -205,100 +257,8 @@ Full TypeScript signatures live in [`src/tools/`](src/tools/); architecture in [
 <details>
 <summary>How Prism survives context compaction</summary>
 
-The LLM context window is treated as ephemeral scratch space; durable state lives in the persistent store (SQLite locally, the portal in the cloud). Every session begins with a mandatory `session_load_context` call, so the agent is oriented before it writes a response. When a project exceeds a threshold (default 50 entries), `session_compact_ledger` summarizes old entries into a rollup, soft-archives the originals, and links them in the graph. → [`docs/COMPACTION.md`](docs/COMPACTION.md)
+The LLM context window is treated as ephemeral scratch space; durable state lives in the persistent store (SQLite locally, the portal in the cloud). Every session begins with a mandatory `session_load_context` call, so the agent is oriented before it writes a response. When a project exceeds a threshold (default 50 entries), `session_compact_ledger` summarizes old entries into a rollup, soft-archives the originals, and links them in the graph. See [`docs/COMPACTION.md`](docs/COMPACTION.md)
 </details>
-
----
-
-## Skills
-
-Skills are behavioral rules injected into the agent's context at session start via `session_load_context`. They govern how the agent works — debugging discipline, security audits, shipping standards, clinical protocols.
-
-### How skills load
-
-```
-session_load_context called
-  → fetch routing table from synalux.ai/.well-known/prism/skills-routing.json (cached 5 min)
-  → resolve universal skills + project-specific skills
-  → sort by priority (lowest first)
-  → fetch content: Synalux portal DB → local SQLite fallback
-  → inject into response as [📜 SKILL: name] blocks
-  → protected skills always load (bypass the 40k-char cap)
-  → truncated skills get a loud ⚠️ warning the agent can see
-```
-
-### Skill types
-
-| Type | Where it lives | Who can write | When it loads |
-|---|---|---|---|
-| **Platform skill** | Synalux DB (`platform_skills` table) or `synalux-private/skills/*/SKILL.md` | Platform admin via `/api/v1/admin/skills` or `sync-skills.sh` | When named in the routing table |
-| **Role skill** | Local SQLite (`skill:<role>`) | User via Prism dashboard → Settings → 📜 Skills tab | When the agent's role matches |
-| **User-local skill** | Local SQLite (`user_skill:<name>`) | User via dashboard | When `user_local.enabled=true` in routing table |
-| **Context skill** | Same as platform | Auto | When a recent handoff/ledger mentions the skill name |
-
-### Adding custom skills via the dashboard
-
-Open the Prism dashboard (`prism dashboard` or `http://localhost:9315`) → **Settings** → **📜 Skills** tab.
-
-1. Select a **role** (global, dev, qa, pm, lead, security, ux)
-2. Paste or upload your skill as Markdown
-3. Click **💾 Save** — takes effect immediately, no restart
-
-Role skills are injected when `session_load_context` is called with a matching role. The `global` role skill loads for all sessions. Dashboard skills are stored in local SQLite under `skill:<role>` and never sent to the cloud.
-
-### Priority and protected skills
-
-The routing table (v8) supports `priority` and `protected` fields on universal skills:
-
-```json
-{
-  "universal": [
-    {"name": "prime-directive", "priority": 0, "protected": true},
-    {"name": "evidence-first-protocol", "priority": 1, "protected": true},
-    {"name": "critical-thinking-debug", "priority": 3},
-    ...
-  ]
-}
-```
-
-- **Priority**: skills load in ascending priority order — behavioral rules first, mechanical audits last
-- **Protected**: always loaded, bypasses the 40k-char cap — use for non-negotiable rules
-- **Cap**: 40,000 chars total. Skills that would exceed the cap are skipped with a visible `⚠️ TRUNCATED` warning
-- **Backward compat**: plain strings (`"skill-name"`) still work (treated as priority = array index, not protected)
-
-### Routing table
-
-The canonical routing table lives at `synalux-private/portal/public/.well-known/prism/skills-routing.json`. It defines:
-
-- `universal` — skills loaded for every project
-- `projects` — project-name substring → additional skills
-- `prompt_keywords` — regex → skills loaded when the user's prompt matches
-
-Prism fetches this from `synalux.ai` on every `session_load_context` (2.5s timeout, 5-min cache). If unreachable, the offline fallback loads `prime-directive` + `evidence-first-protocol`.
-
-### Skill sync chain
-
-```
-synalux-private/skills/  →  sync-skills.sh  →  local SQLite  →  session_load_context  →  agent context
-                         →  /api/v1/admin/skills  →  Supabase platform_skills  →  (paid tier)
-```
-
-One direction only. Never edit local SQLite skills directly — edit `synalux-private/skills/*/SKILL.md` and run `sync-skills.sh`.
-
-### Enforcement hooks
-
-Some skills have mechanical enforcement via Claude Code hooks (not just advisory text):
-
-| Hook | Event | What it enforces |
-|---|---|---|
-| `screenshot-first/detect.py` | UserPromptSubmit | Injects "read the screenshot first" directive when image + bug keywords detected |
-| `screenshot-first/gate.py` | PreToolUse (Bash/Grep/Glob) | Blocks investigative searches until agent quotes the screenshot evidence |
-| `ask-first-tripwire/gate.py` | PreToolUse (Bash) | Prompts before destructive commands (git force, db push, npm publish) |
-| `pre-commit-check/verify.py` | PostToolUse (git commit) | Checks orphan files, scaffold code, disconnected settings, auth consistency |
-| `pre-push-audit/audit.py` | PostToolUse (git push) | 19-rule security audit (SSRF, ILIKE wildcards, rate limits, etc.) |
-| `crash-interactor/detect.py` | PostToolUse (Bash) | Detects runtime crashes and injects evidence-first recovery protocol |
-
-Hooks live at `~/.claude/hooks/` and are wired in `~/.claude/settings.json`.
 
 ---
 
@@ -311,36 +271,26 @@ prism search <query>      # search code across repos (exact / regex / symbol / s
 prism review <files...>   # AI code review — security, performance, style
 prism scan <files...>     # security scan — secrets, licenses, Dockerfile
 prism push                # push local SQLite to the cloud backend
-prism register-models     # alias dcostenco/prism-coder:* → prism-coder:*
+prism register-models     # alias dcostenco/prism-coder:* -> prism-coder:*
 ```
 
----
+### `prism search` — semantic code search
 
-## Self-hosting (Enterprise)
+<p align="center">
+  <img src="docs/scm_search_cli.jpg" alt="prism search — semantic code search with relevance scores" width="500" />
+</p>
 
-Run the full model stack on your own hardware — no cloud, full data sovereignty.
+### `prism review` — AI code review with HIPAA checks
 
-**Requirements:** Mac M2 Pro+ (48 GB recommended) or Linux + NVIDIA GPU, plus [Ollama](https://ollama.com).
+<p align="center">
+  <img src="docs/scm_review_cli.jpg" alt="prism review — AI code review with security and HIPAA findings" width="400" />
+</p>
 
-```bash
-ollama pull dcostenco/prism-coder:14b      # default router
-export LOCAL_LLM_URL=http://localhost:11434
-```
+### `prism scan` — security scanner for secrets, Dockerfiles, licenses
 
-Routing is automatic: `14b → 32b → cloud fallback` on desktop/server, `14b → 4b → 1.7b` on mobile/offline. For iOS or another machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point `LOCAL_LLM_URL` at the host's IP.
-
----
-
-## Configuration reference
-
-| Variable | Purpose | Default |
-|---|---|---|
-| `PRISM_STORAGE` | `local` / `synalux` / `supabase` / `auto` | `auto` |
-| `PRISM_SYNALUX_API_KEY` | Paid-tier portal key (`synalux_sk_…`) | — (local if unset) |
-| `LOCAL_LLM_URL` | Ollama endpoint | `http://localhost:11434` |
-| `PRISM_FORCE_LOCAL` | Force local SQLite regardless of credentials | `false` |
-
-With no variables set, Prism runs fully local. Set `PRISM_SYNALUX_API_KEY` (and leave `PRISM_STORAGE=auto`) to use the cloud backend.
+<p align="center">
+  <img src="docs/scm_scan_cli.jpg" alt="prism scan — security scan finding secrets and container issues" width="400" />
+</p>
 
 ---
 
@@ -353,12 +303,20 @@ A browser-based IDE at [synalux.ai/coder](https://synalux.ai/coder). Import any 
 - **Monaco editor** with multi-tab, split view, syntax highlighting, and VS Code keybindings
 - **In-browser Node.js** via WebContainer (your code runs in the browser sandbox, not on a server)
 - **Integrated terminal** — WebContainer shell in-browser; optional server PTY via WebSocket when connected to a dev server
-- **AI chat** powered by prism-coder models (local or cloud depending on plan)
+- **AI Agent Mode** — describe a task and the agent creates files, runs type-checks, and verifies
 - **Source control** — commit, branch, push/pull, stash, blame, tag management
 - **Live Share** — real-time collaborative editing with session links
 - **Node.js debugger** via Chrome DevTools Protocol
 - **Tasks runner** (VS Code `tasks.json` compatible), **Problems panel** (Monaco diagnostics)
 - **12-language i18n** — full UI localization
+
+<p align="center">
+  <img src="docs/screenshots/agent-mode.png" alt="Prism Coder IDE — Agent Mode creating a component with auto-fix and type-checking" width="500" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/collaboration.png" alt="Prism Coder IDE — Live Share with team members and real-time cursor tracking" width="500" />
+</p>
 
 Standard+ plans get cloud AI and higher rate limits. Free tier works with local Ollama. Code execution uses the in-browser WebContainer by default; Live Share and the optional PTY terminal connect to external servers when explicitly enabled.
 
@@ -384,7 +342,35 @@ code --install-extension synalux-ai.synalux
 
 Communication app for non-speaking users, powered by the on-device prism-coder fleet for phrase prediction. macOS / iOS / web.
 
-→ [github.com/dcostenco/prism-aac](https://github.com/dcostenco/prism-aac)
+See [github.com/dcostenco/prism-aac](https://github.com/dcostenco/prism-aac)
+
+---
+
+## Self-hosting (Enterprise)
+
+Run the full model stack on your own hardware — no cloud, full data sovereignty.
+
+**Requirements:** Mac M2 Pro+ (48 GB recommended) or Linux + NVIDIA GPU, plus [Ollama](https://ollama.com).
+
+```bash
+ollama pull dcostenco/prism-coder:14b      # default router
+export LOCAL_LLM_URL=http://localhost:11434
+```
+
+Routing is automatic: `14b -> 32b -> cloud fallback` on desktop/server, `14b -> 8b -> 1.7b` on mobile/offline. For iOS or another machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point `LOCAL_LLM_URL` at the host's IP.
+
+---
+
+## Configuration reference
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `PRISM_STORAGE` | `local` / `synalux` / `supabase` / `auto` | `auto` |
+| `PRISM_SYNALUX_API_KEY` | Paid-tier portal key (`synalux_sk_...`) | -- (local if unset) |
+| `LOCAL_LLM_URL` | Ollama endpoint | `http://localhost:11434` |
+| `PRISM_FORCE_LOCAL` | Force local SQLite regardless of credentials | `false` |
+
+With no variables set, Prism runs fully local. Set `PRISM_SYNALUX_API_KEY` (and leave `PRISM_STORAGE=auto`) to use the cloud backend.
 
 ---
 
@@ -399,7 +385,7 @@ Coverage spans HRR retrieval, knowledge ingestion, the inference cascade and gro
 
 ---
 
-## Migration: local → cloud
+## Migration: local to cloud
 
 To move free-tier history into the paid portal:
 
