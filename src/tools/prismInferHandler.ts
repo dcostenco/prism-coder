@@ -29,7 +29,10 @@ import {
     PRISM_LOCAL_LLM_URL,
 } from "../config.js";
 import { debugLog } from "../utils/logger.js";
-import { verifyGrounding, type EvidenceSnippet, type GroundingOutcome } from "../utils/groundingVerifier.js";
+// Grounding verification is portal-side (chat-verifier.ts in synalux-private).
+// Prism is a thin client — verification removed from public repo.
+type EvidenceSnippet = { source: string; content: string };
+type GroundingOutcome = { action: string; finalText: string; claims: unknown[]; verifierChain: unknown[]; refusalClaim?: string };
 import { getEntitlements, clampCeiling, type PrismEntitlements, FREE_ENTITLEMENTS } from "../utils/entitlements.js";
 import { ddLog } from "../utils/ddLogger.js";
 
@@ -347,9 +350,8 @@ export interface InferDeps {
     callLocal: typeof callOllamaGenerate;
     callCloud: typeof callSynaluxInference;
     ollamaUrl: string;
-    /** Injectable so tests can pass a passthrough verifier without
-     *  needing a live Ollama. Defaults to the real `verifyGrounding`. */
-    callVerifier?: typeof verifyGrounding;
+    /** Injectable verifier for testing. When omitted, verification is skipped (portal-side). */
+    callVerifier?: (opts: { draft: string; evidence: EvidenceSnippet[]; verifierModel?: string; timeoutMs?: number; ollamaUrl?: string }) => Promise<GroundingOutcome>;
     /** Injectable entitlements for testing. When omitted, fetched live. */
     entitlements?: PrismEntitlements;
 }
@@ -512,10 +514,10 @@ async function applyVerification(
     partial: Omit<PrismInferResult, "output" | "verification">,
 ): Promise<PrismInferResult> {
     const shouldVerify = args.verify ?? (args.evidence !== undefined && args.evidence.length > 0);
-    if (!shouldVerify) {
+    if (!shouldVerify || !deps.callVerifier) {
         return { ...partial, output: draft };
     }
-    const verifier = deps.callVerifier ?? verifyGrounding;
+    const verifier = deps.callVerifier;
     const outcome = await verifier({
         draft,
         evidence: args.evidence ?? [],
