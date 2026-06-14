@@ -11,7 +11,7 @@
  *
  * Cascade role: qwen3.5:4b is the default verifier (fast, 2.5GB).
  * 14b drafts; 4b verifies. Different model = Patronus rule satisfied.
- * Falls back to 1b7 on devices with <4GB free RAM.
+ * Falls back to 2b on devices with <4GB free RAM.
  *
  * Failure modes:
  *   - Verifier model unreachable / timeout → fail-closed refusal
@@ -51,7 +51,7 @@ export interface GroundingOutcome {
 export interface VerifyOptions {
     draft: string;
     evidence: EvidenceSnippet[];
-    /** Verifier model. Defaults to qwen3.5:4b (fast, accurate). Falls back to 1b7 on low-RAM. */
+    /** Verifier model. Defaults to qwen3.5:4b (fast, accurate). Falls back to 2b on low-RAM. */
     verifierModel?: string;
     /** Verifier hard timeout in ms. Defaults to 2000. */
     timeoutMs?: number;

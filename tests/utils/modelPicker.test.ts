@@ -18,14 +18,15 @@ describe("pickLocalModel", () => {
         expect(pickLocalModel(20 * GB)?.tag).toBe("prism-coder:14b");
     });
 
-    it("picks 4B when 4–11 GB free", () => {
-        expect(pickLocalModel(4 * GB)?.tag).toBe("qwen3.5:4b");
+    it("picks 4B when 5–11 GB free", () => {
+        expect(pickLocalModel(5 * GB)?.tag).toBe("qwen3.5:4b");
         expect(pickLocalModel(6 * GB)?.tag).toBe("qwen3.5:4b");
         expect(pickLocalModel(11 * GB)?.tag).toBe("qwen3.5:4b");
     });
 
-    it("picks 1.7B when 3–3.9 GB free", () => {
-        expect(pickLocalModel(3 * GB)?.tag).toBe("prism-coder:1b7");
+    it("picks 2B (Qwen3.5-4B Q3_K_M) when 3–4.9 GB free", () => {
+        expect(pickLocalModel(3 * GB)?.tag).toBe("prism-coder:2b");
+        expect(pickLocalModel(4 * GB)?.tag).toBe("prism-coder:2b");
     });
 
     it("returns null below 3 GB free", () => {
@@ -44,8 +45,8 @@ describe("pickLocalModel", () => {
         expect(pickLocalModel(30 * GB, "4b")?.tag).toBe("qwen3.5:4b");
     });
 
-    it("ceiling '1b7' on 64 GB picks 1.7B", () => {
-        expect(pickLocalModel(64 * GB, "1b7")?.tag).toBe("prism-coder:1b7");
+    it("ceiling '2b' on 64 GB picks 2B", () => {
+        expect(pickLocalModel(64 * GB, "2b")?.tag).toBe("prism-coder:2b");
     });
 
     it("respects `available` whitelist — skips tiers not pulled", () => {

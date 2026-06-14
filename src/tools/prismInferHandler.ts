@@ -68,7 +68,7 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             model_ceiling: {
                 type: "string",
-                enum: ["32b", "14b", "4b", "1b7"],
+                enum: ["32b", "14b", "4b", "2b"],
                 description: "Cap the largest tier the picker may select. e.g. '14b' forbids 32B even if RAM allows.",
             },
             cloud_fallback: {
@@ -125,7 +125,7 @@ export interface PrismInferArgs {
     system?: string;
     max_tokens?: number;
     temperature?: number;
-    model_ceiling?: "32b" | "14b" | "4b" | "1b7";
+    model_ceiling?: "32b" | "14b" | "4b" | "2b";
     cloud_fallback?: boolean;
     timeout_ms?: number;
     /** Evidence snippets the model is expected to be grounded in.
@@ -152,7 +152,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (a.cloud_fallback !== undefined && typeof a.cloud_fallback !== "boolean") return false;
     if (a.timeout_ms !== undefined && typeof a.timeout_ms !== "number") return false;
     if (a.model_ceiling !== undefined &&
-        !["32b", "14b", "4b", "1b7"].includes(a.model_ceiling as string)) return false;
+        !["32b", "14b", "4b", "2b"].includes(a.model_ceiling as string)) return false;
     if (a.verify !== undefined && typeof a.verify !== "boolean") return false;
     if (a.verifier_model !== undefined && typeof a.verifier_model !== "string") return false;
     if (a.verifier_timeout_ms !== undefined && typeof a.verifier_timeout_ms !== "number") return false;
@@ -173,7 +173,7 @@ const DEFAULT_TIMEOUTS: Record<string, number> = {
     "prism-coder:32b": 120_000,
     "prism-coder:14b":  60_000,
     "qwen3.5:4b":   20_000,
-    "prism-coder:1b7":  15_000,
+    "prism-coder:2b":  15_000,
 };
 
 /** List Ollama-installed tags. Returns null if Ollama unreachable. */

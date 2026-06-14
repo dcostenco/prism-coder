@@ -32,7 +32,7 @@ const INSTALLED_ALL = new Set([
     "prism-coder:32b",
     "prism-coder:14b",
     "qwen3.5:4b",
-    "prism-coder:1b7",
+    "prism-coder:2b",
 ]);
 
 function makeDeps(overrides: Partial<InferDeps>): InferDeps {
@@ -98,7 +98,7 @@ describe("runInfer — local-first cascade", () => {
 
     it("skips tiers not installed in Ollama", async () => {
         const calls: string[] = [];
-        const partial = new Set(["qwen3.5:4b", "prism-coder:1b7"]);
+        const partial = new Set(["qwen3.5:4b", "prism-coder:2b"]);
         const deps = makeDeps({
             freemem: () => 30 * GB,
             listTags: async () => partial,
@@ -245,7 +245,7 @@ describe("runInfer — L3 grounding verifier integration", () => {
             action: outcome.action,
             finalText: outcome.finalText,
             claims: [],
-            verifierChain: [{ model: "prism-coder:1b7", verdict: "ENTAILED" as const, latencyMs: 50 }],
+            verifierChain: [{ model: "prism-coder:2b", verdict: "ENTAILED" as const, latencyMs: 50 }],
             refusalClaim: outcome.refusalClaim,
         }));
     }

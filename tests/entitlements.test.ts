@@ -70,7 +70,7 @@ describe("clampCeiling", () => {
 
     it("returns requested ceiling when within plan limit", () => {
         expect(clampCeiling("4b", "14b")).toBe("4b");
-        expect(clampCeiling("1b7", "32b")).toBe("1b7");
+        expect(clampCeiling("2b", "32b")).toBe("2b");
         expect(clampCeiling("4b", "14b")).toBe("4b");
     });
 
@@ -102,11 +102,11 @@ describe("clampCeiling", () => {
         expect(clampCeiling("32b", "4b")).toBe("4b");
     });
 
-    it("allows 1b7 on every plan", () => {
-        expect(clampCeiling("1b7", "1b7")).toBe("1b7");
-        expect(clampCeiling("1b7", "4b")).toBe("1b7");
-        expect(clampCeiling("1b7", "14b")).toBe("1b7");
-        expect(clampCeiling("1b7", "32b")).toBe("1b7");
+    it("allows 2b on every plan", () => {
+        expect(clampCeiling("2b", "2b")).toBe("2b");
+        expect(clampCeiling("2b", "4b")).toBe("2b");
+        expect(clampCeiling("2b", "14b")).toBe("2b");
+        expect(clampCeiling("2b", "32b")).toBe("2b");
     });
 });
 
@@ -123,7 +123,7 @@ describe("ceilingExceeded", () => {
     it("returns false when request is at or below ceiling", () => {
         expect(ceilingExceeded("4b", "4b")).toBe(false);
         expect(ceilingExceeded("4b", "14b")).toBe(false);
-        expect(ceilingExceeded("1b7", "4b")).toBe(false);
+        expect(ceilingExceeded("2b", "4b")).toBe(false);
         expect(ceilingExceeded("14b", "32b")).toBe(false);
     });
 

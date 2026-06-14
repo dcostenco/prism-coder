@@ -81,7 +81,7 @@ function mockDeps(overrides: Partial<InferDeps> = {}): InferDeps {
     return {
         freemem: () => 16 * 1024 ** 3, // 16 GB free
         listTags: async () => new Set([
-            "prism-coder:1b7",
+            "prism-coder:2b",
             "qwen3.5:4b",
             "qwen3.5:4b",
             "prism-coder:14b",
@@ -128,7 +128,7 @@ describe("model ceiling enforcement", () => {
         const calls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
         expect(calls.length).toBeGreaterThan(0);
         const modelUsed = calls[0][1];
-        expect(modelUsed).toMatch(/1b7|4b/);
+        expect(modelUsed).toMatch(/2b|4b/);
     });
 
     it("free user requesting 14b gets clamped to 4b", async () => {
@@ -137,7 +137,7 @@ describe("model ceiling enforcement", () => {
 
         const calls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
         const modelUsed = calls[0][1];
-        expect(modelUsed).toMatch(/1b7|4b/);
+        expect(modelUsed).toMatch(/2b|4b/);
     });
 
     it("standard user requesting 32b gets clamped to 14b", async () => {
@@ -146,7 +146,7 @@ describe("model ceiling enforcement", () => {
 
         const calls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
         const modelUsed = calls[0][1];
-        expect(modelUsed).toMatch(/1b7|4b|14b/);
+        expect(modelUsed).toMatch(/2b|4b|14b/);
         expect(modelUsed).not.toMatch(/32b/);
     });
 
@@ -168,7 +168,7 @@ describe("model ceiling enforcement", () => {
 
         const calls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
         const modelUsed = calls[0][1];
-        expect(modelUsed).toMatch(/1b7|4b/);
+        expect(modelUsed).toMatch(/2b|4b/);
     });
 });
 
@@ -375,7 +375,7 @@ describe("combined gate scenarios", () => {
         // Model: only 4b or lower (no 14b, no 32b)
         const localCalls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
         for (const call of localCalls) {
-            expect(call[1]).toMatch(/1b7|4b/);
+            expect(call[1]).toMatch(/2b|4b/);
         }
 
         // Tokens: capped at 512

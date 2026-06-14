@@ -1,11 +1,12 @@
 /**
  * RAM-Gated Local Model Picker
  * ─────────────────────────────────────────────────────────────
- * Cascade: 14b (default) → 4b (verifier) → 32b (complex only).
+ * Cascade: 14b (default) → 4b (verifier) → 2b (mobile) → 32b (complex only).
  *
  * The default ceiling is "14b" — NOT "32b". This means:
  *   - 14b is the primary model for routing + general inference
  *   - 4b is used as the grounding verifier (fast, small)
+ *   - 2b is the mobile/iPhone first gate (Qwen3.5-4B Q3_K_M, 99.1% BFCL)
  *   - 32b is only loaded when caller explicitly passes ceiling="32b"
  *     or when the task requires maximum quality (complex code gen, etc.)
  *
@@ -15,8 +16,8 @@
  *   tag                 weights   need free   ctx     role
  *   prism-coder:32b     ~19 GB    ≥ 24 GB     32K    complex (on-demand)
  *   prism-coder:14b     ~ 9 GB    ≥ 12 GB     32K    default router
- *   qwen3.5:4b      ~ 2.5 GB  ≥  4 GB      8K    verifier + mobile
- *   prism-coder:1b7     ~ 2 GB    ≥  3 GB      8K    watch + ultra-low RAM
+ *   qwen3.5:4b          ~ 3.4 GB  ≥  5 GB     32K    verifier (Q4_K_M, 100%)
+ *   prism-coder:2b      ~ 2.3 GB  ≥  3 GB      8K    mobile / iPhone (Q3_K_M, 99.1%)
  *
  * Below 3 GB free → no local pick (caller must use cloud).
  */
@@ -37,8 +38,8 @@ export interface ModelChoice {
 export const MODEL_TIERS: ReadonlyArray<ModelChoice> = [
     { tag: 'prism-coder:32b',  weightsGb: 19, minFreeGb: 24, ctxTokens: 32_768 },
     { tag: 'prism-coder:14b',  weightsGb:  9, minFreeGb: 12, ctxTokens: 32_768 },
-    { tag: 'qwen3.5:4b',   weightsGb:  2.5, minFreeGb: 4, ctxTokens:  8_192 },
-    { tag: 'prism-coder:1b7',  weightsGb:  2, minFreeGb:  3, ctxTokens:  8_192 },
+    { tag: 'qwen3.5:4b',       weightsGb:  3.4, minFreeGb: 5, ctxTokens: 32_768 },
+    { tag: 'prism-coder:2b',   weightsGb:  2.3, minFreeGb:  3, ctxTokens:  8_192 },
 ];
 
 /**
