@@ -146,7 +146,7 @@ The free tier runs entirely on your machine. Paid tiers add cloud sync through t
 | API keys required | None | Synalux subscription key |
 | Web search / scrape | Not included | Routed through the Synalux portal (provider keys stay server-side). Search tools appear as `brave_web_search` in the MCP surface but are proxied through the portal for auth and billing. |
 | What leaves your machine | Nothing | Memory text + file paths + search queries, sent to the portal over TLS (PHI-redacted before transit) |
-| Works offline | Yes | Local features yes; sync/cloud no |
+| Works offline | ✅ | Local features yes; sync/cloud no |
 
 **Handling sensitive data.** Memory text fields (summaries, decisions, handoff context, file paths) pass through a PHI-redaction step (SSN/DOB/MRN/phone/email and common clinical identifiers) before any cloud write. Knowledge ingestion chunks are also redacted before being sent to the LLM for Q&A synthesis. For regulated workloads, run the **local tier** to keep data on-device, or use an **Enterprise** plan, which is the tier that includes a HIPAA Business Associate Agreement. Prism does not claim blanket HIPAA compliance on the free or individual tiers — the on-device path is the air-gapped option.
 
@@ -207,30 +207,30 @@ These tables are the maintainer's assessment as of June 2026. Verify claims that
 
 | Feature | Prism Coder | GitHub Copilot | Cursor | Windsurf | Amazon Q | Devin |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
-| Local inference (open-weight) | Yes | No | No | No | No | No |
-| Works fully offline | Yes (free tier) | No | No | No | No | No |
-| Persistent cross-session memory | Yes | Yes | No | No | No | No |
-| Session drift detection | Yes | No | No | No | No | No |
-| L3 grounding verifier | Yes | No | No | No | No | No |
-| Behavioral verification (pre-edit) | Yes | No | No | No | No | No |
-| MCP server (tools + memory) | Yes | No | No | No | No | No |
-| Web IDE | Yes | Yes | No | No | Yes | Yes |
-| VS Code extension | Yes | Yes | N/A (is VS Code) | N/A | Yes | No |
-| Flat-rate team pricing | Yes | No (per-seat) | No (per-seat) | No | No | No |
-| HIPAA BAA available | Yes (Enterprise) | No | No | No | No | No |
+| Local inference (open-weight) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Works fully offline | ✅ (free tier) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Persistent cross-session memory | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Session drift detection | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| L3 grounding verifier | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Behavioral verification (pre-edit) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| MCP server (tools + memory) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Web IDE | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| VS Code extension | ✅ | ✅ | — | — | ✅ | ❌ |
+| Flat-rate team pricing | ✅ | ❌ (per-seat) | ❌ (per-seat) | ❌ | ❌ | ❌ |
+| HIPAA BAA available | ✅ (Enterprise) | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ### vs local AI / memory tools
 
 | Feature | Prism Coder | Ollama | LM Studio | Mem0 | Zep |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Local inference cascade | Yes | Yes | Yes | No | No |
-| Cloud fallback | Yes | No | No | No | No |
-| Persistent cross-session memory | Yes | No | No | Yes | Yes |
-| Knowledge ingestion (MCP + webhook) | Yes | No | No | No | No |
-| Cognitive routing (3-store) | Yes | No | No | No | No |
-| Session drift detection | Yes | No | No | No | No |
-| Native MCP server | Yes | No | No | No | No |
-| Web IDE + VS Code extension | Yes | No | No | No | No |
+| Local inference cascade | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Cloud fallback | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Persistent cross-session memory | ✅ | ❌ | ❌ | ✅ | ✅ |
+| Knowledge ingestion (MCP + webhook) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Cognitive routing (3-store) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Session drift detection | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Native MCP server | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Web IDE + VS Code extension | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 ### Pricing — flat-rate, not per-seat
 
@@ -255,11 +255,11 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 | Cloud search | -- | 50/day | 500/day | 100,000/day |
 | Max output tokens | 512 | 1,024 | 2,048 | 4,096 |
 | Cloud fallback | -- | Claude Sonnet 4 | Claude Sonnet 4 | Priority + Sonnet 4 |
-| Grounding verifier | -- | Yes | Yes | Yes |
-| Memory sync (cloud) | -- | Yes | Yes | Yes |
+| Grounding verifier | -- | ✅ | ✅ | ✅ |
+| Memory sync (cloud) | -- | ✅ | ✅ | ✅ |
 | Knowledge / session memory | limited | unlimited | unlimited | unlimited |
-| Analytics dashboard | -- | Yes | Yes | Yes |
-| HIPAA BAA | -- | -- | -- | Yes |
+| Analytics dashboard | -- | ✅ | ✅ | ✅ |
+| HIPAA BAA | -- | -- | -- | ✅ |
 
 14-day free trial on paid plans. [Pricing](https://synalux.ai/pricing) | 25+ seats: [contact sales](https://synalux.ai/support)
 
