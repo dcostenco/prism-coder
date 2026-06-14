@@ -5,8 +5,8 @@
  * and returns a domain-specific scenario the agent must answer
  * before editing the file.
  *
- * Works without hooks — the skill injection tells the agent to
- * call this tool before behavioral edits.
+ * FAIL-CLOSED: if the portal is unreachable, returns a generic
+ * verification challenge rather than skipping verification.
  */
 
 import { PRISM_SYNALUX_BASE_URL, SYNALUX_CONFIGURED } from "../config.js";
@@ -28,22 +28,31 @@ interface VerifyBehaviorResult {
     reason?: string;
 }
 
+const FALLBACK_SCENARIO = [
+    "⚠️ BEHAVIORAL VERIFICATION (OFFLINE MODE)",
+    "",
+    "Portal unreachable — using generic verification.",
+    "Before editing this file, answer ALL of these:",
+    "",
+    "1. What does the end user experience BEFORE vs AFTER this change?",
+    "2. Does this endpoint verify the caller owns/belongs-to the resource?",
+    "3. Can a user from workspace A access workspace B's data by guessing an ID?",
+    "4. If this is a revert, was the original change actually correct?",
+    "",
+    "Answer concretely. If you cannot, READ THE FILE FIRST.",
+].join("\n");
+
 export async function verifyBehaviorHandler(
     args: VerifyBehaviorArgs,
 ): Promise<string> {
     if (!SYNALUX_CONFIGURED || !PRISM_SYNALUX_BASE_URL) {
-        return formatResult({
-            requires_verification: false,
-            reason: "Synalux portal not configured — behavioral verification unavailable. Proceed with caution.",
-        });
+        return FALLBACK_SCENARIO;
     }
 
     const jwt = await getSynaluxJwt();
     if (!jwt) {
-        return formatResult({
-            requires_verification: false,
-            reason: "Could not authenticate with Synalux portal — behavioral verification unavailable.",
-        });
+        debugLog("[verify-behavior] JWT unavailable — fail-closed with generic scenario");
+        return FALLBACK_SCENARIO;
     }
 
     try {
@@ -63,21 +72,15 @@ export async function verifyBehaviorHandler(
         });
 
         if (!res.ok) {
-            debugLog(`[verify-behavior] portal returned ${res.status}`);
-            return formatResult({
-                requires_verification: false,
-                reason: `Portal returned ${res.status} — verification unavailable.`,
-            });
+            debugLog(`[verify-behavior] portal returned ${res.status} — fail-closed`);
+            return FALLBACK_SCENARIO;
         }
 
         const data = (await res.json()) as VerifyBehaviorResult;
         return formatResult(data);
     } catch (err) {
-        debugLog(`[verify-behavior] error: ${(err as Error).message}`);
-        return formatResult({
-            requires_verification: false,
-            reason: "Portal unreachable — verification unavailable.",
-        });
+        debugLog(`[verify-behavior] error: ${(err as Error).message} — fail-closed`);
+        return FALLBACK_SCENARIO;
     }
 }
 
@@ -89,7 +92,6 @@ function formatResult(data: VerifyBehaviorResult): string {
     return [
         `⚠️ BEHAVIORAL VERIFICATION REQUIRED`,
         `Domain: ${data.domain}`,
-        `File: ${data.scenario ? "" : "(no scenario matched)"}`,
         ``,
         `Before making this edit, answer this scenario:`,
         ``,
