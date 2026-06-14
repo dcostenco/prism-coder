@@ -2669,9 +2669,9 @@ export class SqliteStorage implements StorageBackend {
               AND importance < 10
               AND event_type != 'session'
               AND created_at < datetime('now', '-' || ? || ' days')
-              AND (last_accessed_at IS NOT NULL OR created_at < datetime('now', '-90 days'))
+              AND (last_accessed_at IS NULL OR last_accessed_at < datetime('now', '-' || ? || ' days'))
               AND deleted_at IS NULL`,
-      args: [project, userId, decayDays],
+      args: [project, userId, decayDays, decayDays],
     });
     const decayed = result.rowsAffected || 0;
     if (decayed > 0) {

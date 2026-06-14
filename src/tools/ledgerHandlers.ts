@@ -1139,7 +1139,7 @@ export async function sessionLoadContextHandler(args: unknown) {
   if (behavWarnings && behavWarnings.length > 0) {
     const rawBlock = `\n\n[⚠️ BEHAVIORAL WARNINGS — DO NOT IGNORE]\n` +
       behavWarnings.map(w => `- ${w.summary} (importance: ${w.importance})`).join("\n");
-    behavBlock = rawBlock.slice(0, 2000);
+    behavBlock = [...rawBlock].slice(0, 2000).join('');
   }
 
   let responseText = `${MEMORY_BOUNDARY_PREFIX}📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${splitBrainWarning}${driftReport}${briefingBlock}${sdmRecallBlock}${greetingBlock}${visualMemoryBlock}${behavBlock}${skillBlock}${versionNote}`;
