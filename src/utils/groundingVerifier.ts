@@ -64,7 +64,7 @@ export interface VerifyOptions {
 // ─── Pre-checks ─────────────────────────────────────────────────────────
 
 const ASSERTIVE_RX =
-    /\b(?:\d{1,5}|[A-Z]\d{2}\.\d|ICD-?10|CPT|\$\d|\d{4}-\d{2}-\d{2}|[A-Z][a-z]{2,}\s+[A-Z][a-z]{2,})\b/;
+    /(?:\b(?:\d{1,8}|[A-Z]\d{2}(?:\.\d{1,4})?|ICD-?10|CPT|\d{4}-\d{2}-\d{2}|[A-Z][a-z]{2,}\s+[A-Z][a-z]{2,})\b|\$\d)/;
 
 /**
  * Returns true when the draft makes at least one assertion that could be
@@ -121,19 +121,19 @@ const VERIFIER_JSON_SCHEMA = {
 
 // ─── Refusal text ───────────────────────────────────────────────────────
 
-function refusalText(action: GroundingAction, failedClaim: string): string {
+function refusalText(action: GroundingAction): string {
     switch (action) {
         case "refused_fabricated":
-            return `I can't ground "${failedClaim}" in the evidence provided. ` +
-                "If this claim is correct, supply the supporting source as evidence and retry.";
+            return "I couldn't verify one of the claims in my response against the provided evidence. " +
+                "If this response is correct, supply the supporting source as evidence and retry.";
         case "refused_no_evidence":
-            return `I can't ground "${failedClaim}" — no evidence was provided this turn. ` +
+            return "I couldn't verify one of the claims in my response — no evidence was provided this turn. " +
                 "Provide evidence snippets via the `evidence` argument and retry.";
         case "refused_timeout":
-            return `I couldn't verify "${failedClaim}" within the allowed time. ` +
+            return "I couldn't verify my response within the allowed time. " +
                 "The verifier model may be cold-loading; try again in a moment.";
         case "served":
-            return ""; // unreachable
+            return "";
     }
 }
 
@@ -166,7 +166,7 @@ export async function verifyGrounding(opts: VerifyOptions): Promise<GroundingOut
         const claim = firstAssertiveSpan(opts.draft);
         return {
             action: "refused_no_evidence",
-            finalText: refusalText("refused_no_evidence", claim),
+            finalText: refusalText("refused_no_evidence"),
             claims: [{ claim, verdict: "NEUTRAL", evidence_span: null }],
             verifierChain,
             refusalClaim: claim,
@@ -221,13 +221,26 @@ export async function verifyGrounding(opts: VerifyOptions): Promise<GroundingOut
         const claim = firstAssertiveSpan(opts.draft);
         return {
             action: "refused_timeout",
-            finalText: refusalText("refused_timeout", claim),
+            finalText: refusalText("refused_timeout"),
             claims: [{ claim, verdict: "NEUTRAL", evidence_span: null }],
             verifierChain,
             refusalClaim: claim,
         };
     }
     const latencyMs = Date.now() - t0;
+
+    // C3: empty claims on an assertive draft = verifier failed to decompose
+    if (parsedClaims!.length === 0) {
+        verifierChain.push({ model: verifierModel, verdict: "NEUTRAL", latencyMs });
+        const claim = firstAssertiveSpan(opts.draft);
+        return {
+            action: "refused_timeout",
+            finalText: refusalText("refused_timeout"),
+            claims: [{ claim, verdict: "NEUTRAL", evidence_span: null }],
+            verifierChain,
+            refusalClaim: claim,
+        };
+    }
 
     const failing = parsedClaims!.find(c => c.verdict !== "ENTAILED");
     const rollup: VerifierVerdict = failing ? failing.verdict : "ENTAILED";
@@ -236,7 +249,7 @@ export async function verifyGrounding(opts: VerifyOptions): Promise<GroundingOut
     if (failing) {
         return {
             action: "refused_fabricated",
-            finalText: refusalText("refused_fabricated", failing.claim),
+            finalText: refusalText("refused_fabricated"),
             claims: parsedClaims!,
             verifierChain,
             refusalClaim: failing.claim,
@@ -253,8 +266,6 @@ export async function verifyGrounding(opts: VerifyOptions): Promise<GroundingOut
 
 // ─── helpers ────────────────────────────────────────────────────────────
 
-function firstAssertiveSpan(draft: string): string {
-    const m = draft.match(ASSERTIVE_RX);
-    if (m) return m[0];
-    return draft.slice(0, 80);
+function firstAssertiveSpan(_draft: string): string {
+    return "[unverifiable claim]";
 }
