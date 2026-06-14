@@ -991,51 +991,49 @@ export async function sessionLoadContextHandler(args: unknown) {
   }
 
   // ─── Project-Aware Skill Injection ──────────────────────────
-  // Routing (WHICH skills + user_local policy): Synalux /api/v1/skills/routing.
-  // Content (WHAT):
-  //   Platform skills  → Synalux /api/v1/skills/content (DB first, filesystem fallback)
-  //                      → local SQLite skill:<name> (free tier / offline fallback)
-  //   User-local skills → local SQLite user_skill:<name>
-  //                       ONLY when user_local.enabled=true in routing table
-  //                       OR session_load_context called with user_local=true.
-  //                       Users CANNOT write to the platform skill: namespace.
+  // Skills are priority-sorted and cap-aware. Protected skills always load
+  // (they bypass the cap check). This prevents the silent-truncation bug
+  // where important behavioral skills were dropped because large low-priority
+  // skills consumed the budget first.
   const { resolveSkillsForProject } = await import("./skillRouting.js");
   const resolved = await resolveSkillsForProject(project);
-  const skillsToLoad = resolved.names;
+  const sortedSkills = resolved.skills;
   const userLocalPolicy = resolved.user_local;
 
-  // Paid tier: batch-fetch platform skill content from Synalux in one request.
   let synaluxContent: Record<string, string> = {};
   if (SYNALUX_CONFIGURED && storage && typeof (storage as unknown as { fetchSkillContent?: unknown }).fetchSkillContent === "function") {
-    const missing = skillsToLoad.filter(n => !loadedSkills.includes(n));
+    const missing = sortedSkills.map(s => s.name).filter(n => !loadedSkills.includes(n));
     synaluxContent = await (storage as unknown as { fetchSkillContent: (n: string[]) => Promise<Record<string,string>> })
       .fetchSkillContent(missing).catch(() => ({}));
     debugLog(`[session_load_context] Synalux skill content fetched: ${Object.keys(synaluxContent).join(", ") || "none"}`);
   }
 
-  const SKILL_BLOCK_CAP = 30_000;
+  const SKILL_BLOCK_CAP = 40_000;
   const skippedSkills: string[] = [];
-  for (const skillName of skillsToLoad) {
-    if (loadedSkills.includes(skillName)) continue;
-    if (skillBlock.length >= SKILL_BLOCK_CAP) {
-      skippedSkills.push(skillName);
-      debugLog(`[session_load_context] Skill "${skillName}" skipped — block cap ${SKILL_BLOCK_CAP} reached`);
+  for (const entry of sortedSkills) {
+    if (loadedSkills.includes(entry.name)) continue;
+    const content = synaluxContent[entry.name] || await getSetting(`skill:${entry.name}`, "");
+    if (!content || !content.trim()) continue;
+    const trimmed = content.trim();
+
+    if (entry.protected) {
+      skillBlock += `\n\n[📜 SKILL: ${entry.name}]\n${trimmed}`;
+      loadedSkills.push(entry.name);
+      skillLoaded = true;
+      debugLog(`[session_load_context] Skill "${entry.name}" loaded (protected, p${entry.priority}) [${skillBlock.length} chars]`);
       continue;
     }
-    const content = synaluxContent[skillName] || await getSetting(`skill:${skillName}`, "");
-    if (content && content.trim()) {
-      const trimmed = content.trim();
-      if (skillBlock.length + trimmed.length > SKILL_BLOCK_CAP && loadedSkills.length > 0) {
-        skippedSkills.push(skillName);
-        debugLog(`[session_load_context] Skill "${skillName}" skipped — would exceed cap (${skillBlock.length}+${trimmed.length} > ${SKILL_BLOCK_CAP})`);
-        continue;
-      }
-      const source = synaluxContent[skillName] ? "synalux" : "local-platform";
-      skillBlock += `\n\n[📜 SKILL: ${skillName}]\n${trimmed}`;
-      loadedSkills.push(skillName);
-      skillLoaded = true;
-      debugLog(`[session_load_context] Skill "${skillName}" loaded (${source}) for project="${project}" [${skillBlock.length}/${SKILL_BLOCK_CAP} chars]`);
+
+    if (skillBlock.length + trimmed.length > SKILL_BLOCK_CAP) {
+      skippedSkills.push(entry.name);
+      debugLog(`[session_load_context] Skill "${entry.name}" skipped — would exceed cap (${skillBlock.length}+${trimmed.length} > ${SKILL_BLOCK_CAP})`);
+      continue;
     }
+    const source = synaluxContent[entry.name] ? "synalux" : "local-platform";
+    skillBlock += `\n\n[📜 SKILL: ${entry.name}]\n${trimmed}`;
+    loadedSkills.push(entry.name);
+    skillLoaded = true;
+    debugLog(`[session_load_context] Skill "${entry.name}" loaded (${source}, p${entry.priority}) [${skillBlock.length}/${SKILL_BLOCK_CAP} chars]`);
   }
 
   // ─── User-Local Skills ──────────────────────────────────────
@@ -1084,7 +1082,7 @@ export async function sessionLoadContextHandler(args: unknown) {
   }
 
   if (skippedSkills.length > 0) {
-    skillBlock += `\n\n[⏭️ ${skippedSkills.length} skills skipped (cap ${SKILL_BLOCK_CAP} chars): ${skippedSkills.join(", ")}]`;
+    skillBlock += `\n\n[⚠️ ${skippedSkills.length} skills TRUNCATED by ${SKILL_BLOCK_CAP}-char cap — NOT loaded: ${skippedSkills.join(", ")}. These rules are NOT in your context. Do not claim to follow them.]`;
   }
 
   // ─── Agent Greeting Block ────────────────────────────────────
@@ -1133,16 +1131,18 @@ export async function sessionLoadContextHandler(args: unknown) {
   // Build the response object before v4.0 augmentations
   // SECURITY: Wrap output in boundary tags to prevent context confusion.
   // The LLM sees <prism_memory context="historical"> and knows this is data, not instructions.
-  let responseText = `${MEMORY_BOUNDARY_PREFIX}📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${splitBrainWarning}${driftReport}${briefingBlock}${sdmRecallBlock}${greetingBlock}${visualMemoryBlock}${skillBlock}${versionNote}`;
-
-  // ─── v4.0: Behavioral Warnings Injection ───────────────────
-  // If loadContext returned behavioral_warnings, add them to the
-  // formatted output so the agent sees them prominently.
+  // ─── v19.1: Behavioral Warnings — BEFORE skills (protected from truncation) ───
+  // Corrections must surface prominently. Placed before skillBlock so the
+  // skill budget cannot push them out. Capped at 2,000 chars.
   const behavWarnings = (data as any)?.behavioral_warnings as Array<{summary: string; importance: number}> | undefined;
+  let behavBlock = '';
   if (behavWarnings && behavWarnings.length > 0) {
-    responseText += `\n\n[⚠️ BEHAVIORAL WARNINGS]\n` +
+    const rawBlock = `\n\n[⚠️ BEHAVIORAL WARNINGS — DO NOT IGNORE]\n` +
       behavWarnings.map(w => `- ${w.summary} (importance: ${w.importance})`).join("\n");
+    behavBlock = rawBlock.slice(0, 2000);
   }
+
+  let responseText = `${MEMORY_BOUNDARY_PREFIX}📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${splitBrainWarning}${driftReport}${briefingBlock}${sdmRecallBlock}${greetingBlock}${visualMemoryBlock}${behavBlock}${skillBlock}${versionNote}`;
 
   // ─── v9.4.7: ABA Precision Protocol (foundational) ────────
   // Injected into EVERY session load so the agent always operates

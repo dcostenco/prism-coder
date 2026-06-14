@@ -1411,7 +1411,7 @@ export class SqliteStorage implements StorageBackend {
             FROM session_ledger
             WHERE project = ? AND user_id = ? AND role = ?
               AND event_type = 'correction'
-              AND importance >= 3
+              AND importance >= 0
               AND deleted_at IS NULL
               AND archived_at IS NULL
             ORDER BY importance DESC
@@ -2666,8 +2666,10 @@ export class SqliteStorage implements StorageBackend {
             SET importance = MAX(0, importance - 1)
             WHERE project = ? AND user_id = ?
               AND importance > 0
+              AND importance < 10
               AND event_type != 'session'
               AND created_at < datetime('now', '-' || ? || ' days')
+              AND (last_accessed_at IS NOT NULL OR created_at < datetime('now', '-90 days'))
               AND deleted_at IS NULL`,
       args: [project, userId, decayDays],
     });
