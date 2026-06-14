@@ -51,7 +51,7 @@ export async function verifyBehaviorHandler(
 
     const jwt = await getSynaluxJwt();
     if (!jwt) {
-        debugLog("[verify-behavior] JWT unavailable — fail-closed with generic scenario");
+        console.error("[verify-behavior] ⚠️ JWT unavailable — fail-closed with generic scenario");
         return FALLBACK_SCENARIO;
     }
 
@@ -72,14 +72,14 @@ export async function verifyBehaviorHandler(
         });
 
         if (!res.ok) {
-            debugLog(`[verify-behavior] portal returned ${res.status} — fail-closed`);
+            console.error(`[verify-behavior] ⚠️ portal returned ${res.status} — fail-closed. URL: ${url}`);
             return FALLBACK_SCENARIO;
         }
 
         const data = (await res.json()) as VerifyBehaviorResult;
         return formatResult(data);
     } catch (err) {
-        debugLog(`[verify-behavior] error: ${(err as Error).message} — fail-closed`);
+        console.error(`[verify-behavior] ⚠️ VERIFICATION FAILED: ${(err as Error).message} — using generic fallback`);
         return FALLBACK_SCENARIO;
     }
 }

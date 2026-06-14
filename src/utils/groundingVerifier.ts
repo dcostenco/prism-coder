@@ -214,7 +214,8 @@ export async function verifyGrounding(opts: VerifyOptions): Promise<GroundingOut
                 : "NEUTRAL",
             evidence_span: typeof c.evidence_span === "string" ? c.evidence_span : null,
         }));
-    } catch {
+    } catch (verifyErr) {
+        console.error(`[groundingVerifier] ⚠️ Verifier model "${verifierModel}" failed: ${(verifyErr as Error).message}`);
         const latencyMs = Date.now() - t0;
         verifierChain.push({ model: verifierModel, verdict: "NEUTRAL", latencyMs });
         const claim = firstAssertiveSpan(opts.draft);
