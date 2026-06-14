@@ -38,10 +38,10 @@ Open Claude Desktop or Cursor and your agent now has memory backed by a local SQ
 **Optional — local model fleet** for offline tool-routing. Pull whichever fits your hardware:
 
 ```bash
-ollama pull dcostenco/prism-coder:2b    # 2.3 GB · iPhone / mobile first gate (Qwen3.5-4B Q3_K_M, 99.1%)
-ollama pull dcostenco/prism-coder:4b    # 3.4 GB · verifier + 8 GB+ devices (Qwen3.5-4B Q4_K_M, 100%)
-ollama pull dcostenco/prism-coder:14b   # 8.4 GB · Mac default router (100%)
-ollama pull dcostenco/prism-coder:32b   # 16 GB  · Mac complex tasks (100%)
+ollama pull dcostenco/prism-coder:2b    # 2.3 GB · mobile / lightweight (99.1% routing accuracy)
+ollama pull dcostenco/prism-coder:4b    # 3.4 GB · balanced (100% accuracy)
+ollama pull dcostenco/prism-coder:14b   # 8.4 GB · Mac default (100% accuracy)
+ollama pull dcostenco/prism-coder:32b   # 16 GB  · complex tasks (100% accuracy)
 ```
 
 Prism detects both the namespaced (`dcostenco/prism-coder:14b`) and bare (`prism-coder:14b`) Ollama tags automatically.
@@ -106,7 +106,7 @@ Roll back to any previous session state. Compare diffs between versions. Restore
 
 ### Cognitive Routing
 
-Episodic (what happened), semantic (what's true), and procedural (how to do X) memories live in separate stores; a router decides where to write and where to read.
+Three memory types, automatically sorted: **episodic** (what happened — session logs, decisions), **semantic** (what's true — facts, architecture), and **procedural** (how to do X — workflows, patterns). When you search, the router picks the right store instead of dumping everything.
 
 ### Multi-Agent Hivemind
 
@@ -135,11 +135,11 @@ The free tier runs entirely on your machine. Paid tiers add cloud sync through t
 | Memory storage | Local SQLite | Synalux portal (Supabase-backed) |
 | Inference | Local Ollama models | Local models + cloud fallback |
 | API keys required | None | Synalux subscription key |
-| Web search / scrape | Not included | Routed through the Synalux portal (provider keys stay server-side). Search tools appear as `brave_web_search` in the MCP surface but are proxied through the portal for auth and billing. |
+| Web search / scrape | Not included | Via Synalux portal (provider keys server-side) |
 | What leaves your machine | Nothing | Memory text + file paths + search queries, sent to the portal over TLS (PHI-redacted before transit) |
 | Works offline | ✅ | Local features yes; sync/cloud no |
 
-**Handling sensitive data.** Memory text fields (summaries, decisions, handoff context, file paths) pass through a PHI-redaction step (SSN/DOB/MRN/phone/email and common clinical identifiers) before any cloud write. Knowledge ingestion chunks are also redacted before being sent to the LLM for Q&A synthesis. For regulated workloads, run the **local tier** to keep data on-device, or use an **Enterprise** plan, which is the tier that includes a HIPAA Business Associate Agreement. Prism does not claim blanket HIPAA compliance on the free or individual tiers — the on-device path is the air-gapped option.
+**Handling sensitive data.** All cloud writes pass through automatic redaction (SSNs, dates of birth, medical record numbers, phone numbers, emails, and clinical identifiers are stripped before transit). For regulated workloads, run the **local tier** for full air-gap, or use **Enterprise** which includes a HIPAA Business Associate Agreement.
 
 ---
 
@@ -246,7 +246,7 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 | Cloud search | -- | 50/day | 500/day | 100,000/day |
 | Max output tokens | 512 | 1,024 | 2,048 | 4,096 |
 | Cloud fallback | -- | Claude Sonnet 4 | Claude Sonnet 4 | Priority + Sonnet 4 |
-| Grounding verifier | -- | ✅ | ✅ | ✅ |
+| Grounding verifier (fact-check AI output) | -- | ✅ | ✅ | ✅ |
 | Memory sync (cloud) | -- | ✅ | ✅ | ✅ |
 | Knowledge / session memory | limited | unlimited | unlimited | unlimited |
 | Analytics dashboard | -- | ✅ | ✅ | ✅ |
@@ -351,13 +351,16 @@ code --install-extension synalux-ai.synalux
 
 [![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/synalux-ai.synalux?label=VS%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=synalux-ai.synalux)
 
-**AI features:** Chat participant (`@synalux`), multi-agent pipeline, voice input with conversation mode, model switching (local Ollama / cloud / Gemini), 10 AI personality tones.
+AI chat, voice input, SOAP note generator, team collaboration, and video calls — all inside VS Code. Routes through local Ollama by default; cloud on paid tiers.
 
-**Clinical features (BCBA / healthcare):** SOAP note generator, role-based access, document signing, patient board. Voice recording with AES-256-GCM encryption (consent-gated, off by default, plaintext deleted after encryption).
+<details>
+<summary>Feature details</summary>
 
-**Collaboration:** Team chat, direct messages, enterprise video calls (LiveKit), customer board, visual builder, DevContainers, Auth & Database panel.
-
-**Privacy note:** The extension routes AI requests through the `BackendRouter` — local Ollama by default for free tier, cloud for paid (user-configurable via `preferLocal`). Clinical features (SOAP notes, voice) route through the same backend. `preferLocal=true` tries local first but can still fall back to cloud if the local model is unavailable. For regulated workloads where PHI must never leave the machine, use the free tier (no cloud key) or an Enterprise plan with BAA that covers cloud-bound data. Licensed under [BSL-1.1](https://marketplace.visualstudio.com/items?itemName=synalux-ai.synalux).
+- **AI**: Chat participant (`@synalux`), multi-agent pipeline, voice input, model switching, 10 tones
+- **Clinical**: SOAP note generator, role-based access, document signing, patient board
+- **Collaboration**: Team chat, DMs, video calls, customer board, visual builder, DevContainers
+- **Privacy**: Local Ollama by default. `preferLocal=true` tries local first. Enterprise BAA available.
+</details>
 
 ### Prism AAC
 
