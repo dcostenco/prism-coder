@@ -72,6 +72,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Revoke public/anon access — only service_role can call this RPC.
+-- Prevents cross-user data read via p_user_id parameter.
+REVOKE EXECUTE ON FUNCTION get_session_context FROM public, anon;
+GRANT EXECUTE ON FUNCTION get_session_context TO service_role;
+
 -- 2. Add visible_to column for role-based correction scoping
 ALTER TABLE session_ledger
   ADD COLUMN IF NOT EXISTS visible_to TEXT NOT NULL DEFAULT 'user';
