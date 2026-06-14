@@ -65,13 +65,13 @@ TOOL ROUTING — apply TOP TO BOTTOM, first match wins:
 4. AAC phrases / suggest phrases / phrases for expressing / communication phrases / "give me phrases" / create AAC phrases / list AAC phrases -> respond directly (no tool)
 5. simple personal needs/feelings (I want X, I feel X, I need X) -> respond directly (no tool)
 6. static facts the model knows (capitals, history, math, ML terms like SFT/GRPO/GGUF/LoRA) -> respond directly (no tool)
-7. write code / write regex / explain code / math -> respond directly (no tool)
+7. write code / write regex / write a regex / explain code / math / "match email" / "validate phone" / "parse dates" / "Write a regex to match" -> respond directly (no tool)
 8. handoff / pass to next agent / relay / transition notes / archive and pass on / next session prep / "Next session prep:" / save [context/state/progress] for next agent -> session_save_handoff
 9. load/fetch/get/pull/retrieve/open/resume context for project X -> session_load_context(project=X); compound "load context for X + [any secondary ask]" -> session_load_context (rule 9 wins, first action takes priority)
 10. compact/archive/shrink/prune/trim the ledger (WITHOUT passing to another agent) -> session_compact_ledger
-11. CONVERSATION RECALL: what did we discuss / previously talked about / recall our conversation / session history / my past session notes / "find my past notes about X" / "what have I previously recorded about X" / past sessions about -> session_search_memory; NOTE: "look up my notes on X then Y" (compound with action) → use rule 12 for that
-12. SAVED KNOWLEDGE: what do I know / stored notes / notes on X / on file about / knowledge base / have documented / "look up my notes on X then [action]" (compound stored-knowledge query) — NOTE: "what do I know" is ALWAYS rule 12 even in compound requests; "what do I know about X? Search memory too" / "what do I know about X + [any smem phrase]" → rule 12 wins; BUT "find my PAST notes" / "previously recorded about" → rule 11 not rule 12 -> knowledge_search
-13. note: X / jot down / log / save / record / remember / keep this / "capture this" -> session_save_ledger
+11. CONVERSATION RECALL: what did we discuss / previously talked about / recall our conversation / session history / my past session notes / "find my past notes about X" / "find my past notes on X" / "find previous sessions about X" / "what have I previously recorded about X" / past sessions about -> session_search_memory; KEY SIGNAL: "past notes" / "past session" / "previous sessions" / "previously" = ALWAYS rule 11 (session_search_memory), never rule 12
+12. SAVED KNOWLEDGE: what do I know / stored notes / notes on X / on file about / knowledge base / have documented / "look up my notes on X" / "look up my notes on X then [action]" (compound stored-knowledge query) → knowledge_search; NOTE: "what do I know" is ALWAYS rule 12 even in compound requests; "look up my notes on X then Y" → rule 12 (knowledge_search), NOT rule 11; BUT "find my PAST notes" / "past session notes" / "previously recorded" → rule 11 not rule 12 -> knowledge_search
+13. note: X / jot down / log / save / record / remember / "remember:" / "remember that" / keep this / "capture this" / "don't forget" / "don't lose this" -> session_save_ledger
 
 ONLY use tools listed above. NEVER invent tool names.
 
@@ -80,7 +80,9 @@ translate / say X in Y / convert X to language / how do you say / Translation re
 search online / Google / look up online / web search / latest X online → respond directly (no internet), NO tool call
 weather / temperature / current time / clock → respond directly (no live data), NO tool call
 AAC phrases / communication phrases / suggest phrases / give me phrases / list phrases / create phrases → respond directly, NO tool call
-static facts / ML terms (SFT/GRPO/LoRA/GGUF/quantization/parameters/Transformer) / capitals / history → respond directly, NO tool call"""
+static facts / ML terms (SFT/GRPO/LoRA/GGUF/quantization/parameters/Transformer) / capitals / history → respond directly, NO tool call
+write / regex / code / function / script / explain code / "match X" pattern / programming task → respond directly, NO tool call
+CRITICAL: "Write a regex to match X" is a CODE request (rule 7) → respond with the regex in plain text. Do NOT call any tool."""
 
 TOOLS_SCHEMA = [
     {"name": "session_load_context",   "description": "Load session context for a project",   "input_schema": {"type": "object", "properties": {"project": {"type": "string"}}, "required": ["project"]}},

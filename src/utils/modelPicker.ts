@@ -15,8 +15,7 @@
  *   tag                 weights   need free   ctx     role
  *   prism-coder:32b     ~19 GB    ≥ 24 GB     32K    complex (on-demand)
  *   prism-coder:14b     ~ 9 GB    ≥ 12 GB     32K    default router
- *   prism-coder:8b      ~ 5 GB    ≥  7 GB     32K    fallback
- *   prism-coder:4b      ~ 2.5 GB  ≥  4 GB      8K    verifier + mobile
+ *   qwen3.5:4b      ~ 2.5 GB  ≥  4 GB      8K    verifier + mobile
  *   prism-coder:1b7     ~ 2 GB    ≥  3 GB      8K    watch + ultra-low RAM
  *
  * Below 3 GB free → no local pick (caller must use cloud).
@@ -38,8 +37,7 @@ export interface ModelChoice {
 export const MODEL_TIERS: ReadonlyArray<ModelChoice> = [
     { tag: 'prism-coder:32b',  weightsGb: 19, minFreeGb: 24, ctxTokens: 32_768 },
     { tag: 'prism-coder:14b',  weightsGb:  9, minFreeGb: 12, ctxTokens: 32_768 },
-    { tag: 'prism-coder:8b',   weightsGb:  5, minFreeGb:  7, ctxTokens: 32_768 },
-    { tag: 'prism-coder:4b',   weightsGb:  2.5, minFreeGb: 4, ctxTokens:  8_192 },
+    { tag: 'qwen3.5:4b',   weightsGb:  2.5, minFreeGb: 4, ctxTokens:  8_192 },
     { tag: 'prism-coder:1b7',  weightsGb:  2, minFreeGb:  3, ctxTokens:  8_192 },
 ];
 
@@ -74,9 +72,7 @@ export function pickLocalModel(
     if (!Number.isFinite(freeBytes) || freeBytes <= 0) return null;
 
     const effectiveCeiling = ceiling || DEFAULT_CEILING;
-    const ceilingIdx = MODEL_TIERS.findIndex(
-        t => t.tag.endsWith(effectiveCeiling) || t.tag === effectiveCeiling
-    );
+    const ceilingIdx = MODEL_TIERS.findIndex(t => t.tag.endsWith(`:${effectiveCeiling}`));
     const startIdx = ceilingIdx >= 0 ? ceilingIdx : 0;
 
     for (let i = startIdx; i < MODEL_TIERS.length; i++) {

@@ -31,7 +31,7 @@ afterAll(() => {
 const INSTALLED_ALL = new Set([
     "prism-coder:32b",
     "prism-coder:14b",
-    "prism-coder:8b",
+    "qwen3.5:4b",
     "prism-coder:1b7",
 ]);
 
@@ -98,7 +98,7 @@ describe("runInfer — local-first cascade", () => {
 
     it("skips tiers not installed in Ollama", async () => {
         const calls: string[] = [];
-        const partial = new Set(["prism-coder:8b", "prism-coder:1b7"]);
+        const partial = new Set(["qwen3.5:4b", "prism-coder:1b7"]);
         const deps = makeDeps({
             freemem: () => 30 * GB,
             listTags: async () => partial,
@@ -108,23 +108,23 @@ describe("runInfer — local-first cascade", () => {
             },
         });
         const r = await runInfer(args(), deps);
-        expect(calls).toEqual(["prism-coder:8b"]);
+        expect(calls).toEqual(["qwen3.5:4b"]);
         expect(r.attempts).toContainEqual({ tier: "prism-coder:32b", reason: "not_pulled" });
         expect(r.attempts).toContainEqual({ tier: "prism-coder:14b", reason: "not_pulled" });
     });
 
-    it("RAM gate: 8 GB free skips 32B and 14B", async () => {
+    it("RAM gate: 5 GB free skips 32B and 14B, picks 4b", async () => {
         const calls: string[] = [];
         const deps = makeDeps({
-            freemem: () => 8 * GB,
+            freemem: () => 5 * GB,
             callLocal: async (_url, model) => {
                 calls.push(model);
                 return { ok: true as const, text: "pong" };
             },
         });
         const r = await runInfer(args(), deps);
-        expect(calls).toEqual(["prism-coder:8b"]);
-        expect(r.model_picked).toBe("prism-coder:8b");
+        expect(calls).toEqual(["qwen3.5:4b"]);
+        expect(r.model_picked).toBe("qwen3.5:4b");
     });
 
     it("RAM gate: 2 GB free → no local pick, errors with cloud_fallback=false", async () => {
@@ -318,11 +318,11 @@ describe("runInfer — L3 grounding verifier integration", () => {
         await runInfer(args({
             verify: true,
             evidence: [{ source: "x", content: "y" }],
-            verifier_model: "prism-coder:8b",
+            verifier_model: "qwen3.5:4b",
             verifier_timeout_ms: 5000,
         }), deps);
         const call = callVerifier.mock.calls[0][0] as any;
-        expect(call.verifierModel).toBe("prism-coder:8b");
+        expect(call.verifierModel).toBe("qwen3.5:4b");
         expect(call.timeoutMs).toBe(5000);
     });
 });

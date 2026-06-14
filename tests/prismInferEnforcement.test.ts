@@ -82,8 +82,8 @@ function mockDeps(overrides: Partial<InferDeps> = {}): InferDeps {
         freemem: () => 16 * 1024 ** 3, // 16 GB free
         listTags: async () => new Set([
             "prism-coder:1b7",
-            "prism-coder:4b",
-            "prism-coder:8b",
+            "qwen3.5:4b",
+            "qwen3.5:4b",
             "prism-coder:14b",
             "prism-coder:32b",
         ]),
@@ -146,7 +146,7 @@ describe("model ceiling enforcement", () => {
 
         const calls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
         const modelUsed = calls[0][1];
-        expect(modelUsed).toMatch(/1b7|4b|8b|14b/);
+        expect(modelUsed).toMatch(/1b7|4b|14b/);
         expect(modelUsed).not.toMatch(/32b/);
     });
 

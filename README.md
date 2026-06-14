@@ -36,7 +36,7 @@ Open Claude Desktop or Cursor and your agent now has memory backed by a local SQ
 
 ```bash
 ollama pull dcostenco/prism-coder:1b7   # 1.1 GB · any device, always fits
-ollama pull dcostenco/prism-coder:8b    # 4.7 GB · iPhone/iPad 8 GB+, Mac M1+
+ollama pull qwen3.5:4b                  # 3.4 GB · iPhone/iPad 8 GB+, Mac M1+  (stock model, no fine-tune needed)
 ollama pull dcostenco/prism-coder:14b   # 8.4 GB · Mac 24 GB+, iPad Pro 16 GB  (default router)
 ollama pull dcostenco/prism-coder:32b   # 16 GB  · Mac M2 Ultra+  (complex tasks)
 ```
@@ -78,12 +78,12 @@ The free tier runs entirely on your machine. Paid tiers add cloud sync through t
 
 ## Models
 
-The `prism-coder` fleet are specialists fine-tuned from Qwen3 for MCP tool-routing. They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
+The `prism-coder` fleet are specialists for MCP tool-routing. The 14B and 32B are fine-tuned from Qwen3; the 4B slot uses stock Qwen3.5-4B with prompt engineering (100% routing accuracy without fine-tuning). They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
 
 | Model | Ollama tag | Size (GGUF Q4_K_M) | Role | Tier |
 |---|---|---|---|---|
 | prism-coder:1.7b | `prism-coder:1b7` | 1.1 GB | Always-fits fallback / on-device | Free |
-| prism-coder:8b | `prism-coder:8b` | 4.7 GB | Mobile / balanced | Free |
+| Qwen3.5-4B | `qwen3.5:4b` | 3.4 GB | Verifier + mobile (stock, no fine-tune) | Free |
 | prism-coder:14b | `prism-coder:14b` | 8.4 GB | Default router | Standard+ |
 | prism-coder:32b | `prism-coder:32b` | 16 GB | Complex tasks (MoE) | Advanced+ |
 
@@ -107,14 +107,14 @@ query → prism-coder:14b (local router)
 ```bash
 git clone https://github.com/dcostenco/prism-coder && cd prism-coder
 pip install anthropic requests
-python3 tests/benchmarks/prism-routing-100/benchmark.py --models 1b7 8b 14b 32b
+python3 tests/benchmarks/prism-routing-100/benchmark.py --models 1b7 4b 14b 32b
 ```
 
 **Routing eval (102 cases, 12 categories, 3-seed mean).** On this narrow tool-routing task the fine-tuned models are near-perfect across all sizes. Be honest with yourself about what that means: the eval is **near-saturated** for this taxonomy — it measures whether the right one of a small set of MCP tools is selected, not general capability. The useful takeaway is **offline routing reliability at zero cost**, not that a 1.1 GB model rivals a frontier model in general.
 
 | Model | Routing accuracy | Notes |
 |---|---|---|
-| prism-coder:1.7b / 8b / 14b / 32b | ~100% | Near-saturated on this 102-case taxonomy |
+| prism-coder:1.7b / 4b / 14b / 32b | ~100% | Near-saturated on this 102-case taxonomy |
 | Claude (frontier, same eval) | ~98% | Stronger everywhere outside this narrow task |
 
 **Memory uplift (LoCoMo-Plus, self-published).** A separate long-context dialogue benchmark ([dcostenco/Locomo-Plus](https://github.com/dcostenco/Locomo-Plus)) measures how much structured memory helps a base model retain multi-day context. Results show large gains when a model is paired with Prism memory versus running raw. Note this benchmark is authored, run, and LLM-judged by this project — treat it as a reproducible demonstration, not an independent third-party result, and run it yourself with the commands in that repo.
@@ -210,6 +210,98 @@ The LLM context window is treated as ephemeral scratch space; durable state live
 
 ---
 
+## Skills
+
+Skills are behavioral rules injected into the agent's context at session start via `session_load_context`. They govern how the agent works — debugging discipline, security audits, shipping standards, clinical protocols.
+
+### How skills load
+
+```
+session_load_context called
+  → fetch routing table from synalux.ai/.well-known/prism/skills-routing.json (cached 5 min)
+  → resolve universal skills + project-specific skills
+  → sort by priority (lowest first)
+  → fetch content: Synalux portal DB → local SQLite fallback
+  → inject into response as [📜 SKILL: name] blocks
+  → protected skills always load (bypass the 40k-char cap)
+  → truncated skills get a loud ⚠️ warning the agent can see
+```
+
+### Skill types
+
+| Type | Where it lives | Who can write | When it loads |
+|---|---|---|---|
+| **Platform skill** | Synalux DB (`platform_skills` table) or `synalux-private/skills/*/SKILL.md` | Platform admin via `/api/v1/admin/skills` or `sync-skills.sh` | When named in the routing table |
+| **Role skill** | Local SQLite (`skill:<role>`) | User via Prism dashboard → Settings → 📜 Skills tab | When the agent's role matches |
+| **User-local skill** | Local SQLite (`user_skill:<name>`) | User via dashboard | When `user_local.enabled=true` in routing table |
+| **Context skill** | Same as platform | Auto | When a recent handoff/ledger mentions the skill name |
+
+### Adding custom skills via the dashboard
+
+Open the Prism dashboard (`prism dashboard` or `http://localhost:9315`) → **Settings** → **📜 Skills** tab.
+
+1. Select a **role** (global, dev, qa, pm, lead, security, ux)
+2. Paste or upload your skill as Markdown
+3. Click **💾 Save** — takes effect immediately, no restart
+
+Role skills are injected when `session_load_context` is called with a matching role. The `global` role skill loads for all sessions. Dashboard skills are stored in local SQLite under `skill:<role>` and never sent to the cloud.
+
+### Priority and protected skills
+
+The routing table (v8) supports `priority` and `protected` fields on universal skills:
+
+```json
+{
+  "universal": [
+    {"name": "prime-directive", "priority": 0, "protected": true},
+    {"name": "evidence-first-protocol", "priority": 1, "protected": true},
+    {"name": "critical-thinking-debug", "priority": 3},
+    ...
+  ]
+}
+```
+
+- **Priority**: skills load in ascending priority order — behavioral rules first, mechanical audits last
+- **Protected**: always loaded, bypasses the 40k-char cap — use for non-negotiable rules
+- **Cap**: 40,000 chars total. Skills that would exceed the cap are skipped with a visible `⚠️ TRUNCATED` warning
+- **Backward compat**: plain strings (`"skill-name"`) still work (treated as priority = array index, not protected)
+
+### Routing table
+
+The canonical routing table lives at `synalux-private/portal/public/.well-known/prism/skills-routing.json`. It defines:
+
+- `universal` — skills loaded for every project
+- `projects` — project-name substring → additional skills
+- `prompt_keywords` — regex → skills loaded when the user's prompt matches
+
+Prism fetches this from `synalux.ai` on every `session_load_context` (2.5s timeout, 5-min cache). If unreachable, the offline fallback loads `prime-directive` + `evidence-first-protocol`.
+
+### Skill sync chain
+
+```
+synalux-private/skills/  →  sync-skills.sh  →  local SQLite  →  session_load_context  →  agent context
+                         →  /api/v1/admin/skills  →  Supabase platform_skills  →  (paid tier)
+```
+
+One direction only. Never edit local SQLite skills directly — edit `synalux-private/skills/*/SKILL.md` and run `sync-skills.sh`.
+
+### Enforcement hooks
+
+Some skills have mechanical enforcement via Claude Code hooks (not just advisory text):
+
+| Hook | Event | What it enforces |
+|---|---|---|
+| `screenshot-first/detect.py` | UserPromptSubmit | Injects "read the screenshot first" directive when image + bug keywords detected |
+| `screenshot-first/gate.py` | PreToolUse (Bash/Grep/Glob) | Blocks investigative searches until agent quotes the screenshot evidence |
+| `ask-first-tripwire/gate.py` | PreToolUse (Bash) | Prompts before destructive commands (git force, db push, npm publish) |
+| `pre-commit-check/verify.py` | PostToolUse (git commit) | Checks orphan files, scaffold code, disconnected settings, auth consistency |
+| `pre-push-audit/audit.py` | PostToolUse (git push) | 19-rule security audit (SSRF, ILIKE wildcards, rate limits, etc.) |
+| `crash-interactor/detect.py` | PostToolUse (Bash) | Detects runtime crashes and injects evidence-first recovery protocol |
+
+Hooks live at `~/.claude/hooks/` and are wired in `~/.claude/settings.json`.
+
+---
+
 ## CLI
 
 ```bash
@@ -235,7 +327,7 @@ ollama pull dcostenco/prism-coder:14b      # default router
 export LOCAL_LLM_URL=http://localhost:11434
 ```
 
-Routing is automatic: `14b → 32b → cloud fallback` on desktop/server, `14b → 8b → 1.7b` on mobile/offline. For iOS or another machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point `LOCAL_LLM_URL` at the host's IP.
+Routing is automatic: `14b → 32b → cloud fallback` on desktop/server, `14b → 4b → 1.7b` on mobile/offline. For iOS or another machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point `LOCAL_LLM_URL` at the host's IP.
 
 ---
 

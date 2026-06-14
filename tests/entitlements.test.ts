@@ -71,7 +71,7 @@ describe("clampCeiling", () => {
     it("returns requested ceiling when within plan limit", () => {
         expect(clampCeiling("4b", "14b")).toBe("4b");
         expect(clampCeiling("1b7", "32b")).toBe("1b7");
-        expect(clampCeiling("8b", "14b")).toBe("8b");
+        expect(clampCeiling("4b", "14b")).toBe("4b");
     });
 
     it("clamps requested ceiling to plan maximum", () => {
@@ -97,7 +97,7 @@ describe("clampCeiling", () => {
 
     // Critical: free tier can never get above 4b
     it("free tier ceiling blocks all models above 4b", () => {
-        expect(clampCeiling("8b", "4b")).toBe("4b");
+        expect(clampCeiling("14b", "4b")).toBe("4b");
         expect(clampCeiling("14b", "4b")).toBe("4b");
         expect(clampCeiling("32b", "4b")).toBe("4b");
     });
@@ -117,7 +117,7 @@ describe("ceilingExceeded", () => {
         expect(ceilingExceeded("14b", "4b")).toBe(true);
         expect(ceilingExceeded("32b", "14b")).toBe(true);
         expect(ceilingExceeded("32b", "4b")).toBe(true);
-        expect(ceilingExceeded("8b", "4b")).toBe(true);
+        expect(ceilingExceeded("14b", "4b")).toBe(true);
     });
 
     it("returns false when request is at or below ceiling", () => {

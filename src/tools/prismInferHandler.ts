@@ -68,7 +68,7 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             model_ceiling: {
                 type: "string",
-                enum: ["32b", "14b", "8b", "1b7"],
+                enum: ["32b", "14b", "4b", "1b7"],
                 description: "Cap the largest tier the picker may select. e.g. '14b' forbids 32B even if RAM allows.",
             },
             cloud_fallback: {
@@ -78,7 +78,7 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             timeout_ms: {
                 type: "number",
-                description: "Override per-call timeout. Default scales with model size: 32B=120s, 14B=60s, 8B=30s, 1.7B=15s.",
+                description: "Override per-call timeout. Default scales with model size: 32B=120s, 14B=60s, 4B=20s, 1.7B=15s.",
             },
             evidence: {
                 type: "array",
@@ -101,12 +101,12 @@ export const PRISM_INFER_TOOL: Tool = {
                 description:
                     "Enable the L3 grounding verifier. Default: true when `evidence` is provided, " +
                     "false otherwise. When enabled, the model's draft is checked by a different model " +
-                    "(prism-coder:4b by default) against the supplied `evidence`. Drafts with " +
+                    "(qwen3.5:4b by default) against the supplied `evidence`. Drafts with " +
                     "NEUTRAL or CONTRADICTED claims are refused.",
             },
             verifier_model: {
                 type: "string",
-                description: "Override the verifier model. Default: prism-coder:4b.",
+                description: "Override the verifier model. Default: qwen3.5:4b.",
             },
             verifier_timeout_ms: {
                 type: "number",
@@ -125,7 +125,7 @@ export interface PrismInferArgs {
     system?: string;
     max_tokens?: number;
     temperature?: number;
-    model_ceiling?: "32b" | "14b" | "8b" | "1b7";
+    model_ceiling?: "32b" | "14b" | "4b" | "1b7";
     cloud_fallback?: boolean;
     timeout_ms?: number;
     /** Evidence snippets the model is expected to be grounded in.
@@ -136,7 +136,7 @@ export interface PrismInferArgs {
      *  is provided, false otherwise. Pass `verify: false` explicitly
      *  to skip verification even when evidence is supplied. */
     verify?: boolean;
-    /** Override verifier model. Default: prism-coder:4b. */
+    /** Override verifier model. Default: qwen3.5:4b. */
     verifier_model?: string;
     /** Verifier hard timeout (ms). Default 2000. */
     verifier_timeout_ms?: number;
@@ -152,7 +152,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (a.cloud_fallback !== undefined && typeof a.cloud_fallback !== "boolean") return false;
     if (a.timeout_ms !== undefined && typeof a.timeout_ms !== "number") return false;
     if (a.model_ceiling !== undefined &&
-        !["32b", "14b", "8b", "1b7"].includes(a.model_ceiling as string)) return false;
+        !["32b", "14b", "4b", "1b7"].includes(a.model_ceiling as string)) return false;
     if (a.verify !== undefined && typeof a.verify !== "boolean") return false;
     if (a.verifier_model !== undefined && typeof a.verifier_model !== "string") return false;
     if (a.verifier_timeout_ms !== undefined && typeof a.verifier_timeout_ms !== "number") return false;
@@ -172,7 +172,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
 const DEFAULT_TIMEOUTS: Record<string, number> = {
     "prism-coder:32b": 120_000,
     "prism-coder:14b":  60_000,
-    "prism-coder:8b":   30_000,
+    "qwen3.5:4b":   20_000,
     "prism-coder:1b7":  15_000,
 };
 
@@ -423,9 +423,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     if (installed) {
         // Find start index from ceiling — if no ceiling, start at the top (32B).
         const ceilStart = effectiveCeiling
-            ? Math.max(0, MODEL_TIERS.findIndex(
-                  t => t.tag.endsWith(effectiveCeiling) || t.tag === effectiveCeiling,
-              ))
+            ? Math.max(0, MODEL_TIERS.findIndex(t => t.tag.endsWith(`:${effectiveCeiling}`)))
             : 0;
         let anyViable = false;
 
