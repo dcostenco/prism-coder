@@ -39,10 +39,10 @@ Open Claude Desktop or Cursor and your agent now has memory backed by a local SQ
 **Optional — local model fleet** for offline tool-routing. Pull whichever fits your hardware:
 
 ```bash
-ollama pull dcostenco/prism-coder:1b7   # 1.1 GB - any device, always fits
-ollama pull dcostenco/prism-coder:8b    # 4.7 GB - iPhone/iPad 8 GB+, Mac M1+
-ollama pull dcostenco/prism-coder:14b   # 8.4 GB - Mac 24 GB+, iPad Pro 16 GB  (default router)
-ollama pull dcostenco/prism-coder:32b   # 16 GB  - Mac M2 Ultra+  (complex tasks)
+ollama pull dcostenco/prism-coder:2b    # 2.3 GB · iPhone / mobile first gate (Qwen3.5-4B Q3_K_M, 99.1%)
+ollama pull dcostenco/prism-coder:4b    # 3.4 GB · verifier + 8 GB+ devices (Qwen3.5-4B Q4_K_M, 100%)
+ollama pull dcostenco/prism-coder:14b   # 8.4 GB · Mac default router (100%)
+ollama pull dcostenco/prism-coder:32b   # 16 GB  · Mac complex tasks (100%)
 ```
 
 Prism detects both the namespaced (`dcostenco/prism-coder:14b`) and bare (`prism-coder:14b`) Ollama tags automatically.
@@ -130,24 +130,25 @@ The free tier runs entirely on your machine. Paid tiers add cloud sync through t
 
 ## Models
 
-The `prism-coder` fleet are specialists fine-tuned from Qwen3 for MCP tool-routing. They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
+The `prism-coder` fleet uses Qwen3.5 for MCP tool-routing. The 14B and 32B are fine-tuned from Qwen3; the 2B and 4B slots use stock Qwen3.5-4B with prompt engineering at different quantization levels (100% routing accuracy without fine-tuning). They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
 
-| Model | Ollama tag | Size (GGUF Q4_K_M) | Role | Tier |
-|---|---|---|---|---|
-| prism-coder:1.7b | `prism-coder:1b7` | 1.1 GB | Always-fits fallback / on-device | Free |
-| prism-coder:8b | `prism-coder:8b` | 4.7 GB | Mobile / balanced | Free |
-| prism-coder:14b | `prism-coder:14b` | 8.4 GB | Default router | Standard+ |
-| prism-coder:32b | `prism-coder:32b` | 16 GB | Complex tasks (MoE) | Advanced+ |
+| Model | Ollama tag | Size | BFCL Accuracy | Role | Tier |
+|---|---|---|---|---|---|
+| Qwen3.5-4B Q3_K_M | `prism-coder:2b` | 2.3 GB | 99.1% × 3 seeds | iPhone / mobile first gate | Free |
+| Qwen3.5-4B Q4_K_M | `prism-coder:4b` | 3.4 GB | 100% × 3 seeds | Verifier + 8 GB+ devices | Free |
+| prism-coder:14b | `prism-coder:14b` | 8.4 GB | 100% × 3 seeds | Default router | Standard+ |
+| prism-coder:32b | `prism-coder:32b` | 16 GB | 100% × 3 seeds | Complex tasks | Advanced+ |
 
 Weights: [huggingface.co/dcostenco](https://huggingface.co/dcostenco) (public GGUF). Latency depends on model size and hardware — see [Benchmarks](#benchmarks) to measure it on your own machine rather than trusting a printed number.
 
 ### Cascade
 
 ```
-query -> prism-coder:14b (local router)
-          -> grounding verifier (local, for evidence-backed claims)
-          -> prism-coder:32b (complex tasks, on demand)
-          -> cloud fallback (paid tiers, for max quality)
+query → prism-coder:14b (local router, Mac default)
+      → qwen3.5:4b (grounding verifier)
+      → prism-coder:2b (iPhone / mobile, auto-selected by RAM)
+      → prism-coder:32b (complex tasks, on demand)
+      → cloud fallback (paid tiers, for max quality)
 ```
 
 ---
@@ -159,14 +160,15 @@ query -> prism-coder:14b (local router)
 ```bash
 git clone https://github.com/dcostenco/prism-coder && cd prism-coder
 pip install anthropic requests
-python3 tests/benchmarks/prism-routing-100/benchmark.py --models 1b7 8b 14b 32b
+python3 tests/benchmarks/prism-routing-100/benchmark.py --models 2b 4b 14b 32b
 ```
 
-**Routing eval (102 cases, 12 categories, 3-seed mean).** On this narrow tool-routing task the fine-tuned models are near-perfect across all sizes. Be honest with yourself about what that means: the eval is **near-saturated** for this taxonomy — it measures whether the right one of a small set of MCP tools is selected, not general capability. The useful takeaway is **offline routing reliability at zero cost**, not that a 1.1 GB model rivals a frontier model in general.
+**Routing eval (115 cases, 12 categories, 3-seed mean).** On this narrow tool-routing task all fleet models achieve near-perfect accuracy. Be honest with yourself about what that means: the eval is **near-saturated** for this taxonomy — it measures whether the right one of a small set of MCP tools is selected, not general capability. The useful takeaway is **offline routing reliability at zero cost**, not that a 2.3 GB model rivals a frontier model in general.
 
 | Model | Routing accuracy | Notes |
 |---|---|---|
-| prism-coder:1.7b / 8b / 14b / 32b | ~100% | Near-saturated on this 102-case taxonomy |
+| prism-coder:2b (Q3_K_M) | 99.1% × 3 seeds | 1 failure: regex→knowledge_search |
+| prism-coder:4b / 14b / 32b | 100% × 3 seeds | Perfect on all 115 cases |
 | Claude (frontier, same eval) | ~98% | Stronger everywhere outside this narrow task |
 
 **Memory uplift (LoCoMo-Plus, self-published).** A separate long-context dialogue benchmark ([dcostenco/Locomo-Plus](https://github.com/dcostenco/Locomo-Plus)) measures how much structured memory helps a base model retain multi-day context. Results show large gains when a model is paired with Prism memory versus running raw. Note this benchmark is authored, run, and LLM-judged by this project — treat it as a reproducible demonstration, not an independent third-party result, and run it yourself with the commands in that repo.
@@ -357,7 +359,7 @@ ollama pull dcostenco/prism-coder:14b      # default router
 export LOCAL_LLM_URL=http://localhost:11434
 ```
 
-Routing is automatic: `14b -> 32b -> cloud fallback` on desktop/server, `14b -> 8b -> 1.7b` on mobile/offline. For iOS or another machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point `LOCAL_LLM_URL` at the host's IP.
+Routing is automatic: `14b → 4b → cloud fallback` on desktop/server, `2b → cloud fallback` on mobile/iPhone. For iOS or another machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point `LOCAL_LLM_URL` at the host's IP.
 
 ---
 
