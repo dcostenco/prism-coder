@@ -75,7 +75,10 @@ describe('resolveSkillsForProject', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network')));
     _invalidateRoutingCache();
     const result = await resolveSkillsForProject('anything');
-    expect(result.names).toEqual(_OFFLINE_FALLBACK.universal);
+    const fallbackNames = _OFFLINE_FALLBACK.universal.map(
+      (e: string | { name: string }) => typeof e === 'string' ? e : e.name
+    );
+    expect(result.names).toEqual(fallbackNames);
   });
 });
 

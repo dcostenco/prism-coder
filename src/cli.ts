@@ -577,10 +577,10 @@ scmCmd
 
 // ─── prism register-models ────────────────────────────────────
 // Convenience: alias namespaced HF-style prism-coder tags
-// (`dcostenco/prism-coder:14b`) to the bare tags (`prism-coder:14b`)
+// (`dcostenco/prism-coder:9b`) to the bare tags (`prism-coder:9b`)
 // some external tooling expects. The MCP picker handles both forms
 // natively as of v15.5, so this command is OPTIONAL — useful only
-// when a user wants to run `ollama run prism-coder:14b` directly,
+// when a user wants to run `ollama run prism-coder:9b` directly,
 // or for tools that pre-date the picker's namespace fallback.
 
 program

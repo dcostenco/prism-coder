@@ -24,9 +24,15 @@ export interface UserLocalPolicy {
   key_prefix: string;
 }
 
+export interface SkillEntry {
+  name: string;
+  priority: number;
+  protected?: boolean;
+}
+
 export interface SkillRoutingTable {
   version: number;
-  universal: string[];
+  universal: (string | SkillEntry)[];
   /** project-name substring → list of skill names */
   projects: Record<string, string[]>;
   /** regex pattern → list of skill names. Matched against user prompt. */
@@ -45,7 +51,11 @@ export interface SkillRoutingTable {
 // Minimal fallback when synalux is unreachable.
 const OFFLINE_FALLBACK: SkillRoutingTable = {
   version: 1,
-  universal: ['bcba_ai_assistant'],
+  universal: [
+    { name: 'prime-directive', priority: 0, protected: true },
+    { name: 'evidence-first-protocol', priority: 1, protected: true },
+    { name: 'bcba_ai_assistant', priority: 20 },
+  ],
   projects: {},
   user_local: { enabled: false, key_prefix: 'user_skill:' },
 };
@@ -80,8 +90,15 @@ async function fetchOnce(): Promise<SkillRoutingTable> {
   }
 }
 
+export interface ResolvedSkill {
+  name: string;
+  priority: number;
+  protected: boolean;
+}
+
 export interface ResolvedSkills {
   names: string[];
+  skills: ResolvedSkill[];
   user_local: UserLocalPolicy;
 }
 
@@ -91,6 +108,13 @@ export interface ResolvedSkills {
  * skills. Also returns the user_local policy so callers know whether to
  * load user_skill:* entries from local SQLite.
  */
+function normalizeEntry(entry: string | SkillEntry, defaultPriority: number): ResolvedSkill {
+  if (typeof entry === 'string') {
+    return { name: entry, priority: defaultPriority, protected: false };
+  }
+  return { name: entry.name, priority: entry.priority ?? defaultPriority, protected: entry.protected ?? false };
+}
+
 export async function resolveSkillsForProject(project: string): Promise<ResolvedSkills> {
   const now = Date.now();
   if (!cached || now - cached.fetchedAt > CACHE_TTL_MS) {
@@ -103,15 +127,35 @@ export async function resolveSkillsForProject(project: string): Promise<Resolved
     await inflight;
   }
   const table = cached!.table;
-  const out = new Set<string>(table.universal);
-  const projectLower = project.toLowerCase();
-  for (const [pattern, skills] of Object.entries(table.projects)) {
-    if (projectLower.includes(pattern)) {
-      for (const s of skills) out.add(s);
+  const seen = new Set<string>();
+  const skills: ResolvedSkill[] = [];
+
+  for (let i = 0; i < table.universal.length; i++) {
+    const entry = normalizeEntry(table.universal[i], i);
+    if (!seen.has(entry.name)) {
+      seen.add(entry.name);
+      skills.push(entry);
     }
   }
+
+  const projectLower = project.toLowerCase();
+  let projectPriority = 100;
+  for (const [pattern, projectSkills] of Object.entries(table.projects)) {
+    if (projectLower.includes(pattern)) {
+      for (const s of projectSkills) {
+        if (!seen.has(s)) {
+          seen.add(s);
+          skills.push({ name: s, priority: projectPriority++, protected: false });
+        }
+      }
+    }
+  }
+
+  skills.sort((a, b) => a.priority - b.priority);
+
   return {
-    names: Array.from(out),
+    names: skills.map(s => s.name),
+    skills,
     user_local: table.user_local ?? OFFLINE_FALLBACK.user_local,
   };
 }

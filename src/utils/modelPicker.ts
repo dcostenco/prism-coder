@@ -1,23 +1,22 @@
 /**
  * RAM-Gated Local Model Picker
  * ─────────────────────────────────────────────────────────────
- * Cascade: 14b (default) → 4b (verifier) → 2b (mobile) → 32b (complex only).
+ * Cascade: 9b (default) → 4b (verifier) → 2b (mobile) → 32b (complex only).
  *
- * The default ceiling is "14b" — NOT "32b". This means:
- *   - 14b is the primary model for routing + general inference
+ * The default ceiling is "9b" — NOT "32b". This means:
+ *   - 9b is the primary model for routing + general inference (Qwen3.5-9B, 100% BFCL)
  *   - 4b is used as the grounding verifier (fast, small)
- *   - 2b is the mobile/iPhone first gate (Qwen3.5-4B Q3_K_M, 99.1% BFCL)
+ *   - 2b is the mobile/iPhone first gate (Qwen3.5-2B, 99.1% BFCL)
  *   - 32b is only loaded when caller explicitly passes ceiling="32b"
  *     or when the task requires maximum quality (complex code gen, etc.)
  *
- * This saves 10GB+ RAM on most devices and keeps response times fast.
- * The 14b achieves 100% on eval_300 — same as 32b.
+ * This saves 13GB+ RAM vs 32b and keeps response times fast.
  *
  *   tag                 weights   need free   ctx     role
  *   prism-coder:32b     ~19 GB    ≥ 24 GB     32K    complex (on-demand)
- *   prism-coder:14b     ~ 9 GB    ≥ 12 GB     32K    default router
- *   qwen3.5:4b          ~ 3.4 GB  ≥  5 GB     32K    verifier (Q4_K_M, 100%)
- *   prism-coder:2b      ~ 2.3 GB  ≥  3 GB      8K    mobile / iPhone (Q3_K_M, 99.1%)
+ *   prism-coder:9b      ~ 5.8 GB  ≥  8 GB     32K    default router (Qwen3.5, 100% BFCL)
+ *   prism-coder:4b      ~ 3.4 GB  ≥  5 GB     32K    verifier (Qwen3.5, 100%)
+ *   prism-coder:2b      ~ 2.3 GB  ≥  3 GB      8K    mobile / iPhone (Qwen3.5, 99.1%)
  *
  * Below 3 GB free → no local pick (caller must use cloud).
  */
@@ -37,8 +36,8 @@ export interface ModelChoice {
  */
 export const MODEL_TIERS: ReadonlyArray<ModelChoice> = [
     { tag: 'prism-coder:32b',  weightsGb: 19, minFreeGb: 24, ctxTokens: 32_768 },
-    { tag: 'prism-coder:14b',  weightsGb:  9, minFreeGb: 12, ctxTokens: 32_768 },
-    { tag: 'qwen3.5:4b',       weightsGb:  3.4, minFreeGb: 5, ctxTokens: 32_768 },
+    { tag: 'prism-coder:9b',   weightsGb:  5.8, minFreeGb:  8, ctxTokens: 32_768 },
+    { tag: 'prism-coder:4b',   weightsGb:  3.4, minFreeGb:  5, ctxTokens: 32_768 },
     { tag: 'prism-coder:2b',   weightsGb:  2.3, minFreeGb:  3, ctxTokens:  8_192 },
 ];
 
@@ -54,15 +53,15 @@ function tagMatches(installed: string, tierTag: string): boolean {
     return installed === tierTag || installed.endsWith(`/${tierTag}`);
 }
 
-/** Default ceiling: 14b. Pass ceiling="32b" explicitly for max quality. */
-export const DEFAULT_CEILING = "14b";
+/** Default ceiling: 9b. Pass ceiling="32b" explicitly for max quality. */
+export const DEFAULT_CEILING = "9b";
 
 /**
  * Pick the best viable tier for the given free RAM.
- * Default ceiling is 14b — use ceiling="32b" only for complex tasks.
+ * Default ceiling is 9b — use ceiling="32b" only for complex tasks.
  *
  * @param freeBytes  Result of os.freemem() — binary bytes
- * @param ceiling    Cap tier. Default "14b". Pass "32b" for complex tasks.
+ * @param ceiling    Cap tier. Default "9b". Pass "32b" for complex tasks.
  * @param available  Optional whitelist of installed Ollama tags.
  */
 export function pickLocalModel(

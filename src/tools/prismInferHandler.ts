@@ -2,7 +2,7 @@
  * prism_infer — local-first inference tool
  * ─────────────────────────────────────────────────────────────
  * Save the caller's cloud tokens by routing to a local prism-coder
- * model via Ollama. Tiers (32B/14B/8B/1.7B) auto-selected by free
+ * model via Ollama. Tiers (32B/9B/8B/1.7B) auto-selected by free
  * RAM, then capped by `model_ceiling` and the set of tags that are
  * actually pulled into Ollama.
  *
@@ -12,7 +12,7 @@
  *   4. On local fail, if cloud_fallback=true:
  *        - exchange synalux_sk_ → JWT (cached)
  *        - POST synalux portal /api/v1/prism-aac/inference
- *        - portal runs its own cascade (14B/32B/Claude by tier)
+ *        - portal runs its own cascade (9B/32B/Claude by tier)
  *   5. Return { output, backend, model_picked, ram_free_mb, latency_ms, used_cloud }
  *
  * `prism_infer` is a thin client. It never calls Anthropic / OpenRouter
@@ -42,9 +42,9 @@ export const PRISM_INFER_TOOL: Tool = {
     name: "prism_infer",
     description:
         "Run an inference on a local prism-coder model (Ollama) to save cloud tokens. " +
-        "Picks the largest viable tier — 32B / 14B / 8B / 1.7B — based on free RAM at call time, " +
+        "Picks the largest viable tier — 32B / 9B / 8B / 1.7B — based on free RAM at call time, " +
         "clamped by `model_ceiling` and what is actually pulled in Ollama. " +
-        "Falls through to the synalux portal cloud cascade (14B → 32B → Claude Opus 4.7) " +
+        "Falls through to the synalux portal cloud cascade (9B → 32B → Claude Opus 4.7) " +
         "only when local is unviable AND `cloud_fallback=true`. " +
         "Use this for code generation, summarisation, classification, or any synth task you would " +
         "otherwise hand to the cloud model — it costs $0 when the local hit succeeds.",
@@ -71,8 +71,8 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             model_ceiling: {
                 type: "string",
-                enum: ["32b", "14b", "4b", "2b"],
-                description: "Cap the largest tier the picker may select. e.g. '14b' forbids 32B even if RAM allows.",
+                enum: ["32b", "9b", "4b", "2b"],
+                description: "Cap the largest tier the picker may select. e.g. '9b' forbids 32B even if RAM allows.",
             },
             cloud_fallback: {
                 type: "boolean",
@@ -81,7 +81,7 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             timeout_ms: {
                 type: "number",
-                description: "Override per-call timeout. Default scales with model size: 32B=120s, 14B=60s, 4B=20s, 1.7B=15s.",
+                description: "Override per-call timeout. Default scales with model size: 32B=120s, 9B=60s, 4B=20s, 1.7B=15s.",
             },
             evidence: {
                 type: "array",
@@ -128,7 +128,7 @@ export interface PrismInferArgs {
     system?: string;
     max_tokens?: number;
     temperature?: number;
-    model_ceiling?: "32b" | "14b" | "4b" | "2b";
+    model_ceiling?: "32b" | "9b" | "4b" | "2b";
     cloud_fallback?: boolean;
     timeout_ms?: number;
     /** Evidence snippets the model is expected to be grounded in.
@@ -155,7 +155,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (a.cloud_fallback !== undefined && typeof a.cloud_fallback !== "boolean") return false;
     if (a.timeout_ms !== undefined && typeof a.timeout_ms !== "number") return false;
     if (a.model_ceiling !== undefined &&
-        !["32b", "14b", "4b", "2b"].includes(a.model_ceiling as string)) return false;
+        !["32b", "9b", "4b", "2b"].includes(a.model_ceiling as string)) return false;
     if (a.verify !== undefined && typeof a.verify !== "boolean") return false;
     if (a.verifier_model !== undefined && typeof a.verifier_model !== "string") return false;
     if (a.verifier_timeout_ms !== undefined && typeof a.verifier_timeout_ms !== "number") return false;
@@ -174,8 +174,8 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
 
 const DEFAULT_TIMEOUTS: Record<string, number> = {
     "prism-coder:32b": 120_000,
-    "prism-coder:14b":  60_000,
-    "qwen3.5:4b":   20_000,
+    "prism-coder:9b":   60_000,
+    "prism-coder:4b":   20_000,
     "prism-coder:2b":  15_000,
 };
 
