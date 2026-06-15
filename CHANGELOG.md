@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [19.0.1] - 2026-06-15 — 🔒 Security: 15 verification fixes + 9B fleet
+
+### Fleet
+
+- **14B retired, 9B default.** Qwen3.5-9B achieves 100% BFCL × 3 seeds at 36% smaller (5.8 GB vs 8.4 GB). Cascade updated: `9b → 4b → 2b → 32b → cloud`.
+- Model picker, entitlements, CLI, and all tests updated. `prism-coder:14b` references removed.
+
+### Security (6-round external audit)
+
+- `fix(F1)`: Entitlement fetch failure now **fail-closed** — keeps last-known-good entitlements instead of downgrading to free tier (which disabled the grounding verifier). Stale cache no longer re-cached with fresh TTL.
+- `fix(F9)`: Verification runner HTTP fetch uses `redirect: "error"` — prevents SSRF via 302 → internal IP.
+- `fix(F10)`: Skipped gate/abort-level assertions treated as failures — prevents dependency-chain manipulation to bypass critical checks.
+- `fix(F11)`: `computeRubricHash` now includes `min_pass_rate` when provided, and `verifyRubricHash` passes it — closes threshold-tampering vulnerability.
+- `fix(F19)`: Gatekeeper bypass actor from `process.env.USER` marked as unauthenticated in audit trail.
+
+### Verification pipeline (documented in README)
+
+- New README section: Multi-Layer Verification table (L1 crisis gate → L3 tool routing → L3 NLI verifier → L4 hallucination judge).
+- Honest BFCL disclosure: "Routing accuracy includes the deterministic L3 correction layer."
+- Scoped claims: "Fail-closed on the verified path (Standard tier and up)" — no longer overstates free tier coverage.
+
+### Git hooks (portable)
+
+- New `pre-commit` and `pre-push` hooks that work with any editor/AI tool (no Claude Code dependency).
+- Advisory mode by default; `PRECOMMIT_MODE=block` / `PREPUSH_MODE=block` for hard enforcement.
+- Hooks look in repo `hooks/lib/` first, `~/.claude/hooks/` fallback, then minimal inline checks.
+
+### Tests
+
+- 10 new tests covering all audit fixes (`verification-audit-fixes.test.ts`)
+- Full suite: 89/89 files, 2,672 tests passing
+
 ## [18.0.2] - 2026-06-12 — 🔒 Security: PHI, JWKS, ingest (adversarial review round 2)
 
 ### Security
