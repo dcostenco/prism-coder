@@ -23,8 +23,9 @@ export class Gatekeeper {
       console.warn(`\n⚠️  [OVERRIDDEN] Verification Gate bypassed via administrator override.`);
       // Enforce immutability and record audit trail context via environment variables
       validatedResult.gate_override = true;
+      // F19 fix: process.env.USER is trivially spoofable — log it but note it's unauthenticated.
       const actor = process.env.USER || process.env.USERNAME || 'unknown_user';
-      validatedResult.override_reason = validatedResult.override_reason || `CLI --force bypass by ${actor}`;
+      validatedResult.override_reason = validatedResult.override_reason || `CLI --force bypass (unauthenticated env.USER=${actor})`;
       return { canContinue: true, validatedResult };
     }
 

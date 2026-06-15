@@ -270,7 +270,12 @@ export class VerificationRunner {
    * Throws an error if the hash does not match, ensuring test integrity.
    */
   static verifyRubricHash(tests: TestAssertion[], harness: VerificationHarness): void {
-    const computed = computeRubricHash(tests);
+    // F11 fix: include min_pass_rate in hash verification when harness has it.
+    // Try with min_pass_rate first; fall back to without for backward compat.
+    const minRate = (harness as any).min_pass_rate;
+    const computed = minRate !== undefined
+      ? computeRubricHash(tests, minRate)
+      : computeRubricHash(tests);
     if (computed !== harness.rubric_hash) {
       throw new Error(`Rubric hash mismatch. Expected ${harness.rubric_hash}, but computeRubricHash returned ${computed}. The tests have been modified since the harness was created.`);
     }
@@ -515,7 +520,7 @@ export class VerificationRunner {
             return { passed: false, error: `HTTP target blocked: ${targetCheck.reason}` };
           }
 
-          const res = await fetch(a.target);
+          const res = await fetch(a.target, { redirect: "error" });
           return res.status === a.expected
             ? { passed: true }
             : { passed: false, error: `Expected status ${a.expected}, got ${res.status} for ${a.target}` };

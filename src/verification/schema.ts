@@ -194,8 +194,16 @@ export interface ValidationResult {
  * @param tests - The array of TestAssertion to hash
  * @returns Lowercase hex SHA-256 digest
  */
-export function computeRubricHash(tests: TestAssertion[]): string {
+export function computeRubricHash(tests: TestAssertion[], minPassRate?: number): string {
   const sorted = [...tests].sort((a, b) => a.id.localeCompare(b.id));
+  // F11 fix: when minPassRate is provided, include it in the hash so the
+  // threshold can't be changed without invalidating the rubric.
+  // When omitted, hash only tests (backward compatible with existing harnesses).
+  if (minPassRate !== undefined) {
+    return createHash("sha256")
+      .update(JSON.stringify({ tests: sorted, min_pass_rate: minPassRate }))
+      .digest("hex");
+  }
   return createHash("sha256")
     .update(JSON.stringify(sorted))
     .digest("hex");

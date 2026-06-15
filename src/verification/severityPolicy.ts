@@ -56,6 +56,19 @@ export function evaluateSeverityGates(
 ): SeverityGateResult {
   const failures = results.filter(r => !r.passed && !r.skipped);
 
+  // F10 fix: skipped critical (gate/abort) assertions count as failures.
+  // Crafting depends_on to skip critical checks must not neutralize the gate.
+  const skippedCritical = results.filter(r => r.skipped && (r.severity === 'gate' || r.severity === 'abort'));
+  if (skippedCritical.length > 0) {
+    const ids = skippedCritical.map(r => r.id).join(", ");
+    const hasAbort = skippedCritical.some(r => r.severity === 'abort');
+    return {
+      action: hasAbort ? "abort" : "block",
+      failed_assertions: skippedCritical,
+      summary: `${hasAbort ? 'ABORT' : 'BLOCKED'}: ${skippedCritical.length} critical assertion(s) were skipped [${ids}] — treating as failures.`
+    };
+  }
+
   if (failures.length === 0) {
     return {
       action: "continue",

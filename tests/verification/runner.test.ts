@@ -60,8 +60,8 @@ function buildHarness(tests: TestAssertion[]): VerificationHarness {
     project: 'test',
     conversation_id: 'test-conv',
     created_at: new Date().toISOString(),
-    rubric_hash: computeRubricHash(parsed.tests),
     min_pass_rate: 0.5,
+    rubric_hash: computeRubricHash(parsed.tests, 0.5),
     tests: parsed.tests,
   };
 }

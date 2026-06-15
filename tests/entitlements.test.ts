@@ -24,7 +24,7 @@ import {
 
 const STANDARD_ENTITLEMENTS: PrismEntitlements = {
     plan: "standard",
-    model_ceiling: "14b",
+    model_ceiling: "9b",
     daily_infer_limit: 200,
     max_tokens: 1024,
     max_seats: 1,
@@ -69,43 +69,43 @@ describe("clampCeiling", () => {
     });
 
     it("returns requested ceiling when within plan limit", () => {
-        expect(clampCeiling("4b", "14b")).toBe("4b");
+        expect(clampCeiling("4b", "9b")).toBe("4b");
         expect(clampCeiling("2b", "32b")).toBe("2b");
-        expect(clampCeiling("4b", "14b")).toBe("4b");
+        expect(clampCeiling("4b", "9b")).toBe("4b");
     });
 
     it("clamps requested ceiling to plan maximum", () => {
         expect(clampCeiling("32b", "4b")).toBe("4b");
-        expect(clampCeiling("14b", "4b")).toBe("4b");
-        expect(clampCeiling("32b", "14b")).toBe("14b");
+        expect(clampCeiling("9b", "4b")).toBe("4b");
+        expect(clampCeiling("32b", "9b")).toBe("9b");
     });
 
     it("returns equal ceiling when request matches plan", () => {
         expect(clampCeiling("4b", "4b")).toBe("4b");
-        expect(clampCeiling("14b", "14b")).toBe("14b");
+        expect(clampCeiling("9b", "9b")).toBe("9b");
         expect(clampCeiling("32b", "32b")).toBe("32b");
     });
 
     it("returns plan ceiling for unknown requested model", () => {
-        expect(clampCeiling("70b", "14b")).toBe("14b");
+        expect(clampCeiling("70b", "9b")).toBe("9b");
         expect(clampCeiling("unknown", "4b")).toBe("4b");
     });
 
     it("returns requested for unknown plan ceiling", () => {
-        expect(clampCeiling("14b", "unknown")).toBe("14b");
+        expect(clampCeiling("9b", "unknown")).toBe("9b");
     });
 
     // Critical: free tier can never get above 4b
     it("free tier ceiling blocks all models above 4b", () => {
-        expect(clampCeiling("14b", "4b")).toBe("4b");
-        expect(clampCeiling("14b", "4b")).toBe("4b");
+        expect(clampCeiling("9b", "4b")).toBe("4b");
+        expect(clampCeiling("9b", "4b")).toBe("4b");
         expect(clampCeiling("32b", "4b")).toBe("4b");
     });
 
     it("allows 2b on every plan", () => {
         expect(clampCeiling("2b", "2b")).toBe("2b");
         expect(clampCeiling("2b", "4b")).toBe("2b");
-        expect(clampCeiling("2b", "14b")).toBe("2b");
+        expect(clampCeiling("2b", "9b")).toBe("2b");
         expect(clampCeiling("2b", "32b")).toBe("2b");
     });
 });
@@ -114,22 +114,22 @@ describe("clampCeiling", () => {
 
 describe("ceilingExceeded", () => {
     it("returns true when request exceeds ceiling", () => {
-        expect(ceilingExceeded("14b", "4b")).toBe(true);
-        expect(ceilingExceeded("32b", "14b")).toBe(true);
+        expect(ceilingExceeded("9b", "4b")).toBe(true);
+        expect(ceilingExceeded("32b", "9b")).toBe(true);
         expect(ceilingExceeded("32b", "4b")).toBe(true);
-        expect(ceilingExceeded("14b", "4b")).toBe(true);
+        expect(ceilingExceeded("9b", "4b")).toBe(true);
     });
 
     it("returns false when request is at or below ceiling", () => {
         expect(ceilingExceeded("4b", "4b")).toBe(false);
-        expect(ceilingExceeded("4b", "14b")).toBe(false);
+        expect(ceilingExceeded("4b", "9b")).toBe(false);
         expect(ceilingExceeded("2b", "4b")).toBe(false);
-        expect(ceilingExceeded("14b", "32b")).toBe(false);
+        expect(ceilingExceeded("9b", "32b")).toBe(false);
     });
 
     it("returns false for unknown models (safe fallback)", () => {
         expect(ceilingExceeded("70b", "4b")).toBe(false);
-        expect(ceilingExceeded("14b", "unknown")).toBe(false);
+        expect(ceilingExceeded("9b", "unknown")).toBe(false);
     });
 });
 
@@ -140,7 +140,7 @@ describe("getEntitlements cache", () => {
         _setCacheForTest(STANDARD_ENTITLEMENTS, 60_000);
         const result = await getEntitlements();
         expect(result.plan).toBe("standard");
-        expect(result.model_ceiling).toBe("14b");
+        expect(result.model_ceiling).toBe("9b");
     });
 
     it("returns free tier when cache expired and no auth", async () => {
@@ -190,7 +190,7 @@ describe("FREE_ENTITLEMENTS", () => {
 describe("tier enforcement matrix", () => {
     const tiers: Array<{ plan: string; ceiling: string; maxTokens: number; cloud: boolean; verifier: boolean }> = [
         { plan: "free", ceiling: "4b", maxTokens: 512, cloud: false, verifier: false },
-        { plan: "standard", ceiling: "14b", maxTokens: 1024, cloud: true, verifier: true },
+        { plan: "standard", ceiling: "9b", maxTokens: 1024, cloud: true, verifier: true },
         { plan: "advanced", ceiling: "32b", maxTokens: 2048, cloud: true, verifier: true },
         { plan: "enterprise", ceiling: "32b", maxTokens: 4096, cloud: true, verifier: true },
     ];
@@ -222,12 +222,12 @@ describe("tier enforcement matrix", () => {
     }
 
     // Cross-tier escalation attempts
-    it("free user requesting 14b gets clamped to 4b", () => {
-        expect(clampCeiling("14b", "4b")).toBe("4b");
+    it("free user requesting 9b gets clamped to 4b", () => {
+        expect(clampCeiling("9b", "4b")).toBe("4b");
     });
 
-    it("standard user requesting 32b gets clamped to 14b", () => {
-        expect(clampCeiling("32b", "14b")).toBe("14b");
+    it("standard user requesting 32b gets clamped to 9b", () => {
+        expect(clampCeiling("32b", "9b")).toBe("9b");
     });
 
     it("advanced user requesting 32b gets 32b", () => {

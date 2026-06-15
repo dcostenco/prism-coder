@@ -39,12 +39,12 @@ Open Claude Desktop or Cursor and your agent now has memory backed by a local SQ
 
 ```bash
 ollama pull dcostenco/prism-coder:2b    # 2.3 GB · mobile / lightweight (99.1% routing accuracy)
-ollama pull dcostenco/prism-coder:4b    # 3.4 GB · balanced (100% accuracy)
-ollama pull dcostenco/prism-coder:14b   # 8.4 GB · Mac default (100% accuracy)
-ollama pull dcostenco/prism-coder:32b   # 16 GB  · complex tasks (100% accuracy)
+ollama pull dcostenco/prism-coder:4b    # 3.4 GB · verifier (100% accuracy)
+ollama pull dcostenco/prism-coder:9b    # 5.8 GB · default router (100% accuracy, Qwen3.5)
+ollama pull dcostenco/prism-coder:32b   # 19 GB  · complex tasks (100% accuracy)
 ```
 
-Prism detects both the namespaced (`dcostenco/prism-coder:14b`) and bare (`prism-coder:14b`) Ollama tags automatically.
+Prism detects both the namespaced (`dcostenco/prism-coder:9b`) and bare (`prism-coder:9b`) Ollama tags automatically.
 
 ---
 
@@ -145,26 +145,40 @@ The free tier runs entirely on your machine. Paid tiers add cloud sync through t
 
 ## Models
 
-The `prism-coder` fleet uses Qwen3.5 for MCP tool-routing. The 14B and 32B are fine-tuned from Qwen3; the 2B and 4B slots use stock Qwen3.5-4B with prompt engineering at different quantization levels (100% routing accuracy without fine-tuning). They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
+The `prism-coder` fleet uses Qwen3.5 for MCP tool-routing. The 9B is fine-tuned with LoRA (r=128, all 64 layers including DeltaNet); the 2B and 4B use stock Qwen3.5-4B at different quantization levels. They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
 
 | Model | Ollama tag | Size | [BFCL](https://gorilla.cs.berkeley.edu/blogs/12_bfcl_v3_multi_turn.html) Accuracy | Role | Tier |
 |---|---|---|---|---|---|
 | Qwen3.5-4B Q3_K_M | `prism-coder:2b` | 2.3 GB | 99.1% × 3 seeds | iPhone / mobile first gate | Free |
-| Qwen3.5-4B Q4_K_M | `prism-coder:4b` | 3.4 GB | 100% × 3 seeds | Verifier + 8 GB+ devices | Free |
-| prism-coder:14b | `prism-coder:14b` | 8.4 GB | 100% × 3 seeds | Default router | Standard+ |
-| prism-coder:32b | `prism-coder:32b` | 16 GB | 100% × 3 seeds | Complex tasks | Advanced+ |
+| Qwen3.5-4B Q4_K_M | `prism-coder:4b` | 3.4 GB | 100% × 3 seeds | Verifier | Free |
+| Qwen3.5-9B (LoRA) | `prism-coder:9b` | 5.8 GB | 100% × 3 seeds | Default router | Standard+ |
+| prism-coder:32b | `prism-coder:32b` | 19 GB | 100% × 3 seeds | Complex tasks | Advanced+ |
 
 Weights: [huggingface.co/dcostenco](https://huggingface.co/dcostenco) (public GGUF). Latency depends on model size and hardware — see [Benchmarks](#benchmarks) to measure it on your own machine rather than trusting a printed number.
 
 ### Cascade
 
 ```
-query → prism-coder:14b (local router, Mac default)
-      → qwen3.5:4b (grounding verifier)
+query → prism-coder:9b (local router, default)
+      → prism-coder:4b (grounding verifier)
       → prism-coder:2b (iPhone / mobile, auto-selected by RAM)
       → prism-coder:32b (complex tasks, on demand)
       → cloud fallback (paid tiers, for max quality)
 ```
+
+### Multi-Layer Verification
+
+Every tool-grounded answer on paid tiers passes through deterministic L3 routing rules and an NLI grounding verifier before reaching the user. Free-tier users get the deterministic gates (L1, L3-Tool, L3-Tier0) without the model-based NLI check.
+
+| Layer | What | Model | Cost |
+|---|---|---|---|
+| **L1** | Crisis/medical safety gate | None (regex) | 0 ms |
+| **L3-Tool** | Tool name remap + false-positive rejection | None (deterministic) | 0 ms |
+| **L3-Tier0** | Integer grounding (set membership) | None (deterministic) | 0 ms |
+| **L3-Tier2** | NLI verifier (claim → ENTAILED/NEUTRAL/CONTRADICTED) | prism-coder:2b | ~200 ms |
+| **L4** | Hallucination judge (opt-out for clinical) | prism-coder:4b | ~500 ms |
+
+Fail-closed on the verified path: when the grounding verifier runs (Standard tier and up), timeout, ambiguity, or missing evidence yields a refusal, not pass-through. Free-tier users get the deterministic L1/L3-Tool gates but not the NLI verifier.
 
 ---
 
@@ -175,15 +189,15 @@ query → prism-coder:14b (local router, Mac default)
 ```bash
 git clone https://github.com/dcostenco/prism-coder && cd prism-coder
 pip install anthropic requests
-python3 tests/benchmarks/prism-routing-100/benchmark.py --models 2b 4b 14b 32b
+python3 tests/benchmarks/prism-routing-100/benchmark.py --models 2b 4b 9b 32b
 ```
 
-**Routing eval (115 cases, 12 categories, 3-seed mean).** On this narrow tool-routing task all fleet models achieve near-perfect accuracy. Be honest with yourself about what that means: the eval is **near-saturated** for this taxonomy — it measures whether the right one of a small set of MCP tools is selected, not general capability. The useful takeaway is **offline routing reliability at zero cost**, not that a 2.3 GB model rivals a frontier model in general.
+**Routing eval (115 cases, 12 categories, 3-seed mean).** Routing accuracy includes the deterministic L3 correction layer — the same rules that run in production. On this narrow tool-routing task all fleet models achieve near-perfect accuracy. Be honest with yourself about what that means: the eval is **near-saturated** for this taxonomy — it measures whether the right one of a small set of MCP tools is selected, not general capability. The useful takeaway is **offline routing reliability at zero cost**, not that a 2.3 GB model rivals a frontier model in general.
 
 | Model | Routing accuracy | Notes |
 |---|---|---|
 | prism-coder:2b (Q3_K_M) | 99.1% × 3 seeds | 1 failure: regex→knowledge_search |
-| prism-coder:4b / 14b / 32b | 100% × 3 seeds | Perfect on all 115 cases |
+| prism-coder:4b / 9b / 32b | 100% × 3 seeds | Perfect on all 115 cases |
 | Claude (frontier, same eval) | ~98% | Stronger everywhere outside this narrow task |
 
 **Memory uplift (LoCoMo-Plus, self-published).** A separate long-context dialogue benchmark ([dcostenco/Locomo-Plus](https://github.com/dcostenco/Locomo-Plus)) measures how much structured memory helps a base model retain multi-day context. Results show large gains when a model is paired with Prism memory versus running raw. Note this benchmark is authored, run, and LLM-judged by this project — treat it as a reproducible demonstration, not an independent third-party result, and run it yourself with the commands in that repo.
@@ -240,7 +254,7 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 | | **Free** | **Standard** $19/mo | **Advanced** $49/mo | **Enterprise** $99/mo |
 |---|---|---|---|---|
 | Seats | 1 | 1 | up to 5 | up to 25 |
-| Local model ceiling | up to 4b | up to 14b | up to 32b | up to 32b |
+| Local model ceiling | up to 4b | up to 9b | up to 32b | up to 32b |
 | Daily cloud inference | -- | 200 | 2,000 | 100,000 |
 | Cloud Coder (Web IDE) | -- | 100/day | 1,000/day | 100,000/day |
 | Cloud search | -- | 50/day | 500/day | 100,000/day |
@@ -370,6 +384,28 @@ See [github.com/dcostenco/prism-aac](https://github.com/dcostenco/prism-aac)
 
 ---
 
+## Git Hooks (Portable)
+
+Pre-commit and pre-push security hooks that work with any editor, any AI tool, and direct CLI. No Claude Code dependency.
+
+```bash
+# Install in all repos (one-time)
+bash synalux-private/scripts/install-git-hooks.sh
+
+# Or install manually in a single repo
+cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+cp hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+```
+
+| Hook | What it checks | Mode |
+|------|----------------|------|
+| `pre-commit` | Dead code, orphan services, scaffold code, missing auth | `PRECOMMIT_MODE=advisory\|block\|off` |
+| `pre-push` | 19-rule security audit (SSRF, SQL injection, secrets, IDOR, etc.) | `PREPUSH_MODE=advisory\|block\|off` |
+
+Default mode is `advisory` (warn but allow). Set `*_MODE=block` for hard enforcement. Hooks look for full audit scripts in the repo first (`hooks/lib/`), then `~/.claude/hooks/` fallback, then minimal inline checks.
+
+---
+
 ## Self-hosting (Enterprise)
 
 Run the full model stack on your own hardware — no cloud, full data sovereignty.
@@ -377,11 +413,11 @@ Run the full model stack on your own hardware — no cloud, full data sovereignt
 **Requirements:** Mac M2 Pro+ (48 GB recommended) or Linux + NVIDIA GPU, plus [Ollama](https://ollama.com).
 
 ```bash
-ollama pull dcostenco/prism-coder:14b      # default router
+ollama pull dcostenco/prism-coder:9b       # default router
 export LOCAL_LLM_URL=http://localhost:11434
 ```
 
-Routing is automatic: `14b → 4b → cloud fallback` on desktop/server, `2b → cloud fallback` on mobile/iPhone. For iOS or another machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point `LOCAL_LLM_URL` at the host's IP.
+Routing is automatic: `9b → 4b → cloud fallback` on desktop/server, `2b → cloud fallback` on mobile/iPhone. For iOS or another machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point `LOCAL_LLM_URL` at the host's IP.
 
 ---
 

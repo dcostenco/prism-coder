@@ -6,7 +6,7 @@
  * to enforce model ceiling, max_tokens, and feature gates.
  *
  * Unauthenticated users (no SYNALUX_API_KEY) get free-tier defaults.
- * Authenticated users get their plan from the portal (1-hour cache).
+ * Authenticated users get their plan from the portal (5-minute cache).
  */
 
 import { getSynaluxJwt } from "./synaluxJwt.js";
@@ -116,14 +116,19 @@ async function fetchEntitlements(): Promise<PrismEntitlements> {
         });
 
         if (!res.ok) {
-            debugLog(`[entitlements] portal HTTP ${res.status} — free tier fallback`);
+            debugLog(`[entitlements] portal HTTP ${res.status}`);
+            if (cache) {
+                debugLog("[entitlements] using last-known-good (safety fail-closed)");
+                return cache.entitlements;
+            }
             return FREE_ENTITLEMENTS;
         }
 
         const data = (await res.json()) as PrismEntitlements;
 
         if (!data.plan || !data.model_ceiling) {
-            debugLog("[entitlements] malformed response — free tier fallback");
+            debugLog("[entitlements] malformed response");
+            if (cache) return cache.entitlements;
             return FREE_ENTITLEMENTS;
         }
 
@@ -134,8 +139,15 @@ async function fetchEntitlements(): Promise<PrismEntitlements> {
         return data;
     } catch (err) {
         debugLog(
-            `[entitlements] fetch error: ${err instanceof Error ? err.message : String(err)} — free tier fallback`,
+            `[entitlements] fetch error: ${err instanceof Error ? err.message : String(err)}`,
         );
+        // F1 fix: fail-closed — keep last-known-good entitlements on fetch error.
+        // Safety controls (grounding_verifier) must not degrade on availability failures.
+        if (cache) {
+            debugLog("[entitlements] using last-known-good (safety fail-closed)");
+            return cache.entitlements;
+        }
+        debugLog("[entitlements] no cached entitlements — free tier fallback (cold start)");
         return FREE_ENTITLEMENTS;
     }
 }
@@ -157,7 +169,14 @@ export async function getEntitlements(): Promise<PrismEntitlements> {
     inFlight = (async () => {
         try {
             const ent = await fetchEntitlements();
-            cache = { entitlements: ent, expiresAt: Date.now() + CACHE_TTL_MS };
+            // Only update cache if this is a REAL fetch (not a cached fallback).
+            // fetchEntitlements returns cache.entitlements on error — detect by
+            // checking if the returned object is the exact same reference.
+            const isFallback = cache && ent === cache.entitlements;
+            if (!isFallback) {
+                cache = { entitlements: ent, expiresAt: Date.now() + CACHE_TTL_MS };
+            }
+            // On fallback: DON'T refresh expiresAt — let it expire so we retry.
             return ent;
         } finally {
             inFlight = null;
