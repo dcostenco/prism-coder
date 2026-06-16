@@ -275,6 +275,20 @@ class Trie:
 | Think mode | Enabled (stripped before serving) | N/A |
 | Quality gate | Passed (no escalation needed) | N/A |
 
+### Cloud Escalation in Practice (`cloud_fallback: true`)
+
+The same three tasks with `cloud_fallback: true` — the quality gate decides whether local output is good enough or needs cloud escalation.
+
+| Task | used_cloud | Quality Gate | Latency | What happened |
+|------|:----------:|-------------|---------|---------------|
+| Fibonacci (simple) | **no** | Passed | 11s | 27B served directly, $0 |
+| LRU Cache (medium) | **no** | Passed | 21s | 27B served directly, $0 |
+| Trie (hard) | **yes** | `loop_detected` | 55s | 27B looped → gate caught it → escalated to cloud 27B |
+
+The quality gate detected repeated sentences (≥3 of the same sentence in ≥6 total) in the 27B's Trie output and escalated automatically. The cloud fallback returned clean code. On a second run of the same prompt, the 27B produced clean output without escalation — the loop is stochastic, not systematic.
+
+**Takeaway:** for ~80–90% of coding tasks, the 27B handles everything locally at $0. The quality gate + cloud escalation exists as a safety net for the remaining cases where the local model loops, truncates, or produces empty output. Paid tiers get automatic escalation; free tier gets the local result with a warning.
+
 ---
 
 ## Why Prism Coder
