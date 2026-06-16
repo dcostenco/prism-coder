@@ -45,7 +45,44 @@ describe("passesQualityGate", () => {
     });
 
     it("does NOT false-positive on refusal text (no regex gate)", () => {
-        // "I cannot" is legitimate text — quality gate should NOT reject it
         expect(passesQualityGate("I cannot stress this enough: always use TypeScript.", false).pass).toBe(true);
+    });
+
+    it("does NOT false-positive on code with repeated patterns in fenced blocks", () => {
+        const trieCode = [
+            "Here's a Trie implementation:",
+            "```python",
+            "class Trie:",
+            "    def insert(self, word):",
+            "        node = self.root",
+            "        for char in word:",
+            "            node = node.children[char]",
+            "",
+            "    def search(self, word):",
+            "        node = self.root",
+            "        for char in word:",
+            "            node = node.children[char]",
+            "",
+            "    def starts_with(self, prefix):",
+            "        node = self.root",
+            "        for char in prefix:",
+            "            node = node.children[char]",
+            "",
+            "    def _get_node(self, key):",
+            "        node = self.root",
+            "        for char in key:",
+            "            node = node.children[char]",
+            "```",
+        ].join("\n");
+        const r = passesQualityGate(trieCode, false);
+        expect(r.pass).toBe(true);
+    });
+
+    it("still detects loops in prose outside code blocks", () => {
+        const loopyProse = "```python\nprint('ok')\n```\n" +
+            "The model is working. ".repeat(7);
+        const r = passesQualityGate(loopyProse, false);
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("loop_detected");
     });
 });
