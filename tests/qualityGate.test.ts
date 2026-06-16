@@ -85,4 +85,110 @@ describe("passesQualityGate", () => {
         expect(r.pass).toBe(false);
         expect(r.reason).toBe("loop_detected");
     });
+
+    it("does NOT false-positive on markdown tables with repeated headers", () => {
+        const bip = [
+            "# Goal 1: Manding",
+            "| Component | Details |",
+            "|-----------|---------|",
+            "| Baseline | 2/10 opportunities |",
+            "",
+            "# Goal 2: Tacting",
+            "| Component | Details |",
+            "|-----------|---------|",
+            "| Baseline | 3/10 opportunities |",
+            "",
+            "# Goal 3: Listener Responding",
+            "| Component | Details |",
+            "|-----------|---------|",
+            "| Baseline | 1/10 opportunities |",
+            "",
+            "# Goal 4: Social Skills",
+            "| Component | Details |",
+            "|-----------|---------|",
+            "| Baseline | 0/10 opportunities |",
+        ].join("\n");
+        expect(passesQualityGate(bip, false).pass).toBe(true);
+    });
+
+    it("does NOT false-positive on repeated markdown headings in clinical templates", () => {
+        const sessionNote = [
+            "# Session Notes",
+            "## Goal 1: AAC Manding",
+            "### Intervention",
+            "DTT with AAC device, 5-second delay prompting.",
+            "### Response",
+            "Client initiated 4/5 requests independently.",
+            "### Progress",
+            "80% accuracy, up from 60% baseline.",
+            "## Goal 2: Following Instructions",
+            "### Intervention",
+            "Natural environment teaching with visual supports.",
+            "### Response",
+            "Client followed 3/5 two-step instructions.",
+            "### Progress",
+            "60% accuracy, stable from last session.",
+            "## Goal 3: Peer Play",
+            "### Intervention",
+            "Structured play with peer model and reinforcement.",
+            "### Response",
+            "Client initiated 2 interactions during 15-min play.",
+            "### Progress",
+            "Improvement from 0 initiations at baseline.",
+        ].join("\n");
+        expect(passesQualityGate(sessionNote, false).pass).toBe(true);
+    });
+
+    it("does NOT false-positive on bold list labels repeated across template sections", () => {
+        const crisisProtocol = [
+            "# Client A: SIB",
+            "*   **De-escalation:**",
+            "Redirect client to sensory tools. Maintain calm voice.",
+            "*   **Environment Modifications:**",
+            "Pad hard surfaces. Remove sharp objects from area.",
+            "*   **Crisis Response:**",
+            "If injury occurs, apply first aid. Document in incident log.",
+            "",
+            "# Client B: Aggression",
+            "*   **De-escalation:**",
+            "Give space. Offer choices. Use visual timer.",
+            "*   **Environment Modifications:**",
+            "Separate seating areas. Clear breakable items.",
+            "*   **Crisis Response:**",
+            "Ensure safety of other clients. Document and notify supervisor.",
+            "",
+            "# Client C: Elopement",
+            "*   **De-escalation:**",
+            "Verbal prompts to return. Offer preferred activity.",
+            "*   **Environment Modifications:**",
+            "Door alarms active. GPS tracker charged.",
+            "*   **Crisis Response:**",
+            "Follow elopement protocol. Call 911 if not located in 5 min.",
+            "",
+            "# Client D: Pica",
+            "*   **De-escalation:**",
+            "Redirect to safe oral stimulation items.",
+            "*   **Environment Modifications:**",
+            "Lock cleaning supplies. Regular floor sweeps.",
+            "*   **Crisis Response:**",
+            "If ingestion suspected, call Poison Control. Document item.",
+        ].join("\n");
+        expect(passesQualityGate(crisisProtocol, false).pass).toBe(true);
+    });
+
+    it("still catches real prose loops even with headings present", () => {
+        const loopyWithHeadings = [
+            "# Analysis",
+            "The client needs more support. The intervention was effective.",
+            "The client needs more support. The intervention was effective.",
+            "The client needs more support. The intervention was effective.",
+            "The client needs more support. The intervention was effective.",
+            "The client needs more support. The intervention was effective.",
+            "The client needs more support. The intervention was effective.",
+            "The client needs more support. The intervention was effective.",
+        ].join("\n");
+        const r = passesQualityGate(loopyWithHeadings, false);
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("loop_detected");
+    });
 });

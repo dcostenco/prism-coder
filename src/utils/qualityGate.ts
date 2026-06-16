@@ -41,9 +41,12 @@ export function passesQualityGate(
     }
 
     // Signal 4: Exact-loop — same sentence repeated 3+ times (prose only).
-    // Strip fenced code blocks first — code naturally repeats patterns
-    // (e.g. `node = self.root` in every Trie method) that aren't loops.
-    const proseOnly = stripped.replace(/```[\s\S]*?```/g, "");
+    // Strip structural markdown that naturally repeats across template sections:
+    const proseOnly = stripped
+        .replace(/```[\s\S]*?```/g, "")
+        .replace(/^\|.*\|$/gm, "")
+        .replace(/^#{1,6}\s+.*$/gm, "")
+        .replace(/^[\s*-]*\*{1,2}[^*]+\*{1,2}:?\s*$/gm, "");
     const sentences = proseOnly.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 10);
     if (sentences.length >= 6) {
         const counts = new Map<string, number>();
