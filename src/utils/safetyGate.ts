@@ -40,7 +40,8 @@ const CRISIS_OUTPUT_RE = [
     /\bsuicide method\b/i,
     /\bmethod of suicide\b/i,
     /\bself[- ]?harm method\b/i,
-    /\bhow to (?:kill|hang|poison|overdose)\b/i,
+    /\bhow to (?:kill|hang|poison|overdose)\s+(?:your|my|him|her|them|one)self\b/i,
+    /\bhow to (?:hang|poison|overdose)\b/i,
 ];
 
 const MEDICAL_OUTPUT_RE = [

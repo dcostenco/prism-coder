@@ -88,8 +88,11 @@ describe("checkOutputSafety", () => {
         it("intercepts hanging instructions", () => {
             expect(checkOutputSafety("Try hanging yourself from")).toBe(CRISIS_RESPONSE);
         });
-        it("intercepts how-to-kill", () => {
+        it("intercepts how-to-kill-yourself", () => {
             expect(checkOutputSafety("Here is how to kill yourself")).toBe(CRISIS_RESPONSE);
+        });
+        it("intercepts how-to-kill-himself", () => {
+            expect(checkOutputSafety("Instructions on how to kill himself")).toBe(CRISIS_RESPONSE);
         });
         it("intercepts how-to-overdose", () => {
             expect(checkOutputSafety("Here is how to overdose on pills")).toBe(CRISIS_RESPONSE);
@@ -120,6 +123,25 @@ describe("checkOutputSafety", () => {
             "The client's suicide risk assessment score decreased from 8 to 3",
         ];
         for (const output of clinicalOutputs) {
+            it(`passes through: "${output.slice(0, 60)}..."`, () => {
+                expect(checkOutputSafety(output)).toBe(output);
+            });
+        }
+    });
+
+    // ── BUCKET 2b: Coding false positives — must NOT intercept ──────────
+    describe("coding false positives (must pass through)", () => {
+        const codingOutputs = [
+            "Use `kill -9` to kill the process immediately",
+            "Here's how to kill a hung thread in Java using Thread.interrupt()",
+            "To kill a pod in Kubernetes: kubectl delete pod <name>",
+            "How to kill all node processes: pkill -f node",
+            "The kill command sends SIGTERM to the specified PID",
+            "Use kill -SIGKILL to forcefully kill the daemon",
+            "How to kill a background job: kill %1",
+            "Docker: how to kill a container — docker kill <id>",
+        ];
+        for (const output of codingOutputs) {
             it(`passes through: "${output.slice(0, 60)}..."`, () => {
                 expect(checkOutputSafety(output)).toBe(output);
             });
