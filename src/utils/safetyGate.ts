@@ -24,31 +24,31 @@ const CRISIS_INPUT_RE = [
     /(?:hang|hanging)\s+(?:my)?self/i,
     /jump(?:ing)?\s+off/i,
     /how\s+(?:many|much|to).*(?:pills|overdose|die)/i,
-    // Spanish — negative lookahead for "de" (morir de risa/vergüenza = hyperbolic)
-    /quiero\s+morir(?!\s+de\b)/i,
-    /(?:voy\s+a\s+)?matarme(?!\s+(?:estudiando|trabajando|riendo))/i,
+    // Spanish — block only known hyperbole nouns (risa/vergüenza/ganas/hambre/sed/calor/frío)
+    /quiero\s+morir(?!\s+de\s+(?:risa|la\s+risa|vergüenza|ganas|hambre|sed|calor|fr[ií]o|sue[ñn]o|envidia|aburrimiento)\b)/i,
+    /(?:voy\s+a\s+)?matarme(?!\s+(?:estudiando|trabajando|riendo|de\s+(?:risa|la\s+risa))\b)/i,
     /hacerme\s+da[ñn]o/i,
     /(?:quiero\s+)?suicidarme/i,
-    // French — negative lookahead for "de" (mourir de honte/rire = hyperbolic)
-    /je\s+veux\s+mourir(?!\s+de\b)/i,
-    /(?:vais\s+)?me\s+tuer(?!\s+[àa]\s+(?:rire|travailler))/i,
+    // French — block hyperbole nouns (rire/honte/envie/faim/soif/chaud/froid)
+    /je\s+veux\s+mourir(?!\s+d[e']\s*(?:rire|honte|envie|faim|soif|chaud|froid|ennui)\b)/i,
+    /(?:vais\s+)?me\s+tuer(?!\s+[àa]\s+(?:rire|travailler|étudier)\b)/i,
     /me\s+suicider/i,
-    // Portuguese — negative lookahead for "de" (morrer de rir = hyperbolic)
-    /quero\s+morrer(?!\s+de\b)/i,
-    /(?:vou\s+)?me\s+matar(?!\s+(?:estudando|trabalhando|rindo))/i,
-    // Russian — negative lookahead for "от" (умереть от смеха = hyperbolic)
-    /хочу\s+умереть(?!\s+от\s)/i,
+    // Portuguese — block hyperbole nouns (rir/vergonha/fome/sede/calor)
+    /quero\s+morrer(?!\s+de\s+(?:rir|vergonha|fome|sede|calor|frio|sono|inveja|tédio)\b)/i,
+    /(?:vou\s+)?me\s+matar(?!\s+(?:estudando|trabalhando|rindo|de\s+(?:rir|tanto))\b)/i,
+    // Russian — block hyperbole nouns (смех/стыд/зависть/голод/жара/скука)
+    /хочу\s+умереть(?!\s+от\s+(?:смеха|стыда|зависти|голода|жары|скуки|холода)(?:\s|$))/i,
     /убить\s+себя/i,
     /покончить\s+с\s+собой/i,
     // Arabic (alef variants handled in normalize)
     /[اأإآ]ر[يى]د\s+[اأإآ]ن\s+[اأإآ]موت/,
     /قتل\s+نفس[يى]/,
     /[اأإآ]نه[يى]\s+ح[يى][اأإآ]ت[يى]/,
-    // German — negative lookahead for "vor" (sterben vor Lachen = hyperbolic)
-    /(?:ich\s+)?will\s+sterben(?!\s+vor\b)/i,
+    // German — block hyperbole nouns (Lachen/Scham/Neid/Hunger/Langeweile)
+    /(?:ich\s+)?will\s+sterben(?!\s+vor\s+(?:lachen|scham|neid|hunger|langeweile|kälte)\b)/i,
     /mich\s+umbringen/i,
-    // Ukrainian — negative lookahead for "від" (померти від сміху = hyperbolic)
-    /хочу\s+померти(?!\s+від\s)/i,
+    // Ukrainian — block hyperbole nouns (сміх/сором/заздрість/голод)
+    /хочу\s+померти(?!\s+від\s+(?:сміху|сорому|заздрості|голоду|холоду|нудьги)(?:\s|$))/i,
     /вбити\s+себе/i,
 ];
 

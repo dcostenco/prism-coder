@@ -82,6 +82,26 @@ describe("checkInputSafety", () => {
         }
     });
 
+    // ── i18n: genuine distress with prepositions (MUST intercept) ──────────
+    describe("i18n genuine distress (must intercept despite preposition)", () => {
+        const genuineDistress = [
+            "quiero morir de verdad",           // Spanish: "I truly want to die"
+            "quiero morir de una vez",          // Spanish: "once and for all"
+            "quiero morir de dolor",            // Spanish: "die from pain"
+            "je veux mourir de désespoir",      // French: "die from despair"
+            "je veux mourir d'épuisement",      // French: "die from exhaustion"
+            "quero morrer de tristeza",         // Portuguese: "die from sadness"
+            "хочу умереть от этой боли",        // Russian: "die from this pain"
+            "ich will sterben vor Verzweiflung", // German: "die from despair"
+            "хочу померти від розпачу",         // Ukrainian: "die from despair"
+        ];
+        for (const input of genuineDistress) {
+            it(`intercepts genuine: "${input}"`, () => {
+                expect(checkInputSafety(input)).toBe(CRISIS_RESPONSE);
+            });
+        }
+    });
+
     describe("i18n false positives — benign + hyperbolic idioms (must NOT intercept)", () => {
         const i18nSafe = [
             "quiero comer",                    // Spanish: "I want to eat"
@@ -95,6 +115,7 @@ describe("checkInputSafety", () => {
             "voy a matarme estudiando",        // Spanish: "killing myself studying"
             "je veux mourir de honte",         // French: "dying of shame"
             "je veux mourir de rire",          // French: "dying of laughter"
+            "je veux mourir d'envie",          // French: "dying to / eager to"
             "quero morrer de rir",             // Portuguese: "dying of laughter"
             "хочу умереть от смеха",           // Russian: "dying of laughter"
             "ich will sterben vor Lachen",     // German: "dying of laughter"
