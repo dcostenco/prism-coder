@@ -140,6 +140,13 @@ describe("checkOutputSafety", () => {
             "Use kill -SIGKILL to forcefully kill the daemon",
             "How to kill a background job: kill %1",
             "Docker: how to kill a container — docker kill <id>",
+            "How to hang a picture frame on drywall",
+            "How to hang up a call in Twilio using hangUp()",
+            "How to hang curtains without drilling",
+            "How to hang the splash screen until fonts load",
+            "How to poison the DNS cache for testing",
+            "A poison pill message terminates the consumer",
+            "How to poison a queue to trigger dead-letter routing",
         ];
         for (const output of codingOutputs) {
             it(`passes through: "${output.slice(0, 60)}..."`, () => {
