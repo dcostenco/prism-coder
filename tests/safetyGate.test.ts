@@ -82,19 +82,42 @@ describe("checkInputSafety", () => {
         }
     });
 
-    describe("i18n false positives (must NOT intercept)", () => {
+    describe("i18n false positives — benign + hyperbolic idioms (must NOT intercept)", () => {
         const i18nSafe = [
             "quiero comer",                    // Spanish: "I want to eat"
             "je veux manger",                  // French: "I want to eat"
             "quero brincar",                   // Portuguese: "I want to play"
             "хочу спать",                      // Russian: "I want to sleep"
             "ich will spielen",                // German: "I want to play"
+            // Hyperbolic idioms — everyday expressions, especially from kids
+            "quiero morir de risa",            // Spanish: "dying of laughter"
+            "quiero morir de vergüenza",       // Spanish: "dying of embarrassment"
+            "voy a matarme estudiando",        // Spanish: "killing myself studying"
+            "je veux mourir de honte",         // French: "dying of shame"
+            "je veux mourir de rire",          // French: "dying of laughter"
+            "quero morrer de rir",             // Portuguese: "dying of laughter"
+            "хочу умереть от смеха",           // Russian: "dying of laughter"
+            "ich will sterben vor Lachen",     // German: "dying of laughter"
+            "хочу померти від сміху",          // Ukrainian: "dying of laughter"
         ];
         for (const input of i18nSafe) {
             it(`does NOT intercept: "${input}"`, () => {
                 expect(checkInputSafety(input)).toBeNull();
             });
         }
+    });
+
+    // ── Arabic orthography variations ──────────────────────────────────────
+    describe("Arabic orthography (alef variants + harakat)", () => {
+        it("catches casual Arabic without hamza (اريد ان اموت)", () => {
+            expect(checkInputSafety("اريد ان اموت")).toBe(CRISIS_RESPONSE);
+        });
+        it("catches diacritized Arabic (أُرِيدُ أَنْ أَمُوتَ)", () => {
+            expect(checkInputSafety("أُرِيدُ أَنْ أَمُوتَ")).toBe(CRISIS_RESPONSE);
+        });
+        it("catches alef-madda variant (آريد)", () => {
+            expect(checkInputSafety("آريد أن أموت")).toBe(CRISIS_RESPONSE);
+        });
     });
 
     // ── BUCKET 3: Known evasion limits (documented, not intercepted) ──────
