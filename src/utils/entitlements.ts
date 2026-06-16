@@ -17,7 +17,7 @@ import { debugLog } from "./logger.js";
 
 export interface PrismEntitlements {
     plan: string;
-    model_ceiling: "2b" | "4b" | "9b" | "32b";
+    model_ceiling: "2b" | "4b" | "9b" | "27b";
     daily_infer_limit: number;
     max_tokens: number;
     max_seats: number;
@@ -63,7 +63,7 @@ let inFlight: Promise<PrismEntitlements> | null = null;
 
 // ── Model tier ordering for ceiling enforcement ───────────────────
 
-const TIER_ORDER: readonly string[] = ["2b", "4b", "9b", "32b"];
+const TIER_ORDER: readonly string[] = ["2b", "4b", "9b", "27b"];
 
 /**
  * Returns true if `requested` exceeds `ceiling`.

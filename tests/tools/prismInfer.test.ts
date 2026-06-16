@@ -6,7 +6,7 @@ const GB = 1024 ** 3;
 
 const ENTERPRISE_ENTITLEMENTS: PrismEntitlements = {
     plan: "enterprise",
-    model_ceiling: "32b",
+    model_ceiling: "27b",
     daily_infer_limit: 100000,
     max_tokens: 4096,
     max_seats: 25,
@@ -29,7 +29,7 @@ afterAll(() => {
 });
 
 const INSTALLED_ALL = new Set([
-    "prism-coder:32b",
+    "prism-coder:27b",
     "prism-coder:9b",
     "prism-coder:4b",
     "prism-coder:2b",
@@ -52,37 +52,37 @@ function args(extra: Partial<PrismInferArgs> = {}): PrismInferArgs {
 }
 
 describe("runInfer — local-first cascade", () => {
-    it("hits 32B first on a high-RAM box", async () => {
+    it("hits 27B first on a high-RAM box", async () => {
         const calls: string[] = [];
         const deps = makeDeps({
             callLocal: async (_url, model) => {
                 calls.push(model);
-                return { ok: true as const, text: "pong-32b" };
+                return { ok: true as const, text: "pong-27b" };
             },
         });
         const r = await runInfer(args(), deps);
-        expect(r.backend).toBe("ollama-32b");
-        expect(r.model_picked).toBe("prism-coder:32b");
-        expect(r.output).toBe("pong-32b");
+        expect(r.backend).toBe("ollama-27b");
+        expect(r.model_picked).toBe("prism-coder:27b");
+        expect(r.output).toBe("pong-27b");
         expect(r.used_cloud).toBe(false);
-        expect(calls).toEqual(["prism-coder:32b"]);
+        expect(calls).toEqual(["prism-coder:27b"]);
     });
 
-    it("falls down to 9B when 32B fails", async () => {
+    it("falls down to 9B when 27B fails", async () => {
         const calls: string[] = [];
         const deps = makeDeps({
             callLocal: async (_url, model) => {
                 calls.push(model);
-                if (model === "prism-coder:32b") return { ok: false as const, reason: "timeout" };
+                if (model === "prism-coder:27b") return { ok: false as const, reason: "timeout" };
                 return { ok: true as const, text: `pong-${model}` };
             },
         });
         const r = await runInfer(args(), deps);
-        expect(calls).toEqual(["prism-coder:32b", "prism-coder:9b"]);
+        expect(calls).toEqual(["prism-coder:27b", "prism-coder:9b"]);
         expect(r.backend).toBe("ollama-9b");
     });
 
-    it("honors model_ceiling — 9b on a 64GB box never tries 32B", async () => {
+    it("honors model_ceiling — 9b on a 64GB box never tries 27B", async () => {
         const calls: string[] = [];
         const deps = makeDeps({
             freemem: () => 64 * GB,
@@ -109,11 +109,11 @@ describe("runInfer — local-first cascade", () => {
         });
         const r = await runInfer(args(), deps);
         expect(calls).toEqual(["prism-coder:4b"]);
-        expect(r.attempts).toContainEqual({ tier: "prism-coder:32b", reason: "not_pulled" });
+        expect(r.attempts).toContainEqual({ tier: "prism-coder:27b", reason: "not_pulled" });
         expect(r.attempts).toContainEqual({ tier: "prism-coder:9b", reason: "not_pulled" });
     });
 
-    it("RAM gate: 5 GB free skips 32B and 9B, picks 4b", async () => {
+    it("RAM gate: 5 GB free skips 27B and 9B, picks 4b", async () => {
         const calls: string[] = [];
         const deps = makeDeps({
             freemem: () => 5 * GB,
@@ -200,33 +200,33 @@ describe("runInfer — telemetry", () => {
 });
 
 describe("runInfer — warm-model bypass", () => {
-    it("uses already-loaded 32B even when freemem says insufficient", async () => {
+    it("uses already-loaded 27B even when freemem says insufficient", async () => {
         const calls: string[] = [];
         const deps = makeDeps({
             freemem: () => 2 * GB, // would normally block everything
-            listLoaded: async () => new Set(["prism-coder:32b"]),
+            listLoaded: async () => new Set(["prism-coder:27b"]),
             callLocal: async (_url, model) => {
                 calls.push(model);
-                return { ok: true as const, text: "warm-32b" };
+                return { ok: true as const, text: "warm-27b" };
             },
         });
         const r = await runInfer(args(), deps);
-        expect(calls).toEqual(["prism-coder:32b"]);
-        expect(r.backend).toBe("ollama-32b");
-        expect(r.output).toBe("warm-32b");
+        expect(calls).toEqual(["prism-coder:27b"]);
+        expect(r.backend).toBe("ollama-27b");
+        expect(r.output).toBe("warm-27b");
     });
 
     it("warm bypass respects model_ceiling", async () => {
         const calls: string[] = [];
         const deps = makeDeps({
             freemem: () => 2 * GB,
-            listLoaded: async () => new Set(["prism-coder:32b", "prism-coder:9b"]),
+            listLoaded: async () => new Set(["prism-coder:27b", "prism-coder:9b"]),
             callLocal: async (_url, model) => {
                 calls.push(model);
                 return { ok: true as const, text: "ok" };
             },
         });
-        // ceiling forbids 32B; should pick 9B even though both are warm
+        // ceiling forbids 27B; should pick 9B even though both are warm
         const r = await runInfer(args({ model_ceiling: "9b" }), deps);
         expect(calls).toEqual(["prism-coder:9b"]);
         expect(r.model_picked).toBe("prism-coder:9b");

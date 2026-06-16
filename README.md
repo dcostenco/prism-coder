@@ -11,7 +11,7 @@
   <img src="docs/v11_hivemind_multi_agent_dashboard.jpg" alt="Prism Coder — Mind Palace Dashboard with Knowledge Graph and Multi-Agent Hivemind" width="700" />
 </p>
 
-Prism Coder is an [MCP server](https://modelcontextprotocol.io) that gives Claude, Cursor, and other AI tools long-term memory that survives across sessions. It ships with the open-weight `prism-coder` model fleet (2B–32B) for fast, offline tool-routing — no cloud required.
+Prism Coder is an [MCP server](https://modelcontextprotocol.io) that gives Claude, Cursor, and other AI tools long-term memory that survives across sessions. It ships with the open-weight `prism-coder` model fleet (2B–27B) for fast, offline tool-routing — no cloud required.
 
 **No account needed. No API keys. Runs on your machine.**  
 A paid subscription adds cloud sync, higher model tiers, and team features through the [Synalux portal](https://synalux.ai).
@@ -41,7 +41,7 @@ Open Claude Desktop or Cursor and your agent now has memory backed by a local SQ
 ollama pull dcostenco/prism-coder:2b    # 2.3 GB · mobile / lightweight (99.1% routing accuracy)
 ollama pull dcostenco/prism-coder:4b    # 3.4 GB · verifier (100% accuracy)
 ollama pull dcostenco/prism-coder:9b    # 5.8 GB · default router (100% accuracy, Qwen3.5)
-ollama pull dcostenco/prism-coder:32b   # 19 GB  · complex tasks (100% accuracy)
+ollama pull dcostenco/prism-coder:27b   # 16 GB  · complex tasks (100% accuracy)
 ```
 
 Prism detects both the namespaced (`dcostenco/prism-coder:9b`) and bare (`prism-coder:9b`) Ollama tags automatically.
@@ -145,14 +145,14 @@ The free tier runs entirely on your machine. Paid tiers add cloud sync through t
 
 ## Models
 
-The `prism-coder` fleet uses Qwen3.5 for MCP tool-routing. The 9B is fine-tuned with LoRA (r=128, all 64 layers including DeltaNet); the 2B and 4B use stock Qwen3.5-4B at different quantization levels. They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
+The `prism-coder` fleet uses Qwen3.5 for MCP tool-routing. The 9B and 27B are fine-tuned with LoRA (r=128, all 64 layers including DeltaNet); the 2B and 4B use stock Qwen3.5-4B at different quantization levels. They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
 
 | Model | Ollama tag | Size | [BFCL](https://gorilla.cs.berkeley.edu/blogs/12_bfcl_v3_multi_turn.html) Accuracy | Role | Tier |
 |---|---|---|---|---|---|
 | Qwen3.5-4B Q3_K_M | `prism-coder:2b` | 2.3 GB | 99.1% × 3 seeds | iPhone / mobile first gate | Free |
 | Qwen3.5-4B Q4_K_M | `prism-coder:4b` | 3.4 GB | 100% × 3 seeds | Verifier | Free |
 | Qwen3.5-9B (LoRA) | `prism-coder:9b` | 5.8 GB | 100% × 3 seeds | Default router | Standard+ |
-| prism-coder:32b | `prism-coder:32b` | 19 GB | 100% × 3 seeds | Complex tasks | Advanced+ |
+| Qwen3.5-27B (LoRA) | `prism-coder:27b` | 16 GB | 100% × 3 seeds | Quality tier (DeltaNet, 28.5 tok/s) | Advanced+ |
 
 Weights: [huggingface.co/dcostenco](https://huggingface.co/dcostenco) (public GGUF). Latency depends on model size and hardware — see [Benchmarks](#benchmarks) to measure it on your own machine rather than trusting a printed number.
 
@@ -162,7 +162,7 @@ Weights: [huggingface.co/dcostenco](https://huggingface.co/dcostenco) (public GG
 query → prism-coder:9b (local router, default)
       → prism-coder:4b (grounding verifier)
       → prism-coder:2b (iPhone / mobile, auto-selected by RAM)
-      → prism-coder:32b (complex tasks, on demand)
+      → prism-coder:27b (complex tasks, on demand)
       → cloud fallback (paid tiers, for max quality)
 ```
 
@@ -189,7 +189,7 @@ Fail-closed on the verified path: when the grounding verifier runs (Standard tie
 ```bash
 git clone https://github.com/dcostenco/prism-coder && cd prism-coder
 pip install anthropic requests
-python3 tests/benchmarks/prism-routing-100/benchmark.py --models 2b 4b 9b 32b
+python3 tests/benchmarks/prism-routing-100/benchmark.py --models 2b 4b 9b 27b
 ```
 
 **Routing eval (115 cases, 12 categories, 3-seed mean).** Routing accuracy includes the deterministic L3 correction layer — the same rules that run in production. On this narrow tool-routing task all fleet models achieve near-perfect accuracy. Be honest with yourself about what that means: the eval is **near-saturated** for this taxonomy — it measures whether the right one of a small set of MCP tools is selected, not general capability. The useful takeaway is **offline routing reliability at zero cost**, not that a 2.3 GB model rivals a frontier model in general.
@@ -197,7 +197,7 @@ python3 tests/benchmarks/prism-routing-100/benchmark.py --models 2b 4b 9b 32b
 | Model | Routing accuracy | Notes |
 |---|---|---|
 | prism-coder:2b (Q3_K_M) | 99.1% × 3 seeds | 1 failure: regex→knowledge_search |
-| prism-coder:4b / 9b / 32b | 100% × 3 seeds | Perfect on all 115 cases |
+| prism-coder:4b / 9b / 27b | 100% × 3 seeds | Perfect on all 115 cases |
 | Claude (frontier, same eval) | ~98% | Stronger everywhere outside this narrow task |
 
 **Memory uplift (LoCoMo-Plus, self-published).** A separate long-context dialogue benchmark ([dcostenco/Locomo-Plus](https://github.com/dcostenco/Locomo-Plus)) measures how much structured memory helps a base model retain multi-day context. Results show large gains when a model is paired with Prism memory versus running raw. Note this benchmark is authored, run, and LLM-judged by this project — treat it as a reproducible demonstration, not an independent third-party result, and run it yourself with the commands in that repo.
@@ -254,7 +254,7 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 | | **Free** | **Standard** $19/mo | **Advanced** $49/mo | **Enterprise** $99/mo |
 |---|---|---|---|---|
 | Seats | 1 | 1 | up to 5 | up to 25 |
-| Local model ceiling | up to 4b | up to 9b | up to 32b | up to 32b |
+| Local model ceiling | up to 4b | up to 9b | up to 27b | up to 27b |
 | Daily cloud inference | -- | 200 | 2,000 | 100,000 |
 | Cloud Coder (Web IDE) | -- | 100/day | 1,000/day | 100,000/day |
 | Cloud search | -- | 50/day | 500/day | 100,000/day |

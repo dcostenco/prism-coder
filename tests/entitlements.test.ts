@@ -40,7 +40,7 @@ const STANDARD_ENTITLEMENTS: PrismEntitlements = {
 
 const ADVANCED_ENTITLEMENTS: PrismEntitlements = {
     plan: "advanced",
-    model_ceiling: "32b",
+    model_ceiling: "27b",
     daily_infer_limit: 2000,
     max_tokens: 2048,
     max_seats: 5,
@@ -65,25 +65,25 @@ beforeEach(() => {
 describe("clampCeiling", () => {
     it("returns plan ceiling when no request specified", () => {
         expect(clampCeiling(undefined, "4b")).toBe("4b");
-        expect(clampCeiling(undefined, "32b")).toBe("32b");
+        expect(clampCeiling(undefined, "27b")).toBe("27b");
     });
 
     it("returns requested ceiling when within plan limit", () => {
         expect(clampCeiling("4b", "9b")).toBe("4b");
-        expect(clampCeiling("2b", "32b")).toBe("2b");
+        expect(clampCeiling("2b", "27b")).toBe("2b");
         expect(clampCeiling("4b", "9b")).toBe("4b");
     });
 
     it("clamps requested ceiling to plan maximum", () => {
-        expect(clampCeiling("32b", "4b")).toBe("4b");
+        expect(clampCeiling("27b", "4b")).toBe("4b");
         expect(clampCeiling("9b", "4b")).toBe("4b");
-        expect(clampCeiling("32b", "9b")).toBe("9b");
+        expect(clampCeiling("27b", "9b")).toBe("9b");
     });
 
     it("returns equal ceiling when request matches plan", () => {
         expect(clampCeiling("4b", "4b")).toBe("4b");
         expect(clampCeiling("9b", "9b")).toBe("9b");
-        expect(clampCeiling("32b", "32b")).toBe("32b");
+        expect(clampCeiling("27b", "27b")).toBe("27b");
     });
 
     it("returns plan ceiling for unknown requested model", () => {
@@ -99,14 +99,14 @@ describe("clampCeiling", () => {
     it("free tier ceiling blocks all models above 4b", () => {
         expect(clampCeiling("9b", "4b")).toBe("4b");
         expect(clampCeiling("9b", "4b")).toBe("4b");
-        expect(clampCeiling("32b", "4b")).toBe("4b");
+        expect(clampCeiling("27b", "4b")).toBe("4b");
     });
 
     it("allows 2b on every plan", () => {
         expect(clampCeiling("2b", "2b")).toBe("2b");
         expect(clampCeiling("2b", "4b")).toBe("2b");
         expect(clampCeiling("2b", "9b")).toBe("2b");
-        expect(clampCeiling("2b", "32b")).toBe("2b");
+        expect(clampCeiling("2b", "27b")).toBe("2b");
     });
 });
 
@@ -115,8 +115,8 @@ describe("clampCeiling", () => {
 describe("ceilingExceeded", () => {
     it("returns true when request exceeds ceiling", () => {
         expect(ceilingExceeded("9b", "4b")).toBe(true);
-        expect(ceilingExceeded("32b", "9b")).toBe(true);
-        expect(ceilingExceeded("32b", "4b")).toBe(true);
+        expect(ceilingExceeded("27b", "9b")).toBe(true);
+        expect(ceilingExceeded("27b", "4b")).toBe(true);
         expect(ceilingExceeded("9b", "4b")).toBe(true);
     });
 
@@ -124,7 +124,7 @@ describe("ceilingExceeded", () => {
         expect(ceilingExceeded("4b", "4b")).toBe(false);
         expect(ceilingExceeded("4b", "9b")).toBe(false);
         expect(ceilingExceeded("2b", "4b")).toBe(false);
-        expect(ceilingExceeded("9b", "32b")).toBe(false);
+        expect(ceilingExceeded("9b", "27b")).toBe(false);
     });
 
     it("returns false for unknown models (safe fallback)", () => {
@@ -191,15 +191,15 @@ describe("tier enforcement matrix", () => {
     const tiers: Array<{ plan: string; ceiling: string; maxTokens: number; cloud: boolean; verifier: boolean }> = [
         { plan: "free", ceiling: "4b", maxTokens: 512, cloud: false, verifier: false },
         { plan: "standard", ceiling: "9b", maxTokens: 1024, cloud: true, verifier: true },
-        { plan: "advanced", ceiling: "32b", maxTokens: 2048, cloud: true, verifier: true },
-        { plan: "enterprise", ceiling: "32b", maxTokens: 4096, cloud: true, verifier: true },
+        { plan: "advanced", ceiling: "27b", maxTokens: 2048, cloud: true, verifier: true },
+        { plan: "enterprise", ceiling: "27b", maxTokens: 4096, cloud: true, verifier: true },
     ];
 
     for (const tier of tiers) {
         describe(`${tier.plan} plan`, () => {
             it(`ceiling is ${tier.ceiling}`, () => {
-                // Requesting 32b on this plan should clamp to tier ceiling
-                const clamped = clampCeiling("32b", tier.ceiling);
+                // Requesting 27b on this plan should clamp to tier ceiling
+                const clamped = clampCeiling("27b", tier.ceiling);
                 expect(clamped).toBe(tier.ceiling);
             });
 
@@ -226,11 +226,11 @@ describe("tier enforcement matrix", () => {
         expect(clampCeiling("9b", "4b")).toBe("4b");
     });
 
-    it("standard user requesting 32b gets clamped to 9b", () => {
-        expect(clampCeiling("32b", "9b")).toBe("9b");
+    it("standard user requesting 27b gets clamped to 9b", () => {
+        expect(clampCeiling("27b", "9b")).toBe("9b");
     });
 
-    it("advanced user requesting 32b gets 32b", () => {
-        expect(clampCeiling("32b", "32b")).toBe("32b");
+    it("advanced user requesting 27b gets 27b", () => {
+        expect(clampCeiling("27b", "27b")).toBe("27b");
     });
 });

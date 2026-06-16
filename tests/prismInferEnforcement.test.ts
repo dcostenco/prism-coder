@@ -2,7 +2,7 @@
  * prism_infer Tier Enforcement Tests
  *
  * Verifies that runInfer() correctly enforces entitlement gates:
- *   1. Model ceiling — free=4b, standard=14b, advanced/enterprise=32b
+ *   1. Model ceiling — free=4b, standard=14b, advanced/enterprise=27b
  *   2. Max tokens — clamped to plan limit
  *   3. Cloud fallback — blocked for free users
  *   4. Grounding verifier — blocked for free users
@@ -45,7 +45,7 @@ const STANDARD: PrismEntitlements = {
 
 const ADVANCED: PrismEntitlements = {
     plan: "advanced",
-    model_ceiling: "32b",
+    model_ceiling: "27b",
     daily_infer_limit: 2000,
     max_tokens: 2048,
     max_seats: 5,
@@ -61,7 +61,7 @@ const ADVANCED: PrismEntitlements = {
 
 const ENTERPRISE: PrismEntitlements = {
     plan: "enterprise",
-    model_ceiling: "32b",
+    model_ceiling: "27b",
     daily_infer_limit: 100_000,
     max_tokens: 4096,
     max_seats: 25,
@@ -85,7 +85,7 @@ function mockDeps(overrides: Partial<InferDeps> = {}): InferDeps {
             "qwen3.5:4b",
             "qwen3.5:4b",
             "prism-coder:14b",
-            "prism-coder:32b",
+            "prism-coder:27b",
         ]),
         listLoaded: async () => new Set<string>(),
         callLocal: vi.fn(async (
@@ -120,9 +120,9 @@ const baseArgs: PrismInferArgs = { prompt: "test prompt" };
 // ── 1. Model Ceiling Enforcement ─────────────────────────────────
 
 describe("model ceiling enforcement", () => {
-    it("free user requesting 32b gets clamped to 4b model", async () => {
+    it("free user requesting 27b gets clamped to 4b model", async () => {
         const deps = mockDeps({ entitlements: FREE });
-        const result = await runInfer({ ...baseArgs, model_ceiling: "32b" }, deps);
+        const result = await runInfer({ ...baseArgs, model_ceiling: "27b" }, deps);
 
         // callLocal should have been called with a model ≤ 4b
         const calls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
@@ -140,26 +140,26 @@ describe("model ceiling enforcement", () => {
         expect(modelUsed).toMatch(/2b|4b/);
     });
 
-    it("standard user requesting 32b gets clamped to 14b", async () => {
+    it("standard user requesting 27b gets clamped to 14b", async () => {
         const deps = mockDeps({ entitlements: STANDARD });
-        const result = await runInfer({ ...baseArgs, model_ceiling: "32b" }, deps);
+        const result = await runInfer({ ...baseArgs, model_ceiling: "27b" }, deps);
 
         const calls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
         const modelUsed = calls[0][1];
         expect(modelUsed).toMatch(/2b|4b|14b/);
-        expect(modelUsed).not.toMatch(/32b/);
+        expect(modelUsed).not.toMatch(/27b/);
     });
 
-    it("advanced user requesting 32b gets 32b (with sufficient RAM)", async () => {
+    it("advanced user requesting 27b gets 27b (with sufficient RAM)", async () => {
         const deps = mockDeps({
             entitlements: ADVANCED,
-            freemem: () => 32 * 1024 ** 3, // 32 GB — enough for 32b model (needs 24GB)
+            freemem: () => 32 * 1024 ** 3, // 32 GB — enough for 27b model (needs 24GB)
         });
-        const result = await runInfer({ ...baseArgs, model_ceiling: "32b" }, deps);
+        const result = await runInfer({ ...baseArgs, model_ceiling: "27b" }, deps);
 
         const calls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
         const modelUsed = calls[0][1];
-        expect(modelUsed).toMatch(/32b/);
+        expect(modelUsed).toMatch(/27b/);
     });
 
     it("free user with no ceiling specified gets 4b max", async () => {
@@ -366,13 +366,13 @@ describe("combined gate scenarios", () => {
         const result = await runInfer({
             prompt: "test",
             max_tokens: 8192,
-            model_ceiling: "32b",
+            model_ceiling: "27b",
             cloud_fallback: true,
             verify: true,
             evidence: [{ source: "x", content: "y" }],
         }, deps);
 
-        // Model: only 4b or lower (no 14b, no 32b)
+        // Model: only 4b or lower (no 14b, no 27b)
         const localCalls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
         for (const call of localCalls) {
             expect(call[1]).toMatch(/2b|4b/);
@@ -396,20 +396,20 @@ describe("combined gate scenarios", () => {
         const deps = mockDeps({
             entitlements: ENTERPRISE,
             callVerifier: verifierFn,
-            freemem: () => 32 * 1024 ** 3, // 32 GB — enough for 32b model
+            freemem: () => 32 * 1024 ** 3, // 32 GB — enough for 27b model
         });
 
         const result = await runInfer({
             prompt: "test",
             max_tokens: 4096,
-            model_ceiling: "32b",
+            model_ceiling: "27b",
             verify: true,
             evidence: [{ source: "x", content: "y" }],
         }, deps);
 
-        // Model: 32b available
+        // Model: 27b available
         const localCalls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
-        expect(localCalls[0][1]).toMatch(/32b/);
+        expect(localCalls[0][1]).toMatch(/27b/);
 
         // Tokens: full 4096
         expect(localCalls[0][4]).toBe(4096);
