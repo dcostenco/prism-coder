@@ -37,6 +37,7 @@ import { getEntitlements, clampCeiling, type PrismEntitlements, FREE_ENTITLEMENT
 import { ddLog } from "../utils/ddLogger.js";
 import { stripThink } from "../utils/thinkStrip.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
+import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
 
 // ─── Tool Definition ────────────────────────────────────────────
 
@@ -392,6 +393,20 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     const t0 = Date.now();
     const temperature = args.temperature ?? 0;
 
+    // ── L1 Safety — deterministic input interception ────────────
+    const safetyIntercept = checkInputSafety(args.prompt);
+    if (safetyIntercept) {
+        return {
+            output: safetyIntercept,
+            backend: "safety_gate",
+            model_picked: null,
+            ram_free_mb: Math.round(deps.freemem() / (1024 * 1024)),
+            latency_ms: Date.now() - t0,
+            used_cloud: false,
+            attempts: [{ tier: "l1_safety", reason: "crisis_or_medical_intercept" }],
+        };
+    }
+
     // ── Entitlement enforcement ──────────────────────────────────
     // Fetch user's plan limits (cached 1hr). Free users without auth
     // get 4b ceiling, 50 calls/day, 512 max tokens.
@@ -583,9 +598,12 @@ async function applyVerification(
     deps: InferDeps,
     partial: Omit<PrismInferResult, "output" | "verification">,
 ): Promise<PrismInferResult> {
+    // L1 output safety — intercept dangerous model-generated content
+    const safeDraft = checkOutputSafety(draft);
+
     const shouldVerify = args.verify ?? (args.evidence !== undefined && args.evidence.length > 0);
     if (!shouldVerify || !deps.callVerifier) {
-        return { ...partial, output: draft };
+        return { ...partial, output: safeDraft };
     }
     const verifier = deps.callVerifier;
     const outcome = await verifier({
@@ -597,7 +615,7 @@ async function applyVerification(
     });
     return {
         ...partial,
-        output: outcome.finalText,
+        output: checkOutputSafety(outcome.finalText),
         verification: {
             action: outcome.action,
             verifierChain: outcome.verifierChain,

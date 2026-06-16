@@ -40,20 +40,39 @@ export function passesQualityGate(
         return { pass: false, reason: "hard_truncation" };
     }
 
-    // Signal 4: Exact-loop — same sentence repeated 3+ times (prose only).
-    // Strip structural markdown that naturally repeats across template sections:
+    // Signal 4: Exact-loop detection (two passes).
+    //
+    // Pass A (prose-only, threshold ≥3): strip structural markdown that
+    // naturally repeats (code blocks, tables, headings, bold labels).
+    // Catches loops in explanatory text.
     const proseOnly = stripped
         .replace(/```[\s\S]*?```/g, "")
         .replace(/^\|.*\|$/gm, "")
         .replace(/^#{1,6}\s+.*$/gm, "")
         .replace(/^[\s*-]*\*{1,2}[^*]+\*{1,2}:?\s*$/gm, "");
-    const sentences = proseOnly.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 10);
-    if (sentences.length >= 6) {
+    const proseSentences = proseOnly.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 10);
+    if (proseSentences.length >= 6) {
         const counts = new Map<string, number>();
-        for (const s of sentences) {
+        for (const s of proseSentences) {
             const key = s.toLowerCase();
             counts.set(key, (counts.get(key) ?? 0) + 1);
             if ((counts.get(key) ?? 0) >= 3) {
+                return { pass: false, reason: "loop_detected" };
+            }
+        }
+    }
+
+    // Pass B (full text, threshold ≥5): catches egregious loops hidden
+    // inside fake code blocks or other structural elements. Higher
+    // threshold avoids false positives on legitimate code patterns
+    // (e.g. `node = self.root` × 4 is fine, × 5 is suspicious).
+    const allSentences = stripped.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 10);
+    if (allSentences.length >= 10) {
+        const counts = new Map<string, number>();
+        for (const s of allSentences) {
+            const key = s.toLowerCase();
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+            if ((counts.get(key) ?? 0) >= 5) {
                 return { pass: false, reason: "loop_detected" };
             }
         }

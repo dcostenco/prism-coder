@@ -191,4 +191,54 @@ describe("passesQualityGate", () => {
         expect(r.pass).toBe(false);
         expect(r.reason).toBe("loop_detected");
     });
+
+    // ── Loop evasion hardening (Pass B: full-text, threshold ≥5) ─────────
+
+    it("catches egregious loop hidden inside fake code block (≥5 repeats)", () => {
+        const fakeCodeLoop = [
+            "Here is the answer to your question about the topic:",
+            "Let me explain in detail below.",
+            "```",
+            "The solution is to restart the service and clear the cache.",
+            "The solution is to restart the service and clear the cache.",
+            "The solution is to restart the service and clear the cache.",
+            "The solution is to restart the service and clear the cache.",
+            "The solution is to restart the service and clear the cache.",
+            "The solution is to restart the service and clear the cache.",
+            "The solution is to restart the service and clear the cache.",
+            "The solution is to restart the service and clear the cache.",
+            "The solution is to restart the service and clear the cache.",
+            "The solution is to restart the service and clear the cache.",
+            "```",
+        ].join("\n");
+        const r = passesQualityGate(fakeCodeLoop, false);
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("loop_detected");
+    });
+
+    it("does NOT false-positive on code with 4 repeated patterns (below threshold)", () => {
+        const legitimateCode = [
+            "```python",
+            "class Trie:",
+            "    def insert(self, word):",
+            "        node = self.root",
+            "    def search(self, word):",
+            "        node = self.root",
+            "    def starts_with(self, prefix):",
+            "        node = self.root",
+            "    def _get_node(self, key):",
+            "        node = self.root",
+            "```",
+        ].join("\n");
+        expect(passesQualityGate(legitimateCode, false).pass).toBe(true);
+    });
+
+    it("catches loop wrapped in markdown heading evasion (≥5 full-text)", () => {
+        const headingEvasion = Array.from({ length: 6 }, (_, i) =>
+            `# Section ${i}\nThe model cannot answer this question at this time.`
+        ).join("\n");
+        const r = passesQualityGate(headingEvasion, false);
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("loop_detected");
+    });
 });
