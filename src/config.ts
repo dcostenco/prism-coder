@@ -445,11 +445,11 @@ export const PRISM_TURBOQUANT_TIEBREAKER_EPSILON =
     ? rawTiebreakerEpsilon
     : 0;
 
-// ─── v9.x: Local LLM (prism-coder:7b) Integration ─────────────────────────
+// ─── v9.x: Local LLM (prism-coder) Integration ────────────────────────────
 // Enables background tasks (compaction, task-router fallback, pipeline ops)
 // to use a local Ollama model instead of the cloud LLM provider.
 //
-// Default model is prism-coder:7b — fine-tuned on Prism tool schemas.
+// Default model is prism-coder:9b — fine-tuned on Prism tool schemas.
 // Disabled by default so existing deployments are unaffected.
 //
 // Set PRISM_LOCAL_LLM_ENABLED=true to activate.
@@ -458,13 +458,13 @@ export const PRISM_TURBOQUANT_TIEBREAKER_EPSILON =
 // Set PRISM_LOCAL_LLM_TIMEOUT_MS to override per-call timeout (default: 60000, max: 300000).
 // Set PRISM_STRICT_LOCAL_MODE=true to block cloud fallback when local LLM is enabled (HIPAA).
 
-/** Master switch — enables the local prism-coder:7b LLM for background tasks. */
+/** Master switch — enables the local prism-coder LLM for background tasks. */
 export const PRISM_LOCAL_LLM_ENABLED =
   process.env.PRISM_LOCAL_LLM_ENABLED === "true"; // Opt-in, default false
 
 /** Ollama model tag to use for local LLM calls. */
 export const PRISM_LOCAL_LLM_MODEL =
-  (process.env.PRISM_LOCAL_LLM_MODEL || "prism-coder:7b").trim();
+  (process.env.PRISM_LOCAL_LLM_MODEL || "prism-coder:9b").trim();
 
 /** Ollama base URL. Override for remote Ollama instances. */
 export const PRISM_LOCAL_LLM_URL =

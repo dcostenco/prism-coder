@@ -361,7 +361,7 @@ export async function sessionTaskRouteHandler(
 
   // ── v9.x: Local LLM second-opinion for low-confidence cases ──────────────
   // When confidence is below the threshold AND local LLM is enabled,
-  // ask prism-coder:7b to break the tie. This is purely additive — if the
+  // ask prism-coder:9b to break the tie. This is purely additive — if the
   // LLM call fails or times out, the original heuristic result is returned.
   if (
     PRISM_LOCAL_LLM_ENABLED &&
@@ -398,7 +398,7 @@ export async function sessionTaskRouteHandler(
 // ─── Local LLM Route Classifier ──────────────────────────────
 
 /**
- * Ask prism-coder:7b to classify a task description as "claw" or "host".
+ * Ask prism-coder:9b to classify a task description as "claw" or "host".
  * Returns the string or null if the model is unavailable / response unparseable.
  * Called only when heuristic confidence is below the threshold.
  */

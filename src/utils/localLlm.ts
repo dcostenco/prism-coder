@@ -1,5 +1,5 @@
 /**
- * Local LLM Client — Ollama/prism-coder:7b Integration (v1.0.0)
+ * Local LLM Client — Ollama/prism-coder:9b Integration (v1.0.0)
  * ──────────────────────────────────────────────────────────────────
  * Thin HTTP wrapper around the Ollama /api/chat endpoint.
  *
@@ -9,7 +9,7 @@
  *   - Silent fail: returning null instead of throwing ensures callers
  *     can fall back to Gemini without crashing the MCP server.
  *   - Fire-and-forget safe: wrapped in try/catch, never propagates.
- *   - Default model: prism-coder:7b — fine-tuned on Prism tool schemas,
+ *   - Default model: prism-coder:9b — fine-tuned on Prism tool schemas,
  *     8192-token context, Q8_0 quantization, ~8.1GB RAM footprint.
  *
  * FEATURE FLAG:

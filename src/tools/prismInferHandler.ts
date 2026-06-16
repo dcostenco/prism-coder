@@ -2,7 +2,7 @@
  * prism_infer — local-first inference tool
  * ─────────────────────────────────────────────────────────────
  * Save the caller's cloud tokens by routing to a local prism-coder
- * model via Ollama. Tiers (27B/9B/8B/1.7B) auto-selected by free
+ * model via Ollama. Tiers (27B/9B/4B/2B) auto-selected by free
  * RAM, then capped by `model_ceiling` and the set of tags that are
  * actually pulled into Ollama.
  *
@@ -45,7 +45,7 @@ export const PRISM_INFER_TOOL: Tool = {
     name: "prism_infer",
     description:
         "Run an inference on a local prism-coder model (Ollama) to save cloud tokens. " +
-        "Picks the largest viable tier — 27B / 9B / 8B / 1.7B — based on free RAM at call time, " +
+        "Picks the largest viable tier — 27B / 9B / 4B / 2B — based on free RAM at call time, " +
         "clamped by `model_ceiling` and what is actually pulled in Ollama. " +
         "Falls through to the synalux portal cloud cascade (9B → 27B → Claude Opus 4.7) " +
         "only when local is unviable AND `cloud_fallback=true`. " +
@@ -84,7 +84,7 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             timeout_ms: {
                 type: "number",
-                description: "Override per-call timeout. Default scales with model size: 27B=120s, 9B=60s, 4B=20s, 1.7B=15s.",
+                description: "Override per-call timeout. Default scales with model size: 27B=120s, 9B=60s, 4B=20s, 2B=15s.",
             },
             evidence: {
                 type: "array",

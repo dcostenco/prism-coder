@@ -133,7 +133,7 @@ function parseCompactionResponse(response: string, source: string): any {
 async function summarizeEntries(entries: any[]): Promise<any> {
   const prompt = buildCompactionPrompt(entries);
 
-  // ── Path 1: Local LLM (prism-coder:7b) ───────────────────────────
+  // ── Path 1: Local LLM (prism-coder:9b) ───────────────────────────
   if (PRISM_LOCAL_LLM_ENABLED) {
     debugLog(`[compact_ledger] Attempting local LLM summarization (${entries.length} entries)`);
     const localResponse = await callLocalLlm(prompt);
@@ -150,7 +150,7 @@ async function summarizeEntries(entries: any[]): Promise<any> {
       throw new Error(
         "[HIPAA] Local LLM failed and PRISM_STRICT_LOCAL_MODE=true. " +
         "Cloud fallback is blocked to prevent unauthorized PHI disclosure. " +
-        "Ensure Ollama is running and prism-coder:7b is available."
+        "Ensure Ollama is running and prism-coder:9b is available."
       );
     }
 

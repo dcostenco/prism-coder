@@ -16,7 +16,7 @@
  *
  * Architecture:
  *   1. Rule-based extraction (fast, zero-cost, always available)
- *   2. Local LLM extraction (optional, higher quality, uses prism-coder:7b)
+ *   2. Local LLM extraction (optional, higher quality, uses prism-coder:9b)
  *   3. Merged + deduplicated results
  */
 
