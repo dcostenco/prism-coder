@@ -58,6 +58,45 @@ describe("checkInputSafety", () => {
         }
     });
 
+    // ── i18n crisis input ──────────────────────────────────────────────────
+    describe("i18n crisis input (non-English)", () => {
+        const i18nCrisis = [
+            "quiero morir",                    // Spanish
+            "voy a matarme",                   // Spanish
+            "je veux mourir",                  // French
+            "me suicider",                     // French
+            "quero morrer",                    // Portuguese
+            "vou me matar",                    // Portuguese
+            "хочу умереть",                    // Russian
+            "убить себя",                      // Russian
+            "покончить с собой",               // Russian
+            "أريد أن أموت",                    // Arabic
+            "ich will sterben",                // German
+            "mich umbringen",                  // German
+            "хочу померти",                    // Ukrainian
+        ];
+        for (const input of i18nCrisis) {
+            it(`intercepts: "${input}"`, () => {
+                expect(checkInputSafety(input)).toBe(CRISIS_RESPONSE);
+            });
+        }
+    });
+
+    describe("i18n false positives (must NOT intercept)", () => {
+        const i18nSafe = [
+            "quiero comer",                    // Spanish: "I want to eat"
+            "je veux manger",                  // French: "I want to eat"
+            "quero brincar",                   // Portuguese: "I want to play"
+            "хочу спать",                      // Russian: "I want to sleep"
+            "ich will spielen",                // German: "I want to play"
+        ];
+        for (const input of i18nSafe) {
+            it(`does NOT intercept: "${input}"`, () => {
+                expect(checkInputSafety(input)).toBeNull();
+            });
+        }
+    });
+
     // ── BUCKET 3: Known evasion limits (documented, not intercepted) ──────
     describe("known evasion limits (documented out of scope)", () => {
         const evasions = [

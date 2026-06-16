@@ -14,6 +14,7 @@
 // ── Input: first-person crisis expressions ───────────────────────────────────
 
 const CRISIS_INPUT_RE = [
+    // English
     /hurt(?:ing)?\s+(?:my)?self/i,
     /kill\s+(?:my)?self/i,
     /end\s+my\s+life/i,
@@ -23,6 +24,32 @@ const CRISIS_INPUT_RE = [
     /(?:hang|hanging)\s+(?:my)?self/i,
     /jump(?:ing)?\s+off/i,
     /how\s+(?:many|much|to).*(?:pills|overdose|die)/i,
+    // Spanish
+    /quiero\s+morir/i,
+    /(?:voy\s+a\s+)?matarme/i,
+    /hacerme\s+da[ñn]o/i,
+    /(?:quiero\s+)?suicidarme/i,
+    // French
+    /je\s+veux\s+mourir/i,
+    /(?:vais\s+)?me\s+tuer/i,
+    /me\s+suicider/i,
+    // Portuguese
+    /quero\s+morrer/i,
+    /(?:vou\s+)?me\s+matar/i,
+    // Russian
+    /хочу\s+умереть/i,
+    /убить\s+себя/i,
+    /покончить\s+с\s+собой/i,
+    // Arabic
+    /أريد\s+أن\s+أموت/,
+    /قتل\s+نفسي/,
+    /أنهي\s+حياتي/,
+    // German
+    /(?:ich\s+)?will\s+sterben/i,
+    /mich\s+umbringen/i,
+    // Ukrainian
+    /хочу\s+померти/i,
+    /вбити\s+себе/i,
 ];
 
 const MEDICAL_INPUT_RE = [
@@ -52,7 +79,7 @@ const MEDICAL_OUTPUT_RE = [
 
 // ── Responses ────────────────────────────────────────────────────────────────
 
-export const CRISIS_RESPONSE = "I'm concerned about your safety. Please call or text 988 (Suicide & Crisis Lifeline) right now — available 24/7. If in immediate danger, call 911. You are not alone.";
+export const CRISIS_RESPONSE = "I'm concerned about your safety. Please call or text 988 (Suicide & Crisis Lifeline) right now — available 24/7. If in immediate danger, call 911. International: findahelpline.com. You are not alone.";
 export const MEDICAL_RESPONSE = "I cannot provide specific medical dosing advice. Please contact your doctor or pharmacist. For emergencies, call 911.";
 
 // ── API ──────────────────────────────────────────────────────────────────────
