@@ -204,6 +204,77 @@ python3 tests/benchmarks/prism-routing-100/benchmark.py --models 2b 4b 9b 27b
 
 **Memory uplift (LoCoMo-Plus, self-published).** A separate long-context dialogue benchmark ([dcostenco/Locomo-Plus](https://github.com/dcostenco/Locomo-Plus)) measures how much structured memory helps a base model retain multi-day context. Results show large gains when a model is paired with Prism memory versus running raw. Note this benchmark is authored, run, and LLM-judged by this project — treat it as a reproducible demonstration, not an independent third-party result, and run it yourself with the commands in that repo.
 
+### Code Generation Quality (27B vs Claude Opus)
+
+Three progressively harder Python tasks run through `prism_infer(mode:"code", think:true)` on the local 27B and compared with Claude Opus. Both produce correct, production-quality code. The 27B is slightly more verbose (docstrings, examples); Opus is slightly tighter (`__slots__`, early-exit DFS). On routine coding the 27B at $0 replaces cloud calls entirely.
+
+| Task | Local 27B | Claude Opus | Verdict |
+|------|-----------|-------------|---------|
+| Fibonacci with memoization | `@lru_cache`, ValueError on negative, docstring | Nested `_fib` to keep cache private | Both correct, equivalent |
+| LRU Cache (OrderedDict, O(1)) | `Any` keys, isinstance capacity check, `__repr__` | `Hashable` key type (more precise), same ops | Both correct, Opus marginally tighter |
+| Trie with autocomplete | `.lower()` normalization, collect+sort+slice | `__slots__` on TrieNode, early-exit DFS at limit | Both correct, Opus slightly more optimized |
+
+<details>
+<summary>Local 27B output — Trie with autocomplete (hardest task)</summary>
+
+```python
+class TrieNode:
+    def __init__(self):
+        self.children: dict[str, 'TrieNode'] = {}
+        self.is_end_of_word: bool = False
+
+class Trie:
+    def __init__(self):
+        self.root: TrieNode = TrieNode()
+
+    def insert(self, word: str) -> None:
+        node = self.root
+        for char in word.lower():
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            node = node.children[char]
+        node.is_end_of_word = True
+
+    def search(self, word: str) -> bool:
+        node = self._get_node(word.lower())
+        return node is not None and node.is_end_of_word
+
+    def starts_with(self, prefix: str) -> bool:
+        return self._get_node(prefix.lower()) is not None
+
+    def autocomplete(self, prefix: str, limit: int = 5) -> list[str]:
+        node = self._get_node(prefix.lower())
+        if node is None:
+            return []
+        results: list[str] = []
+        self._collect_words(node, prefix.lower(), results)
+        results.sort()
+        return results[:limit]
+
+    def _get_node(self, key: str) -> 'TrieNode | None':
+        node = self.root
+        for char in key:
+            if char not in node.children:
+                return None
+            node = node.children[char]
+        return node
+
+    def _collect_words(self, node: TrieNode, prefix: str, results: list[str]) -> None:
+        if node.is_end_of_word:
+            results.append(prefix)
+        for char, child in sorted(node.children.items()):
+            self._collect_words(child, prefix + char, results)
+```
+
+</details>
+
+| Metric | Local 27B | Cloud (Opus) |
+|--------|-----------|-------------|
+| Latency (Trie task) | ~30s | ~8s |
+| Cost | $0 | ~$0.05 |
+| Think mode | Enabled (stripped before serving) | N/A |
+| Quality gate | Passed (no escalation needed) | N/A |
+
 ---
 
 ## Why Prism Coder
