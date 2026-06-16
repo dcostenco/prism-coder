@@ -1014,3 +1014,83 @@ describe("runInfer — error details", () => {
         expect(err.message).toMatch(/2\.0 GB/);
     });
 });
+
+describe("runInfer — mode/think parameter", () => {
+    it("route mode sends think=false to Ollama", async () => {
+        let capturedThink: boolean | undefined;
+        const deps = makeDeps({
+            callLocal: async (_url, _model, _prompt, _system, _max, _temp, _timeout, think) => {
+                capturedThink = think;
+                return { ok: true as const, text: "tool_call result" };
+            },
+        });
+        await runInfer(args({ mode: "route" }), deps);
+        expect(capturedThink).toBe(false);
+    });
+
+    it("chat mode sends think=true to Ollama", async () => {
+        let capturedThink: boolean | undefined;
+        const deps = makeDeps({
+            callLocal: async (_url, _model, _prompt, _system, _max, _temp, _timeout, think) => {
+                capturedThink = think;
+                return { ok: true as const, text: "A helpful response about the topic." };
+            },
+        });
+        await runInfer(args({ mode: "chat" }), deps);
+        expect(capturedThink).toBe(true);
+    });
+
+    it("code mode sends think=true to Ollama", async () => {
+        let capturedThink: boolean | undefined;
+        const deps = makeDeps({
+            callLocal: async (_url, _model, _prompt, _system, _max, _temp, _timeout, think) => {
+                capturedThink = think;
+                return { ok: true as const, text: "function sort(arr) { return arr.sort(); }" };
+            },
+        });
+        await runInfer(args({ mode: "code" }), deps);
+        expect(capturedThink).toBe(true);
+    });
+
+    it("explicit think=false overrides chat mode default", async () => {
+        let capturedThink: boolean | undefined;
+        const deps = makeDeps({
+            callLocal: async (_url, _model, _prompt, _system, _max, _temp, _timeout, think) => {
+                capturedThink = think;
+                return { ok: true as const, text: "Quick answer without reasoning." };
+            },
+        });
+        await runInfer(args({ mode: "chat", think: false }), deps);
+        expect(capturedThink).toBe(false);
+    });
+
+    it("route mode does NOT inject nothink prefix into prompt", async () => {
+        let capturedPrompt = "";
+        const deps = makeDeps({
+            callLocal: async (_url, _model, prompt, _system, _max, _temp, _timeout) => {
+                capturedPrompt = prompt;
+                return { ok: true as const, text: "tool routing result" };
+            },
+        });
+        await runInfer(args({ mode: "route", prompt: "list tools" }), deps);
+        expect(capturedPrompt).toBe("list tools");
+        expect(capturedPrompt).not.toContain("<think>");
+    });
+
+    it("uses /api/chat not /api/generate (messages format)", async () => {
+        let capturedUrl = "";
+        const deps = makeDeps({
+            freemem: () => 30 * GB,
+            listTags: async () => INSTALLED_ALL,
+            listLoaded: async () => new Set<string>(),
+            callLocal: async (url) => {
+                capturedUrl = url;
+                return { ok: true as const, text: "response" };
+            },
+            callCloud: async () => ({ ok: false as const, reason: "unused" }),
+            ollamaUrl: "http://localhost:11434",
+        });
+        await runInfer(args(), deps);
+        expect(capturedUrl).toBe("http://localhost:11434");
+    });
+});

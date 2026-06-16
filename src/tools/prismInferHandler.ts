@@ -35,6 +35,8 @@ type EvidenceSnippet = { source: string; content: string };
 type GroundingOutcome = { action: string; finalText: string; claims: unknown[]; verifierChain: unknown[]; refusalClaim?: string };
 import { getEntitlements, clampCeiling, type PrismEntitlements, FREE_ENTITLEMENTS } from "../utils/entitlements.js";
 import { ddLog } from "../utils/ddLogger.js";
+import { stripThink } from "../utils/thinkStrip.js";
+import { passesQualityGate } from "../utils/qualityGate.js";
 
 // ─── Tool Definition ────────────────────────────────────────────
 
@@ -116,6 +118,22 @@ export const PRISM_INFER_TOOL: Tool = {
                 description: "Override the verifier hard timeout. Default 2000 ms.",
                 default: 2000,
             },
+            mode: {
+                type: "string",
+                enum: ["route", "chat", "code"],
+                description:
+                    "Execution mode. 'route' (default) for MCP tool routing — fast, nothink. " +
+                    "'chat' for general conversation — uses thinking, escalates to cloud on failure. " +
+                    "'code' for code generation — uses thinking, larger context. " +
+                    "In chat/code modes, prefers the 27B tier and enables <think> reasoning.",
+                default: "route",
+            },
+            think: {
+                type: "boolean",
+                description:
+                    "Enable thinking mode (<think> blocks). Default: true for chat/code, false for route. " +
+                    "Thinking improves quality on complex tasks but adds latency (~2-5s).",
+            },
         },
         required: ["prompt"],
     },
@@ -143,6 +161,10 @@ export interface PrismInferArgs {
     verifier_model?: string;
     /** Verifier hard timeout (ms). Default 2000. */
     verifier_timeout_ms?: number;
+    /** Execution mode: route (default), chat, code. */
+    mode?: "route" | "chat" | "code";
+    /** Enable thinking (<think> blocks). Default: true for chat/code, false for route. */
+    think?: boolean;
 }
 
 export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
@@ -156,6 +178,9 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (a.timeout_ms !== undefined && typeof a.timeout_ms !== "number") return false;
     if (a.model_ceiling !== undefined &&
         !["27b", "9b", "4b", "2b"].includes(a.model_ceiling as string)) return false;
+    if (a.mode !== undefined &&
+        !["route", "chat", "code"].includes(a.mode as string)) return false;
+    if (a.think !== undefined && typeof a.think !== "boolean") return false;
     if (a.verify !== undefined && typeof a.verify !== "boolean") return false;
     if (a.verifier_model !== undefined && typeof a.verifier_model !== "string") return false;
     if (a.verifier_timeout_ms !== undefined && typeof a.verifier_timeout_ms !== "number") return false;
@@ -217,10 +242,11 @@ export async function listOllamaLoaded(url: string = PRISM_LOCAL_LLM_URL): Promi
     }
 }
 
-interface OllamaGenerateResp {
-    response?: string;
+interface OllamaChatResp {
+    message?: { content?: string };
     error?: string;
     done?: boolean;
+    done_reason?: string;
 }
 
 async function callOllamaGenerate(
@@ -231,16 +257,20 @@ async function callOllamaGenerate(
     maxTokens: number,
     temperature: number,
     timeoutMs: number,
-): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
+    think?: boolean,
+): Promise<{ ok: true; text: string; doneReason?: string } | { ok: false; reason: string }> {
     try {
+        const messages: Array<{ role: string; content: string }> = [];
+        if (system) messages.push({ role: "system", content: system });
+        messages.push({ role: "user", content: prompt });
         const body = {
             model,
-            prompt,
-            ...(system ? { system } : {}),
+            messages,
             stream: false,
+            ...(think !== undefined ? { think } : {}),
             options: { num_predict: maxTokens, temperature },
         };
-        const res = await fetch(`${url}/api/generate`, {
+        const res = await fetch(`${url}/api/chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -248,11 +278,11 @@ async function callOllamaGenerate(
             redirect: "error",
         });
         if (!res.ok) return { ok: false, reason: `ollama_http_${res.status}` };
-        const data = (await res.json()) as OllamaGenerateResp;
+        const data = (await res.json()) as OllamaChatResp;
         if (data.error) return { ok: false, reason: `ollama_err:${data.error}` };
-        const text = (data.response ?? "").trim();
+        const text = (data.message?.content ?? "").trim();
         if (!text) return { ok: false, reason: "empty_response" };
-        return { ok: true, text };
+        return { ok: true, text, doneReason: data.done_reason };
     } catch (err) {
         const name = err instanceof Error ? err.name : "Unknown";
         return { ok: false, reason: name === "TimeoutError" || name === "AbortError" ? "timeout" : "network" };
@@ -337,6 +367,8 @@ export interface PrismInferResult {
         verifierChain: GroundingOutcome["verifierChain"];
         refusalClaim?: string;
     };
+    /** True when local output was served despite quality gate failure (cloud unavailable/failed). */
+    quality_gate_failed?: boolean;
 }
 
 /**
@@ -347,7 +379,7 @@ export interface InferDeps {
     freemem: () => number;
     listTags: () => Promise<Set<string> | null>;
     listLoaded: () => Promise<Set<string>>;
-    callLocal: typeof callOllamaGenerate;
+    callLocal: (url: string, model: string, prompt: string, system: string | undefined, maxTokens: number, temperature: number, timeoutMs: number, think?: boolean) => ReturnType<typeof callOllamaGenerate>;
     callCloud: typeof callSynaluxInference;
     ollamaUrl: string;
     /** Injectable verifier for testing. When omitted, verification is skipped (portal-side). */
@@ -365,8 +397,11 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // get 4b ceiling, 50 calls/day, 512 max tokens.
     const ent = deps.entitlements ?? await getEntitlements();
 
-    // Clamp model ceiling to what the plan allows
-    const effectiveCeiling = clampCeiling(args.model_ceiling, ent.model_ceiling);
+    // MF2: In chat/code modes, request the 27B tier (subject to plan ceiling + RAM).
+    // mode:"code" implies quality → start higher in the cascade.
+    const mode = args.mode ?? "route";
+    const modeCeiling = (mode === "chat" || mode === "code") ? (args.model_ceiling ?? "27b") : args.model_ceiling;
+    const effectiveCeiling = clampCeiling(modeCeiling, ent.model_ceiling);
 
     // Clamp max_tokens to plan limit
     const maxTokens = Math.min(args.max_tokens ?? 1024, ent.max_tokens, 8192);
@@ -422,8 +457,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // Walk the tier table top → bottom, capped by model_ceiling. Each tier
     // logs its skip reason ("not_pulled" / "ram_insufficient" / fail reason)
     // so the caller can see exactly why each tier was bypassed.
+    let localDraft: { output: string; tier: string } | null = null;
+
     if (installed) {
-        // Find start index from ceiling — if no ceiling, start at the top (27B).
         const ceilStart = effectiveCeiling
             ? Math.max(0, MODEL_TIERS.findIndex(t => t.tag.endsWith(`:${effectiveCeiling}`)))
             : 0;
@@ -449,11 +485,31 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
             anyViable = true;
             const timeout = args.timeout_ms ?? DEFAULT_TIMEOUTS[tier.tag] ?? 60_000;
+            const enableThink = args.think ?? (mode !== "route");
             const result = await deps.callLocal(
-                deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout,
+                deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout, enableThink,
             );
             if (result.ok) {
-                return await applyVerification(result.text, gatedArgs, deps, {
+                const { stripped, thinkOnly } = stripThink(result.text);
+                const output = stripped;
+
+                // Quality gate for chat/code modes
+                if (mode !== "route") {
+                    const gate = passesQualityGate(output, thinkOnly, result.doneReason);
+                    if (!gate.pass && allowCloud) {
+                        debugLog(`[prism_infer] quality gate FAIL (${gate.reason}) — escalating to cloud`);
+                        attempts.push({ tier: tier.tag, reason: `quality_gate:${gate.reason}` });
+                        if (gate.reason === "hard_truncation" || gate.reason === "loop_detected") {
+                            localDraft = { output, tier: tier.tag };
+                        }
+                        break;
+                    }
+                    if (!gate.pass) {
+                        debugLog(`[prism_infer] quality gate FAIL (${gate.reason}) — no cloud, serving local`);
+                    }
+                }
+
+                return await applyVerification(output, gatedArgs, deps, {
                     backend: `ollama-${tier.tag.replace("prism-coder:", "")}`,
                     model_picked: tier.tag,
                     ram_free_mb: ramFreeMb,
@@ -492,7 +548,21 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         attempts.push({ tier: "synalux", reason: "cloud_fallback_disabled" });
     }
 
-    // Everything failed.
+    // Cloud also failed — serve the local draft if we have one
+    if (localDraft) {
+        debugLog(`[prism_infer] cloud failed, serving gate-failed local draft from ${localDraft.tier}`);
+        return await applyVerification(localDraft.output, gatedArgs, deps, {
+            backend: `ollama-${localDraft.tier.replace("prism-coder:", "")}`,
+            model_picked: localDraft.tier,
+            ram_free_mb: ramFreeMb,
+            latency_ms: Date.now() - t0,
+            used_cloud: false,
+            attempts,
+            plan: ent.plan,
+            quality_gate_failed: true,
+        });
+    }
+
     const err = new Error(
         `prism_infer: no backend produced output. attempts=${JSON.stringify(attempts)}, free=${fmtGb(freeBytes)}`
     );
@@ -565,6 +635,7 @@ export async function prismInferHandler(args: unknown): Promise<{
             ` free_ram=${result.ram_free_mb}MB` +
             ` latency=${result.latency_ms}ms` +
             ` used_cloud=${result.used_cloud}` +
+            (result.quality_gate_failed ? ` quality_gate_failed=true` : "") +
             (result.verification ? ` verify=${result.verification.action}` : "") +
             (result.attempts.length ? ` attempts=${JSON.stringify(result.attempts)}` : "");
 

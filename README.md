@@ -145,7 +145,9 @@ The free tier runs entirely on your machine. Paid tiers add cloud sync through t
 
 ## Models
 
-The `prism-coder` fleet uses Qwen3.5 for MCP tool-routing. The 9B and 27B are fine-tuned with LoRA (r=128, all 64 layers including DeltaNet); the 2B and 4B use stock Qwen3.5-4B at different quantization levels. They are **not** general-purpose chat models — they route reliably and run offline; Claude and other frontier models remain better at reasoning, coding, and open-domain work. The intended pattern is local routing with an optional cloud fallback for hard cases.
+The `prism-coder` fleet uses Qwen3.5 for MCP tool-routing AND general inference. The 9B and 27B are fine-tuned with LoRA (r=128, all 64 layers including DeltaNet); the 2B and 4B use stock Qwen3.5-4B at different quantization levels. The 27B scored 100% on BFCL function-calling and 100% on an internal 15-problem coding eval at $0 inference cost.
+
+`prism_infer` supports three modes: `route` (tool routing, fast, nothink), `chat` (conversation with thinking), and `code` (code generation with thinking). In chat/code modes, the model uses `<think>` blocks for chain-of-thought reasoning, which are stripped before the response is served. If the local model fails a quality gate (empty, think-only, or truncated), paid tiers automatically escalate to Claude via the Synalux portal.
 
 | Model | Ollama tag | Size | [BFCL](https://gorilla.cs.berkeley.edu/blogs/12_bfcl_v3_multi_turn.html) Accuracy | Role | Tier |
 |---|---|---|---|---|---|
@@ -284,6 +286,26 @@ Prism exposes 40+ MCP tools. The core memory loop:
 | `session_detect_drift` | Detect when a session has drifted from its goal |
 | `verify_behavior` | Pre-edit scenario challenge — catch bad changes before they happen |
 | `knowledge_ingest` | Teach Prism a codebase or document |
+| `prism_infer` | Local-first inference (route/chat/code modes, thinking, cloud escalation) |
+
+### `prism_infer` — local-first inference with cloud escalation
+
+```typescript
+prism_infer({
+    prompt: "Write a binary search in Python",
+    mode: "code",        // "route" | "chat" | "code"
+    think: true,          // enable <think> reasoning (default: true for chat/code)
+    model_ceiling: "27b", // use the quality tier
+})
+// → 27B generates code locally ($0), with thinking for quality
+// → If quality gate fails + paid tier → auto-escalate to Claude
+```
+
+| Mode | Think | Model | Use case |
+|------|-------|-------|----------|
+| `route` | Off (fast) | 9B default | MCP tool routing |
+| `chat` | On | 27B preferred | Conversation, reasoning |
+| `code` | On | 27B preferred | Code generation, debugging |
 
 Full TypeScript signatures live in [`src/tools/`](src/tools/); architecture in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
