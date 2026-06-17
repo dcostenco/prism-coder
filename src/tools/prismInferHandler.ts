@@ -38,6 +38,7 @@ import { ddLog } from "../utils/ddLogger.js";
 import { stripThink } from "../utils/thinkStrip.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
+import { recordInference } from "../utils/inferenceMetrics.js";
 
 // ─── Tool Definition ────────────────────────────────────────────
 
@@ -248,6 +249,8 @@ interface OllamaChatResp {
     error?: string;
     done?: boolean;
     done_reason?: string;
+    prompt_eval_count?: number;
+    eval_count?: number;
 }
 
 async function callOllamaGenerate(
@@ -259,7 +262,7 @@ async function callOllamaGenerate(
     temperature: number,
     timeoutMs: number,
     think?: boolean,
-): Promise<{ ok: true; text: string; doneReason?: string } | { ok: false; reason: string }> {
+): Promise<{ ok: true; text: string; doneReason?: string; promptTokens?: number; completionTokens?: number } | { ok: false; reason: string }> {
     try {
         const messages: Array<{ role: string; content: string }> = [];
         if (system) messages.push({ role: "system", content: system });
@@ -283,7 +286,7 @@ async function callOllamaGenerate(
         if (data.error) return { ok: false, reason: `ollama_err:${data.error}` };
         const text = (data.message?.content ?? "").trim();
         if (!text) return { ok: false, reason: "empty_response" };
-        return { ok: true, text, doneReason: data.done_reason };
+        return { ok: true, text, doneReason: data.done_reason, promptTokens: data.prompt_eval_count, completionTokens: data.eval_count };
     } catch (err) {
         const name = err instanceof Error ? err.name : "Unknown";
         return { ok: false, reason: name === "TimeoutError" || name === "AbortError" ? "timeout" : "network" };
@@ -362,6 +365,9 @@ export interface PrismInferResult {
     used_cloud: boolean;
     attempts: Array<{ tier: string; reason: string }>;
     plan?: string;
+    /** Actual token counts from Ollama, or char/4 estimates for cloud. */
+    prompt_tokens?: number;
+    completion_tokens?: number;
     /** Populated when `verify: true` was supplied. */
     verification?: {
         action: GroundingOutcome["action"];
@@ -472,7 +478,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // Walk the tier table top → bottom, capped by model_ceiling. Each tier
     // logs its skip reason ("not_pulled" / "ram_insufficient" / fail reason)
     // so the caller can see exactly why each tier was bypassed.
-    let localDraft: { output: string; tier: string } | null = null;
+    let localDraft: { output: string; tier: string; promptTokens?: number; completionTokens?: number } | null = null;
 
     if (installed) {
         const ceilStart = effectiveCeiling
@@ -515,7 +521,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                         debugLog(`[prism_infer] quality gate FAIL (${gate.reason}) — escalating to cloud`);
                         attempts.push({ tier: tier.tag, reason: `quality_gate:${gate.reason}` });
                         if (gate.reason === "hard_truncation" || gate.reason === "loop_detected") {
-                            localDraft = { output, tier: tier.tag };
+                            localDraft = { output, tier: tier.tag, promptTokens: result.promptTokens, completionTokens: result.completionTokens };
                         }
                         break;
                     }
@@ -532,6 +538,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     used_cloud: false,
                     attempts,
                     plan: ent.plan,
+                    prompt_tokens: result.promptTokens,
+                    completion_tokens: result.completionTokens,
                 });
             }
             attempts.push({ tier: tier.tag, reason: result.reason });
@@ -556,6 +564,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 used_cloud: true,
                 attempts,
                 plan: ent.plan,
+                prompt_tokens: Math.ceil(args.prompt.length / 4),
+                completion_tokens: Math.ceil(cloud.output.length / 4),
             });
         }
         attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
@@ -574,6 +584,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             used_cloud: false,
             attempts,
             plan: ent.plan,
+            prompt_tokens: localDraft.promptTokens,
+            completion_tokens: localDraft.completionTokens,
             quality_gate_failed: true,
         });
     }
@@ -646,6 +658,25 @@ export async function prismInferHandler(args: unknown): Promise<{
 
         debugLog(`[prism_infer] backend=${result.backend} model=${result.model_picked} latency=${result.latency_ms}ms free=${result.ram_free_mb}MB`);
 
+        // Record metrics for session-level accumulation
+        recordInference(result);
+
+        // safety_gate is excluded from telemetry — logging that a user triggered
+        // a crisis/medical filter is a HIPAA-adjacent privacy concern.
+        if (result.backend !== "safety_gate") {
+            ddLog("info", "prism_infer.usage", {
+                backend: result.backend,
+                model: result.model_picked ?? result.backend,
+                used_cloud: result.used_cloud,
+                prompt_tokens: result.prompt_tokens ?? 0,
+                completion_tokens: result.completion_tokens ?? 0,
+                latency_ms: result.latency_ms,
+            });
+        }
+
+        const tokenStr = result.prompt_tokens != null || result.completion_tokens != null
+            ? ` tokens=${result.prompt_tokens ?? "?"}in/${result.completion_tokens ?? "?"}out`
+            : "";
         const header =
             `[prism_infer] backend=${result.backend}` +
             ` model=${result.model_picked ?? "n/a"}` +
@@ -653,6 +684,7 @@ export async function prismInferHandler(args: unknown): Promise<{
             ` free_ram=${result.ram_free_mb}MB` +
             ` latency=${result.latency_ms}ms` +
             ` used_cloud=${result.used_cloud}` +
+            tokenStr +
             (result.quality_gate_failed ? ` quality_gate_failed=true` : "") +
             (result.verification ? ` verify=${result.verification.action}` : "") +
             (result.attempts.length ? ` attempts=${JSON.stringify(result.attempts)}` : "");

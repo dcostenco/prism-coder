@@ -25,6 +25,7 @@ import { buildVaultDirectory } from "../utils/vaultExporter.js";
  */
 
 import { debugLog } from "../utils/logger.js";
+import { ddLog } from "../utils/ddLogger.js";
 import { getStorage, activeStorageBackend } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
@@ -135,6 +136,7 @@ const MEMORY_BOUNDARY_SUFFIX = '\n</prism_memory>';
  * After saving, generates an embedding vector for the entry via fire-and-forget.
  */
 import { computeEffectiveImportance, recordMemoryAccess } from "../utils/cognitiveMemory.js";
+import { formatInferenceMetrics, getInferenceSnapshot, resetInferenceMetrics, getSnapshotSequence } from "../utils/inferenceMetrics.js";
 export async function sessionSaveLedgerHandler(args: unknown) {
   if (!isSessionSaveLedgerArgs(args)) {
     throw new Error("Invalid arguments for session_save_ledger");
@@ -297,6 +299,30 @@ export async function sessionSaveLedgerHandler(args: unknown) {
     debugLog(`[session_save_ledger] Background decay failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   });
 
+  const metricsBlock = formatInferenceMetrics();
+
+  // Log accumulated inference metrics to Datadog/Synalux portal.
+  // snapshot_sequence lets downstream dashboards deduplicate: take MAX()
+  // per session instead of SUM(), since totals are cumulative.
+  const snap = getInferenceSnapshot();
+  if (snap.totalCalls > 0) {
+    ddLog("info", "session.inference_metrics", {
+      project,
+      snapshot_sequence: getSnapshotSequence(),
+      is_cumulative: true,
+      local_calls: snap.localCalls,
+      cloud_calls: snap.cloudCalls,
+      total_calls: snap.totalCalls,
+      local_pct: snap.localPct,
+      cloud_pct: snap.cloudPct,
+      total_prompt_tokens: snap.totalPromptTokens,
+      total_completion_tokens: snap.totalCompletionTokens,
+      total_tokens: snap.totalTokens,
+      avg_latency_ms: snap.avgLatencyMs,
+      by_model: snap.byModel,
+    });
+  }
+
   return {
     content: [{
       type: "text",
@@ -306,6 +332,7 @@ export async function sessionSaveLedgerHandler(args: unknown) {
         (files_changed?.length ? `Files changed: ${files_changed.length}\n` : "") +
         (decisions?.length ? `Decisions: ${decisions.length}\n` : "") +
         `📊 Embedding generation queued for semantic search.` +
+        metricsBlock +
         resolverNote,
     }],
     isError: false,
@@ -673,11 +700,14 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     );
   }
 
+  const metricsBlock = formatInferenceMetrics();
+
   // Build response text based on whether a CRDT merge occurred
   const responseText = isMerged
     ? `🔄 Auto-merged conflict for "${project}" (v${expected_version} → v${newVersion})\n` +
       `Strategy: ${JSON.stringify(mergeStrategy)}\n` +
       (last_summary ? `Summary: ${last_summary}\n` : "") +
+      metricsBlock +
       `\n🔑 Remember: pass expected_version: ${newVersion} on your next save ` +
       `to maintain concurrency control.`
     : `✅ Handoff ${data.status || "saved"} for project "${project}" ` +
@@ -686,6 +716,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
       (open_todos?.length ? `Open TODOs: ${open_todos.length} items\n` : "") +
       (active_branch ? `Active branch: ${active_branch}\n` : "") +
       `📊 Embedding generation queued for semantic search.\n` +
+      metricsBlock +
       `\n🔑 Remember: pass expected_version: ${newVersion} on your next save ` +
       `to maintain concurrency control.`;
 
@@ -702,6 +733,14 @@ export async function sessionLoadContextHandler(args: unknown) {
   if (!isSessionLoadContextArgs(args)) {
     throw new Error("Invalid arguments for session_load_context");
   }
+
+  // New session boundary — reset accumulated inference metrics.
+  // Warn if unreported metrics exist (user loaded context without saving ledger first).
+  const preResetSnap = getInferenceSnapshot();
+  if (preResetSnap.totalCalls > 0) {
+    debugLog(`[session_load_context] Resetting ${preResetSnap.totalCalls} unreported inference metrics (${preResetSnap.totalTokens} tokens)`);
+  }
+  resetInferenceMetrics();
 
   const { project, level = "standard", role } = args;
   const maxTokens = (args as any).max_tokens as number | undefined
