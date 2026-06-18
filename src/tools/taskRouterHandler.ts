@@ -23,6 +23,7 @@ import {
 } from "./sessionMemoryDefinitions.js";
 
 import { getStorage } from "../storage/index.js";
+import { getSetting } from "../storage/configStorage.js";
 import { getExperienceBias } from "./routerExperience.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { callLocalLlm } from "../utils/localLlm.js";
@@ -316,6 +317,26 @@ export async function sessionTaskRouteHandler(
         },
       ],
       isError: true,
+    };
+  }
+
+  // Delegation opt-in gate: if delegation_enabled is not "true", always route to host.
+  // This enforces the prism-infer-delegation skill's "off by default" rule in code.
+  const delegationEnabled = await getSetting("delegation_enabled", "false");
+  if (delegationEnabled !== "true") {
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          target: "host",
+          confidence: 1.0,
+          complexity_score: 5,
+          rationale: "Delegation is off (default). Enable with: configure_notifications({setting: 'delegation_enabled', value: 'true'}) or via the Prism dashboard.",
+          recommended_tool: null,
+          delegation_enabled: false,
+        }),
+      }],
+      isError: false,
     };
   }
 
