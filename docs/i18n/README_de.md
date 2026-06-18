@@ -412,6 +412,40 @@ prism_infer({
 
 Full TypeScript signatures live in [`src/tools/`](../../src/tools/); architecture in [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md).
 
+### `inference_metrics` — see your local-model usage on demand
+
+Call `inference_metrics` anytime mid-session to see how many `prism_infer` calls ran locally vs cloud, with actual token counts:
+
+```
+📊 Inference Metrics — local-model delegation (this session):
+  Total calls: 5 — Local: 5 (100%) | Cloud: 0 (0%)
+  Tokens: 1,240 in + 380 out = 1,620 total
+  Avg latency: 420ms
+  By model:
+    prism-coder:27b: 3 calls, 1,100 tokens, avg 520ms
+    prism-coder:9b: 2 calls, 520 tokens, avg 270ms
+```
+
+The same block also appears automatically in `session_save_ledger` and `session_save_handoff` responses at session end.
+
+**Note:** This tracks `prism_infer` delegation only — not your host model's (Claude's) own token spend. For that, use Claude Code's `/cost` command.
+
+### Local-model delegation (opt-in)
+
+By default, your AI agent (Claude, Cursor, etc.) handles everything itself. You can optionally enable delegation so the agent offloads cheap, verifiable sub-tasks to local Ollama models at $0:
+
+```bash
+# Enable via Prism config
+prism config set delegation_enabled true
+```
+
+When enabled, the agent's task router may delegate qualifying work — bulk classification, field extraction, mechanical formatting — to `prism_infer` instead of using cloud tokens. The agent always verifies the result and redoes it itself if quality is degraded.
+
+**Guardrails:**
+- **Off by default** — enforced in code, not just convention
+- **Never delegates:** code/text that ships to the user, security/safety logic, planning/reasoning, anything where a silent quality drop isn't obvious
+- **Always verifies:** checks `quality_gate_failed` and `used_cloud` before trusting local output
+
 <details>
 <summary>How Prism survives context compaction</summary>
 
