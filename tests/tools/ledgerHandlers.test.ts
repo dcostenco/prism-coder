@@ -139,8 +139,8 @@ vi.mock("../../src/utils/cognitiveMemory.js", () => ({
 }));
 
 vi.mock("../../src/utils/inferenceMetrics.js", () => ({
-  fetchPortalInferenceMetrics: vi.fn(async () => ""),
-  markSessionStart: vi.fn(),
+  formatInferenceMetrics: vi.fn(() => ""),
+  resetInferenceMetrics: vi.fn(),
 }));
 
 vi.mock("../../src/tools/commonHelpers.js", () => ({

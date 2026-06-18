@@ -135,7 +135,7 @@ const MEMORY_BOUNDARY_SUFFIX = '\n</prism_memory>';
  * After saving, generates an embedding vector for the entry via fire-and-forget.
  */
 import { computeEffectiveImportance, recordMemoryAccess } from "../utils/cognitiveMemory.js";
-import { fetchPortalInferenceMetrics, markSessionStart } from "../utils/inferenceMetrics.js";
+import { formatInferenceMetrics, resetInferenceMetrics } from "../utils/inferenceMetrics.js";
 export async function sessionSaveLedgerHandler(args: unknown) {
   if (!isSessionSaveLedgerArgs(args)) {
     throw new Error("Invalid arguments for session_save_ledger");
@@ -298,8 +298,7 @@ export async function sessionSaveLedgerHandler(args: unknown) {
     debugLog(`[session_save_ledger] Background decay failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   });
 
-  // Fetch inference metrics from portal (thin-client: portal is authority)
-  const metricsBlock = await fetchPortalInferenceMetrics();
+  const metricsBlock = formatInferenceMetrics();
 
   return {
     content: [{
@@ -678,7 +677,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     );
   }
 
-  const metricsBlock = await fetchPortalInferenceMetrics();
+  const metricsBlock = formatInferenceMetrics();
 
   // Build response text based on whether a CRDT merge occurred
   const responseText = isMerged
@@ -712,8 +711,7 @@ export async function sessionLoadContextHandler(args: unknown) {
     throw new Error("Invalid arguments for session_load_context");
   }
 
-  // Mark session boundary — portal metrics fetched with since=this timestamp
-  markSessionStart();
+  resetInferenceMetrics();
 
   const { project, level = "standard", role } = args;
   const maxTokens = (args as any).max_tokens as number | undefined

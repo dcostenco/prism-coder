@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [19.2.1] - 2026-06-17 — 📊 Inference Metrics: Local-First Fix
+
+### Fixed
+- **Metrics now work for all users.** Restored local accumulator as the sole display source — works immediately with zero config, no portal dependency, no env vars. The 19.2.0 thin-client architecture silently returned empty for every user because the portal infrastructure (token + migration) was never deployed.
+- **Startup warning** — `console.warn` when `TELEMETRY_WRITE_TOKEN` is not set, so dead portal forwarding is visible instead of silent.
+- Portal `ddLog` forwarding remains as best-effort analytics (independent of display). Egress allowlist and write-auth headers preserved.
+
+### Architecture note
+Local accumulator = user-facing display (what did MY session do). Portal forwarding = business analytics (what is the fleet doing). These are independent streams — display never depends on portal connectivity.
+
 ## [19.2.0] - 2026-06-17 — 📊 Inference Metrics + Write-Side Hardening
 
 ### Added

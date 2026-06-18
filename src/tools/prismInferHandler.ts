@@ -38,6 +38,7 @@ import { ddLog } from "../utils/ddLogger.js";
 import { stripThink } from "../utils/thinkStrip.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
+import { recordInference } from "../utils/inferenceMetrics.js";
 
 // ─── Tool Definition ────────────────────────────────────────────
 
@@ -657,7 +658,10 @@ export async function prismInferHandler(args: unknown): Promise<{
 
         debugLog(`[prism_infer] backend=${result.backend} model=${result.model_picked} latency=${result.latency_ms}ms free=${result.ram_free_mb}MB`);
 
-        // Forward per-call metrics to portal (thin-client pattern).
+        // Local accumulator — sole source of the user-facing metrics block.
+        recordInference(result);
+
+        // Best-effort portal forwarding (independent analytics stream).
         // safety_gate excluded — logging crisis filter triggers is a HIPAA concern.
         if (result.backend !== "safety_gate") {
             ddLog("info", "prism_infer.usage", {

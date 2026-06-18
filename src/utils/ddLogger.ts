@@ -139,3 +139,7 @@ export function ddInfo(message: string, context?: Record<string, unknown>) {
 export function ddWarn(message: string, context?: Record<string, unknown>) {
     ddLog("warn", message, context);
 }
+
+if (!TELEMETRY_WRITE_TOKEN) {
+    console.warn("[prism-mcp] TELEMETRY_WRITE_TOKEN not set — portal telemetry disabled. Session metrics still work locally.");
+}
