@@ -123,7 +123,7 @@ export function formatInferenceMetrics(): string {
     if (snap.totalCalls === 0) return "";
 
     const lines: string[] = [
-        `\n📊 Inference Metrics (this session):`,
+        `\n📊 Inference Metrics — local-model delegation (this session):`,
         `  Total calls: ${snap.totalCalls} — Local: ${snap.localCalls} (${snap.localPct}%) | Cloud: ${snap.cloudCalls} (${snap.cloudPct}%)`,
         `  Tokens: ${snap.totalPromptTokens.toLocaleString()} in + ${snap.totalCompletionTokens.toLocaleString()} out = ${snap.totalTokens.toLocaleString()} total`,
         `  Avg latency: ${snap.avgLatencyMs}ms`,
