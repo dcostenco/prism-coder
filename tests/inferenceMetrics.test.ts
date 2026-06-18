@@ -4,6 +4,7 @@ import {
     getInferenceSnapshot,
     resetInferenceMetrics,
     formatInferenceMetrics,
+    inferenceMetricsHandler,
 } from "../src/utils/inferenceMetrics.js";
 
 beforeEach(() => {
@@ -145,6 +146,19 @@ describe("formatInferenceMetrics", () => {
         const out = formatInferenceMetrics();
         expect(out).toContain("By model:");
         expect(out.indexOf("prism-coder:9b")).toBeLessThan(out.indexOf("prism-coder:27b"));
+    });
+
+    it("handler returns message when no calls", async () => {
+        const result = await inferenceMetricsHandler();
+        expect(result.content[0].text).toContain("No prism_infer calls");
+        expect(result.content[0].text).toContain("local-model delegation");
+    });
+
+    it("handler returns metrics block when calls exist", async () => {
+        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 100, prompt_tokens: 200, completion_tokens: 80 });
+        const result = await inferenceMetricsHandler();
+        expect(result.content[0].text).toContain("Total calls: 1");
+        expect(result.content[0].text).toContain("Local: 1 (100%)");
     });
 
     it("mixed local and cloud", () => {

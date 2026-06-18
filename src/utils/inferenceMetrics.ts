@@ -105,6 +105,19 @@ export function resetInferenceMetrics(): void {
     debugLog("[inference-metrics] Session metrics reset");
 }
 
+export async function inferenceMetricsHandler(): Promise<{
+    content: Array<{ type: "text"; text: string }>;
+    isError?: boolean;
+}> {
+    const block = formatInferenceMetrics();
+    return {
+        content: [{
+            type: "text",
+            text: block || "No prism_infer calls this session. Metrics track local-model delegation only — not the host model's (Claude's) token spend.",
+        }],
+    };
+}
+
 export function formatInferenceMetrics(): string {
     const snap = getInferenceSnapshot();
     if (snap.totalCalls === 0) return "";

@@ -100,6 +100,7 @@ import { sanitizeMcpOutput } from "./utils/sanitizer.js";
 import { getTracer, initTelemetry } from "./utils/telemetry.js";
 import { context as otelContext, trace, SpanStatusCode } from "@opentelemetry/api";
 import { ddInfo, ddError as ddLogError } from "./utils/ddLogger.js";
+import { inferenceMetricsHandler } from "./utils/inferenceMetrics.js";
 
 // ─── Import Tool Definitions (schemas) and Handlers (implementations) ─────
 
@@ -171,6 +172,8 @@ import {
   QUERY_MEMORY_NATURAL_TOOL,
   // v15.5: Knowledge Ingestion
   KNOWLEDGE_INGEST_TOOL,
+  // v19.2: Inference Metrics
+  INFERENCE_METRICS_TOOL,
 
   sessionSaveLedgerHandler,
   sessionSaveHandoffHandler,
@@ -345,6 +348,8 @@ function buildSessionMemoryTools(autoloadList: string[]): Tool[] {
     QUERY_MEMORY_NATURAL_TOOL,     // query_memory_natural — NL → structured memory search
     // ─── v15.5: Knowledge Ingestion ───
     KNOWLEDGE_INGEST_TOOL,         // knowledge_ingest — chunk code, gen Q&A, store in graph
+    // ─── v19.2: Inference Metrics ───
+    INFERENCE_METRICS_TOOL,          // inference_metrics — read-only session delegation stats
   ];
 }
 
@@ -1077,6 +1082,9 @@ export function createServer() {
           case "knowledge_ingest":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured.");
             result = await knowledgeIngestHandler(args); break;
+
+          case "inference_metrics":
+            result = await inferenceMetricsHandler(); break;
 
           default:
             result = {

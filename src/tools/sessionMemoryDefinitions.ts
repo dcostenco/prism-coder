@@ -2035,3 +2035,18 @@ export function isVerifyBehaviorArgs(a: unknown): a is {
   if (typeof o.change_summary !== "string") return false;
   return true;
 }
+
+// ─── v19.2: Inference Metrics Tool ──────────────────────────
+
+export const INFERENCE_METRICS_TOOL: Tool = {
+  name: "inference_metrics",
+  description:
+    "Returns the current session's local-model inference metrics — call count, " +
+    "local vs cloud split, token totals, per-model breakdown, and average latency. " +
+    "Read-only, no arguments. Reflects prism_infer delegation usage only, not the " +
+    "host model's (Claude's) own token spend (use /cost for that).",
+  inputSchema: {
+    type: "object",
+    properties: {},
+  },
+};
