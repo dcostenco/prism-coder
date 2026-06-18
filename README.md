@@ -78,6 +78,23 @@ Every session is logged with files changed, decisions made, and TODOs. Search, f
   <img src="docs/session-ledger.jpg" alt="Session Ledger — 93 sessions, 847 decisions logged across 12 projects" width="700" />
 </p>
 
+### Inference Metrics — see where your tokens go
+
+Every `prism_infer` call tracks which model handled it (local Ollama vs cloud) and how many tokens were consumed. When you save a session, Prism shows a summary:
+
+```
+📊 Inference Metrics (this session):
+  Total calls: 12 — Local: 10 (83%) | Cloud: 2 (17%)
+  Tokens: 8,420 in + 3,150 out = 11,570 total
+  Avg latency: 1,240ms
+  By model:
+    prism-coder:27b: 6 calls, 7,200 tokens, avg 1,800ms
+    prism-coder:9b: 4 calls, 2,870 tokens, avg 620ms
+    synalux-27b: 2 calls, 1,500 tokens, avg 1,100ms
+```
+
+Local calls use actual Ollama token counts; cloud calls use estimates. Metrics are aggregated by the Synalux portal — Prism is a thin client that forwards per-call data and fetches the summary on demand.
+
 ### Session Drift Detection
 
 Long agent sessions can wander from their original goal. `session_detect_drift` compares current work against the stated goal and returns `on_track / minor_drift / major_drift` so the agent can self-correct.

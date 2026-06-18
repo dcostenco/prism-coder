@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [19.2.0] - 2026-06-17 — 📊 Inference Metrics + Write-Side Hardening
+
+### Added
+- **Inference metrics** — `session_save_ledger` and `session_save_handoff` now show local vs cloud usage percentage, token counts (actual from Ollama), per-model breakdown, and avg latency. Metrics are aggregated by the Synalux portal (thin-client architecture).
+- **Ollama token parsing** — `prism_infer` now captures `prompt_eval_count` and `eval_count` from Ollama responses and includes them in the MCP response header.
+- **Datadog telemetry** — Per-call `prism_infer.usage` events forwarded to Synalux portal for aggregation. Safety gate intercepts excluded (HIPAA).
+- **SECURITY.md** — Data inventory for inference telemetry, behavioral metadata classification, and multi-user gate checklist.
+- **Contract tests** — Cross-repo field name pinning (emitter ↔ allowlist ↔ SQL RPC ↔ portal headers). Catches silent-regression class.
+- 26 new tests: ddLogger write headers + allowlist (11), inference metrics fetch (9), contract pinning (6).
+
+### Security
+- **ddLogger auth** — Now sends `Authorization: Bearer ${TELEMETRY_WRITE_TOKEN}` + `X-Prism-Client` headers. Previously silently 401'd (events never reached portal).
+- **Context allowlist** — 15-field static allowlist applied to BOTH Supabase and Datadog sinks. Stack traces, file paths, error messages, and prompt fragments no longer reach either vendor.
+- **Message cap** — `ddLog` message field capped at 200 chars as backstop against interpolated sensitive data.
+
+### Changed
+- `inferenceMetrics.ts` rewritten from 129-line in-memory accumulator to 74-line thin-client portal fetch. No local state, no dedup complexity.
+- 94 test files, 2826 tests (up from 92/2807).
+
 ## [19.0.1] - 2026-06-15 — 🔒 Security: 15 verification fixes + 9B fleet
 
 ### Fleet
