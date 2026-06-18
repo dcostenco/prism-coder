@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [19.2.4] - 2026-06-18 — 📊 `inference_metrics` Tool + Delegation Gate
+
+### Added
+- **`inference_metrics` MCP tool** — read-only, no args. Returns the session's local-delegation stats on demand (call count, local/cloud split, token totals, per-model breakdown). Description explicitly notes this tracks `prism_infer` delegation only, not Claude's own token spend.
+- **Delegation opt-in gate** — `session_task_route` checks `delegation_enabled` setting before allowing local-model delegation. Off by default, enforced in code (not just skill prose). 4 tests.
+- **Inline framing** — metrics title reads "local-model delegation (this session)" so the caveat travels with the data when relayed.
+
+### Security
+- Context allowlist applied to Datadog sink (was Supabase-only in 19.2.1). Both sinks now filter identically.
+- `message` field capped at 200 chars.
+
+### Changed
+- Architecture skill corrected from stale 19.2.0 thin-client description to 19.2.1 local-first reality.
+- Delegation skill rewritten to v2 (reviewer's canonical version): off by default, principle-first framing.
+- 95 test files, 2841 tests (up from 94/2835).
+
 ## [19.2.1] - 2026-06-17 — 📊 Inference Metrics: Local-First Fix
 
 ### Fixed

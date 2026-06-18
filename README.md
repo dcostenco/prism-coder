@@ -389,6 +389,7 @@ Prism exposes 40+ MCP tools. The core memory loop:
 | `verify_behavior` | Pre-edit scenario challenge — catch bad changes before they happen |
 | `knowledge_ingest` | Teach Prism a codebase or document |
 | `prism_infer` | Local-first inference (route/chat/code modes, thinking, cloud escalation) |
+| `inference_metrics` | Session delegation stats on demand (call count, tokens, local/cloud split) |
 
 ### `prism_infer` — local-first inference with cloud escalation
 
@@ -562,7 +563,7 @@ With no variables set, Prism runs fully local. Set `PRISM_SYNALUX_API_KEY` (and 
 ## Testing
 
 ```bash
-npm test                 # full suite (vitest) — 95 files, 2839 tests
+npm test                 # full suite (vitest) — 95 files, 2841 tests
 npm test -- --coverage   # coverage report
 ```
 
