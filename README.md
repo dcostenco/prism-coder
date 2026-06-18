@@ -93,7 +93,7 @@ Every `prism_infer` call tracks which model handled it (local Ollama vs cloud) a
     synalux-27b: 2 calls, 1,500 tokens, avg 1,100ms
 ```
 
-Local calls use actual Ollama token counts; cloud calls use estimates. Metrics are aggregated by the Synalux portal — Prism is a thin client that forwards per-call data and fetches the summary on demand.
+Local calls use actual Ollama token counts (`prompt_eval_count` / `eval_count` from Ollama); cloud calls use char/4 estimates. Metrics are tracked locally — no portal dependency, no env vars, works offline. Per-call data is also forwarded to the Synalux portal as best-effort analytics (independent of the display).
 
 ### Session Drift Detection
 
@@ -363,7 +363,7 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 | Cloud Coder (Web IDE) | -- | 100/day | 1,000/day | 100,000/day |
 | Cloud search | -- | 50/day | 500/day | 100,000/day |
 | Max output tokens | 512 | 1,024 | 2,048 | 4,096 |
-| Cloud fallback | -- | Claude Sonnet 4 | Claude Sonnet 4 | Priority + Sonnet 4 |
+| Cloud fallback | -- | Claude Opus 4.7 | Claude Opus 4.7 | Priority + Opus 4.7 |
 | Grounding verifier (fact-check AI output) | -- | ✅ | ✅ | ✅ |
 | Memory sync (cloud) | -- | ✅ | ✅ | ✅ |
 | Knowledge / session memory | limited | unlimited | unlimited | unlimited |
@@ -553,6 +553,7 @@ Routing is automatic: `9b → 4b → cloud fallback` on desktop/server, `2b → 
 | `PRISM_SYNALUX_API_KEY` | Paid-tier portal key (`synalux_sk_...`) | -- (local if unset) |
 | `LOCAL_LLM_URL` | Ollama endpoint | `http://localhost:11434` |
 | `PRISM_FORCE_LOCAL` | Force local SQLite regardless of credentials | `false` |
+| `TELEMETRY_WRITE_TOKEN` | Portal analytics token (optional — metrics display works without it) | -- |
 
 With no variables set, Prism runs fully local. Set `PRISM_SYNALUX_API_KEY` (and leave `PRISM_STORAGE=auto`) to use the cloud backend.
 
@@ -561,11 +562,11 @@ With no variables set, Prism runs fully local. Set `PRISM_SYNALUX_API_KEY` (and 
 ## Testing
 
 ```bash
-npm test                 # full suite (vitest)
+npm test                 # full suite (vitest) — 95 files, 2839 tests
 npm test -- --coverage   # coverage report
 ```
 
-Coverage spans HRR retrieval, knowledge ingestion, the inference cascade and grounding verifier, compaction, the model picker, and storage round-trips.
+Coverage spans HRR retrieval, knowledge ingestion, the inference cascade and grounding verifier, inference metrics, telemetry allowlist, delegation gate, compaction, the model picker, and storage round-trips.
 
 ---
 
