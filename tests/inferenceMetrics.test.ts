@@ -1,226 +1,149 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import {
-    recordInference,
-    getInferenceSnapshot,
-    resetInferenceMetrics,
-    formatInferenceMetrics,
-    getSnapshotSequence,
-} from "../src/utils/inferenceMetrics.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { markSessionStart, fetchPortalInferenceMetrics } from "../src/utils/inferenceMetrics.js";
+
+// Mock the JWT helper and config
+vi.mock("../src/utils/synaluxJwt.js", () => ({
+    getSynaluxJwt: vi.fn(async () => "mock-jwt"),
+}));
+
+vi.mock("../src/config.js", async (importOriginal) => {
+    const actual = await importOriginal() as Record<string, unknown>;
+    return { ...actual, PRISM_SYNALUX_BASE_URL: "https://test.synalux.ai" };
+});
+
+const mockFetch = vi.fn();
+vi.stubGlobal("fetch", mockFetch);
 
 beforeEach(() => {
-    resetInferenceMetrics();
+    vi.clearAllMocks();
+    markSessionStart();
 });
 
-describe("recordInference", () => {
-    it("increments localCalls for local backend", () => {
-        recordInference({ backend: "ollama-27b", model_picked: "prism-coder:27b", used_cloud: false, latency_ms: 100 });
-        const snap = getInferenceSnapshot();
-        expect(snap.localCalls).toBe(1);
-        expect(snap.cloudCalls).toBe(0);
+describe("fetchPortalInferenceMetrics", () => {
+    it("returns empty string when portal returns 0 calls", async () => {
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ total_calls: 0 }),
+        });
+        const result = await fetchPortalInferenceMetrics();
+        expect(result).toBe("");
     });
 
-    it("increments cloudCalls for cloud backend", () => {
-        recordInference({ backend: "synalux", model_picked: null, used_cloud: true, latency_ms: 200 });
-        const snap = getInferenceSnapshot();
-        expect(snap.localCalls).toBe(0);
-        expect(snap.cloudCalls).toBe(1);
+    it("formats portal response with local/cloud split", async () => {
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                total_calls: 12,
+                local_calls: 10,
+                cloud_calls: 2,
+                local_pct: 83,
+                cloud_pct: 17,
+                total_prompt_tokens: 8420,
+                total_completion_tokens: 3150,
+                total_tokens: 11570,
+                avg_latency_ms: 1240,
+                by_model: {
+                    "prism-coder:27b": { calls: 6, prompt_tokens: 5100, completion_tokens: 2100, total_latency_ms: 10800 },
+                    "prism-coder:9b": { calls: 4, prompt_tokens: 1820, completion_tokens: 1050, total_latency_ms: 2480 },
+                    "synalux-27b": { calls: 2, prompt_tokens: 1500, completion_tokens: 0, total_latency_ms: 2200 },
+                },
+            }),
+        });
+
+        const result = await fetchPortalInferenceMetrics();
+        expect(result).toContain("Total calls: 12");
+        expect(result).toContain("Local: 10 (83%)");
+        expect(result).toContain("Cloud: 2 (17%)");
+        expect(result).toContain("11,570 total");
+        expect(result).toContain("1240ms");
+        expect(result).toContain("By model:");
+        expect(result).toContain("prism-coder:27b");
     });
 
-    it("skips safety_gate intercepts entirely", () => {
-        recordInference({ backend: "safety_gate", model_picked: null, used_cloud: false, latency_ms: 1 });
-        const snap = getInferenceSnapshot();
-        expect(snap.totalCalls).toBe(0);
-        expect(snap.localCalls).toBe(0);
-        expect(snap.cloudCalls).toBe(0);
+    it("hides model breakdown for single model", async () => {
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                total_calls: 3,
+                local_calls: 3,
+                cloud_calls: 0,
+                local_pct: 100,
+                cloud_pct: 0,
+                total_prompt_tokens: 300,
+                total_completion_tokens: 100,
+                total_tokens: 400,
+                avg_latency_ms: 80,
+                by_model: { "prism-coder:9b": { calls: 3, prompt_tokens: 300, completion_tokens: 100, total_latency_ms: 240 } },
+            }),
+        });
+
+        const result = await fetchPortalInferenceMetrics();
+        expect(result).toContain("Total calls: 3");
+        expect(result).not.toContain("By model:");
     });
 
-    it("accumulates token counts", () => {
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 50, prompt_tokens: 100, completion_tokens: 50 });
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 60, prompt_tokens: 200, completion_tokens: 80 });
-        const snap = getInferenceSnapshot();
-        expect(snap.totalPromptTokens).toBe(300);
-        expect(snap.totalCompletionTokens).toBe(130);
-        expect(snap.totalTokens).toBe(430);
+    it("returns empty string on portal error", async () => {
+        mockFetch.mockResolvedValue({ ok: false, status: 500 });
+        const result = await fetchPortalInferenceMetrics();
+        expect(result).toBe("");
     });
 
-    it("handles undefined token counts as 0", () => {
-        recordInference({ backend: "ollama-2b", model_picked: "prism-coder:2b", used_cloud: false, latency_ms: 10 });
-        const snap = getInferenceSnapshot();
-        expect(snap.totalPromptTokens).toBe(0);
-        expect(snap.totalCompletionTokens).toBe(0);
+    it("returns empty string on network failure", async () => {
+        mockFetch.mockRejectedValue(new Error("network error"));
+        const result = await fetchPortalInferenceMetrics();
+        expect(result).toBe("");
     });
 
-    it("keys byModel on model_picked when available", () => {
-        recordInference({ backend: "ollama-27b", model_picked: "prism-coder:27b", used_cloud: false, latency_ms: 100, prompt_tokens: 50, completion_tokens: 25 });
-        const snap = getInferenceSnapshot();
-        expect(snap.byModel["prism-coder:27b"]).toBeDefined();
-        expect(snap.byModel["prism-coder:27b"].calls).toBe(1);
+    it("sends since param from session start", async () => {
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ total_calls: 0 }),
+        });
+        await fetchPortalInferenceMetrics();
+
+        expect(mockFetch).toHaveBeenCalledOnce();
+        const url = mockFetch.mock.calls[0][0] as string;
+        expect(url).toContain("/api/v1/telemetry/inference-metrics?since=");
+        expect(url).toContain("test.synalux.ai");
     });
 
-    it("keys byModel on backend when model_picked is null", () => {
-        recordInference({ backend: "synalux-27b", model_picked: null, used_cloud: true, latency_ms: 200 });
-        const snap = getInferenceSnapshot();
-        expect(snap.byModel["synalux-27b"]).toBeDefined();
+    it("sends JWT auth header", async () => {
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ total_calls: 0 }),
+        });
+        await fetchPortalInferenceMetrics();
+
+        const opts = mockFetch.mock.calls[0][1] as RequestInit;
+        expect(opts.headers).toHaveProperty("Authorization", "Bearer mock-jwt");
     });
 
-    it("accumulates per-model stats across multiple calls", () => {
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 50, prompt_tokens: 100, completion_tokens: 50 });
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 70, prompt_tokens: 150, completion_tokens: 60 });
-        recordInference({ backend: "synalux", model_picked: null, used_cloud: true, latency_ms: 200, prompt_tokens: 80, completion_tokens: 40 });
-
-        const snap = getInferenceSnapshot();
-        expect(snap.byModel["prism-coder:9b"].calls).toBe(2);
-        expect(snap.byModel["prism-coder:9b"].promptTokens).toBe(250);
-        expect(snap.byModel["prism-coder:9b"].completionTokens).toBe(110);
-        expect(snap.byModel["synalux"].calls).toBe(1);
-    });
-});
-
-describe("getInferenceSnapshot", () => {
-    it("returns zeroed snapshot when no calls recorded", () => {
-        const snap = getInferenceSnapshot();
-        expect(snap.totalCalls).toBe(0);
-        expect(snap.localPct).toBe(0);
-        expect(snap.cloudPct).toBe(0);
-        expect(snap.avgLatencyMs).toBe(0);
-        expect(Object.keys(snap.byModel)).toHaveLength(0);
-    });
-
-    it("calculates correct percentages", () => {
-        for (let i = 0; i < 3; i++) {
-            recordInference({ backend: "ollama-27b", model_picked: "prism-coder:27b", used_cloud: false, latency_ms: 100 });
-        }
-        recordInference({ backend: "synalux", model_picked: null, used_cloud: true, latency_ms: 200 });
-
-        const snap = getInferenceSnapshot();
-        expect(snap.localPct).toBe(75);
-        expect(snap.cloudPct).toBe(25);
-        expect(snap.localPct + snap.cloudPct).toBe(100);
-    });
-
-    it("percentages always sum to 100 (no rounding drift)", () => {
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 50 });
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 50 });
-        recordInference({ backend: "synalux", model_picked: null, used_cloud: true, latency_ms: 200 });
-        // 2/3 = 66.67% → rounds to 67. cloudPct should be 33 (100 - 67), not 33 from independent rounding.
-        const snap = getInferenceSnapshot();
-        expect(snap.localPct + snap.cloudPct).toBe(100);
-    });
-
-    it("100% local when no cloud calls", () => {
-        recordInference({ backend: "ollama-4b", model_picked: "prism-coder:4b", used_cloud: false, latency_ms: 30 });
-        const snap = getInferenceSnapshot();
-        expect(snap.localPct).toBe(100);
-        expect(snap.cloudPct).toBe(0);
-    });
-
-    it("100% cloud when no local calls", () => {
-        recordInference({ backend: "synalux", model_picked: null, used_cloud: true, latency_ms: 200 });
-        const snap = getInferenceSnapshot();
-        expect(snap.localPct).toBe(0);
-        expect(snap.cloudPct).toBe(100);
-    });
-
-    it("calculates average latency", () => {
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 100 });
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 300 });
-        const snap = getInferenceSnapshot();
-        expect(snap.avgLatencyMs).toBe(200);
-    });
-
-    it("deep-copies byModel — mutations don't affect accumulator", () => {
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 100, prompt_tokens: 50, completion_tokens: 25 });
-
-        const snap1 = getInferenceSnapshot();
-        snap1.byModel["prism-coder:9b"].calls = 999;
-
-        const snap2 = getInferenceSnapshot();
-        expect(snap2.byModel["prism-coder:9b"].calls).toBe(1);
+    it("returns empty string when no portal URL configured", async () => {
+        const configModule = await import("../src/config.js");
+        const original = configModule.PRISM_SYNALUX_BASE_URL;
+        (configModule as any).PRISM_SYNALUX_BASE_URL = "";
+        const result = await fetchPortalInferenceMetrics();
+        expect(result).toBe("");
+        (configModule as any).PRISM_SYNALUX_BASE_URL = original;
     });
 });
 
-describe("resetInferenceMetrics", () => {
-    it("clears all accumulated state", () => {
-        recordInference({ backend: "ollama-27b", model_picked: "prism-coder:27b", used_cloud: false, latency_ms: 100, prompt_tokens: 500, completion_tokens: 200 });
-        recordInference({ backend: "synalux", model_picked: null, used_cloud: true, latency_ms: 200, prompt_tokens: 100, completion_tokens: 50 });
+describe("markSessionStart", () => {
+    it("updates the since timestamp used in fetch", async () => {
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ total_calls: 0 }),
+        });
 
-        resetInferenceMetrics();
-        const snap = getInferenceSnapshot();
+        await fetchPortalInferenceMetrics();
+        const url1 = mockFetch.mock.calls[0][0] as string;
 
-        expect(snap.totalCalls).toBe(0);
-        expect(snap.localCalls).toBe(0);
-        expect(snap.cloudCalls).toBe(0);
-        expect(snap.totalPromptTokens).toBe(0);
-        expect(snap.totalCompletionTokens).toBe(0);
-        expect(snap.totalTokens).toBe(0);
-        expect(snap.avgLatencyMs).toBe(0);
-        expect(Object.keys(snap.byModel)).toHaveLength(0);
-    });
+        markSessionStart();
+        await fetchPortalInferenceMetrics();
+        const url2 = mockFetch.mock.calls[1][0] as string;
 
-    it("allows recording after reset", () => {
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 50, prompt_tokens: 100, completion_tokens: 50 });
-        resetInferenceMetrics();
-        recordInference({ backend: "ollama-4b", model_picked: "prism-coder:4b", used_cloud: false, latency_ms: 30, prompt_tokens: 40, completion_tokens: 20 });
-
-        const snap = getInferenceSnapshot();
-        expect(snap.totalCalls).toBe(1);
-        expect(snap.totalPromptTokens).toBe(40);
-        expect(snap.byModel["prism-coder:4b"]).toBeDefined();
-        expect(snap.byModel["prism-coder:9b"]).toBeUndefined();
-    });
-
-    it("resets snapshot sequence counter", () => {
-        getSnapshotSequence();
-        getSnapshotSequence();
-        resetInferenceMetrics();
-        expect(getSnapshotSequence()).toBe(1);
-    });
-});
-
-describe("getSnapshotSequence", () => {
-    it("increments on each call", () => {
-        expect(getSnapshotSequence()).toBe(1);
-        expect(getSnapshotSequence()).toBe(2);
-        expect(getSnapshotSequence()).toBe(3);
-    });
-});
-
-describe("formatInferenceMetrics", () => {
-    it("returns empty string when no calls", () => {
-        expect(formatInferenceMetrics()).toBe("");
-    });
-
-    it("shows summary for single model (no breakdown section)", () => {
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 100, prompt_tokens: 200, completion_tokens: 80 });
-
-        const output = formatInferenceMetrics();
-        expect(output).toContain("Total calls: 1");
-        expect(output).toContain("Local: 1 (100%)");
-        expect(output).toContain("Cloud: 0 (0%)");
-        expect(output).toContain("280");
-        expect(output).not.toContain("By model:");
-    });
-
-    it("shows per-model breakdown with multiple models sorted by call count", () => {
-        recordInference({ backend: "ollama-27b", model_picked: "prism-coder:27b", used_cloud: false, latency_ms: 100, prompt_tokens: 100, completion_tokens: 50 });
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 50, prompt_tokens: 80, completion_tokens: 40 });
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 60, prompt_tokens: 90, completion_tokens: 45 });
-
-        const output = formatInferenceMetrics();
-        expect(output).toContain("By model:");
-        // 9b has 2 calls, should appear before 27b (1 call)
-        const idx9b = output.indexOf("prism-coder:9b");
-        const idx27b = output.indexOf("prism-coder:27b");
-        expect(idx9b).toBeLessThan(idx27b);
-    });
-
-    it("handles mixed local and cloud calls", () => {
-        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 50, prompt_tokens: 100, completion_tokens: 50 });
-        recordInference({ backend: "synalux", model_picked: null, used_cloud: true, latency_ms: 200, prompt_tokens: 80, completion_tokens: 40 });
-
-        const output = formatInferenceMetrics();
-        expect(output).toContain("Local: 1 (50%)");
-        expect(output).toContain("Cloud: 1 (50%)");
-        expect(output).toContain("By model:");
+        const since1 = new URL(url1).searchParams.get("since")!;
+        const since2 = new URL(url2).searchParams.get("since")!;
+        expect(new Date(since2).getTime()).toBeGreaterThanOrEqual(new Date(since1).getTime());
     });
 });

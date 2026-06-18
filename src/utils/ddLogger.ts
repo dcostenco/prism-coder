@@ -9,9 +9,18 @@
  */
 
 const SYNALUX_BASE = process.env.PRISM_SYNALUX_BASE_URL || "https://synalux.ai";
+const TELEMETRY_WRITE_TOKEN = process.env.TELEMETRY_WRITE_TOKEN || "";
 const DD_API_KEY = process.env.DD_API_KEY || "";
 const DD_SITE = process.env.DD_SITE || "datadoghq.com";
 const SERVICE = "prism-mcp";
+
+const CONTEXT_ALLOWLIST = new Set([
+    "backend", "model", "used_cloud", "prompt_tokens", "completion_tokens",
+    "latency_ms", "plan", "requested_ceiling", "effective_ceiling",
+    "ceiling_clamped", "requested_tokens", "effective_tokens", "tokens_clamped",
+    "cloud_requested", "cloud_allowed", "cloud_blocked",
+    "verify_requested", "verify_allowed", "verify_blocked",
+]);
 
 const queue: Array<Record<string, unknown>> = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -30,31 +39,59 @@ async function flush() {
     const batch = queue.splice(0, MAX_BATCH);
 
     // Primary: Synalux portal → Supabase (always available)
-    try {
-        await fetch(`${SYNALUX_BASE}/api/v1/telemetry`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(batch.map(e => ({
-                service: SERVICE,
-                event_type: e.status === "error" ? "error" : "action",
-                message: e.message,
-                context: { ...e, service: undefined, message: undefined },
-                user_id: e.user_id,
-                user_plan: e.user_plan,
-            }))),
-            signal: AbortSignal.timeout(5_000),
-        });
-    } catch {
-        // Silent — don't crash the MCP server
+    if (TELEMETRY_WRITE_TOKEN) {
+        try {
+            await fetch(`${SYNALUX_BASE}/api/v1/telemetry`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${TELEMETRY_WRITE_TOKEN}`,
+                    "X-Prism-Client": "prism-mcp",
+                },
+                body: JSON.stringify(batch.map(e => {
+                    const ctx: Record<string, unknown> = {};
+                    for (const [k, v] of Object.entries(e)) {
+                        if (CONTEXT_ALLOWLIST.has(k)) ctx[k] = v;
+                    }
+                    return {
+                        service: SERVICE,
+                        event_type: e.status === "error" ? "error" : "action",
+                        message: e.message,
+                        context: ctx,
+                        user_id: e.user_id,
+                        user_plan: e.user_plan,
+                    };
+                })),
+                signal: AbortSignal.timeout(5_000),
+            });
+        } catch {
+            // Silent — don't crash the MCP server
+        }
     }
 
     // Secondary: Datadog Logs (if API key is set AND Logs product is enabled)
+    // Same allowlist applied — both sinks get identical filtered context.
     if (DD_API_KEY) {
         try {
             await fetch(`https://http-intake.logs.${DD_SITE}/api/v2/logs`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "DD-API-KEY": DD_API_KEY },
-                body: JSON.stringify(batch),
+                body: JSON.stringify(batch.map(e => {
+                    const ctx: Record<string, unknown> = {};
+                    for (const [k, v] of Object.entries(e)) {
+                        if (CONTEXT_ALLOWLIST.has(k)) ctx[k] = v;
+                    }
+                    return {
+                        ddsource: "nodejs",
+                        ddtags: e.ddtags,
+                        hostname: e.hostname,
+                        service: SERVICE,
+                        status: e.status,
+                        message: e.message,
+                        ...ctx,
+                        timestamp: e.timestamp,
+                    };
+                })),
                 signal: AbortSignal.timeout(5_000),
             });
         } catch {
@@ -76,7 +113,7 @@ export function ddLog(
         hostname: process.env.HOSTNAME || "prism-mcp",
         service: SERVICE,
         status: level,
-        message,
+        message: message.slice(0, 200),
         ...context,
         timestamp: new Date().toISOString(),
     });

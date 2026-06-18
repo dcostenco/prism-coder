@@ -38,7 +38,6 @@ import { ddLog } from "../utils/ddLogger.js";
 import { stripThink } from "../utils/thinkStrip.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
-import { recordInference } from "../utils/inferenceMetrics.js";
 
 // ─── Tool Definition ────────────────────────────────────────────
 
@@ -658,11 +657,8 @@ export async function prismInferHandler(args: unknown): Promise<{
 
         debugLog(`[prism_infer] backend=${result.backend} model=${result.model_picked} latency=${result.latency_ms}ms free=${result.ram_free_mb}MB`);
 
-        // Record metrics for session-level accumulation
-        recordInference(result);
-
-        // safety_gate is excluded from telemetry — logging that a user triggered
-        // a crisis/medical filter is a HIPAA-adjacent privacy concern.
+        // Forward per-call metrics to portal (thin-client pattern).
+        // safety_gate excluded — logging crisis filter triggers is a HIPAA concern.
         if (result.backend !== "safety_gate") {
             ddLog("info", "prism_infer.usage", {
                 backend: result.backend,

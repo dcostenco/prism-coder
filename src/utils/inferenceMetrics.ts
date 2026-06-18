@@ -1,126 +1,79 @@
 /**
- * In-memory session-level inference metrics accumulator.
+ * Inference metrics — thin-client fetch from Synalux portal.
  *
- * Tracks local vs cloud usage, per-model call counts, and token totals
- * across all prism_infer calls in the current server process lifetime.
- * Surfaced in session_save_ledger output so the user sees a summary.
+ * Prism forwards per-call metrics via ddLog("prism_infer.usage").
+ * The portal aggregates them in app_telemetry. This module fetches
+ * the aggregated summary on demand (session_save_ledger/handoff).
  */
 
-export interface ModelStats {
-    calls: number;
-    promptTokens: number;
-    completionTokens: number;
-    totalLatencyMs: number;
+import { getSynaluxJwt } from "./synaluxJwt.js";
+import { PRISM_SYNALUX_BASE_URL } from "../config.js";
+import { debugLog } from "./logger.js";
+
+interface PortalMetrics {
+    total_calls: number;
+    local_calls: number;
+    cloud_calls: number;
+    local_pct: number;
+    cloud_pct: number;
+    total_prompt_tokens: number;
+    total_completion_tokens: number;
+    total_tokens: number;
+    avg_latency_ms: number;
+    by_model: Record<string, { calls: number; prompt_tokens: number; completion_tokens: number; total_latency_ms: number }>;
 }
 
-export interface InferenceSnapshot {
-    localCalls: number;
-    cloudCalls: number;
-    totalCalls: number;
-    localPct: number;
-    cloudPct: number;
-    totalPromptTokens: number;
-    totalCompletionTokens: number;
-    totalTokens: number;
-    avgLatencyMs: number;
-    byModel: Record<string, ModelStats>;
+let sessionStartedAt: string = new Date().toISOString();
+
+export function markSessionStart(): void {
+    sessionStartedAt = new Date().toISOString();
 }
 
-const byModel: Record<string, ModelStats> = {};
-let localCalls = 0;
-let cloudCalls = 0;
-let totalPromptTokens = 0;
-let totalCompletionTokens = 0;
-let totalLatencyMs = 0;
-let snapshotSeq = 0;
+async function fetchMetrics(): Promise<{ metrics: PortalMetrics | null; error?: string }> {
+    if (!PRISM_SYNALUX_BASE_URL) return { metrics: null, error: "no_portal_url" };
 
-export function recordInference(result: {
-    backend: string;
-    model_picked: string | null;
-    used_cloud: boolean;
-    latency_ms: number;
-    prompt_tokens?: number;
-    completion_tokens?: number;
-}): void {
-    // safety_gate is a deterministic intercept, not a model call
-    if (result.backend === "safety_gate") return;
+    const jwt = await getSynaluxJwt();
+    if (!jwt) return { metrics: null, error: "jwt_unavailable" };
 
-    const key = result.model_picked ?? result.backend;
-
-    if (result.used_cloud) {
-        cloudCalls++;
-    } else {
-        localCalls++;
-    }
-
-    const pt = result.prompt_tokens ?? 0;
-    const ct = result.completion_tokens ?? 0;
-    totalPromptTokens += pt;
-    totalCompletionTokens += ct;
-    totalLatencyMs += result.latency_ms;
-
-    if (!byModel[key]) {
-        byModel[key] = { calls: 0, promptTokens: 0, completionTokens: 0, totalLatencyMs: 0 };
-    }
-    byModel[key].calls++;
-    byModel[key].promptTokens += pt;
-    byModel[key].completionTokens += ct;
-    byModel[key].totalLatencyMs += result.latency_ms;
-}
-
-export function getInferenceSnapshot(): InferenceSnapshot {
-    const total = localCalls + cloudCalls;
-    const modelCopy: Record<string, ModelStats> = {};
-    for (const [k, v] of Object.entries(byModel)) {
-        modelCopy[k] = { ...v };
-    }
-    return {
-        localCalls,
-        cloudCalls,
-        totalCalls: total,
-        localPct: total > 0 ? Math.round((localCalls / total) * 100) : 0,
-        cloudPct: total > 0 ? 100 - Math.round((localCalls / total) * 100) : 0,
-        totalPromptTokens,
-        totalCompletionTokens,
-        totalTokens: totalPromptTokens + totalCompletionTokens,
-        avgLatencyMs: total > 0 ? Math.round(totalLatencyMs / total) : 0,
-        byModel: modelCopy,
-    };
-}
-
-export function getSnapshotSequence(): number {
-    return ++snapshotSeq;
-}
-
-export function resetInferenceMetrics(): void {
-    localCalls = 0;
-    cloudCalls = 0;
-    totalPromptTokens = 0;
-    totalCompletionTokens = 0;
-    totalLatencyMs = 0;
-    snapshotSeq = 0;
-    for (const key of Object.keys(byModel)) {
-        delete byModel[key];
+    try {
+        const url = `${PRISM_SYNALUX_BASE_URL}/api/v1/telemetry/inference-metrics?since=${encodeURIComponent(sessionStartedAt)}`;
+        const res = await fetch(url, {
+            headers: { "Authorization": `Bearer ${jwt}` },
+            signal: AbortSignal.timeout(5_000),
+        });
+        if (!res.ok) {
+            debugLog(`[inference-metrics] portal returned ${res.status}`);
+            return { metrics: null, error: `portal_${res.status}` };
+        }
+        return { metrics: (await res.json()) as PortalMetrics };
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[inference-metrics] fetch failed: ${msg}`);
+        return { metrics: null, error: msg };
     }
 }
 
-export function formatInferenceMetrics(): string {
-    const snap = getInferenceSnapshot();
-    if (snap.totalCalls === 0) return "";
+export async function fetchPortalInferenceMetrics(): Promise<string> {
+    const { metrics, error } = await fetchMetrics();
+    if (!metrics) {
+        if (error) debugLog(`[inference-metrics] unavailable: ${error}`);
+        return "";
+    }
+    if (metrics.total_calls === 0) return "";
 
     const lines: string[] = [
         `\n📊 Inference Metrics (this session):`,
-        `  Total calls: ${snap.totalCalls} — Local: ${snap.localCalls} (${snap.localPct}%) | Cloud: ${snap.cloudCalls} (${snap.cloudPct}%)`,
-        `  Tokens: ${snap.totalPromptTokens.toLocaleString()} in + ${snap.totalCompletionTokens.toLocaleString()} out = ${snap.totalTokens.toLocaleString()} total`,
-        `  Avg latency: ${snap.avgLatencyMs}ms`,
+        `  Total calls: ${metrics.total_calls} — Local: ${metrics.local_calls} (${metrics.local_pct}%) | Cloud: ${metrics.cloud_calls} (${metrics.cloud_pct}%)`,
+        `  Tokens: ${metrics.total_prompt_tokens.toLocaleString()} in + ${metrics.total_completion_tokens.toLocaleString()} out = ${metrics.total_tokens.toLocaleString()} total`,
+        `  Avg latency: ${metrics.avg_latency_ms}ms`,
     ];
 
-    const models = Object.entries(snap.byModel).sort((a, b) => b[1].calls - a[1].calls);
+    const models = Object.entries(metrics.by_model).sort((a, b) => b[1].calls - a[1].calls);
     if (models.length > 1) {
         lines.push(`  By model:`);
         for (const [name, stats] of models) {
-            const tokens = stats.promptTokens + stats.completionTokens;
-            const avgMs = stats.calls > 0 ? Math.round(stats.totalLatencyMs / stats.calls) : 0;
+            const tokens = stats.prompt_tokens + stats.completion_tokens;
+            const avgMs = stats.calls > 0 ? Math.round(stats.total_latency_ms / stats.calls) : 0;
             lines.push(`    ${name}: ${stats.calls} calls, ${tokens.toLocaleString()} tokens, avg ${avgMs}ms`);
         }
     }
