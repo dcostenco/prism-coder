@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [19.2.5] - 2026-06-22 — 🔒 Security Advisory Fixes
+
+### Security
+- **GHSA-g3wf-5xg2-c4vh (Critical)** — HTTP bridge now requires bearer token auth (`PRISM_MCP_HTTP_TOKEN`). Constant-time HMAC comparison via `timingSafeEqual`. 503 if token not configured, 401 on mismatch.
+- **GHSA-wpc9-r66q-pj2c (Medium)** — `session_export_memory` path confinement: `realpath` + allow-list, sensitive directory deny (resolves macOS `/private` symlinks), owner-only tmp subdir (mode 0700), exclusive-create write (`wx` flag) prevents symlink-following.
+- **Notifier SSRF** — All notification senders now use `redirect: "error"` and DNS resolve-then-check to reject private/internal IPs.
+
+### Added
+- 4 security regression tests for export path confinement (outside-allow-list, sensitive-dir, positive control, symlink attack).
+
+### Fixed
+- Resolved 15 of 16 Dependabot vulnerabilities (hono, undici, ws, vite, tar, protobufjs, OpenTelemetry). Remaining: 1 low (esbuild Windows dev server, not applicable).
+
+### Changed
+- 96 test files, 2845 tests (up from 95/2841).
+- Reviewed through 4 rounds of external security review.
+
 ## [19.2.4] - 2026-06-18 — 📊 `inference_metrics` Tool + Delegation Gate
 
 ### Added
