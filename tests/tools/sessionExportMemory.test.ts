@@ -259,7 +259,9 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
 
   beforeEach(async () => {
     // Isolated tmp directory per test — parallel-safe.
+    // Use PRISM_EXPORT_ROOT so the path-confinement allow-list accepts it.
     tempDir = await mkdtemp(join(tmpdir(), "prism-export-test-"));
+    process.env.PRISM_EXPORT_ROOT = tempDir;
 
     vi.clearAllMocks();
 
@@ -276,6 +278,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
   });
 
   afterEach(async () => {
+    delete process.env.PRISM_EXPORT_ROOT;
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -1208,4 +1211,5 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
       expect(buf[1]).toBe(0x4b);
     });
   });
+
 });

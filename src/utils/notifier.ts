@@ -12,6 +12,7 @@
  */
 
 import { debugLog } from "./logger.js";
+import { lookup } from "node:dns/promises";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -145,7 +146,7 @@ function isPrivateIP(ip: string): boolean {
     return false;
 }
 
-function isAllowedUrl(url: string): boolean {
+async function isAllowedUrl(url: string): Promise<boolean> {
     try {
         const parsed = new URL(url);
 
@@ -166,6 +167,17 @@ function isAllowedUrl(url: string): boolean {
         // Block bracketed IPv6
         if (hostname.startsWith("[") && isPrivateIP(hostname)) return false;
 
+        // Resolve hostname and reject if ANY address is private (closes
+        // attacker.example → 169.254.169.254 / 127.0.0.1 bypass)
+        try {
+            const addrs = await lookup(hostname, { all: true });
+            for (const { address } of addrs) {
+                if (isPrivateIP(address)) return false;
+            }
+        } catch {
+            return false;
+        }
+
         return true;
     } catch {
         return false;
@@ -178,7 +190,7 @@ async function sendWebhook(
     url: string,
     payload: NotificationPayload,
 ): Promise<boolean> {
-    if (!isAllowedUrl(url)) {
+    if (!(await isAllowedUrl(url))) {
         debugLog(`Webhook URL blocked by SSRF policy: ${url}`);
         return false;
     }
@@ -187,6 +199,7 @@ async function sendWebhook(
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
+            redirect: "error",
             signal: AbortSignal.timeout(10_000),
         });
         return response.ok;
@@ -200,7 +213,7 @@ async function sendSlack(
     webhookUrl: string,
     payload: NotificationPayload,
 ): Promise<boolean> {
-    if (!isAllowedUrl(webhookUrl)) {
+    if (!(await isAllowedUrl(webhookUrl))) {
         debugLog(`Slack webhook URL blocked by SSRF policy: ${webhookUrl}`);
         return false;
     }
@@ -248,6 +261,7 @@ async function sendSlack(
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(slackPayload),
+            redirect: "error",
             signal: AbortSignal.timeout(10_000),
         });
         return response.ok;
@@ -261,7 +275,7 @@ async function sendEmail(
     endpoint: string,
     payload: NotificationPayload,
 ): Promise<boolean> {
-    if (!isAllowedUrl(endpoint)) {
+    if (!(await isAllowedUrl(endpoint))) {
         debugLog(`Email endpoint URL blocked by SSRF policy: ${endpoint}`);
         return false;
     }
@@ -276,6 +290,7 @@ async function sendEmail(
                 project: payload.project,
                 details: payload.details,
             }),
+            redirect: "error",
             signal: AbortSignal.timeout(10_000),
         });
         return response.ok;

@@ -6,9 +6,21 @@
  */
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const PUBLIC_PORT = parseInt(process.env.PORT || '8000', 10);
 const GATEWAY_PORT = 8001;
+const HTTP_TOKEN = process.env.PRISM_MCP_HTTP_TOKEN || '';
+
+// Constant-time token comparison — HMAC both sides with a per-process
+// random key so timingSafeEqual never throws on length mismatch and
+// leaks neither the token's contents nor its length.
+const TOKEN_COMPARE_KEY = randomBytes(32);
+function constantTimeEqual(a, b) {
+  const da = createHmac('sha256', TOKEN_COMPARE_KEY).update(String(a)).digest();
+  const db = createHmac('sha256', TOKEN_COMPARE_KEY).update(String(b)).digest();
+  return timingSafeEqual(da, db);
+}
 
 // --- Server Card (static metadata for Smithery) ---
 const serverCard = {
@@ -18,7 +30,7 @@ const serverCard = {
     description:
       'The Mind Palace for AI Agents — persistent memory, ACT-R cognitive retrieval, Dark Factory autonomous pipelines, behavioral learning, multi-agent Hivemind, time travel, visual dashboard.',
   },
-  authentication: { required: false },
+  authentication: { required: true, type: 'bearer' },
   tools: [
     { name: 'session_load_context', description: 'Load session context for a project using progressive context loading.' },
     { name: 'session_save_ledger', description: 'Save an immutable session log entry to the session ledger.' },
@@ -79,6 +91,23 @@ const server = http.createServer((req, res) => {
   if (req.url === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('OK');
+    return;
+  }
+
+  // --- Auth enforcement (all routes below require a valid bearer token) ---
+  if (!HTTP_TOKEN) {
+    res.writeHead(503, { 'Content-Type': 'text/plain' });
+    res.end('Service unavailable: PRISM_MCP_HTTP_TOKEN not configured');
+    return;
+  }
+
+  const authHeader = req.headers['authorization'] || '';
+  if (!constantTimeEqual(authHeader, `Bearer ${HTTP_TOKEN}`)) {
+    res.writeHead(401, {
+      'Content-Type': 'text/plain',
+      'WWW-Authenticate': 'Bearer',
+    });
+    res.end('Unauthorized');
     return;
   }
 

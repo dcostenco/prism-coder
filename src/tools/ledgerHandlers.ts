@@ -73,7 +73,7 @@ import {
 
 // v4.2: File system access for knowledge_sync_rules
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync, mkdirSync } from "node:fs";
 import { join, dirname, resolve, isAbsolute, sep, relative } from "node:path";
 
 // v3.1: In-memory debounce lock for auto-compaction.
@@ -1675,12 +1675,91 @@ export async function sessionExportMemoryHandler(args: unknown) {
   const requestedFormat = rawFormat;
   const format = normalizeExportFormat(rawFormat);
 
-  // Validate output directory
+  // Validate output directory — path traversal confinement (v4.3 security)
+  const homeDir = process.env.HOME || process.env.USERPROFILE || "/tmp";
+  const defaultExportDir = join(homeDir, ".prism-mcp", "exports");
+
+  // Create default export directory if it doesn't exist
+  if (!existsSync(defaultExportDir)) {
+    mkdirSync(defaultExportDir, { recursive: true });
+  }
+
   if (!existsSync(output_dir)) {
     return {
       content: [{
         type: "text",
         text: `Error: output_dir does not exist: "${output_dir}". Please create it first.`,
+      }],
+      isError: true,
+    };
+  }
+
+  // Resolve symlinks and ".." to get the canonical path
+  const resolvedDir = realpathSync(output_dir);
+
+  // Build allow-list of safe export roots
+  const allowedRoots: string[] = [
+    defaultExportDir,
+    process.cwd(),
+  ];
+  // Scratch root under tmp — but NOT the world-writable tmp root itself.
+  // os.tmpdir() (typically /tmp, mode 1777) is readable and writable by every
+  // local principal: allowing it as an export root would (a) leak unredacted
+  // ledger/handoff contents to other users and (b) let a co-resident attacker
+  // pre-plant a symlink at the predictable export filename and have writeFile
+  // follow it (arbitrary-file overwrite). Confine to an owner-only subdir.
+  const tmpExportDir = join(os.tmpdir(), ".prism-mcp", "exports");
+  if (!existsSync(tmpExportDir)) {
+    mkdirSync(tmpExportDir, { recursive: true, mode: 0o700 });
+  }
+  allowedRoots.push(realpathSync(tmpExportDir));
+  if (process.env.PRISM_EXPORT_ROOT) {
+    const exportRoot = process.env.PRISM_EXPORT_ROOT;
+    if (existsSync(exportRoot)) {
+      allowedRoots.push(realpathSync(exportRoot));
+    }
+  }
+
+  // Reject sensitive directories (resolve each so macOS /etc → /private/etc matches)
+  const sensitiveRoots = [
+    join(homeDir, ".ssh"),
+    join(homeDir, ".gnupg"),
+    "/etc",
+    "/var",
+    "/etc/cron.d",
+    "/etc/cron.daily",
+    "/etc/sudoers.d",
+  ].map(p => existsSync(p) ? realpathSync(p) : p);
+  // Check allow-list first — explicitly configured roots take precedence
+  const isAllowedRoot = (dir: string) => allowedRoots.some((root) => {
+    const resolvedRoot = existsSync(root) ? realpathSync(root) : root;
+    return dir === resolvedRoot || dir.startsWith(resolvedRoot + sep);
+  });
+
+  for (const sensitive of sensitiveRoots) {
+    if (resolvedDir === sensitive || resolvedDir.startsWith(sensitive + sep)) {
+      // Allow explicitly configured roots even under sensitive parents
+      // (e.g. tmpExportDir under /private/var on macOS, or PRISM_EXPORT_ROOT)
+      if (!isAllowedRoot(resolvedDir)) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: output_dir resolves to a sensitive system directory ("${resolvedDir}"). Export denied.`,
+          }],
+          isError: true,
+        };
+      }
+    }
+  }
+
+  // Verify resolved path falls under an allowed root
+  if (!isAllowedRoot(resolvedDir)) {
+    return {
+      content: [{
+        type: "text",
+        text: `Error: output_dir "${resolvedDir}" is outside allowed export roots. ` +
+          `Allowed: ${allowedRoots.join(", ")}. ` +
+          `Set PRISM_EXPORT_ROOT env var to add a custom root.`,
       }],
       isError: true,
     };
@@ -1777,13 +1856,25 @@ export async function sessionExportMemoryHandler(args: unknown) {
         content = JSON.stringify(exportPayload, null, 2);
       }
 
-      if (format === "vault") {
-        await writeFile(outputPath, content as Buffer);
-      } else {
-        await writeFile(outputPath, content as string, "utf-8");
+      // Exclusive create (flag: "wx") refuses to write if the path already
+      // exists — including a symlink pre-planted at the predictable export
+      // name. On a genuine collision fall back to a timestamped unique name.
+      let finalPath = outputPath;
+      try {
+        await writeFile(finalPath, content, { flag: "wx" });
+      } catch (e: any) {
+        if (e && e.code === "EEXIST") {
+          const dot = filename.lastIndexOf(".");
+          const stem = dot > 0 ? filename.slice(0, dot) : filename;
+          const extPart = dot > 0 ? filename.slice(dot) : "";
+          finalPath = join(output_dir, `${stem}-${Date.now()}${extPart}`);
+          await writeFile(finalPath, content, { flag: "wx" });
+        } else {
+          throw e;
+        }
       }
-      exportedFiles.push(outputPath);
-      debugLog(`[session_export_memory] Wrote ${content.length} bytes to ${outputPath}`);
+      exportedFiles.push(finalPath);
+      debugLog(`[session_export_memory] Wrote ${content.length} bytes to ${finalPath}`);
     }
 
     const plural = exportedFiles.length > 1 ? "files" : "file";

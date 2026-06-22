@@ -997,6 +997,7 @@ describe("ledgerHandlers", () => {
 
     beforeEach(async () => {
       tempDir = await mkdtemp(join(tmpdir(), "prism-handler-export-"));
+      process.env.PRISM_EXPORT_ROOT = tempDir;
       storage.listProjects.mockResolvedValue(["test-project"]);
       storage.getLedgerEntries.mockResolvedValue([
         { id: "entry-1", summary: "Session 1", importance: 3 },
@@ -1008,6 +1009,7 @@ describe("ledgerHandlers", () => {
     });
 
     afterEach(async () => {
+      delete process.env.PRISM_EXPORT_ROOT;
       await rm(tempDir, { recursive: true, force: true });
     });
 
