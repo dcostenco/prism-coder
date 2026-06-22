@@ -60,6 +60,12 @@ const serverCard = {
 const serverCardJSON = JSON.stringify(serverCard, null, 2);
 
 // --- Start supergateway on internal port ---
+// SECURITY NOTE: supergateway has no --host flag and ignores HOST env;
+// it binds 0.0.0.0:GATEWAY_PORT. The proxy below enforces auth on all
+// inbound requests. On Railway/Docker, only PUBLIC_PORT is routed
+// externally — GATEWAY_PORT is container-internal. If deploying where
+// 8001 is reachable from other hosts, add a firewall rule or use
+// Railway private networking to restrict access.
 const gateway = spawn(
   'npx', ['-y', 'supergateway',
     '--stdio', 'node dist/server.js',

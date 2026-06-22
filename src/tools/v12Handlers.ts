@@ -141,8 +141,8 @@ export async function extractEntitiesHandler(args: Record<string, unknown>) {
 // ─── API Analytics Handler ───────────────────────────────────
 
 export async function apiAnalyticsHandler(args: Record<string, unknown>) {
-    const { action, project, days } = args as {
-        action?: string;
+    const { scope, project, days } = args as {
+        scope?: string;
         project?: string;
         days?: number;
     };
@@ -150,7 +150,7 @@ export async function apiAnalyticsHandler(args: Record<string, unknown>) {
     try {
         const analytics = await import("../utils/analytics.js");
 
-        if (action === "dashboard" || !action) {
+        if (scope === "system" || !scope) {
             const dashboard = await analytics.getSystemAnalytics(days || 30);
             return {
                 content: [{
@@ -164,7 +164,7 @@ export async function apiAnalyticsHandler(args: Record<string, unknown>) {
             };
         }
 
-        if (action === "project" && project) {
+        if (scope === "project" && project) {
             const projectStats = await analytics.getProjectAnalytics(project, days || 30);
             return {
                 content: [{
@@ -184,7 +184,7 @@ export async function apiAnalyticsHandler(args: Record<string, unknown>) {
                 type: "text",
                 text: JSON.stringify({
                     status: "ok",
-                    message: "Use action='dashboard' for aggregate stats or action='project' with project='name' for per-project stats.",
+                    message: "Use scope='system' for aggregate stats or scope='project' with project='name' for per-project stats.",
                 }, null, 2),
             }],
         };

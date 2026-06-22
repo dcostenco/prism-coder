@@ -13,6 +13,7 @@
 
 import { debugLog } from "./logger.js";
 import { lookup } from "node:dns/promises";
+import { Agent } from "undici";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -146,42 +147,53 @@ function isPrivateIP(ip: string): boolean {
     return false;
 }
 
-async function isAllowedUrl(url: string): Promise<boolean> {
+type AllowedUrlResult = {
+    allowed: false;
+} | {
+    allowed: true;
+    resolvedAddr: string;
+    resolvedFamily: number;
+};
+
+async function validateUrl(url: string): Promise<AllowedUrlResult> {
     try {
         const parsed = new URL(url);
 
-        // Block non-HTTP(S) schemes
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return { allowed: false };
 
         const hostname = parsed.hostname.toLowerCase();
 
-        // Block localhost variants
-        if (hostname === "localhost" || hostname === "localhost.localdomain") return false;
+        if (hostname === "localhost" || hostname === "localhost.localdomain") return { allowed: false };
 
-        // Block .internal, .local, .arpa TLDs
-        if (hostname.endsWith(".internal") || hostname.endsWith(".local") || hostname.endsWith(".arpa")) return false;
+        if (hostname.endsWith(".internal") || hostname.endsWith(".local") || hostname.endsWith(".arpa")) return { allowed: false };
 
-        // Block private/loopback IPs (covers 0.0.0.0, 127.x, 10.x, 172.16-31.x, 192.168.x, ::1, etc.)
-        if (isPrivateIP(hostname)) return false;
+        if (isPrivateIP(hostname)) return { allowed: false };
 
-        // Block bracketed IPv6
-        if (hostname.startsWith("[") && isPrivateIP(hostname)) return false;
+        if (hostname.startsWith("[") && isPrivateIP(hostname)) return { allowed: false };
 
-        // Resolve hostname and reject if ANY address is private (closes
-        // attacker.example → 169.254.169.254 / 127.0.0.1 bypass)
         try {
             const addrs = await lookup(hostname, { all: true });
             for (const { address } of addrs) {
-                if (isPrivateIP(address)) return false;
+                if (isPrivateIP(address)) return { allowed: false };
             }
+            // Return the first validated address so senders can pin DNS
+            return { allowed: true, resolvedAddr: addrs[0].address, resolvedFamily: addrs[0].family };
         } catch {
-            return false;
+            return { allowed: false };
         }
-
-        return true;
     } catch {
-        return false;
+        return { allowed: false };
     }
+}
+
+function pinnedDispatcher(address: string, family: number): Agent {
+    return new Agent({
+        connect: {
+            lookup: (_hostname, _opts, cb) => {
+                cb(null, address, family);
+            },
+        },
+    });
 }
 
 // ─── Channel Senders ─────────────────────────────────────────
@@ -190,10 +202,12 @@ async function sendWebhook(
     url: string,
     payload: NotificationPayload,
 ): Promise<boolean> {
-    if (!(await isAllowedUrl(url))) {
+    const check = await validateUrl(url);
+    if (!check.allowed) {
         debugLog(`Webhook URL blocked by SSRF policy: ${url}`);
         return false;
     }
+    const dispatcher = pinnedDispatcher(check.resolvedAddr, check.resolvedFamily);
     try {
         const response = await fetch(url, {
             method: "POST",
@@ -201,11 +215,14 @@ async function sendWebhook(
             body: JSON.stringify(payload),
             redirect: "error",
             signal: AbortSignal.timeout(10_000),
-        });
+            dispatcher,
+        } as RequestInit);
         return response.ok;
     } catch (err) {
         debugLog(`Webhook notification failed: ${err}`);
         return false;
+    } finally {
+        await dispatcher.close().catch(() => {});
     }
 }
 
@@ -213,7 +230,8 @@ async function sendSlack(
     webhookUrl: string,
     payload: NotificationPayload,
 ): Promise<boolean> {
-    if (!(await isAllowedUrl(webhookUrl))) {
+    const check = await validateUrl(webhookUrl);
+    if (!check.allowed) {
         debugLog(`Slack webhook URL blocked by SSRF policy: ${webhookUrl}`);
         return false;
     }
@@ -256,6 +274,7 @@ async function sendSlack(
         ],
     };
 
+    const dispatcher = pinnedDispatcher(check.resolvedAddr, check.resolvedFamily);
     try {
         const response = await fetch(webhookUrl, {
             method: "POST",
@@ -263,11 +282,14 @@ async function sendSlack(
             body: JSON.stringify(slackPayload),
             redirect: "error",
             signal: AbortSignal.timeout(10_000),
-        });
+            dispatcher,
+        } as RequestInit);
         return response.ok;
     } catch (err) {
         debugLog(`Slack notification failed: ${err}`);
         return false;
+    } finally {
+        await dispatcher.close().catch(() => {});
     }
 }
 
@@ -275,11 +297,12 @@ async function sendEmail(
     endpoint: string,
     payload: NotificationPayload,
 ): Promise<boolean> {
-    if (!(await isAllowedUrl(endpoint))) {
+    const check = await validateUrl(endpoint);
+    if (!check.allowed) {
         debugLog(`Email endpoint URL blocked by SSRF policy: ${endpoint}`);
         return false;
     }
-    // Email via webhook relay (e.g., SendGrid, Mailgun, or custom endpoint)
+    const dispatcher = pinnedDispatcher(check.resolvedAddr, check.resolvedFamily);
     try {
         const response = await fetch(endpoint, {
             method: "POST",
@@ -292,11 +315,14 @@ async function sendEmail(
             }),
             redirect: "error",
             signal: AbortSignal.timeout(10_000),
-        });
+            dispatcher,
+        } as RequestInit);
         return response.ok;
     } catch (err) {
         debugLog(`Email notification failed: ${err}`);
         return false;
+    } finally {
+        await dispatcher.close().catch(() => {});
     }
 }
 

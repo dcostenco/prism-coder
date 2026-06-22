@@ -20,6 +20,7 @@ const CONTEXT_ALLOWLIST = new Set([
     "ceiling_clamped", "requested_tokens", "effective_tokens", "tokens_clamped",
     "cloud_requested", "cloud_allowed", "cloud_blocked",
     "verify_requested", "verify_allowed", "verify_blocked",
+    "tool", "project", "success", "durationMs",
 ]);
 
 const queue: Array<Record<string, unknown>> = [];

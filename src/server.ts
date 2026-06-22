@@ -101,6 +101,7 @@ import { getTracer, initTelemetry } from "./utils/telemetry.js";
 import { context as otelContext, trace, SpanStatusCode } from "@opentelemetry/api";
 import { ddInfo, ddError as ddLogError } from "./utils/ddLogger.js";
 import { inferenceMetricsHandler } from "./utils/inferenceMetrics.js";
+import { recordInvocation } from "./utils/analytics.js";
 
 // ─── Import Tool Definitions (schemas) and Handlers (implementations) ─────
 
@@ -1094,7 +1095,17 @@ export function createServer() {
         }
 
         rootSpan.setStatus({ code: SpanStatusCode.OK });
-        ddInfo("mcp.tool.success", { tool: name, project: (args as Record<string, unknown>)?.project, durationMs: Date.now() - _ddStart });
+        const _ddDuration = Date.now() - _ddStart;
+        ddInfo("mcp.tool.success", { tool: name, project: (args as Record<string, unknown>)?.project, durationMs: _ddDuration });
+
+        recordInvocation(
+          name,
+          String((args as Record<string, unknown>)?.project ?? ""),
+          args,
+          JSON.stringify(result?.content?.[0]?.text ?? "").slice(0, 2000),
+          _ddDuration,
+          true,
+        );
 
         // ═══ v5.3: Hivemind Watchdog Alert Injection (Telepathy) ═══
         // CRITICAL: Append alerts DIRECTLY to tool response content
@@ -1140,13 +1151,26 @@ export function createServer() {
         return result;
 
       } catch (error) {
-        console.error(`Error in tool handler: ${error instanceof Error ? error.message : String(error)}`);
-        ddLogError("mcp.tool.error", error instanceof Error ? error : undefined, { tool: name, project: (args as Record<string, unknown>)?.project, durationMs: Date.now() - _ddStart });
-        rootSpan.recordException(error instanceof Error ? error : new Error(String(error)));
+        const errMsg = error instanceof Error ? error.message : String(error);
+        const _ddErrDuration = Date.now() - _ddStart;
+        console.error(`Error in tool handler: ${errMsg}`);
+        ddLogError("mcp.tool.error", error instanceof Error ? error : undefined, { tool: name, project: (args as Record<string, unknown>)?.project, durationMs: _ddErrDuration });
+        rootSpan.recordException(error instanceof Error ? error : new Error(errMsg));
         rootSpan.setStatus({
           code: SpanStatusCode.ERROR,
-          message: error instanceof Error ? error.message : String(error),
+          message: errMsg,
         });
+
+        recordInvocation(
+          name,
+          String((args as Record<string, unknown>)?.project ?? ""),
+          args,
+          "",
+          _ddErrDuration,
+          false,
+          errMsg,
+        );
+
         return {
           content: [
             {
