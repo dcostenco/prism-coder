@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [19.2.6] - 2026-06-22 — 📊 Analytics Stats Fix + Security Hardening
+
+### Fixed
+- **`api_analytics` now works** — Rewrote from dead `better-sqlite3` (never installed as a dependency) to `@libsql/client` (same SQLite client used by the storage layer). Tool calls are recorded to `~/.prism-mcp/data.db` with per-project and system-wide query support.
+- **`recordInvocation` wired in dispatch** — Called on both success and error paths of the MCP tool dispatch loop. Isolated with try/catch so analytics never breaks tool responses. Timer `unref()`'d to avoid holding process open.
+- **`api_analytics` scope param** — Handler now reads `scope` (matching the tool schema enum) instead of the undeclared `action` parameter.
+- **Datadog context forwarding** — Added `tool`, `project`, `success`, `durationMs` to the DD `CONTEXT_ALLOWLIST`. Tool-level analytics now reach Datadog.
+- **Analytics WAL mode** — `PRAGMA journal_mode=WAL` set during table init to prevent `SQLITE_BUSY` contention with the storage layer on the shared `data.db`.
+
+### Security
+- **Notifier DNS-rebinding TOCTOU closed** — Replaced `isAllowedUrl()` with `validateUrl()` that returns the resolved IP. New `pinnedDispatcher()` creates an undici `Agent` that forces `fetch` to connect to the pre-validated IP only — no DNS re-resolution between check and use. All 3 senders use pinned dispatchers with `dispatcher.close()` in `finally`.
+- **Supergateway bind documented** — Supergateway has no `--host` CLI flag and ignores `HOST` env; binds `0.0.0.0:8001`. Security note added documenting that the proxy enforces bearer auth and the port is container-internal on Railway/Docker. Infra-level firewall recommended for other deployments.
+
+### Added
+- 31 new tests: analytics recording/flush/query (8), handler scope alignment (4), inference_metrics (3), DD allowlist (1), dispatch isolation (2), dispatch wiring guards (4), WAL mode (1), DNS pinning + dispatcher close (5), supergateway security (3).
+
+### Changed
+- 97 test files, 2876 tests (up from 96/2845).
+- Reviewed through 6 rounds of adversarial external review.
+
 ## [19.2.5] - 2026-06-22 — 🔒 Security Advisory Fixes
 
 ### Security
