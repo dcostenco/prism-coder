@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [19.2.7] - 2026-06-24 — 🔒 CodeQL Security Sweep
+
+### Security
+- **24 CodeQL alerts resolved** — full sweep of GitHub Code Scanning findings across prototype pollution, log injection, TOCTOU race conditions, insecure temp files, and URL sanitization.
+- **Prototype pollution defense** — All dynamic-key objects use `Object.create(null)` + explicit `PROTO_KEYS` guards (`configStorage`, `commonHelpers`, `dashboard/server`).
+- **Log injection hardened** — Exported `sanitizeForLog()` strips C0+C1 control characters (including 8-bit CSI U+009B) and ANSI sequences. Applied to 16 call sites across 8 production files.
+- **TOCTOU file lock eliminated** — Scholar lock acquisition replaced with atomic `renameSync` pattern (POSIX atomic) + post-rename PID verification. No mutual-exclusion window.
+- **Temp file prediction eliminated** — Export filenames now include `randomUUID` token in primary name, not just collision fallback.
+- **URL substring sanitization** — DataDog URL check uses `new URL().hostname.endsWith()` instead of `.includes()`.
+- **5 intentional file-access-to-http alerts dismissed** — ingest/API modules reading files and sending to first-party endpoints (Anthropic, Supabase, Synalux).
+
+### Added
+- `sanitizeForLog` test suite — 11 assertions covering C0, C1, ANSI, newline forgery, UTF-8 preservation.
+
+### Changed
+- 98 test files, 2880 tests (up from 97/2876).
+- 17 test logger mocks updated with `sanitizeForLog` passthrough.
+- Reviewed through 4 rounds including external adversarial review.
+
 ## [19.2.6] - 2026-06-22 — 📊 Analytics Stats Fix + Security Hardening
 
 ### Fixed
