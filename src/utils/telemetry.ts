@@ -193,7 +193,7 @@ export function initTelemetry(): void {
     );
   } catch (err) {
     // OTel init errors must NEVER crash the server. Log and continue.
-    console.error(`[Telemetry] Failed to initialize OTel (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[Telemetry] Failed to initialize OTel (non-fatal): ${sanitizeForLog(err instanceof Error ? err.message : String(err))}`);
     _provider = null; // Clean state so getTracer() returns no-op
   }
 }
@@ -243,6 +243,6 @@ export async function shutdownTelemetry(): Promise<void> {
     console.error("[Telemetry] Flushed remaining spans and shut down.");
   } catch (err) {
     // Log but don't rethrow — shutdown errors must not prevent DB cleanup.
-    console.error(`[Telemetry] Error during shutdown (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[Telemetry] Error during shutdown (non-fatal): ${sanitizeForLog(err instanceof Error ? err.message : String(err))}`);
   }
 }

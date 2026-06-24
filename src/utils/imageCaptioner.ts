@@ -204,8 +204,8 @@ async function captionImageAsync(
       // OCR is additive value. Surface as warn (not error) so it's grep-able
       // but doesn't trip alerting on transient VLM blips.
       console.warn(
-        `[ImageCaptioner] OCR failed for [${imageId}] (non-fatal): ` +
-        `${ocrErr instanceof Error ? ocrErr.message : String(ocrErr)}`,
+        `[ImageCaptioner] OCR failed for [${sanitizeForLog(imageId)}] (non-fatal): ` +
+        `${sanitizeForLog(ocrErr instanceof Error ? ocrErr.message : String(ocrErr))}`,
       );
     }
   }
@@ -348,7 +348,7 @@ async function updateHandoffCaption(
   }
 
   console.warn(
-    `[ImageCaptioner] Could not patch handoff for [${imageId}] after 2 attempts. ` +
+    `[ImageCaptioner] Could not patch handoff for [${sanitizeForLog(imageId)}] after 2 attempts. ` +
     `Caption is still saved in the ledger and will surface via semantic search.`
   );
 }

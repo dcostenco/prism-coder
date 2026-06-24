@@ -154,7 +154,7 @@ export async function getAllSettings(): Promise<Record<string, string>> {
   const client = getClient();
   const rs = await client.execute("SELECT key, value FROM system_settings");
 
-  const settings: Record<string, string> = {};
+  const settings: Record<string, string> = Object.create(null);
   for (const row of rs.rows) {
     settings[row.key as string] = row.value as string;
   }
