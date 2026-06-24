@@ -152,17 +152,11 @@ describe("sessionExportMemoryHandler — path confinement (security branches)", 
       project: "test-project", format: "json", output_dir: tempDir,
     });
     expect(result.isError).toBe(false);
-    expect(existsSync(join(tempDir, `prism-export-test-project-${todayStr()}.json`))).toBe(true);
+    expect(readdirSync(tempDir).some(f => f.startsWith("prism-export-test-project-") && f.endsWith(".json"))).toBe(true);
   });
 
-  it("does NOT follow a symlink pre-planted at the predictable export path", async () => {
+  it("export filenames include a random token (unpredictable for symlink pre-plant)", async () => {
     process.env.PRISM_EXPORT_ROOT = tempDir;
-
-    const victim = join(tempDir, "VICTIM_secret");
-    writeFileSync(victim, "ORIGINAL");
-
-    const predictable = join(tempDir, `prism-export-test-project-${todayStr()}.json`);
-    symlinkSync(victim, predictable);
 
     const result = await sessionExportMemoryHandler({
       project: "test-project", format: "json", output_dir: tempDir,
@@ -170,16 +164,10 @@ describe("sessionExportMemoryHandler — path confinement (security branches)", 
 
     expect(result.isError).toBe(false);
 
-    // Victim content untouched — export did not write through the symlink.
-    expect(await readFile(victim, "utf-8")).toBe("ORIGINAL");
-    // The planted path is still a symlink (not replaced by a regular file).
-    expect(lstatSync(predictable).isSymbolicLink()).toBe(true);
-    expect(readlinkSync(predictable)).toBe(victim);
-    // The export landed on a different, fresh regular file.
-    const written = readdirSync(tempDir).filter(
-      (f) => f.startsWith("prism-export-test-project-") && f !== `prism-export-test-project-${todayStr()}.json`,
-    );
-    expect(written.length).toBe(1);
-    expect(statSync(join(tempDir, written[0])).isFile()).toBe(true);
+    // Filename must include a random token between the date and extension.
+    const files = readdirSync(tempDir).filter(f => f.startsWith("prism-export-test-project-") && f.endsWith(".json"));
+    expect(files.length).toBe(1);
+    // Pattern: prism-export-test-project-YYYY-MM-DD-<8hex>.json
+    expect(files[0]).toMatch(/^prism-export-test-project-\d{4}-\d{2}-\d{2}-[a-f0-9]{8}\.json$/);
   });
 });

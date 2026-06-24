@@ -9,7 +9,7 @@ export function sanitizeForLog(msg: string): string {
   return msg
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "")  // C0 + C1 control chars (keep \n \r \t)
     .replace(/\r?\n/g, " ⏎ ")                                  // newlines → visible marker
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");                   // ANSI CSI escape sequences
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");                   // CSI residue (defense-in-depth if first regex relaxed)
 }
 
 /**
@@ -18,7 +18,6 @@ export function sanitizeForLog(msg: string): string {
  */
 export function debugLog(message: string) {
   if (PRISM_DEBUG_LOGGING) {
-    const safe = sanitizeForLog(message);
-    console.error(safe);
+    console.error(sanitizeForLog(message));
   }
 }

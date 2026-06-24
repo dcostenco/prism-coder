@@ -13,7 +13,7 @@ import { getStorage } from "../storage/index.js";
 import { debugLog } from "../utils/logger.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { performWebSearchRaw } from "../utils/braveApi.js";
@@ -136,24 +136,41 @@ function acquireFileLock(): boolean {
     const lockDir = dirname(LOCK_PATH);
     if (!existsSync(lockDir)) mkdirSync(lockDir, { recursive: true });
 
-    // Attempt exclusive create first — avoids TOCTOU race on stale-lock check.
+    const lockContent = `${process.pid}\n${new Date().toISOString()}`;
+
+    // Fast path: exclusive create — no lock exists.
     try {
-      writeFileSync(LOCK_PATH, `${process.pid}\n${new Date().toISOString()}`, { flag: "wx" });
+      writeFileSync(LOCK_PATH, lockContent, { flag: "wx" });
       return true;
     } catch (wxErr: any) {
       if (wxErr?.code !== "EEXIST") return false;
     }
-    // Lock file exists — check if stale.
+
+    // Lock exists — check if stale.
     let stat;
     try { stat = statSync(LOCK_PATH); } catch { return false; }
-    const ageMs = Date.now() - stat.mtimeMs;
-    if (ageMs < LOCK_STALE_MS) return false;
-    // Stale — remove and retry exclusive create.
-    try { unlinkSync(LOCK_PATH); } catch { /* lost race — fine */ }
-    writeFileSync(LOCK_PATH, `${process.pid}\n${new Date().toISOString()}`, { flag: "wx" });
+    if (Date.now() - stat.mtimeMs < LOCK_STALE_MS) return false;
+
+    // Stale lock — atomic takeover via rename.
+    // Write our identity to a temp file, then rename over the lock.
+    // rename() is atomic on POSIX; no window where the lock is absent.
+    const tmpLock = `${LOCK_PATH}.${process.pid}`;
+    try {
+      writeFileSync(tmpLock, lockContent, { flag: "wx" });
+      renameSync(tmpLock, LOCK_PATH);
+    } catch {
+      try { unlinkSync(tmpLock); } catch { /* cleanup */ }
+      return false;
+    }
+
+    // Verify we own the lock (another process may have renamed over us).
+    try {
+      const owner = readFileSync(LOCK_PATH, "utf-8").split("\n")[0];
+      if (owner !== String(process.pid)) return false;
+    } catch { return false; }
+
     return true;
-  } catch (err: any) {
-    if (err?.code === "EEXIST") return false;
+  } catch {
     return false;
   }
 }

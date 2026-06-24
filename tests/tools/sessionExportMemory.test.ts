@@ -70,7 +70,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -166,6 +166,13 @@ const mockGetAllSettings = vi.mocked(getAllSettings);
 // Each test gets a clean stub with default resolved values that can be
 // overridden inline with .mockResolvedValue() / .mockRejectedValue().
 // ─────────────────────────────────────────────────────────────────────────────
+
+function findExport(dir: string, project: string, ext: string): string {
+  const prefix = `prism-export-${project}-`;
+  const match = readdirSync(dir).find(f => f.startsWith(prefix) && f.endsWith(`.${ext}`));
+  if (!match) throw new Error(`No export file matching ${prefix}*.${ext} in ${dir}`);
+  return join(dir, match);
+}
 
 function makeStorageStub() {
   return {
@@ -298,15 +305,13 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
 
       expect(result.isError).toBe(false);
 
-      const today = new Date().toISOString().split("T")[0];
-      expect(existsSync(join(tempDir, `prism-export-test-project-${today}.json`))).toBe(true);
+      expect(existsSync(findExport(tempDir, "test-project", "json"))).toBe(true);
     });
 
     it("writes valid JSON that round-trips through JSON.parse", async () => {
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
-      const raw = await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8");
+      const raw = await readFile(findExport(tempDir, "test-project", "json"), "utf-8");
       expect(() => JSON.parse(raw)).not.toThrow();
     });
 
@@ -316,8 +321,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
       // before attempting to parse, rather than guessing the format.
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
-      const parsed = JSON.parse(await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8"));
+      const parsed = JSON.parse(await readFile(findExport(tempDir, "test-project", "json"), "utf-8"));
 
       expect(parsed).toHaveProperty("prism_export");
       expect(parsed.prism_export.version).toBe("6.1");
@@ -326,8 +330,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
     it("JSON contains handoff.last_summary and handoff.active_branch", async () => {
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
-      const { prism_export } = JSON.parse(await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8"));
+      const { prism_export } = JSON.parse(await readFile(findExport(tempDir, "test-project", "json"), "utf-8"));
 
       expect(prism_export.handoff.last_summary).toBe("Completed v4.5.0 VLM pipeline.");
       expect(prism_export.handoff.active_branch).toBe("bcba");
@@ -336,8 +339,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
     it("JSON contains the ledger array with correct summary", async () => {
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
-      const { prism_export } = JSON.parse(await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8"));
+      const { prism_export } = JSON.parse(await readFile(findExport(tempDir, "test-project", "json"), "utf-8"));
 
       expect(prism_export.ledger).toHaveLength(1);
       expect(prism_export.ledger[0].summary).toBe("Implemented the GDPR export handler.");
@@ -346,8 +348,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
     it("JSON contains visual_memory index with image id and VLM caption", async () => {
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
-      const { prism_export } = JSON.parse(await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8"));
+      const { prism_export } = JSON.parse(await readFile(findExport(tempDir, "test-project", "json"), "utf-8"));
 
       expect(prism_export.visual_memory).toHaveLength(1);
       expect(prism_export.visual_memory[0].id).toBe("img001");
@@ -369,9 +370,9 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
       // rely on the client sending the default.
       await sessionExportMemoryHandler({ project: "test-project", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
-      expect(existsSync(join(tempDir, `prism-export-test-project-${today}.json`))).toBe(true);
-      expect(existsSync(join(tempDir, `prism-export-test-project-${today}.md`))).toBe(false);
+      expect(() => findExport(tempDir, "test-project", "json")).not.toThrow();
+      const files = readdirSync(tempDir);
+      expect(files.some(f => f.startsWith("prism-export-test-project-") && f.endsWith(".md"))).toBe(false);
     });
   });
 
@@ -382,15 +383,13 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
   describe("Markdown export — happy path", () => {
     async function getMd(project = "test-project"): Promise<string> {
       await sessionExportMemoryHandler({ project, format: "markdown", output_dir: tempDir });
-      const today = new Date().toISOString().split("T")[0];
-      return readFile(join(tempDir, `prism-export-${project}-${today}.md`), "utf-8");
+      return readFile(findExport(tempDir, project, "md"), "utf-8");
     }
 
     it("writes a .md file with correct filename", async () => {
       const result = await sessionExportMemoryHandler({ project: "test-project", format: "markdown", output_dir: tempDir });
       expect(result.isError).toBe(false);
-      const today = new Date().toISOString().split("T")[0];
-      expect(existsSync(join(tempDir, `prism-export-test-project-${today}.md`))).toBe(true);
+      expect(existsSync(findExport(tempDir, "test-project", "md"))).toBe(true);
     });
 
     it("Markdown H1 contains the project name", async () => {
@@ -461,8 +460,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
      */
     async function getSettings(): Promise<Record<string, string>> {
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
-      const today = new Date().toISOString().split("T")[0];
-      const { prism_export } = JSON.parse(await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8"));
+      const { prism_export } = JSON.parse(await readFile(findExport(tempDir, "test-project", "json"), "utf-8"));
       return prism_export.settings;
     }
 
@@ -533,8 +531,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
      */
     async function getLedger(): Promise<Array<Record<string, unknown>>> {
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
-      const today = new Date().toISOString().split("T")[0];
-      const { prism_export } = JSON.parse(await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8"));
+      const { prism_export } = JSON.parse(await readFile(findExport(tempDir, "test-project", "json"), "utf-8"));
       return prism_export.ledger;
     }
 
@@ -591,9 +588,8 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
       const result = await sessionExportMemoryHandler({ format: "json", output_dir: tempDir });
       expect(result.isError).toBe(false);
 
-      const today = new Date().toISOString().split("T")[0];
       for (const p of ["alpha", "beta", "gamma"]) {
-        expect(existsSync(join(tempDir, `prism-export-${p}-${today}.json`))).toBe(true);
+        expect(existsSync(findExport(tempDir, p, "json"))).toBe(true);
       }
     });
 
@@ -629,8 +625,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
       storage.loadContext.mockResolvedValue(null);
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
-      const { prism_export } = JSON.parse(await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8"));
+      const { prism_export } = JSON.parse(await readFile(findExport(tempDir, "test-project", "json"), "utf-8"));
       expect(prism_export.handoff).toBeNull();
     });
 
@@ -638,8 +633,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
       storage.getLedgerEntries.mockResolvedValue([]);
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
-      const { prism_export } = JSON.parse(await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8"));
+      const { prism_export } = JSON.parse(await readFile(findExport(tempDir, "test-project", "json"), "utf-8"));
       expect(prism_export.ledger).toEqual([]);
     });
 
@@ -647,8 +641,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
       storage.loadContext.mockResolvedValue({ project: "test-project", last_summary: "X" });
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
-      const { prism_export } = JSON.parse(await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8"));
+      const { prism_export } = JSON.parse(await readFile(findExport(tempDir, "test-project", "json"), "utf-8"));
       expect(prism_export.visual_memory).toEqual([]);
     });
 
@@ -818,8 +811,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
     async function getSettingsFor(settings: Record<string, string>): Promise<Record<string, string>> {
       mockGetAllSettings.mockResolvedValue(settings);
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
-      const today = new Date().toISOString().split("T")[0];
-      const raw = await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8");
+      const raw = await readFile(findExport(tempDir, "test-project", "json"), "utf-8");
       // Clean up the written file before next call in the same test
       const { prism_export } = JSON.parse(raw);
       return prism_export.settings;
@@ -909,9 +901,8 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
 
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
       const { prism_export } = JSON.parse(
-        await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8")
+        await readFile(findExport(tempDir, "test-project", "json"), "utf-8")
       );
 
       // All 3 entries present
@@ -940,9 +931,8 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
       storage.getLedgerEntries.mockResolvedValue(entries);
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
       const { prism_export } = JSON.parse(
-        await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8")
+        await readFile(findExport(tempDir, "test-project", "json"), "utf-8")
       );
 
       // Verify each entry's fields are distinct (no cross-entry contamination)
@@ -972,9 +962,8 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
 
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
 
-      const today = new Date().toISOString().split("T")[0];
       const { prism_export } = JSON.parse(
-        await readFile(join(tempDir, `prism-export-test-project-${today}.json`), "utf-8")
+        await readFile(findExport(tempDir, "test-project", "json"), "utf-8")
       );
 
       // importance=0 must survive serialization (falsy but valid)
@@ -1020,9 +1009,8 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
       // Handler must not error — missing handoff is a valid state
       expect(result.isError).toBe(false);
 
-      const today = new Date().toISOString().split("T")[0];
       const md = await readFile(
-        join(tempDir, `prism-export-test-project-${today}.md`),
+        findExport(tempDir, "test-project", "md"),
         "utf-8"
       );
 
@@ -1054,9 +1042,8 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
 
       expect(result.isError).toBe(false);
 
-      const today = new Date().toISOString().split("T")[0];
       const md = await readFile(
-        join(tempDir, `prism-export-test-project-${today}.md`),
+        findExport(tempDir, "test-project", "md"),
         "utf-8"
       );
 
@@ -1086,13 +1073,13 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
 
       expect(result.isError).toBe(false);
 
-      const today = new Date().toISOString().split("T")[0];
       // Both files must be .md (not .json)
-      expect(existsSync(join(tempDir, `prism-export-proj-a-${today}.md`))).toBe(true);
-      expect(existsSync(join(tempDir, `prism-export-proj-b-${today}.md`))).toBe(true);
+      expect(() => findExport(tempDir, "proj-a", "md")).not.toThrow();
+      expect(() => findExport(tempDir, "proj-b", "md")).not.toThrow();
       // .json variants must NOT exist (format was respected)
-      expect(existsSync(join(tempDir, `prism-export-proj-a-${today}.json`))).toBe(false);
-      expect(existsSync(join(tempDir, `prism-export-proj-b-${today}.json`))).toBe(false);
+      const files = readdirSync(tempDir);
+      expect(files.some(f => f.startsWith("prism-export-proj-a-") && f.endsWith(".json"))).toBe(false);
+      expect(files.some(f => f.startsWith("prism-export-proj-b-") && f.endsWith(".json"))).toBe(false);
     });
   });
 
@@ -1162,9 +1149,8 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
       }
 
       // Each project file must be valid JSON
-      const today = new Date().toISOString().split("T")[0];
       for (const p of projects) {
-        const filePath = join(tempDir, `prism-export-${p}-${today}.json`);
+        const filePath = findExport(tempDir, p, "json");
         expect(existsSync(filePath)).toBe(true);
 
         const raw = await readFile(filePath, "utf-8");
@@ -1202,8 +1188,7 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
 
       expect(result.isError).toBe(false);
 
-      const today = new Date().toISOString().split("T")[0];
-      const filePath = join(tempDir, `prism-export-test-project-${today}.zip`);
+      const filePath = findExport(tempDir, "test-project", "zip");
       expect(existsSync(filePath)).toBe(true);
 
       const buf = await readFile(filePath);
