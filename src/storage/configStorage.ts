@@ -25,7 +25,7 @@ let initialized = false;
 // (e.g. ReadResourceRequestSchema) can read settings synchronously
 // without opening an additional SQLite round-trip and stalling the
 // MCP stdio handshake (which causes a black-screen on startup).
-let settingsCache: Record<string, string> | null = null;
+let settingsCache: Record<string, string> | null = null; // assigned as Object.create(null) below
 
 function getClient() {
   if (!configClient) {
@@ -58,9 +58,10 @@ export async function initConfigStorage() {
 
     // Preload all rows into the cache so subsequent reads are zero-cost.
     const rs = await client.execute("SELECT key, value FROM system_settings");
-    settingsCache = {};
+    settingsCache = Object.create(null) as Record<string, string>;
+    const cache = settingsCache;
     for (const row of rs.rows) {
-      settingsCache[row.key as string] = row.value as string;
+      cache[row.key as string] = row.value as string;
     }
   } catch (err) {
     // Graceful degradation: if the DB can't be opened (e.g. read-only
@@ -68,7 +69,7 @@ export async function initConfigStorage() {
     // getSettingSync() will return defaults; getSetting()/setSetting()
     // will attempt to re-open the DB on first call.
     console.error(`[configStorage] Failed to initialize (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-    settingsCache = {};
+    settingsCache = Object.create(null);
   }
 
   initialized = true;

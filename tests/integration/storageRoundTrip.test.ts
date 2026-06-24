@@ -49,6 +49,7 @@ vi.mock("../../src/config.js", async () => {
 });
 
 vi.mock("../../src/utils/logger.js", () => ({
+  sanitizeForLog: vi.fn((s: string) => s),
   debugLog: vi.fn(),
 }));
 

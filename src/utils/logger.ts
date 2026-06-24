@@ -5,7 +5,7 @@ import { PRISM_DEBUG_LOGGING } from "../config.js";
  * newlines, and ANSI escape sequences that could be used for log
  * injection or terminal escape attacks.
  */
-function sanitizeForLog(msg: string): string {
+export function sanitizeForLog(msg: string): string {
   return msg
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")  // control chars (keep \n \r \t)
     .replace(/\r?\n/g, " ⏎ ")                              // newlines → visible marker
@@ -18,6 +18,7 @@ function sanitizeForLog(msg: string): string {
  */
 export function debugLog(message: string) {
   if (PRISM_DEBUG_LOGGING) {
-    console.error(sanitizeForLog(message));
+    const safe = sanitizeForLog(message);
+    console.error(safe);
   }
 }

@@ -31,7 +31,7 @@ import * as fs from "fs";
 import * as nodePath from "path";
 import { getLLMProvider } from "./llm/factory.js";
 import { getStorage } from "../storage/index.js";
-import { debugLog } from "./logger.js";
+import { debugLog, sanitizeForLog } from "./logger.js";
 import { PRISM_USER_ID } from "../config.js";
 import { getTracer } from "./telemetry.js";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
@@ -108,7 +108,7 @@ export function fireCaptionAsync(
           code: SpanStatusCode.ERROR,
           message: err instanceof Error ? err.message : String(err),
         });
-        console.error(`[ImageCaptioner] Failed for [${imageId}]: ${err instanceof Error ? err.message : String(err)}`);
+        console.error(`[ImageCaptioner] Failed for [${sanitizeForLog(imageId)}]: ${sanitizeForLog(err instanceof Error ? err.message : String(err))}`);
       })
       .finally(() => {
         // Always end the span — even on VLM failure — to flush the BatchSpanProcessor.
@@ -158,8 +158,8 @@ async function captionImageAsync(
     const limitMB = (maxBytes / 1024 / 1024).toFixed(0);
     const actualMB = (fileSizeBytes / 1024 / 1024).toFixed(1);
     console.warn(
-      `[ImageCaptioner] Image [${imageId}] is ${actualMB}MB, exceeding ` +
-      `the ${textProvider} VLM limit (${limitMB}MB). Captioning skipped. ` +
+      `[ImageCaptioner] Image [${sanitizeForLog(imageId)}] is ${sanitizeForLog(actualMB)}MB, exceeding ` +
+      `the ${sanitizeForLog(textProvider)} VLM limit (${limitMB}MB). Captioning skipped. ` +
       (textProvider === "anthropic"
         ? "Switch Embedding Provider to Gemini/OpenAI to caption larger images."
         : "Consider resizing the image.")

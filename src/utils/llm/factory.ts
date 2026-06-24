@@ -49,6 +49,7 @@ import { VoyageAdapter } from "./adapters/voyage.js";
 import { LocalEmbeddingAdapter } from "./adapters/local.js";
 import { DisabledTextAdapter } from "./adapters/disabledText.js";
 import { TracingLLMProvider } from "./adapters/traced.js";
+import { sanitizeForLog } from "../logger.js";
 
 // Module-level singleton — one composed provider per MCP server process.
 let providerInstance: LLMProvider | null = null;
@@ -168,14 +169,14 @@ export function getLLMProvider(): LLMProvider {
 
     if (textType !== embedType) {
       console.info(
-        `[LLMFactory] Split provider: text=${textType}, embedding=${embedType}`
+        `[LLMFactory] Split provider: text=${sanitizeForLog(textType)}, embedding=${sanitizeForLog(embedType)}`
       );
     }
   } catch (err) {
     // Init failure (e.g. missing API key) → fall back to full Gemini provider.
     // A crash here would silently kill the MCP server.
     console.error(
-      `[LLMFactory] Failed to initialise providers (text=${textType}, embed=${embedType}): ${err instanceof Error ? err.message : String(err)}. ` +
+      `[LLMFactory] Failed to initialise providers (text=${sanitizeForLog(textType)}, embed=${sanitizeForLog(embedType)}): ${sanitizeForLog(err instanceof Error ? err.message : String(err))}. ` +
       `Falling back to GeminiAdapter for both.`
     );
     const fallback = new GeminiAdapter();

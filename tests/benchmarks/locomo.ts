@@ -1,6 +1,7 @@
 import { getStorage } from "../../src/storage/index.js";
 import { PRISM_USER_ID } from "../../src/config.js";
 import { _setLLMProviderForTest } from "../../src/utils/llm/factory.js";
+import { sanitizeForLog } from "../../src/utils/logger.js";
 import { compactLedgerHandler } from "../../src/tools/compactionHandler.js";
 import { knowledgeSearchHandler } from "../../src/tools/graphHandlers.js";
 import type { LLMProvider } from "../../src/utils/llm/provider.js";
@@ -85,6 +86,6 @@ async function runLoCoMoBenchmark() {
 runLoCoMoBenchmark().then(() => {
   process.exit(0);
 }).catch(err => {
-  console.error("Benchmark failed with error:", err);
+  console.error("Benchmark failed with error:", sanitizeForLog(String(err)));
   process.exit(1);
 });

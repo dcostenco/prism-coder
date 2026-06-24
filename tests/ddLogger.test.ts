@@ -146,7 +146,9 @@ describe("ddLogger flush — write headers + context allowlist", () => {
       user_password: "hunter2",
     });
 
-    const ddCall = mockFetch.mock.calls.find(c => (c[0] as string).includes("datadoghq.com"));
+    const ddCall = mockFetch.mock.calls.find(c => {
+      try { return new URL(c[0] as string).hostname.endsWith(".datadoghq.com"); } catch { return false; }
+    });
     expect(ddCall).toBeDefined();
     const body = JSON.parse((ddCall![1] as RequestInit).body as string);
     const event = body[0];

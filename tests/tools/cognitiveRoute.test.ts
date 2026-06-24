@@ -143,7 +143,8 @@ vi.mock("../../src/config.js", () => ({
 }));
 
 // 9. Silence non-essential imports
-vi.mock("../../src/utils/logger.js", () => ({ debugLog: vi.fn() }));
+vi.mock("../../src/utils/logger.js", () => ({
+  sanitizeForLog: vi.fn((s: string) => s), debugLog: vi.fn() }));
 vi.mock("../../src/utils/keywordExtractor.js", () => ({ toKeywordArray: vi.fn(() => []) }));
 vi.mock("../../src/utils/llm/factory.js", () => ({
   getLLMProvider: vi.fn(() => ({

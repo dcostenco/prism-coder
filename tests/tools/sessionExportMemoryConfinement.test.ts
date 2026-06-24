@@ -50,7 +50,8 @@ vi.mock("../../src/config.js", () => ({
   PRISM_SYNALUX_BASE_URL:                 "",
   PRISM_SYNALUX_API_KEY:                  "",
 }));
-vi.mock("../../src/utils/logger.js", () => ({ debugLog: vi.fn() }));
+vi.mock("../../src/utils/logger.js", () => ({
+  sanitizeForLog: vi.fn((s: string) => s), debugLog: vi.fn() }));
 vi.mock("../../src/utils/llm/factory.js", () => ({ getLLMProvider: vi.fn() }));
 vi.mock("../../src/utils/git.js", () => ({
   getCurrentGitState: vi.fn(),

@@ -17,6 +17,7 @@ vi.mock("../../src/storage/configStorage.js", () => ({
 
 // ─── Mock: logger ─────────────────────────────────────────────────────────────
 vi.mock("../../src/utils/logger.js", () => ({
+  sanitizeForLog: vi.fn((s: string) => s),
   debugLog: vi.fn(),
 }));
 

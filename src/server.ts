@@ -97,6 +97,7 @@ import { verifyBehaviorHandler } from "./tools/behavioralVerifierHandler.js";
 import { getStorage } from "./storage/index.js";
 import { getSettingSync, initConfigStorage } from "./storage/configStorage.js";
 import { sanitizeMcpOutput } from "./utils/sanitizer.js";
+import { sanitizeForLog } from "./utils/logger.js";
 import { getTracer, initTelemetry } from "./utils/telemetry.js";
 import { context as otelContext, trace, SpanStatusCode } from "@opentelemetry/api";
 import { ddInfo, ddError as ddLogError } from "./utils/ddLogger.js";
@@ -1153,7 +1154,7 @@ export function createServer() {
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
         const _ddErrDuration = Date.now() - _ddStart;
-        console.error(`Error in tool handler: ${errMsg}`);
+        console.error(`Error in tool handler: ${sanitizeForLog(errMsg)}`);
         ddLogError("mcp.tool.error", error instanceof Error ? error : undefined, { tool: name, project: (args as Record<string, unknown>)?.project, durationMs: _ddErrDuration });
         rootSpan.recordException(error instanceof Error ? error : new Error(errMsg));
         rootSpan.setStatus({

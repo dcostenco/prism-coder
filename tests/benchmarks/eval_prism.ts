@@ -3,6 +3,7 @@ import { PRISM_USER_ID } from "../../src/config.js";
 import { sessionSearchMemoryHandler } from "../../src/tools/graphHandlers.js";
 import { sessionSaveLedgerHandler } from "../../src/tools/ledgerHandlers.js";
 import { getLLMProvider } from "../../src/utils/llm/factory.js";
+import { sanitizeForLog } from "../../src/utils/logger.js";
 import { stdin } from "node:process";
 
 async function readStdin(): Promise<string> {
@@ -95,6 +96,6 @@ Answer concisely.`;
 }
 
 run().catch(e => {
-  console.error("Error:", e);
+  console.error("Error:", sanitizeForLog(String(e)));
   process.exit(1);
 });

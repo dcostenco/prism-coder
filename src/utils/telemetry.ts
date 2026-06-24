@@ -65,6 +65,7 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { SEMRESATTRS_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import { getSettingSync } from "../storage/configStorage.js";
+import { sanitizeForLog } from "./logger.js";
 
 // ─── Module-level singleton ───────────────────────────────────────────────────
 // Null when OTel is disabled or before initTelemetry() is called.
@@ -188,7 +189,7 @@ export function initTelemetry(): void {
 
     console.error(
       `[Telemetry] OpenTelemetry initialized. ` +
-      `Service: "${serviceName}", Endpoint: "${endpoint}"`
+      `Service: "${sanitizeForLog(serviceName)}", Endpoint: "${sanitizeForLog(endpoint)}"`
     );
   } catch (err) {
     // OTel init errors must NEVER crash the server. Log and continue.

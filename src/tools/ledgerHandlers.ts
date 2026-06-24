@@ -1867,7 +1867,7 @@ export async function sessionExportMemoryHandler(args: unknown) {
           const dot = filename.lastIndexOf(".");
           const stem = dot > 0 ? filename.slice(0, dot) : filename;
           const extPart = dot > 0 ? filename.slice(dot) : "";
-          finalPath = join(output_dir, `${stem}-${Date.now()}${extPart}`);
+          finalPath = join(output_dir, `${stem}-${randomUUID()}${extPart}`);
           await writeFile(finalPath, content, { flag: "wx" });
         } else {
           throw e;

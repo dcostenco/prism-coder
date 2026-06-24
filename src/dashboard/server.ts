@@ -585,7 +585,7 @@ return false;}
       // GET /api/skills → { skills: { dev: "...", qa: "..." } }
       if (url.pathname === "/api/skills" && req.method === "GET") {
         const all = await getAllSettings();
-        const skills: Record<string, string> = {};
+        const skills: Record<string, string> = Object.create(null);
         for (const [k, v] of Object.entries(all)) {
           if (k.startsWith("skill:") && v) {
             skills[k.replace("skill:", "")] = v;

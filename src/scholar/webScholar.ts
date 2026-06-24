@@ -136,13 +136,20 @@ function acquireFileLock(): boolean {
     const lockDir = dirname(LOCK_PATH);
     if (!existsSync(lockDir)) mkdirSync(lockDir, { recursive: true });
 
-    if (existsSync(LOCK_PATH)) {
-      const stat = statSync(LOCK_PATH);
-      const ageMs = Date.now() - stat.mtimeMs;
-      if (ageMs < LOCK_STALE_MS) return false;
-      unlinkSync(LOCK_PATH);
+    // Attempt exclusive create first — avoids TOCTOU race on stale-lock check.
+    try {
+      writeFileSync(LOCK_PATH, `${process.pid}\n${new Date().toISOString()}`, { flag: "wx" });
+      return true;
+    } catch (wxErr: any) {
+      if (wxErr?.code !== "EEXIST") return false;
     }
-    // wx = exclusive create — throws EEXIST if another process won the race
+    // Lock file exists — check if stale.
+    let stat;
+    try { stat = statSync(LOCK_PATH); } catch { return false; }
+    const ageMs = Date.now() - stat.mtimeMs;
+    if (ageMs < LOCK_STALE_MS) return false;
+    // Stale — remove and retry exclusive create.
+    try { unlinkSync(LOCK_PATH); } catch { /* lost race — fine */ }
     writeFileSync(LOCK_PATH, `${process.pid}\n${new Date().toISOString()}`, { flag: "wx" });
     return true;
   } catch (err: any) {
