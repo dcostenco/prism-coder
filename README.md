@@ -629,3 +629,5 @@ It reads `~/.prism-mcp/data.db` and POSTs entries to the portal. Ledger entries 
 | **Prism AAC** | AGPL-3.0 |
 
 The AGPL-3.0 license covers the MCP server and its source code. The VS Code extension and Web IDE are separate products with their own licenses. Commercial hosted/managed deployment of the MCP server is available via the Synalux subscription.
+
+© 2026 Synalux, LLC.
