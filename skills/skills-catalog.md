@@ -26,9 +26,10 @@
 - **synalux-customers** — Production DB queries, user/workspace reports
 - **i18n-tts** — 14 languages, 4-tier TTS, translation services
 
-## Development (2)
+## Development (3)
 - **dev-engineering-super-skill** — Full-stack architecture, testing, DevOps
 - **code-mode-skill** — Add sandbox code execution to MCP servers
+- **local-browser** — Stealth browser automation via browse.py (WebKit/Playwright); covers navigation, screenshots, DOM, Google Docs, bot-detection evasion, HIPAA audit logging
 
 ## Business (8)
 - **pm-super-skill** — Product management, roadmaps, sprints
