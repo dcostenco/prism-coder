@@ -107,6 +107,10 @@ export const SESSION_SAVE_HANDOFF_TOOL: Tool = {
         type: "boolean",
         description: "Set to true to disable automatic CRDT merging and fail strictly on version conflict (original OCC behavior). Default: false.",
       },
+      conversation_id: {
+        type: "string",
+        description: "Optional. Session key for this conversation (same id used in session_load_context). When provided, the server verifies that session_load_context was called for this conversation before accepting the write.",
+      },
     },
     required: ["project"],
   },
@@ -151,6 +155,10 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
       toolSummary: {
         type: "string",
         description: "Brief 2-5 word noun phrase describing what this tool call is about.",
+      },
+      conversation_id: {
+        type: "string",
+        description: "Optional. Session key for this conversation (same id used in session_save_ledger). When provided, marks the session as context-loaded server-side so project-scoped tools can verify working context without relying on hook-based enforcement. Required on non-Claude hosts.",
       },
     },
     required: ["project", "toolAction", "toolSummary"],
@@ -540,8 +548,9 @@ export function isSessionSaveHandoffArgs(
   active_branch?: string;
   last_summary?: string;
   key_context?: string;
-  role?: string;  // v3.0: Hivemind
-  disable_merge?: boolean;  // v5.4: CRDT bypass
+  role?: string;
+  disable_merge?: boolean;
+  conversation_id?: string;
 } {
   if (typeof args !== "object" || args === null) return false;
   const a = args as Record<string, unknown>;
@@ -553,6 +562,7 @@ export function isSessionSaveHandoffArgs(
   if (a.key_context !== undefined && typeof a.key_context !== "string") return false;
   if (a.role !== undefined && typeof a.role !== "string") return false;
   if (a.disable_merge !== undefined && typeof a.disable_merge !== "boolean") return false;
+  if (a.conversation_id !== undefined && typeof a.conversation_id !== "string") return false;
   return true;
 }
 
@@ -609,7 +619,7 @@ export function isBackfillLinksArgs(
 
 export function isSessionLoadContextArgs(
   args: unknown
-): args is { project: string; level?: "quick" | "standard" | "deep"; role?: string; max_tokens?: number; toolAction?: string; toolSummary?: string } {
+): args is { project: string; level?: "quick" | "standard" | "deep"; role?: string; max_tokens?: number; toolAction?: string; toolSummary?: string; conversation_id?: string } {
   if (typeof args !== "object" || args === null) return false;
   const a = args as Record<string, unknown>;
   if (typeof a.project !== "string") return false;
@@ -618,6 +628,7 @@ export function isSessionLoadContextArgs(
   if (a.max_tokens !== undefined && typeof a.max_tokens !== "number") return false;
   if (a.toolAction !== undefined && typeof a.toolAction !== "string") return false;
   if (a.toolSummary !== undefined && typeof a.toolSummary !== "string") return false;
+  if (a.conversation_id !== undefined && typeof a.conversation_id !== "string") return false;
   return true;
 }
 

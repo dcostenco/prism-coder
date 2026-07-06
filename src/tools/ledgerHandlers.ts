@@ -141,6 +141,19 @@ export async function sessionSaveLedgerHandler(args: unknown) {
     throw new Error("Invalid arguments for session_save_ledger");
   }
 
+  // Host-agnostic context gate: any host that calls save_ledger without first
+  // loading context (on any host type) gets a structured error instead of a
+  // silently wrong write. Does NOT gate safety — prism_infer handles that.
+  let _saveLedgerGateWarning: string | undefined;
+  {
+    const { requireContextLoaded } = await import("../session/sessionContext.js");
+    const gate = requireContextLoaded(args.conversation_id);
+    if (gate !== null && gate.blocked) {
+      return { content: [{ type: "text", text: gate.error }], isError: true };
+    }
+    if (gate !== null && !gate.blocked) _saveLedgerGateWarning = gate.warning;
+  }
+
   // SECURITY: Sanitize all text fields to prevent stored prompt injection
   let project = args.project;
   const conversation_id = args.conversation_id;
@@ -303,7 +316,8 @@ export async function sessionSaveLedgerHandler(args: unknown) {
   return {
     content: [{
       type: "text",
-      text: `✅ Session ledger saved for project "${project}"\n` +
+      text: (_saveLedgerGateWarning ? `⚠️ ${_saveLedgerGateWarning}\n\n` : "") +
+        `✅ Session ledger saved for project "${project}"\n` +
         `Summary: ${summary}\n` +
         (todos?.length ? `TODOs: ${todos.length} items\n` : "") +
         (files_changed?.length ? `Files changed: ${files_changed.length}\n` : "") +
@@ -319,6 +333,16 @@ export async function sessionSaveLedgerHandler(args: unknown) {
 export async function sessionSaveHandoffHandler(args: unknown, server?: Server) {
   if (!isSessionSaveHandoffArgs(args)) {
     throw new Error("Invalid arguments for session_save_handoff");
+  }
+
+  let _saveHandoffGateWarning: string | undefined;
+  {
+    const { requireContextLoaded } = await import("../session/sessionContext.js");
+    const gate = requireContextLoaded(args.conversation_id);
+    if (gate !== null && gate.blocked) {
+      return { content: [{ type: "text", text: gate.error }], isError: true };
+    }
+    if (gate !== null && !gate.blocked) _saveHandoffGateWarning = gate.warning;
   }
 
   // SECURITY: Sanitize all text fields to prevent stored prompt injection
@@ -680,7 +704,8 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   const metricsBlock = formatInferenceMetrics();
 
   // Build response text based on whether a CRDT merge occurred
-  const responseText = isMerged
+  const responseText = (_saveHandoffGateWarning ? `⚠️ ${_saveHandoffGateWarning}\n\n` : "") +
+    (isMerged
     ? `🔄 Auto-merged conflict for "${project}" (v${expected_version} → v${newVersion})\n` +
       `Strategy: ${JSON.stringify(mergeStrategy)}\n` +
       (last_summary ? `Summary: ${last_summary}\n` : "") +
@@ -695,7 +720,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
       `📊 Embedding generation queued for semantic search.\n` +
       metricsBlock +
       `\n🔑 Remember: pass expected_version: ${newVersion} on your next save ` +
-      `to maintain concurrency control.`;
+      `to maintain concurrency control.`);
 
   return {
     content: [{
@@ -718,9 +743,9 @@ export async function sessionLoadContextHandler(args: unknown) {
     resetInferenceMetrics();
   }
 
-  const { project, level = "standard", role } = args;
+  const { project, level = "standard", role, conversation_id: convId } = args;
   // T6 fix: explicit Number() coercion prevents string "2000" from later concatenating instead of adding
-  const _maxTokensArg = Number((args as any).max_tokens);
+  const _maxTokensArg = Number(args.max_tokens);
   const _maxTokensSetting = parseInt(await getSetting("max_tokens", "0"), 10);
   const maxTokens: number | undefined =
     (_maxTokensArg > 0 ? _maxTokensArg : undefined) ?? (_maxTokensSetting > 0 ? _maxTokensSetting : undefined);
@@ -759,10 +784,22 @@ export async function sessionLoadContextHandler(args: unknown) {
     } catch {
       debugLog(`[session_load_context] Fresh project skill injection failed — continuing without`);
     }
+    if (convId) {
+      const { markContextLoaded } = await import("../session/sessionContext.js");
+      const { BOUNDARIES_VERSION } = await import("../boundaries/boundaries.js");
+      markContextLoaded(convId, project, BOUNDARIES_VERSION);
+    }
+    const { BOUNDARIES_TEXT: BT0, BOUNDARIES_VERSION: BV0 } = await import("../boundaries/boundaries.js");
+    const boundariesHeader0 =
+      `# OPERATING BOUNDARIES (v${BV0}) — enforced server-side, shown for transparency\n` +
+      BT0 + "\n\n" +
+      `# NOTE FOR NON-CLAUDE HOSTS: these boundaries run in code on every prism_infer call.\n` +
+      `# Reserved-category requests are routed to cloud or refused — not by instruction.\n\n---\n\n`;
     return {
       content: [{
         type: "text",
-        text: `No session context found for project "${project}" at level ${level}.\n` +
+        text: boundariesHeader0 +
+          `No session context found for project "${project}" at level ${level}.\n` +
           `This project has no previous session history. Starting fresh.` +
           freshSkillBlock,
       }],
@@ -1244,16 +1281,42 @@ export async function sessionLoadContextHandler(args: unknown) {
       responseText += `\n\n[ℹ️ Sections omitted to fit token budget (${maxTokens} tokens): ${droppedSections.join(", ")}. Skills and behavioral rules were preserved.]`;
     }
 
+    if (convId) {
+      const { markContextLoaded } = await import("../session/sessionContext.js");
+      const { BOUNDARIES_VERSION } = await import("../boundaries/boundaries.js");
+      markContextLoaded(convId, project, BOUNDARIES_VERSION);
+    }
+
+    const { BOUNDARIES_TEXT, BOUNDARIES_VERSION: BV } = await import("../boundaries/boundaries.js");
+    const boundariesHeader =
+      `# OPERATING BOUNDARIES (v${BV}) — enforced server-side, shown for transparency\n` +
+      BOUNDARIES_TEXT + "\n\n" +
+      `# NOTE FOR NON-CLAUDE HOSTS: these boundaries run in code on every prism_infer call.\n` +
+      `# Reserved-category requests are routed to cloud or refused — not by instruction.\n\n---\n\n`;
+
     return {
-      content: [{ type: "text", text: responseText + MEMORY_BOUNDARY_SUFFIX }],
+      content: [{ type: "text", text: boundariesHeader + responseText + MEMORY_BOUNDARY_SUFFIX }],
       isError: false,
     };
   }
 
   let responseText = criticalPrefix + lowerPriority + historySection;
 
+  if (convId) {
+    const { markContextLoaded } = await import("../session/sessionContext.js");
+    const { BOUNDARIES_VERSION } = await import("../boundaries/boundaries.js");
+    markContextLoaded(convId, project, BOUNDARIES_VERSION);
+  }
+
+  const { BOUNDARIES_TEXT, BOUNDARIES_VERSION: BV2 } = await import("../boundaries/boundaries.js");
+  const boundariesHeader2 =
+    `# OPERATING BOUNDARIES (v${BV2}) — enforced server-side, shown for transparency\n` +
+    BOUNDARIES_TEXT + "\n\n" +
+    `# NOTE FOR NON-CLAUDE HOSTS: these boundaries run in code on every prism_infer call.\n` +
+    `# Reserved-category requests are routed to cloud or refused — not by instruction.\n\n---\n\n`;
+
   return {
-    content: [{ type: "text", text: responseText + MEMORY_BOUNDARY_SUFFIX }],
+    content: [{ type: "text", text: boundariesHeader2 + responseText + MEMORY_BOUNDARY_SUFFIX }],
     isError: false,
   };
 }

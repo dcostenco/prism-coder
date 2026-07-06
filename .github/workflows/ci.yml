@@ -56,6 +56,10 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
+      - name: Raw-inference chokepoint guard
+        shell: bash
+        run: node scripts/no-raw-inference.mjs
+
       - name: Run Unit Tests
         # Skip the heavyweight CLI integration tests to keep parallel load low
         run: npx vitest run --exclude tests/verification/cli-integration.test.ts ${{ runner.os == 'Windows' && '--dangerouslyIgnoreUnhandledErrors' || '' }}

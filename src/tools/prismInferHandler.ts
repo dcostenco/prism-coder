@@ -168,6 +168,9 @@ export interface PrismInferArgs {
     mode?: "route" | "chat" | "code";
     /** Enable thinking (<think> blocks). Default: true for chat/code, false for route. */
     think?: boolean;
+    /** Session key. Same id used by session_load_context / session_save_ledger.
+     *  When provided, inference telemetry is recorded server-side for session health. */
+    conversation_id?: string;
 }
 
 export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
@@ -184,6 +187,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (a.mode !== undefined &&
         !["route", "chat", "code"].includes(a.mode as string)) return false;
     if (a.think !== undefined && typeof a.think !== "boolean") return false;
+    if (a.conversation_id !== undefined && typeof a.conversation_id !== "string") return false;
     if (a.verify !== undefined && typeof a.verify !== "boolean") return false;
     if (a.verifier_model !== undefined && typeof a.verifier_model !== "string") return false;
     if (a.verifier_timeout_ms !== undefined && typeof a.verifier_timeout_ms !== "number") return false;
@@ -818,6 +822,18 @@ export async function prismInferHandler(args: unknown): Promise<{
         // T4: pass prompt_text so recordInference computes submittedEst via
         // estimateTokens() — critical for cloud path where prompt_tokens is unset.
         recordInference({ ...result, prompt_text: args.prompt });
+
+        // Best-effort session telemetry — records that inference ran for this
+        // conversation. Never affects routing or safety decisions.
+        const _convId = args.conversation_id;
+        if (_convId && result.backend !== "safety_gate") {
+            import("../session/sessionContext.js").then(({ noteInferenceForSession }) => {
+                noteInferenceForSession(_convId, {
+                    backend: result.backend,
+                    usedCloud: result.used_cloud,
+                });
+            }).catch(() => { /* non-critical */ });
+        }
 
         // Best-effort portal forwarding (independent analytics stream).
         // safety_gate excluded — logging crisis filter triggers is a HIPAA concern.

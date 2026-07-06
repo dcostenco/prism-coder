@@ -138,6 +138,21 @@ vi.mock("../../../src/utils/cognitiveMemory.js", () => ({
   recordMemoryAccess: vi.fn(),
 }));
 
+// Session context gate — default to "pass" (null) so existing tests are unaffected.
+// Gate-blocking behaviour is tested explicitly in the "context gate" sections below.
+vi.mock("../../../src/session/sessionContext.js", () => ({
+  markContextLoaded: vi.fn(),
+  requireContextLoaded: vi.fn(() => null),
+  noteInferenceForSession: vi.fn(),
+  getSessionState: vi.fn(() => null),
+}));
+
+// Boundaries — return minimal stubs so load-context tests don't depend on exact text.
+vi.mock("../../../src/boundaries/boundaries.js", () => ({
+  BOUNDARIES_VERSION: "test",
+  BOUNDARIES_TEXT: "# BOUNDARIES STUB",
+}));
+
 vi.mock("../../../src/tools/commonHelpers.js", () => ({
   redactSettings: vi.fn((s: Record<string, string>) => s),
   toMarkdown: vi.fn(() => "# Markdown Export"),
@@ -153,6 +168,7 @@ vi.mock("../../../src/utils/vaultExporter.js", () => ({
 
 import { getStorage } from "../../../src/storage/index.js";
 import { getSetting, getAllSettings } from "../../../src/storage/configStorage.js";
+import { requireContextLoaded, markContextLoaded } from "../../../src/session/sessionContext.js";
 import {
   sessionSaveLedgerHandler,
   sessionSaveHandoffHandler,
@@ -404,6 +420,46 @@ describe("ledgerHandlers", () => {
       storage.saveLedger.mockRejectedValue(new Error("DB write failed"));
       await expect(sessionSaveLedgerHandler(validArgs)).rejects.toThrow("DB write failed");
     });
+
+    // --- Context gate ---
+
+    it("blocks save and returns structured error when context not loaded", async () => {
+      vi.mocked(requireContextLoaded).mockReturnValueOnce({
+        blocked: true,
+        error: "context_not_loaded: call session_load_context first.",
+      });
+
+      const result = await sessionSaveLedgerHandler(validArgs);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("context_not_loaded");
+      expect(storage.saveLedger).not.toHaveBeenCalled();
+    });
+
+    it("passes through to storage when context is loaded (gate returns null)", async () => {
+      vi.mocked(requireContextLoaded).mockReturnValueOnce(null);
+
+      const result = await sessionSaveLedgerHandler(validArgs);
+
+      expect(result.isError).toBe(false);
+      expect(storage.saveLedger).toHaveBeenCalledTimes(1);
+    });
+
+    it("proceeds and prepends warning when gate returns { blocked: false, warning } (version drift)", async () => {
+      vi.mocked(requireContextLoaded).mockReturnValueOnce({
+        blocked: false,
+        warning: "[advisory] Operating boundaries updated. Call session_load_context again.",
+      });
+
+      const result = await sessionSaveLedgerHandler(validArgs);
+
+      // Must NOT block — write proceeds
+      expect(result.isError).toBe(false);
+      expect(storage.saveLedger).toHaveBeenCalledTimes(1);
+      // Warning is prepended to the success text
+      expect(result.content[0].text).toContain("[advisory] Operating boundaries updated");
+      expect(result.content[0].text).toContain("✅ Session ledger saved");
+    });
   });
 
   // ====================================================================
@@ -610,6 +666,34 @@ describe("ledgerHandlers", () => {
         "Connection timeout"
       );
     });
+
+    // --- conversation_id / markContextLoaded ---
+
+    it("calls markContextLoaded when conversation_id is provided", async () => {
+      storage.loadContext.mockResolvedValue(null);
+
+      await sessionLoadContextHandler({ project: "test-project", conversation_id: "conv-xyz" });
+
+      expect(vi.mocked(markContextLoaded)).toHaveBeenCalledWith("conv-xyz", "test-project", "test");
+    });
+
+    it("does not call markContextLoaded when conversation_id is absent", async () => {
+      storage.loadContext.mockResolvedValue(null);
+
+      await sessionLoadContextHandler({ project: "test-project" });
+
+      expect(vi.mocked(markContextLoaded)).not.toHaveBeenCalled();
+    });
+
+    it("prepends BOUNDARIES header to every response", async () => {
+      storage.loadContext.mockResolvedValue(null);
+
+      const result = await sessionLoadContextHandler(validArgs);
+      const text = result.content[0].text as string;
+
+      expect(text).toContain("OPERATING BOUNDARIES");
+      expect(text).toContain("BOUNDARIES STUB");
+    });
   });
 
   // ====================================================================
@@ -785,6 +869,48 @@ describe("ledgerHandlers", () => {
       await expect(sessionSaveHandoffHandler(validArgs)).rejects.toThrow(
         "Write conflict"
       );
+    });
+
+    // --- Context gate ---
+
+    it("blocks handoff save and returns structured error when context not loaded", async () => {
+      vi.mocked(requireContextLoaded).mockReturnValueOnce({
+        blocked: true,
+        error: "context_not_loaded: call session_load_context first.",
+      });
+
+      const result = await sessionSaveHandoffHandler(validArgs);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("context_not_loaded");
+      expect(storage.saveHandoff).not.toHaveBeenCalled();
+    });
+
+    it("passes through to storage when context is loaded (gate returns null)", async () => {
+      storage.saveHandoff.mockResolvedValue({ status: "created", version: 1 });
+      vi.mocked(requireContextLoaded).mockReturnValueOnce(null);
+
+      const result = await sessionSaveHandoffHandler(validArgs);
+
+      expect(result.isError).toBe(false);
+      expect(storage.saveHandoff).toHaveBeenCalledTimes(1);
+    });
+
+    it("proceeds and prepends warning when gate returns { blocked: false, warning } (version drift)", async () => {
+      storage.saveHandoff.mockResolvedValue({ status: "created", version: 1 });
+      vi.mocked(requireContextLoaded).mockReturnValueOnce({
+        blocked: false,
+        warning: "[advisory] Operating boundaries updated. Call session_load_context again.",
+      });
+
+      const result = await sessionSaveHandoffHandler(validArgs);
+
+      // Must NOT block — write proceeds
+      expect(result.isError).toBe(false);
+      expect(storage.saveHandoff).toHaveBeenCalledTimes(1);
+      // Warning is prepended to the success text
+      expect(result.content[0].text).toContain("[advisory] Operating boundaries updated");
+      expect(result.content[0].text).toContain("✅ Handoff");
     });
   });
 

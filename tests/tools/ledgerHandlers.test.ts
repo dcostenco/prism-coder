@@ -96,6 +96,20 @@ vi.mock("../../src/utils/imageCaptioner.js", () => ({
   fireCaptionAsync: vi.fn(),
 }));
 
+// Gate is tested separately in src/tools/__tests__/ledgerHandlers.test.ts.
+// Allow all calls through here so existing handler-behavior tests stay focused.
+vi.mock("../../src/session/sessionContext.js", () => ({
+  requireContextLoaded: vi.fn(() => null),
+  markContextLoaded: vi.fn(),
+  noteInferenceForSession: vi.fn(),
+  getSessionState: vi.fn(() => null),
+}));
+
+vi.mock("../../src/boundaries/boundaries.js", () => ({
+  BOUNDARIES_VERSION: "1",
+  BOUNDARIES_TEXT: "# Operating boundaries (stub for tests)",
+}));
+
 vi.mock("../../src/sync/factory.js", () => ({
   getSyncBus: vi.fn(() => ({
     broadcastUpdate: vi.fn(),
