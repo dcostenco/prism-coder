@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [19.3.1] - 2026-07-06 — Cloud Tokens Saved Metric + Gemini Host Verification
+
+### Added
+- **`cloudTokensSavedEst`** counter in `inferenceMetrics.ts` — the honest local-inference routing metric. Accumulates `submittedEst + completionTokens` for every `used_cloud=false` call. Uses `submittedEst` (not `evaluated`) to correctly count KV-cached prompts. Displayed in both compact footer (`📊 … · N cloud tok saved`) and full `inference_metrics` block. Reset on session boundary.
+- **`scripts/test-gemini-host.mjs`** — Gemini 2.5 Flash integration test for host-agnostic Arc 1 gates and Arc 2 routing. Spawns `dist/server.js` as a real subprocess over stdio JSON-RPC. 5 tests, 7 assertions: T1–T3 confirm gates are server-side (hard-block without context, pass after load, `""` hard-blocked); T4–T5 confirm Arc 2 routing instinct from tool descriptions alone without skill-file instructions. T4 is two-sided — "answered directly" fails. 7/7 across 4 independent runs.
+
 ## [19.3.0] - 2026-07-06 — 🔒 Host-Agnostic Session Enforcement + CI Guard
 
 ### Added
