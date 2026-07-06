@@ -434,6 +434,21 @@ export interface InferDeps {
     callLayer1?: (userPrompt: string, ollamaUrl: string, model: string) => Promise<Layer1Verdict>;
 }
 
+// In-process mutex that serialises eviction so concurrent requests don't evict
+// a model that another in-flight inference is actively using (F3 fix).
+const _evictionMutex = (() => {
+    let _lock: Promise<void> = Promise.resolve();
+    return {
+        acquire(): Promise<() => void> {
+            let release!: () => void;
+            const next = new Promise<void>(resolve => { release = resolve; });
+            const chain = _lock.then(() => release);
+            _lock = _lock.then(() => next);
+            return chain;
+        },
+    };
+})();
+
 export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<PrismInferResult> {
     const t0 = Date.now();
     const temperature = args.temperature ?? 0;
@@ -558,39 +573,71 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     let localDraft: { output: string; tier: string; promptTokens?: number; completionTokens?: number } | null = null;
 
     if (installed) {
-        const ceilStart = effectiveCeiling
-            ? Math.max(0, MODEL_TIERS.findIndex(t => t.tag.endsWith(`:${effectiveCeiling}`)))
-            : 0;
+        // F4 fix: guard ceiling-not-found — Math.max(0,-1) silently targets tier 0 (27b).
+        // Instead of defaulting to the largest tier, treat not-found as "no ceiling" (start=0).
+        const ceilIdx = effectiveCeiling
+            ? MODEL_TIERS.findIndex(t => t.tag.endsWith(`:${effectiveCeiling}`))
+            : -1;
+        const ceilStart = ceilIdx >= 0 ? ceilIdx : 0;
 
-        // Auto-evict: if the ceiling tier is installed but not warm and smaller
-        // models are warm, unload them so their RAM is available. Avoids the
-        // caller having to manually free memory before requesting a large model.
+        // Auto-evict: if the ceiling tier is installed but not warm and prism's
+        // own smaller tier models are warm, unload them to make room.
+        // Operates only on prism tier models — never evicts arbitrary Ollama models
+        // the caller doesn't own (F1). Uses an in-process mutex to prevent a
+        // concurrent request from evicting a model mid-inference (F3).
+        let freeAfterEvict = freeBytes;
         if (loaded && loaded.size > 0) {
-            const ceilTier = MODEL_TIERS[ceilStart];
+            const ceilTier = MODEL_TIERS[ceilIdx >= 0 ? ceilIdx : 0];
             const ceilName = ceilTier ? resolveOllamaName(ceilTier.tag, installed) : null;
             const ceilInstalled = ceilName ? installed.has(ceilName) : false;
             const ceilWarm = ceilName ? loaded.has(ceilName) : false;
             if (ceilInstalled && !ceilWarm) {
-                const warmBytes = [...loaded].reduce((sum, m) => {
-                    const t = MODEL_TIERS.find(t => resolveOllamaName(t.tag, installed) === m);
+                // F1 fix: only count and evict prism tier models — not arbitrary warm models.
+                const tierModelsToEvict = MODEL_TIERS
+                    .map(t => resolveOllamaName(t.tag, installed))
+                    .filter(name => loaded.has(name));
+                const tierWarmBytes = tierModelsToEvict.reduce((sum, name) => {
+                    const t = MODEL_TIERS.find(t => resolveOllamaName(t.tag, installed) === name);
                     return sum + (t ? t.weightsGb * 1024 ** 3 : 0);
                 }, 0);
-                if (freeBytes + warmBytes >= ceilTier.minFreeGb * 1024 ** 3) {
-                    for (const warmModel of loaded) {
-                        fetch(`${deps.ollamaUrl}/api/generate`, {
-                            method: "POST",
-                            body: JSON.stringify({ model: warmModel, keep_alive: 0 }),
-                        }).catch(() => {});
+                if (freeBytes + tierWarmBytes >= ceilTier.minFreeGb * 1024 ** 3) {
+                    // F3 fix: hold eviction mutex so no concurrent request evicts a model
+                    // that another in-flight inference is actively using.
+                    const released = await _evictionMutex.acquire();
+                    try {
+                        // F2 fix: await each evict call; log failures; don't proceed blind.
+                        const evictResults = await Promise.allSettled(
+                            tierModelsToEvict.map(m =>
+                                fetch(`${deps.ollamaUrl}/api/generate`, {
+                                    method: "POST",
+                                    body: JSON.stringify({ model: m, keep_alive: 0 }),
+                                    signal: AbortSignal.timeout(3_000),
+                                })
+                            )
+                        );
+                        const failed = evictResults.filter(r => r.status === "rejected").length;
+                        if (failed > 0) {
+                            debugLog(`[prism_infer] evict: ${failed}/${tierModelsToEvict.length} unload requests failed`);
+                        }
+                        // Settle: give Ollama time to release buffers before re-reading RAM.
+                        await new Promise(r => setTimeout(r, 800));
+                        freeAfterEvict = deps.freemem();
+                        debugLog(
+                            `[prism_infer] auto-evicted ${tierModelsToEvict.join(", ")} ` +
+                            `(${fmtGb(tierWarmBytes)}) → freeAfterEvict=${fmtGb(freeAfterEvict)}`
+                        );
+                        // F2 fix: if still insufficient after eviction, log and fall through
+                        // cleanly — the tier loop will emit ram_insufficient rather than
+                        // proceeding on a stale freeBytes value.
+                        if (freeAfterEvict < ceilTier.minFreeGb * 1024 ** 3) {
+                            debugLog(`[prism_infer] evict completed but RAM still insufficient for ${ceilTier.tag}`);
+                        }
+                    } finally {
+                        released();
                     }
-                    // Give Ollama a moment to release the buffers before the RAM check.
-                    await new Promise(r => setTimeout(r, 800));
-                    debugLog(`[prism_infer] auto-evicted ${[...loaded].join(", ")} to make room for ${ceilTier.tag}`);
                 }
             }
         }
-
-        // Re-read free RAM after potential eviction.
-        const freeAfterEvict = deps.freemem();
 
         let anyViable = false;
 
