@@ -132,10 +132,14 @@ async function fetchEntitlements(): Promise<PrismEntitlements> {
             return FREE_ENTITLEMENTS;
         }
 
-        // Normalize grandfathered "14b" ceiling → "9b" (14b fleet retired).
+        // Normalize legacy ceiling values to the current fleet.
         if (data.model_ceiling === ("14b" as string)) {
             debugLog("[entitlements] grandfathered 14b ceiling → 9b");
             data.model_ceiling = "9b";
+        }
+        if (data.model_ceiling === ("32b" as string)) {
+            debugLog("[entitlements] grandfathered 32b ceiling → 27b");
+            data.model_ceiling = "27b";
         }
 
         debugLog(
