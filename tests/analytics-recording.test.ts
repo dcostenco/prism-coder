@@ -1,16 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { unlink } from "node:fs/promises";
 
-const TEST_DB = `/tmp/prism-analytics-test-${process.pid}.db`;
+// Each test gets a unique DB path so Windows file-lock failures in afterEach
+// don't let stale rows bleed into the next test's fresh module import.
+let TEST_DB = "";
+let _testId = 0;
 
 beforeEach(() => {
     vi.resetModules();
+    TEST_DB = `/tmp/prism-analytics-test-${process.pid}-${++_testId}.db`;
     process.env.PRISM_ANALYTICS_DB_PATH = TEST_DB;
 });
 
 afterEach(async () => {
     delete process.env.PRISM_ANALYTICS_DB_PATH;
-    try { await unlink(TEST_DB); } catch { /* ok */ }
+    for (const suffix of ["", "-wal", "-shm"]) {
+        try { await unlink(TEST_DB + suffix); } catch { /* ok */ }
+    }
 });
 
 describe("recordInvocation + flush", () => {
