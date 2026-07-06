@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [19.2.9] - 2026-07-05 — ⚡ Auto-Evict + 27B Routing Fix
+
+### Added
+- **Auto-evict warm smaller models** — When `model_ceiling: "27b"` is requested and 27B is installed but not warm, the handler now automatically unloads any warm smaller-tier models (9B, 4B, 2B) if freeing them would provide sufficient RAM for 27B. Eliminates the need for callers to manually unload models before requesting a large-model ceiling.
+  - Eviction is conditional: `freeBytes + warmBytes ≥ minFreeGb` must hold before any eviction fires.
+  - Evictions run with `Promise.allSettled` (network error to Ollama cannot crash the inference call).
+  - In-process mutex prevents concurrent requests from racing the eviction window.
+  - 800ms settle before re-reading free RAM (measured Ollama buffer-release latency).
+  - Live test: 9B warm (5.6 GB) → evicted → 27B loaded and ran locally. `used_cloud=false`, `attempts=[]`.
+
+### Fixed
+- **`model_ceiling: "27b"` ignored for enterprise plans** — Portal returns `model_ceiling: "32b"` for legacy enterprise/advanced accounts. Added normalization `32b → 27b` (same pattern as existing `14b → 9b`). Per-call `model_ceiling: "27b"` now resolves correctly without being clamped down.
+
+### Changed
+- 3096 tests across 101 files (up from 3031/101). 4 new auto-evict unit tests covering eviction condition guard (F1), parallel eviction with failure logging (F2), eviction mutex (F3), and ceiling-index guard (F4).
+
 ## [19.2.8] - 2026-06-24 — 🔧 ESM require() Fix + Schema-Code Audit Skill
 
 ### Fixed
