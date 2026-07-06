@@ -33,6 +33,10 @@ export interface InferenceSnapshot {
     totalCompletionTokens: number;
     totalTokens: number;
     avgLatencyMs: number;
+    /** Tokens handled by local Ollama instead of cloud — the honest routing metric.
+     *  Accumulated as submittedEst + completionTokens for every used_cloud=false call.
+     *  This is the "opportunity savings" — what would have gone to Claude/Synalux portal. */
+    cloudTokensSavedEst: number;
     byModel: Record<string, ModelStats>;
 }
 
@@ -61,6 +65,7 @@ let promptTokensEvaluated = 0;
 let promptTokensSubmittedEst = 0;
 let totalCompletionTokens = 0;
 let totalLatencyMs = 0;
+let cloudTokensSavedEst = 0;
 
 export function recordInference(result: {
     backend: string;
@@ -102,6 +107,9 @@ export function recordInference(result: {
     promptTokensSubmittedEst += submittedEst;
     totalCompletionTokens += ct;
     totalLatencyMs += result.latency_ms;
+    if (!result.used_cloud) {
+        cloudTokensSavedEst += submittedEst + ct;
+    }
 
     if (!byModel[key]) {
         byModel[key] = {
@@ -136,6 +144,7 @@ export function getInferenceSnapshot(): InferenceSnapshot {
         totalCompletionTokens,
         totalTokens: promptTokensSubmittedEst + totalCompletionTokens,
         avgLatencyMs: total > 0 ? Math.round(totalLatencyMs / total) : 0,
+        cloudTokensSavedEst,
         byModel: modelCopy,
     };
 }
@@ -147,6 +156,7 @@ export function resetInferenceMetrics(): void {
     promptTokensSubmittedEst = 0;
     totalCompletionTokens = 0;
     totalLatencyMs = 0;
+    cloudTokensSavedEst = 0;
     for (const key of Object.keys(byModel)) {
         delete byModel[key];
     }
@@ -187,7 +197,8 @@ export function formatInferenceMetrics(compact = false): string {
         // Always emit on the first call (totalCalls===1) so short sessions (1–4 calls)
         // see at least one rollup. Otherwise emit every N calls as the rolling summary.
         if (snap.totalCalls !== 1 && snap.totalCalls % every !== 0) return "";
-        return `📊 local ${snap.localCalls} (${snap.localPct}%) · cloud ${snap.cloudCalls} (${snap.cloudPct}%) · ~${snap.totalTokens.toLocaleString()} tok · avg ${snap.avgLatencyMs}ms`;
+        const savedStr = snap.cloudTokensSavedEst > 0 ? ` · ${snap.cloudTokensSavedEst.toLocaleString()} cloud tok saved` : "";
+        return `📊 local ${snap.localCalls} (${snap.localPct}%) · cloud ${snap.cloudCalls} (${snap.cloudPct}%) · ~${snap.totalTokens.toLocaleString()} tok · avg ${snap.avgLatencyMs}ms${savedStr}`;
     }
 
     // Full multi-line block (explicit inference_metrics tool call).
@@ -197,11 +208,16 @@ export function formatInferenceMetrics(compact = false): string {
         ? `  Prompt tokens: ${snap.promptTokensEvaluated.toLocaleString()} evaluated / ${snap.promptTokensSubmittedEst.toLocaleString()} submitted est.`
         : `  Prompt tokens: ${snap.promptTokensEvaluated.toLocaleString()}`;
 
+    const savedLine = snap.cloudTokensSavedEst > 0
+        ? `  Cloud tokens saved (est.): ${snap.cloudTokensSavedEst.toLocaleString()} — token volume handled locally instead of cloud`
+        : `  Cloud tokens saved (est.): 0`;
+
     const lines: string[] = [
         `\n📊 Delegation Metrics — local-model calls this session (not host model spend):`,
         `  Total calls: ${snap.totalCalls} — Local: ${snap.localCalls} (${snap.localPct}%) | Cloud: ${snap.cloudCalls} (${snap.cloudPct}%)`,
         promptLine,
         `  Completion tokens: ${snap.totalCompletionTokens.toLocaleString()}`,
+        savedLine,
         `  Avg latency: ${snap.avgLatencyMs}ms`,
     ];
 
