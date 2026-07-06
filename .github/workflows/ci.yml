@@ -39,15 +39,16 @@ jobs:
 
       - name: Private repo leak guard
         run: |
-          # Split the search term so this file doesn't self-match
+          # Scan every file git tracks — extension-based grep misses dotfiles,
+          # Dockerfiles, .gitignore, LICENSE, smithery.yaml, etc.
+          # Split the search term so this file doesn't self-match.
           TERM="synalux""-private"
-          HITS=$(grep -rn "$TERM" . \
-            --include="*.ts" --include="*.js" --include="*.md" --include="*.json" --include="*.yml" --include="*.sh" --include="*.py" \
-            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
-            2>/dev/null | grep -v "package-lock.json" | grep -v "ci.yml" || true)
+          HITS=$(git ls-files | xargs grep -ln "$TERM" 2>/dev/null \
+            | grep -v "package-lock.json" | grep -v ".github/workflows/ci.yml" || true)
           if [ -n "$HITS" ]; then
-            echo "ERROR: private repo name leaked in public repo:"
-            echo "$HITS"
+            echo "ERROR: private repo name leaked in tracked files:"
+            git ls-files | xargs grep -n "$TERM" 2>/dev/null \
+              | grep -v "package-lock.json" | grep -v ".github/workflows/ci.yml"
             exit 1
           fi
 

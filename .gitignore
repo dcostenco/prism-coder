@@ -73,12 +73,7 @@ test_save.js
 test_save2.js
 upvote.js
 test-results.txt
-# ─── Training: ENTIRE directory blocked from this PUBLIC repo ───
-# 2026-05-05: training/ was force-purged from prism-coder history after a
-# leak audit found 178 proprietary files (Modal scripts, Phase plans,
-# BFCL eval methodology, build_phase pipelines) in the public repo.
-# All training work belongs in synalux-private/prism-training/.
-# See ~/.agent/skills/no-public-leak/SKILL.md for the full rule.
+# ─── Training: blocked from this repo (kept in private engineering repo) ───
 /training/
 bfcl-submission/
 
