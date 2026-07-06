@@ -266,14 +266,8 @@ try {
 
   const t4UsedSearch = t4Tools.includes("brave_web_search");
   const t4UsedInfer = t4Tools.includes("prism_infer");
-  // Gemini may answer directly without calling any tool — also acceptable
-  // for a time-stable factual question. What's NOT acceptable: calling search.
   assert(!t4UsedSearch, "Gemini did NOT call brave_web_search for stable ABA question");
-  if (t4UsedInfer) {
-    console.log("    Gemini called prism_infer — close-domain bypass instinct without skill-file instruction ✓");
-  } else if (t4Tools.length === 0) {
-    console.log("    Gemini answered directly — no tool call. Acceptable: stable domain, no search needed.");
-  }
+  assert(t4UsedInfer, "Gemini called prism_infer for stable ABA question (close-domain bypass without skill-file instruction)");
 
   // ── T5: Gemini routing — time-sensitive version question ──
   console.log("\nT5: Gemini routing — 'What is the current stable LTS version of Node.js?'");
