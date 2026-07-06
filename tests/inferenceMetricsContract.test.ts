@@ -46,8 +46,7 @@ describe("inference metrics contract", () => {
         const { readFileSync } = await import("node:fs");
         // Read the migration file that defines the RPC
         const migrationFiles = [
-            "../synalux-private/portal/supabase/migrations/20260617400000_inference_metrics_rpc.sql",
-            "../../synalux-private/portal/supabase/migrations/20260617400000_inference_metrics_rpc.sql",
+            `${process.env.SYNALUX_PORTAL_ROOT ?? ""}/supabase/migrations/20260617400000_inference_metrics_rpc.sql`,
         ];
 
         let sql = "";
@@ -81,8 +80,7 @@ describe("inference metrics contract", () => {
     it("portal ingest route checks the same headers prism sends", async () => {
         const { readFileSync } = await import("node:fs");
         const paths = [
-            "../synalux-private/portal/src/app/api/v1/telemetry/route.ts",
-            "../../synalux-private/portal/src/app/api/v1/telemetry/route.ts",
+            `${process.env.SYNALUX_PORTAL_ROOT ?? ""}/src/app/api/v1/telemetry/route.ts`,
         ];
         let src = "";
         for (const p of paths) {
@@ -99,8 +97,7 @@ describe("inference metrics contract", () => {
     it("portal read endpoint scopes by userId before querying", async () => {
         const { readFileSync } = await import("node:fs");
         const paths = [
-            "../synalux-private/portal/src/app/api/v1/telemetry/inference-metrics/route.ts",
-            "../../synalux-private/portal/src/app/api/v1/telemetry/inference-metrics/route.ts",
+            `${process.env.SYNALUX_PORTAL_ROOT ?? ""}/src/app/api/v1/telemetry/inference-metrics/route.ts`,
         ];
         let src = "";
         for (const p of paths) {

@@ -7,8 +7,7 @@
  *
  * Only interfaces live in Prism — implementations stay in Synalux.
  *
- * @see synalux-private/portal/src/lib/vm-manager.ts
- * @see synalux-private/portal/src/lib/device-registry.ts
+ * @see Synalux portal — vm-manager, device-registry
  */
 
 import type { ScmTier } from '../scm/types.js';

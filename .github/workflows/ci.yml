@@ -37,6 +37,20 @@ jobs:
       - name: Audit Dependencies
         run: npm audit --audit-level=high
 
+      - name: Private repo leak guard
+        run: |
+          # Split the search term so this file doesn't self-match
+          TERM="synalux""-private"
+          HITS=$(grep -rn "$TERM" . \
+            --include="*.ts" --include="*.js" --include="*.md" --include="*.json" --include="*.yml" --include="*.sh" --include="*.py" \
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            2>/dev/null | grep -v "package-lock.json" | grep -v "ci.yml" || true)
+          if [ -n "$HITS" ]; then
+            echo "ERROR: private repo name leaked in public repo:"
+            echo "$HITS"
+            exit 1
+          fi
+
       - name: Build TypeScript
         run: npm run build
 

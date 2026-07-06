@@ -1,13 +1,13 @@
 #!/bin/bash
-# Sync synalux-private/skills → Prism DB
-# synalux-private is the single source of truth. No local mirror.
+# Sync skills → Prism DB
+# The skills directory is the single source of truth. No local mirror.
 
-SYNALUX_SKILLS="$HOME/synalux-private/skills"
+SYNALUX_SKILLS="${SYNALUX_SKILLS_DIR:-$HOME/.synalux/skills}"
 PRISM_DIR="$HOME/.prism-mcp"
 DB="$PRISM_DIR/prism-config.db"
 
 if [ ! -d "$SYNALUX_SKILLS" ]; then
-  echo "✗ synalux-private/skills not found at $SYNALUX_SKILLS"
+  echo "✗ Skills directory not found at $SYNALUX_SKILLS"
   exit 1
 fi
 

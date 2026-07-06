@@ -1,6 +1,6 @@
 # Engineering Standards
 
-See synalux-private/GEMINI.md for the full protocol. This file inherits those standards.
+See the Synalux engineering standards doc for the full protocol. This file inherits those standards.
 Additional Prism-specific rules:
 
 1. **MCP Tool Testing:** When modifying tool handlers in src/tools/, run `npm test` before committing.

@@ -8,7 +8,7 @@
  *   - Audio generation and production
  *   - All tier-gated through Synalux subscription
  *
- * BOUNDARY: Interfaces only — implementations in synalux-private.
+ * BOUNDARY: Interfaces only — implementations are portal-side.
  */
 
 import type { ScmTier } from '../scm/types.js';

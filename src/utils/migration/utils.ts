@@ -1,3 +1,5 @@
+import { openSync, readSync, closeSync } from "node:fs";
+
 /**
  * ═══════════════════════════════════════════════════════════════════
  * Migration Utilities — Shared Normalization Helpers
@@ -44,11 +46,10 @@
  *   OpenAI  → `"tool_calls":` or `"created_at":` (Unix epoch) or `"role":"system"`
  */
 export function sniffFormat(filePath: string): string | null {
-  const fs = require('node:fs');
-  const fd = fs.openSync(filePath, 'r');
+  const fd = openSync(filePath, 'r');
   const buf = Buffer.alloc(4096);
-  const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
-  fs.closeSync(fd);
+  const bytesRead = readSync(fd, buf, 0, 4096, 0);
+  closeSync(fd);
 
   if (bytesRead === 0) return null;
 

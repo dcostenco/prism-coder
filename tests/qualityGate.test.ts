@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { passesQualityGate } from "../src/utils/qualityGate.js";
+import { passesQualityGate, TOOL_CALL_BLEED_RE } from "../src/utils/qualityGate.js";
 
 describe("passesQualityGate", () => {
     it("passes normal response", () => {
@@ -176,6 +176,39 @@ describe("passesQualityGate", () => {
         expect(passesQualityGate(crisisProtocol, false).pass).toBe(true);
     });
 
+    // ── Signal 5: tool_call_bleed (R8) ───────────────────────────────────────
+
+    it("tool_call_bleed: pipe-delimited format fails the gate", () => {
+        const bleed = '<|tool_call|>{"name":"aac_route","arguments":{"phrase":"help"}}<|tool_call_end|>';
+        const r = passesQualityGate(bleed, false);
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("tool_call_bleed");
+    });
+
+    it("tool_call_bleed: <|tool_call_end|> alone fails the gate", () => {
+        const r = passesQualityGate("Some output <|tool_call_end|>", false);
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("tool_call_bleed");
+    });
+
+    it("tool_call_bleed: does NOT false-positive on prose mentioning 'tool call'", () => {
+        const prose = "The model emits a tool call token when routing to AAC.";
+        expect(passesQualityGate(prose, false).pass).toBe(true);
+    });
+
+    it("tool_call_bleed: does NOT false-positive on angle-bracket <tool_call> (normalized variant, not pipe)", () => {
+        const angleVariant = '<tool_call>\n{"name":"x","arguments":{}}\n</tool_call>';
+        // angle-bracket variant is handled by normalizeToolCallFormat, NOT gated as a failure
+        expect(passesQualityGate(angleVariant, false).pass).toBe(true);
+    });
+
+    it("TOOL_CALL_BLEED_RE: exported regex matches pipe format only", () => {
+        expect(TOOL_CALL_BLEED_RE.test("<|tool_call|>")).toBe(true);
+        expect(TOOL_CALL_BLEED_RE.test("<|tool_call_end|>")).toBe(true);
+        expect(TOOL_CALL_BLEED_RE.test("<tool_call>")).toBe(false);
+        expect(TOOL_CALL_BLEED_RE.test("tool call")).toBe(false);
+    });
+
     it("still catches real prose loops even with headings present", () => {
         const loopyWithHeadings = [
             "# Analysis",
@@ -240,5 +273,59 @@ describe("passesQualityGate", () => {
         const r = passesQualityGate(headingEvasion, false);
         expect(r.pass).toBe(false);
         expect(r.reason).toBe("loop_detected");
+    });
+
+    // ── Signal 2: mode-aware empty floor (R9) ────────────────────────────────
+    // Route mode returns short classification labels — they are valid, not empty.
+
+    it("route: 'P1' (2 chars) passes the gate (not empty_response)", () => {
+        const r = passesQualityGate("P1", false, undefined, "route");
+        expect(r.pass).toBe(true);
+    });
+
+    it("route: 'YES' (3 chars) passes the gate", () => {
+        expect(passesQualityGate("YES", false, undefined, "route").pass).toBe(true);
+    });
+
+    it("route: 'GO' (2 chars) passes the gate", () => {
+        expect(passesQualityGate("GO", false, undefined, "route").pass).toBe(true);
+    });
+
+    it("route: 'CO4' (3 chars) passes the gate", () => {
+        expect(passesQualityGate("CO4", false, undefined, "route").pass).toBe(true);
+    });
+
+    it("route: empty string still fails (empty_response)", () => {
+        const r = passesQualityGate("", false, undefined, "route");
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("empty_response");
+    });
+
+    it("route: whitespace-only still fails (empty_response)", () => {
+        const r = passesQualityGate("   ", false, undefined, "route");
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("empty_response");
+    });
+
+    it("code: 'Hi' (2 chars) still fails the gate (threshold <5 preserved)", () => {
+        const r = passesQualityGate("Hi", false, undefined, "code");
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("empty_response");
+    });
+
+    it("code: 'DONE' (4 chars) still fails the gate (code threshold preserved)", () => {
+        const r = passesQualityGate("DONE", false, undefined, "code");
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("empty_response");
+    });
+
+    it("route: bleed check still fires on short bleed output", () => {
+        const r = passesQualityGate("<|tool_call|>x<|tool_call_end|>", false, undefined, "route");
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("tool_call_bleed");
+    });
+
+    it("no mode (default): 'Hi' fails — backward-compatible with code/chat callers", () => {
+        expect(passesQualityGate("Hi", false).pass).toBe(false);
     });
 });

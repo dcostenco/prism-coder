@@ -36,7 +36,7 @@ describe("recordInference", () => {
         recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 50, prompt_tokens: 100, completion_tokens: 50 });
         recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 60, prompt_tokens: 200, completion_tokens: 80 });
         const snap = getInferenceSnapshot();
-        expect(snap.totalPromptTokens).toBe(300);
+        expect(snap.promptTokensEvaluated).toBe(300);
         expect(snap.totalCompletionTokens).toBe(130);
         expect(snap.totalTokens).toBe(430);
     });
@@ -44,7 +44,7 @@ describe("recordInference", () => {
     it("handles undefined token counts as 0", () => {
         recordInference({ backend: "ollama-2b", model_picked: "prism-coder:2b", used_cloud: false, latency_ms: 10 });
         const snap = getInferenceSnapshot();
-        expect(snap.totalPromptTokens).toBe(0);
+        expect(snap.promptTokensEvaluated).toBe(0);
         expect(snap.totalCompletionTokens).toBe(0);
     });
 
@@ -67,7 +67,7 @@ describe("recordInference", () => {
         recordInference({ backend: "synalux", model_picked: null, used_cloud: true, latency_ms: 200, prompt_tokens: 80, completion_tokens: 40 });
         const snap = getInferenceSnapshot();
         expect(snap.byModel["prism-coder:9b"].calls).toBe(2);
-        expect(snap.byModel["prism-coder:9b"].promptTokens).toBe(250);
+        expect(snap.byModel["prism-coder:9b"].promptTokensEvaluated).toBe(250);
         expect(snap.byModel["synalux"].calls).toBe(1);
     });
 });

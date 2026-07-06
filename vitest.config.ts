@@ -15,8 +15,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     // ─── Test Discovery ───────────────────────────────────────────
-    // Look for *.test.ts files in the tests/ directory
-    include: ["tests/**/*.test.ts"],
+    // Look for *.test.ts files in the tests/ directory and src/**/__tests__/
+    include: ["tests/**/*.test.ts", "src/tools/__tests__/*.test.ts"],
 
     // ─── Environment ──────────────────────────────────────────────
     // Use Node environment (not jsdom) since Prism is a server-side

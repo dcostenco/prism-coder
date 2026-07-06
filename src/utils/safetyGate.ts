@@ -60,6 +60,29 @@ const MEDICAL_INPUT_RE = [
     /(?:dose|dosage)\s+(?:should\s+I|do\s+I|can\s+I)\s+(?:inject|take|give)/i,
 ];
 
+// ── Output: BCBA reserved category — physical management / restraint / seclusion ─
+//
+// These patterns are a BACKSTOP (Option 1) — high-precision/low-recall.
+// The structural safety mechanism is Option 4: consequence/crisis sections of BIPs
+// never generate locally. These regexes catch the obvious cases if section-routing fails.
+// They do NOT substitute for the structural gate; euphemistic phrasings ("guide the client
+// firmly to the floor") pass through, so the structural gate is the primary control.
+
+const BCBA_OUTPUT_RE = [
+    // Explicit restraint technique names
+    /\b(?:prone|supine|basket|therapeutic|manual)\s+(?:hold|restraint)\b/i,
+    /\btwo[-\s]?person\s+(?:hold|restraint)\b/i,
+    /\bphysical\s+(?:intervention|management|restraint)\b/i,
+    // Seclusion
+    /\bseclusion\s+(?:room|protocol|procedure|space)\b/i,
+    /\bplace\s+(?:the\s+)?client\s+in\s+(?:a\s+)?(?:seclusion|hold|timeout\s+room)\b/i,
+    // Staff-instruction framing (high-precision: requires staff + restraint verb + client)
+    /\bstaff\s+(?:should|must|will)\s+(?:hold|restrain|physically)\s+(?:the\s+)?client\b/i,
+    /\bcaregiver\s+(?:should|must|will)\s+(?:hold|restrain|physically)\s+(?:the\s+)?client\b/i,
+];
+
+export const BCBA_RESPONSE = "This output contains physical management content (restraint, hold, or seclusion procedure). Consequence strategy and crisis/safety sections require cloud review — they cannot generate locally per BCBA clinical standards. Escalating to cloud.";
+
 // ── Output: model providing dangerous instructions ───────────────────────────
 
 const CRISIS_OUTPUT_RE = [
@@ -106,6 +129,7 @@ export function checkInputSafety(text: string): string | null {
 
 export function checkOutputSafety(response: string): string {
     const r = normalize(response);
+    if (BCBA_OUTPUT_RE.some(re => re.test(r))) return BCBA_RESPONSE;
     if (CRISIS_OUTPUT_RE.some(re => re.test(r))) return CRISIS_RESPONSE;
     if (MEDICAL_OUTPUT_RE.some(re => re.test(r))) return MEDICAL_RESPONSE;
     return response;

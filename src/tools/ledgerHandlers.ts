@@ -135,7 +135,7 @@ const MEMORY_BOUNDARY_SUFFIX = '\n</prism_memory>';
  * After saving, generates an embedding vector for the entry via fire-and-forget.
  */
 import { computeEffectiveImportance, recordMemoryAccess } from "../utils/cognitiveMemory.js";
-import { formatInferenceMetrics, resetInferenceMetrics } from "../utils/inferenceMetrics.js";
+import { formatInferenceMetrics, resetInferenceMetrics, getInferenceSnapshot } from "../utils/inferenceMetrics.js";
 export async function sessionSaveLedgerHandler(args: unknown) {
   if (!isSessionSaveLedgerArgs(args)) {
     throw new Error("Invalid arguments for session_save_ledger");
@@ -711,11 +711,19 @@ export async function sessionLoadContextHandler(args: unknown) {
     throw new Error("Invalid arguments for session_load_context");
   }
 
-  resetInferenceMetrics();
+  // T3 fix: only reset metrics at true session start (totalCalls==0), not on GATE 5 mid-session
+  // reloads. Resetting on every call wipes accumulated delegation metrics right before
+  // session_save_ledger renders them, making the 📊 block show near-zero after any reload.
+  if (getInferenceSnapshot().totalCalls === 0) {
+    resetInferenceMetrics();
+  }
 
   const { project, level = "standard", role } = args;
-  const maxTokens = (args as any).max_tokens as number | undefined
-    || parseInt(await getSetting("max_tokens", "0"), 10) || undefined;  // v4.0: arg > dashboard setting > none
+  // T6 fix: explicit Number() coercion prevents string "2000" from later concatenating instead of adding
+  const _maxTokensArg = Number((args as any).max_tokens);
+  const _maxTokensSetting = parseInt(await getSetting("max_tokens", "0"), 10);
+  const maxTokens: number | undefined =
+    (_maxTokensArg > 0 ? _maxTokensArg : undefined) ?? (_maxTokensSetting > 0 ? _maxTokensSetting : undefined);
   const agentName = await getSetting("agent_name", "");
 
   const validLevels = ["quick", "standard", "deep"];
@@ -735,12 +743,28 @@ export async function sessionLoadContextHandler(args: unknown) {
   const effectiveRole = role || await getSetting("default_role", "") || undefined;
   const data = await storage.loadContext(project, level, PRISM_USER_ID, effectiveRole);  // v3.0: role with dashboard fallback
 
+  // F4 fix: inject protected skills even for fresh projects.
+  // Previously this returned before skill injection, leaving new projects with zero
+  // behavioral guardrails for the entire session. Now protected skills always load.
   if (!data) {
+    let freshSkillBlock = "";
+    try {
+      const { resolveSkillsForProject: resolveForFresh } = await import("./skillRouting.js");
+      const freshResolved = await resolveForFresh(project);
+      for (const entry of freshResolved.skills.filter(e => e.protected)) {
+        const content = await getSetting(`skill:${entry.name}`, "");
+        if (!content?.trim()) continue;
+        freshSkillBlock += `\n\n[📜 SKILL: ${entry.name}]\n${content.trim()}`;
+      }
+    } catch {
+      debugLog(`[session_load_context] Fresh project skill injection failed — continuing without`);
+    }
     return {
       content: [{
         type: "text",
         text: `No session context found for project "${project}" at level ${level}.\n` +
-          `This project has no previous session history. Starting fresh.`,
+          `This project has no previous session history. Starting fresh.` +
+          freshSkillBlock,
       }],
       isError: false,
     };
@@ -1009,6 +1033,10 @@ export async function sessionLoadContextHandler(args: unknown) {
   const resolved = await resolveSkillsForProject(project);
   const sortedSkills = resolved.skills;
   const userLocalPolicy = resolved.user_local;
+  // F5: surface offline routing to the agent so it knows project/keyword skills may be missing
+  if (resolved.isOffline) {
+    skillBlock += `\n\n[⚠️ OFFLINE ROUTING: synalux.ai unreachable — using stale or fallback routing table. Project-specific and keyword-triggered skills may be missing. Universal protected skills still load.]`;
+  }
 
   let synaluxContent: Record<string, string> = {};
   if (SYNALUX_CONFIGURED && storage && typeof (storage as unknown as { fetchSkillContent?: unknown }).fetchSkillContent === "function") {
@@ -1152,13 +1180,8 @@ export async function sessionLoadContextHandler(args: unknown) {
     behavBlock = [...rawBlock].slice(0, 2000).join('');
   }
 
-  let responseText = `${MEMORY_BOUNDARY_PREFIX}📋 Session context for "${project}" (${level}):\n\n${formattedContext.trim()}${splitBrainWarning}${driftReport}${briefingBlock}${sdmRecallBlock}${greetingBlock}${visualMemoryBlock}${behavBlock}${skillBlock}${versionNote}`;
-
   // ─── v9.4.7: ABA Precision Protocol (foundational) ────────
-  // Injected into EVERY session load so the agent always operates
-  // under these behavioral rules. Never truncated (placed before
-  // token budget check).
-  responseText += `\n\n[🧠 ABA PRECISION PROTOCOL]\n` +
+  const abaProtocol = `\n\n[🧠 ABA PRECISION PROTOCOL]\n` +
     `Rule 1 — Observable Goals: Every task must have a measurable, verifiable outcome. State the specific result.\n` +
     `Rule 2 — Precise Execution: One step at a time. Verify each step. If it fails → STOP → fix → verify → then continue.\n` +
     `Rule 3 — No Reinforcement of Errors: Never repeat the same mistake twice. When the user says something is wrong, read the actual code/data FIRST before forming an opinion.\n` +
@@ -1167,15 +1190,67 @@ export async function sessionLoadContextHandler(args: unknown) {
     `Rule 6 — Action Intent: When user says "fix/run/open/deploy", they want ACTION not a tutorial. Ask for specific info needed in 1-2 sentences, or act directly.\n` +
     `Rule 7 — Tool Redirect: When user asks to "open browser"/"run terminal"/"git push" — output ONLY the URL or command. No follow-up. No explanations. Example: "open browser" → "https://synalux.ai/dashboard"`;
 
-  // ─── v4.0: Token Budget Truncation ─────────────────────────
-  // 1 token ≈ 4 chars heuristic. Truncate if response exceeds budget.
+  // T5 structural truncation: assemble sections in priority order so budget truncation
+  // drops the LEAST critical sections first (session history), never skills.
+  // Priority high→low: ABA | skills | behavioral warnings | version | drift | briefing | SDM | history
+  // The header + critical rules are always at the top; history is appended last.
+  const criticalPrefix =
+    `${MEMORY_BOUNDARY_PREFIX}📋 Session context for "${project}" (${level}):\n\n` +
+    abaProtocol +
+    behavBlock +
+    skillBlock +
+    versionNote +
+    greetingBlock +
+    splitBrainWarning;
+
+  const lowerPriority =
+    driftReport +
+    briefingBlock +
+    sdmRecallBlock +
+    visualMemoryBlock;
+
+  const historySection = formattedContext.trim()
+    ? `\n\n---\n\n📋 Historical Context:\n${formattedContext.trim()}`
+    : "";
+
+  // ─── v4.0: Token Budget Truncation (T5 structural version) ──
+  // Drops low-priority sections whole (no mid-slice) before falling back
+  // to trimming the history block. Protected sections (skills, ABA) always survive.
+  // T1: use ~3.5 chars/token (better for emoji+code payload) instead of flat 4.
   if (maxTokens && maxTokens > 0) {
-    const maxChars = maxTokens * 4;
+    const maxChars = Math.floor(maxTokens * 3.5);
+    const droppedSections: string[] = [];
+
+    let responseText = criticalPrefix + lowerPriority + historySection;
     if (responseText.length > maxChars) {
-      responseText = responseText.slice(0, maxChars) + "\n\n[… truncated to fit token budget]";
-      debugLog(`[session_load_context] Truncated response to ${maxTokens} tokens (${maxChars} chars)`);
+      // Drop low-priority sections first (SDM recall, briefing, drift)
+      responseText = criticalPrefix + historySection;
+      droppedSections.push("briefing", "drift-report", "sdm-recall");
+      debugLog(`[session_load_context] T5: dropped low-priority sections (${droppedSections.join(", ")})`);
+
+      if (responseText.length > maxChars) {
+        // History too long — trim it, preserving all critical sections
+        const histAllowed = Math.max(0, maxChars - criticalPrefix.length - 200);
+        const trimmedHistory = histAllowed > 0
+          ? `\n\n---\n\n📋 Historical Context (trimmed):\n${formattedContext.trim().slice(0, histAllowed)}…`
+          : "";
+        droppedSections.push("partial-history");
+        responseText = criticalPrefix + trimmedHistory;
+        debugLog(`[session_load_context] T5: trimmed history to ${histAllowed} chars`);
+      }
     }
+
+    if (droppedSections.length > 0) {
+      responseText += `\n\n[ℹ️ Sections omitted to fit token budget (${maxTokens} tokens): ${droppedSections.join(", ")}. Skills and behavioral rules were preserved.]`;
+    }
+
+    return {
+      content: [{ type: "text", text: responseText + MEMORY_BOUNDARY_SUFFIX }],
+      isError: false,
+    };
   }
+
+  let responseText = criticalPrefix + lowerPriority + historySection;
 
   return {
     content: [{ type: "text", text: responseText + MEMORY_BOUNDARY_SUFFIX }],

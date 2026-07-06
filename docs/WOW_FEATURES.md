@@ -227,7 +227,7 @@ const MAX_INJECT_CHARS = 25_000;  // compactionHandler.ts:81 — same prompt-bud
 
 ## 7. HRR zero-search retrieval
 
-**Where:** [`synalux-private/portal/src/lib/hrr/`](https://github.com/dcostenco/synalux-private/tree/main/portal/src/lib/hrr) (engine) + [`packages/hrr-wasm/`](https://github.com/dcostenco/synalux-private/tree/main/packages/hrr-wasm) (Rust WASM)
+**Where:** Synalux portal engine (HRR core + Rust WASM bindings)
 **Stable since:** v16.0.0
 
 Holographic Reduced Representations encode key-value pairs into a single fixed-size vector via circular convolution. Retrieval is a mathematical unbind — no index, no database, no network. ~0.2ms per probe.

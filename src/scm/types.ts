@@ -4,10 +4,7 @@
  * These interfaces mirror the Synalux SCM engines.
  * Only types live in Prism — implementations stay in Synalux.
  *
- * @see synalux-private/portal/src/lib/code-search.ts
- * @see synalux-private/portal/src/lib/ai-review.ts
- * @see synalux-private/portal/src/lib/security-scanner.ts
- * @see synalux-private/portal/src/lib/dora-metrics.ts
+ * @see Synalux portal — code-search, ai-review, security-scanner, dora-metrics
  */
 
 // ── Code Search ─────────────────────────────────────────────

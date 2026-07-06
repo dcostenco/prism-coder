@@ -549,7 +549,7 @@ Pre-commit and pre-push security hooks that work with any editor, any AI tool, a
 
 ```bash
 # Install in all repos (one-time)
-bash synalux-private/scripts/install-git-hooks.sh
+bash hooks/install.sh
 
 # Or install manually in a single repo
 cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit

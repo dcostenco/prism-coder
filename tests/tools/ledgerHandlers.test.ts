@@ -142,6 +142,11 @@ vi.mock("../../src/utils/cognitiveMemory.js", () => ({
 vi.mock("../../src/utils/inferenceMetrics.js", () => ({
   formatInferenceMetrics: vi.fn(() => ""),
   resetInferenceMetrics: vi.fn(),
+  getInferenceSnapshot: vi.fn(() => ({
+    totalCalls: 0, localCalls: 0, cloudCalls: 0, localPct: 0, cloudPct: 0,
+    promptTokensEvaluated: 0, promptTokensSubmittedEst: 0,
+    totalCompletionTokens: 0, totalTokens: 0, avgLatencyMs: 0, byModel: {},
+  })),
 }));
 
 vi.mock("../../src/tools/commonHelpers.js", () => ({
@@ -556,7 +561,7 @@ describe("ledgerHandlers", () => {
 
       const text = result.content[0].text as string;
       // With 100 tokens * 4 chars = 400 char budget, the 5000-char summary gets truncated
-      expect(text).toContain("truncated to fit token budget");
+      expect(text).toContain("omitted to fit token budget");
     });
 
     it("includes recent sessions in formatted output", async () => {

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [19.2.8] - 2026-06-24 — 🔧 ESM require() Fix + Schema-Code Audit Skill
+
+### Fixed
+- **`knowledge_ingest` broken** — `require("path")` in `ingestHandler.ts` crashes in ESM context (`"type": "module"`). Replaced with static `import { resolve } from "path"`. File-path ingestion was completely non-functional.
+- **`sniffFormat` broken** — `require('node:fs')` in `migration/utils.ts` same ESM issue. Replaced with top-level `import { openSync, readSync, closeSync } from "node:fs"`.
+- Zero `require()` calls remain in compiled output.
+
+### Added
+- **`schema-code-audit` skill** — Deep cross-reference audit technique: extracts every `.from()` call from API routes and verifies table names, column names, FK joins, onConflict constraints, and cross-table ID usage against actual migration DDL. Originated from a sweep that found 20 BLOCKER bugs across banking, billing, accounting, and clinical modules.
+- **`pre-push-audit` rules 20-25** — Six new schema-code rules: phantom table, ghost column, invalid FK join, missing upsert constraint, nested insert anti-pattern, cross-table ID confusion.
+
 ## [19.2.7] - 2026-06-24 — 🔒 CodeQL Security Sweep
 
 ### Security
@@ -414,13 +425,13 @@ Prevents AI agents from reporting `done / fixed / working / 90%+` without observ
 **SSML rate formula restored** (prism-aac)
 `rate × 2` formula (capped at 1.4) confirmed working via tts-live-diag-rate.mjs. Stored slider 0.5 → SSML 1.0 (normal speed). Fixes Romanian/Ukrainian 2× slower regression.
 
-**Marketplace catalog** (synalux-private)
+**Marketplace catalog** 
 `marketplace_modules` table created via migration `20260510_marketplace_modules.sql`. Resolves 500 on every `/api/v1/marketplace/catalog` call (table was never applied to prod Supabase).
 
 **13 synalux stub fixes**
 Unread count, mail sync (IMAP→501, OAuth→real Gmail fetch), inbox thread 503, accounting providers removed (no longer returned as 'planned'), Zoom 501→422, chat providers cleaned, e-sign 501→422, feature-flags DB error returns success:false, SMS send 501→503, marketplace/installed 401, MathPanel + MathKeyboardRegion stub comments removed.
 
-**Inbox / messages** (prism-aac + synalux-private)
+**Inbox / messages** (prism-aac)
 - `/api/v1/prism-aac/inbox/poll` now returns real Gmail unread messages (via user's OAuth grant) and unclaimed SMS from `inbound_sms` table. Previously returned `[]`.
 - Per-message TTS on arrival: speaks "New message from [sender]: [text]" for ≤3 messages.
 - Reply button (↩) on schedule message tasks opens AACChatPanel and pre-selects the sender contact.
@@ -505,7 +516,7 @@ External systems were already building on Prism algorithms with hand-tuned appro
 
 ## [13.1.0] - 2026-05-04 — 🤖 Prism Coder 14B sibling + tier-aware local routing
 
-Coordinated cross-product release with **synalux-private v0.14.4** and **prism-aac v0.2.1**. No prism-mcp-server code changes (the model fleet lives in Ollama; npm package is unchanged) — this entry documents what ships through the Synalux portal that prism-mcp clients reach.
+Coordinated cross-product release with **portal v0.14.4** and **prism-aac v0.2.1**. No prism-mcp-server code changes (the model fleet lives in Ollama; npm package is unchanged) — this entry documents what ships through the Synalux portal that prism-mcp clients reach.
 
 ### Model fleet
 - **`prism-coder:7b` re-trained from clean Qwen2.5-Coder-7B base.** Replaces v18aac-MAX (BFCL 47.2%) with v18clean-epoch0 (BFCL **88.1%** 3-run StdDev 0%, AAC realigned **47/48 (97.9%)**, caregiver targeted **20/20**, emergency_qa 13/13, text_correct 15/15, translate 8/8). +40.9pp BFCL recovery, no AAC regression.
@@ -571,7 +582,7 @@ The adaptive engine observes 5 dimensions of user behavior and shapes runtime pa
 4. **Background noise** — EMA noise floor with `threshold = floor + 15dB`, **clamped at ≤ -20dB** so a loud environment never pushes the threshold above what voice can hit.
 5. **Prompt patterns** — frequency-weighted category preference (`count × exp(-age_days/14)`), 30-day decay on time-of-day vocabulary so summer routines don't haunt the autumn UI.
 
-`PROFILE_VERSION = 2` with v1 → v2 migration. Schema lives canonically at `synalux-private/portal/src/shared/adaptiveEngine.ts`; PrismAAC mirrors it for offline operation, with `training/sync_adaptive_engine.sh` as a structural drift check.
+`PROFILE_VERSION = 2` with v1 → v2 migration. Schema lives canonically at `the Synalux portal`; PrismAAC mirrors it for offline operation, with `training/sync_adaptive_engine.sh` as a structural drift check.
 
 Hysteresis: `dominantMood` only flips when ≥6 of last 10 events agree, so a single emergency doesn't trap the system in `'urgent'` for the next half hour.
 </details>

@@ -13,7 +13,7 @@
  *   - Eclipse
  *   - Flutter/Dart
  *
- * BOUNDARY: Interfaces only — implementations in synalux-private.
+ * BOUNDARY: Interfaces only — implementations are portal-side.
  */
 
 import type { ScmTier } from '../scm/types.js';

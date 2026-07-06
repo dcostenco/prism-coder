@@ -1,7 +1,7 @@
 /**
  * Tests — prism-mcp Project Resolver (local config storage variant)
  *
- * Mirrors synalux-private/portal/src/__tests__/prism-project-resolver.test.ts
+ * Mirrors the Synalux portal project-resolver test suite
  * but exercises the prism-mcp port that reads/writes the local
  * prism-config.db `repo_path:*` settings instead of the synalux portal
  * `prism_projects` table.

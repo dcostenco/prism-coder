@@ -132,6 +132,12 @@ async function fetchEntitlements(): Promise<PrismEntitlements> {
             return FREE_ENTITLEMENTS;
         }
 
+        // Normalize grandfathered "14b" ceiling → "9b" (14b fleet retired).
+        if (data.model_ceiling === ("14b" as string)) {
+            debugLog("[entitlements] grandfathered 14b ceiling → 9b");
+            data.model_ceiling = "9b";
+        }
+
         debugLog(
             `[entitlements] plan=${data.plan} ceiling=${data.model_ceiling} ` +
             `daily=${data.daily_infer_limit} max_tokens=${data.max_tokens}`,

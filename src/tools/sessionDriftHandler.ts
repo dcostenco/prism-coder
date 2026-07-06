@@ -5,7 +5,7 @@
  * (POST /api/v1/prism/memory action=detect_drift) which owns the embedding
  * + detection logic, and returns the structured result.
  *
- * Prism-mcp never does NLP or embedding here — that lives in synalux-private.
+ * Prism-mcp never does NLP or embedding here — that is portal-side.
  */
 
 import { isSessionDetectDriftArgs } from "./sessionMemoryDefinitions.js";

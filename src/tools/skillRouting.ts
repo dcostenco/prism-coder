@@ -9,9 +9,8 @@
  *      free-tier / disconnected installations still get the BCBA universal
  *      skill loaded.
  *
- * To change the routing for production, edit
- *   synalux-private/portal/src/app/api/v1/skills/routing/route.ts
- * and deploy synalux. prism-mcp picks up the new config within 5 minutes.
+ * To change the routing for production, edit the portal routing endpoint
+ * and deploy. prism-mcp picks up the new config within 5 minutes.
  *
  * Do NOT add hardcoded skill names here outside the OFFLINE_FALLBACK block
  * — that defeats the single-source-of-truth design.
@@ -61,9 +60,12 @@ const OFFLINE_FALLBACK: SkillRoutingTable = {
 };
 
 const SYNALUX_BASE = process.env.SYNALUX_BASE_URL || 'https://synalux.ai';
-const CACHE_TTL_MS = 5 * 60 * 1000;
+const LIVE_CACHE_TTL_MS = 5 * 60 * 1000;   // 5min for successful fetches
+const FAILURE_BACKOFF_MS = 30_000;           // F5 fix: 30s retry after failure (not 5min)
 
-let cached: { table: SkillRoutingTable; fetchedAt: number } | null = null;
+// F5 fix: track live vs fallback separately so a transient failure doesn't
+// negative-cache the full routing table for 5 minutes, dropping 19 skills.
+let cached: { table: SkillRoutingTable; fetchedAt: number; isLive: boolean } | null = null;
 let inflight: Promise<SkillRoutingTable> | null = null;
 
 async function fetchOnce(): Promise<SkillRoutingTable> {
@@ -86,7 +88,9 @@ async function fetchOnce(): Promise<SkillRoutingTable> {
     }
     return body;
   } catch {
-    return OFFLINE_FALLBACK;
+    // On failure: return the last live table (stale-while-revalidate) or OFFLINE_FALLBACK.
+    // The caller marks this as isLive=false so it retries after FAILURE_BACKOFF_MS, not 5min.
+    return cached?.table ?? OFFLINE_FALLBACK;
   }
 }
 
@@ -100,6 +104,8 @@ export interface ResolvedSkills {
   names: string[];
   skills: ResolvedSkill[];
   user_local: UserLocalPolicy;
+  /** True when routing table was fetched live; false when using stale cache or OFFLINE_FALLBACK. */
+  isOffline: boolean;
 }
 
 /**
@@ -117,15 +123,21 @@ function normalizeEntry(entry: string | SkillEntry, defaultPriority: number): Re
 
 export async function resolveSkillsForProject(project: string): Promise<ResolvedSkills> {
   const now = Date.now();
-  if (!cached || now - cached.fetchedAt > CACHE_TTL_MS) {
+  // F5 fix: use shorter backoff TTL after failures so a 30s synalux hiccup doesn't
+  // lock the session into OFFLINE_FALLBACK for 5 minutes.
+  const ttl = (cached?.isLive ?? true) ? LIVE_CACHE_TTL_MS : FAILURE_BACKOFF_MS;
+  if (!cached || now - cached.fetchedAt > ttl) {
     if (!inflight) {
       inflight = fetchOnce().then((table) => {
-        cached = { table, fetchedAt: Date.now() };
+        // isLive = true only when we got a live response (not stale cache / OFFLINE_FALLBACK)
+        const isLive = table !== OFFLINE_FALLBACK && table !== cached?.table;
+        cached = { table, fetchedAt: Date.now(), isLive };
         return table;
       }).finally(() => { inflight = null; });
     }
     await inflight;
   }
+  const isOffline = !(cached?.isLive ?? false);
   const table = cached!.table;
   const seen = new Set<string>();
   const skills: ResolvedSkill[] = [];
@@ -157,6 +169,7 @@ export async function resolveSkillsForProject(project: string): Promise<Resolved
     names: skills.map(s => s.name),
     skills,
     user_local: table.user_local ?? OFFLINE_FALLBACK.user_local,
+    isOffline,
   };
 }
 
@@ -170,10 +183,12 @@ export async function resolveSkillsForPrompt(
   baseSkills: string[] = [],
 ): Promise<string[]> {
   const now = Date.now();
-  if (!cached || now - cached.fetchedAt > CACHE_TTL_MS) {
+  const ttl = (cached?.isLive ?? true) ? LIVE_CACHE_TTL_MS : FAILURE_BACKOFF_MS;
+  if (!cached || now - cached.fetchedAt > ttl) {
     if (!inflight) {
       inflight = fetchOnce().then((table) => {
-        cached = { table, fetchedAt: Date.now() };
+        const isLive = table !== OFFLINE_FALLBACK && table !== cached?.table;
+        cached = { table, fetchedAt: Date.now(), isLive };
         return table;
       }).finally(() => { inflight = null; });
     }

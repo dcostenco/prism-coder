@@ -167,9 +167,9 @@ describe('skills-routing.json validation', () => {
     // This test validates the actual file, not the mock
     const fs = await import('fs');
     const path = await import('path');
-    const filePath = path.resolve(__dirname, '../../../../synalux-private/portal/public/.well-known/prism/skills-routing.json');
+    const filePath = path.resolve(process.env.SYNALUX_PORTAL_ROOT ?? '', 'public/.well-known/prism/skills-routing.json');
 
-    // Skip if file doesn't exist (CI without synalux-private)
+    // Skip if SYNALUX_PORTAL_ROOT not set or file not found
     if (!fs.existsSync(filePath)) return;
 
     const raw = fs.readFileSync(filePath, 'utf-8');

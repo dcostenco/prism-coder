@@ -8,7 +8,7 @@
  *   - Creative projects (3D visualization, VR experience, etc.)
  *   - Enterprise (dashboards, APIs, microservices)
  *
- * BOUNDARY: Interfaces only — implementations in synalux-private.
+ * BOUNDARY: Interfaces only — implementations are portal-side.
  */
 
 import type { ScmTier } from '../scm/types.js';

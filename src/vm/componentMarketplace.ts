@@ -9,7 +9,7 @@
  *   - License enforcement and revenue sharing
  *   - Category-based discovery and search
  *
- * BOUNDARY: Interfaces only — implementations in synalux-private.
+ * BOUNDARY: Interfaces only — implementations are portal-side.
  */
 
 import type { ScmTier } from '../scm/types.js';

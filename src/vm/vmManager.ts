@@ -2,7 +2,7 @@
  * VM Manager — Prism IDE Hypervisor Abstraction
  * ==============================================
  * Interface layer for VM lifecycle management.
- * Implementations live in Synalux (synalux-private/portal/src/lib/vm-manager.ts).
+ * Implementations are portal-side (Synalux VM manager).
  *
  * Supports:
  * - VM creation from built-in templates or custom specs

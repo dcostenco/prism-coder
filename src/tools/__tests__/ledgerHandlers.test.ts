@@ -60,6 +60,7 @@ vi.mock("../../../src/config.js", () => ({
   PRISM_GRAPH_PRUNE_MAX_PROJECTS_PER_SWEEP: 25,
   PRISM_ACTR_ENABLED: false,
   PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS: 90,
+  SYNALUX_CONFIGURED: false,
 }));
 
 vi.mock("../../../src/utils/logger.js", () => ({
@@ -549,7 +550,7 @@ describe("ledgerHandlers", () => {
 
       const text = result.content[0].text as string;
       // With 100 tokens * 4 chars = 400 char budget, the 5000-char summary gets truncated
-      expect(text).toContain("truncated to fit token budget");
+      expect(text).toContain("Sections omitted to fit token budget");
     });
 
     it("includes recent sessions in formatted output", async () => {
@@ -880,14 +881,14 @@ describe("ledgerHandlers", () => {
   describe("sessionForgetMemoryHandler", () => {
     it("soft-deletes a memory entry by default", async () => {
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-123",
+        memory_id: "550e8400-e29b-41d4-a716-446655440123",
       });
 
       expect(result.isError).toBe(false);
       expect(result.content[0].text).toContain("Soft Deleted");
-      expect(result.content[0].text).toContain("uuid-123");
+      expect(result.content[0].text).toContain("550e8400-e29b-41d4-a716-446655440123");
       expect(storage.softDeleteLedger).toHaveBeenCalledWith(
-        "uuid-123",
+        "550e8400-e29b-41d4-a716-446655440123",
         "test-user-id",
         undefined
       );
@@ -895,7 +896,7 @@ describe("ledgerHandlers", () => {
 
     it("soft-deletes with reason for audit trail", async () => {
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-456",
+        memory_id: "550e8400-e29b-41d4-a716-446655440456",
         reason: "GDPR Article 17 request",
       });
 
@@ -903,7 +904,7 @@ describe("ledgerHandlers", () => {
       expect(result.content[0].text).toContain("Reason");
       expect(result.content[0].text).toContain("GDPR Article 17 request");
       expect(storage.softDeleteLedger).toHaveBeenCalledWith(
-        "uuid-456",
+        "550e8400-e29b-41d4-a716-446655440456",
         "test-user-id",
         "GDPR Article 17 request"
       );
@@ -911,7 +912,7 @@ describe("ledgerHandlers", () => {
 
     it("hard-deletes when hard_delete is true", async () => {
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-789",
+        memory_id: "550e8400-e29b-41d4-a716-446655440789",
         hard_delete: true,
       });
 
@@ -919,14 +920,14 @@ describe("ledgerHandlers", () => {
       expect(result.content[0].text).toContain("Hard Deleted");
       expect(result.content[0].text).toContain("permanently removed");
       expect(storage.hardDeleteLedger).toHaveBeenCalledWith(
-        "uuid-789",
+        "550e8400-e29b-41d4-a716-446655440789",
         "test-user-id"
       );
     });
 
     it("does not call hardDeleteLedger when hard_delete is false", async () => {
       await sessionForgetMemoryHandler({
-        memory_id: "uuid-aaa",
+        memory_id: "550e8400-e29b-41d4-a716-446655440aaa",
         hard_delete: false,
       });
 
@@ -962,7 +963,7 @@ describe("ledgerHandlers", () => {
       storage.softDeleteLedger.mockRejectedValue(new Error("Entry not found"));
 
       const result = await sessionForgetMemoryHandler({
-        memory_id: "nonexistent-uuid",
+        memory_id: "550e8400-e29b-41d4-a716-446655440f99",
       });
 
       expect(result.isError).toBe(true);
@@ -973,7 +974,7 @@ describe("ledgerHandlers", () => {
       storage.hardDeleteLedger.mockRejectedValue(new Error("FK constraint"));
 
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-fail",
+        memory_id: "550e8400-e29b-41d4-a716-446655440f11",
         hard_delete: true,
       });
 
@@ -991,6 +992,7 @@ describe("ledgerHandlers", () => {
 
     beforeEach(async () => {
       tempDir = await mkdtemp(join(tmpdir(), "prism-handler-export-"));
+      process.env.PRISM_EXPORT_ROOT = tempDir;
       storage.listProjects.mockResolvedValue(["test-project"]);
       storage.getLedgerEntries.mockResolvedValue([
         { id: "entry-1", summary: "Session 1", importance: 3 },
@@ -1002,6 +1004,7 @@ describe("ledgerHandlers", () => {
     });
 
     afterEach(async () => {
+      delete process.env.PRISM_EXPORT_ROOT;
       await rm(tempDir, { recursive: true, force: true });
     });
 
@@ -1121,7 +1124,7 @@ describe("ledgerHandlers", () => {
     it("returns error for non-existent file", async () => {
       const result = await sessionSaveImageHandler({
         project: "test-project",
-        file_path: "/nonexistent/path/image.png",
+        file_path: join(tempDir, "does-not-exist.png"),
         description: "Missing image",
       });
 
@@ -1476,7 +1479,7 @@ describe("ledgerHandlers", () => {
 
     it("sessionForgetMemoryHandler includes 'tombstoned' in soft-delete response", async () => {
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-test",
+        memory_id: "550e8400-e29b-41d4-a716-446655440001",
       });
 
       expect(result.content[0].text).toContain("tombstoned");
@@ -1484,7 +1487,7 @@ describe("ledgerHandlers", () => {
 
     it("sessionForgetMemoryHandler mentions hard_delete option in soft-delete response", async () => {
       const result = await sessionForgetMemoryHandler({
-        memory_id: "uuid-test",
+        memory_id: "550e8400-e29b-41d4-a716-446655440001",
       });
 
       expect(result.content[0].text).toContain("hard_delete: true");

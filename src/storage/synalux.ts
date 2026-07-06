@@ -462,7 +462,7 @@ export class SynaluxStorage extends SupabaseStorage {
    * Missing skills are absent from the map — caller falls back to local SQLite.
    *
    * Uses a public GET (no auth required) since skill content is not sensitive
-   * and the route is already in synalux-private/portal at /api/v1/skills/content.
+   * and the route is portal-side at /api/v1/skills/content.
    */
   async fetchSkillContent(names: string[]): Promise<Record<string, string>> {
     if (names.length === 0) return {};

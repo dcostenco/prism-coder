@@ -80,7 +80,7 @@ GOLDEN_PROMPTS = [
     ("web", "Google: latest LLM benchmarks 2026", "brave_web_search"),
     ("web", "Search the internet for current vast.ai pricing", "brave_web_search"),
     ("know", "What do I know about HIPAA compliance?", "knowledge_search"),
-    ("cmpct", "Compact the ledger for synalux-private project", "session_compact_ledger"),
+    ("cmpct", "Compact the ledger for prism-coder project", "session_compact_ledger"),
     ("pred", "What is the capital of France?", None),
     ("pred", "Explain what a LoRA adapter is", None),
 ]

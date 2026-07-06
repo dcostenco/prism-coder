@@ -9,7 +9,7 @@
  * Required because the marketplace allows building, distributing, and selling apps.
  * License compliance is enforced at build, deploy, and publish time.
  *
- * BOUNDARY: Interfaces only — implementations in synalux-private.
+ * BOUNDARY: Interfaces only — implementations are portal-side.
  */
 
 import type { ScmTier } from '../scm/types.js';

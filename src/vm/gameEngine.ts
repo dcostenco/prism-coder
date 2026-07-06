@@ -15,7 +15,7 @@
  *   - Cross-platform build matrix
  *   - Plugin/SDK sandbox
  *
- * BOUNDARY: Interfaces only — implementations in synalux-private.
+ * BOUNDARY: Interfaces only — implementations are portal-side.
  */
 
 import type { ScmTier } from '../scm/types.js';

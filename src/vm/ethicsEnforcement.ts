@@ -14,7 +14,7 @@
  *   5. KILL SWITCH         — instant account suspension (remote, irreversible)
  *   6. AUDIT TRAIL         — tamper-proof logging for compliance investigations
  *
- * BOUNDARY: Interfaces only — implementations in synalux-private.
+ * BOUNDARY: Interfaces only — implementations are portal-side.
  */
 
 import type { ScmTier } from '../scm/types.js';
@@ -266,7 +266,7 @@ export const DEFAULT_USE_CASE_SCREENING: UseCaseScreeningConfig = {
     human_review_queue: true,
     re_screening_interval_days: 30,
     prohibited_dependencies: [
-        // Placeholder patterns — real list maintained in synalux-private
+        // Placeholder patterns — see portal-side ethics enforcement config
         '@military/*', 'defense-*', 'weapon-*', 'surveillance-*',
     ],
     government_domain_patterns: [

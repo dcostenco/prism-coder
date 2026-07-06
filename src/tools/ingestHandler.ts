@@ -13,6 +13,7 @@
  */
 
 import { readFileSync, existsSync } from "fs";
+import { resolve as resolvePath } from "path";
 import { basename } from "path";
 import { PRISM_USER_ID } from "../config.js";
 import { getStorage } from "../storage/index.js";
@@ -145,7 +146,7 @@ export async function ingestKnowledge(args: IngestArgs): Promise<IngestResult> {
 
   let content = args.content || "";
   if (args.file_path) {
-    const resolved = require("path").resolve(args.file_path);
+    const resolved = resolvePath(args.file_path);
     const blocked = ["/etc", "/var", "/usr", "/sys", "/proc", "/dev", "/root",
       "/.ssh", "/.env", "/.git/config", "/private/etc"].some(p => resolved.startsWith(p) || resolved.includes("/."));
     if (blocked) {

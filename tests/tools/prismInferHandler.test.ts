@@ -66,6 +66,7 @@ function makeDeps(overrides: Partial<InferDeps> = {}): InferDeps {
         callLocal: async () => ({ ok: false as const, reason: "default_mock_fail" }),
         callCloud: async () => ({ ok: false as const, reason: "default_mock_fail" }),
         ollamaUrl: "http://localhost:11434",
+        callLayer1: async () => "OBVIOUS_NOT_RESERVED",
         ...overrides,
     };
 }

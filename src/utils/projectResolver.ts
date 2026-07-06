@@ -2,8 +2,7 @@
  * Prism Project Resolver — Local Storage Variant
  * ================================================
  *
- * Same contract as the synalux portal resolver
- * (synalux-private/portal/src/lib/prism-project-resolver.ts) but
+ * Same contract as the Synalux portal resolver but
  * sources the project registry from local prism-config.db settings
  * (`repo_path:<project>` keys) instead of the `prism_projects`
  * Supabase table.
@@ -13,8 +12,7 @@
  * portal resolver becomes authoritative and this one becomes a noop
  * for the same write.
  *
- * Background: see synalux-private project ledger entry
- * 2026-04-30-thin-client-architecture-directive — the prism-aac
+ * Background: thin-client architecture directive 2026-04-30 — the prism-aac
  * Azure-leak memory-loss bug was caused by the absence of this
  * validation.
  */

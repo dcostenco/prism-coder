@@ -608,7 +608,7 @@ Agent calls session_load_context()
 
 ### 11.4 Adding a Skill
 
-1. Create `synalux-private/skills/<name>/SKILL.md`
+1. Create `<skills-dir>/<name>/SKILL.md` (see `SYNALUX_SKILLS_DIR` in `scripts/sync-skills.sh`)
 2. Add to routing table in portal's `routing/route.ts`
 3. Deploy portal — Prism picks up within 60 s (content cache TTL)
 4. Free-tier / offline: run `bash scripts/sync-skills.sh`
