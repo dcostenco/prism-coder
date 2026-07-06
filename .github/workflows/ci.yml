@@ -38,6 +38,7 @@ jobs:
         run: npm audit --audit-level=high
 
       - name: Private repo leak guard
+        shell: bash
         run: |
           # Scan every file git tracks — extension-based grep misses dotfiles,
           # Dockerfiles, .gitignore, LICENSE, smithery.yaml, etc.

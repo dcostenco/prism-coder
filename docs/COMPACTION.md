@@ -212,7 +212,7 @@ PRISM_SCHEDULER_ENABLED=true           # toggle (default: true)
 PRISM_SCHEDULER_INTERVAL_MS=43200000   # 12 hours
 ```
 
-See [docs/ARCHITECTURE.md §9](ARCHITECTURE.md#9-background-purge-scheduler-v54) for full scheduler details.
+See [docs/ARCHITECTURE.md §8.2](ARCHITECTURE.md#82-background-scheduler) for full scheduler details.
 
 ---
 
@@ -246,8 +246,8 @@ backend is active.
 
 ## Related docs
 
-- [ARCHITECTURE.md §2 — Memory Lifecycle & OCC](ARCHITECTURE.md#2-the-memory-lifecycle-occ)
-- [ARCHITECTURE.md §8 — Hivemind Mode](ARCHITECTURE.md#8-agent-hivemind-mode-v53)
-- [ARCHITECTURE.md §9 — Background Purge Scheduler](ARCHITECTURE.md#9-background-purge-scheduler-v54)
+- [ARCHITECTURE.md §6 — Memory Lifecycle & OCC](ARCHITECTURE.md#6-memory-lifecycle)
+- [ARCHITECTURE.md §8.1 — Hivemind Watchdog](ARCHITECTURE.md#81-hivemind-watchdog)
+- [ARCHITECTURE.md §8.2 — Background Scheduler](ARCHITECTURE.md#82-background-scheduler)
 - [`src/tools/compactionHandler.ts`](https://github.com/dcostenco/prism-coder/blob/main/src/tools/compactionHandler.ts) — ledger compaction source
 - [`src/tools/sessionMemoryHandlers.ts`](https://github.com/dcostenco/prism-coder/blob/main/src/tools/sessionMemoryHandlers.ts) — `session_load_context`, `session_save_handoff`, `session_save_ledger`

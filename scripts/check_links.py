@@ -79,9 +79,8 @@ def generate_github_slug(text):
     # Replace spaces with hyphens
     slug = slug.replace(' ', '-')
     # Remove everything except letters, numbers, hyphens, and underscores
+    # GitHub does NOT collapse consecutive hyphens (e.g. "Security & Compliance" → "security--compliance")
     slug = re.sub(r'[^a-z0-9\-_]', '', slug)
-    # Collapse multiple hyphens
-    slug = re.sub(r'-+', '-', slug)
     # Strip leading/trailing hyphens
     slug = slug.strip('-')
     return slug

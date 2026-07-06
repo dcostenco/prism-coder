@@ -19,7 +19,7 @@
 8. [Background Services](#8-background-services)
 9. [Security & Compliance](#9-security--compliance)
 10. [Cognitive Systems](#10-cognitive-systems)
-11. [Skill Architecture](#11-skill-architecture)
+11. [Skill Architecture](#11-skill-architecture-v151)
 12. [CLI](#12-cli)
 13. [Configuration Reference](#13-configuration-reference)
 14. [Telemetry & Observability](#14-telemetry--observability)
