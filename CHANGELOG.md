@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [19.3.0] - 2026-07-06 — 🔒 Host-Agnostic Session Enforcement + CI Guard
+
+### Added
+- **`src/session/sessionContext.ts`** — Server-side LRU session registry keyed on `conversation_id`. Replaces Claude Code-only hook enforcement; gates fire from the tool handler itself so every host (Gemini, cron, auto-push) sees the same behavior.
+  - `markContextLoaded(conversationId, project, version)` — called by `session_load_context` handler after successful assembly.
+  - `requireContextLoaded(conversationId | undefined) → GateResult` — fail-closed gate returning `null` (pass) | `{blocked:true, error}` | `{blocked:false, warning}`. `undefined` → allow (opt-in for session-agnostic hosts); `""` → block (not a bypass). LRU via Map insertion order + `touch()` (O(1)). TTL enforced on every read, not just eviction.
+  - `noteInferenceForSession` — fire-and-forget telemetry; uses `sessions.get()` (not `getOrInit`) to prevent ghost stubs.
+- **`src/session/__tests__/sessionContext.test.ts`** — Unit tests for the full gate surface: `undefined → null`, `"" → block`, expired TTL, LRU cap, ghost stub prevention.
+- **`scripts/no-raw-inference.mjs`** — CI guard: scans all tracked `src/` TypeScript files for raw inference calls outside the allowlist. Exits 1 on untracked `src/` files. Uses `(?<!:)\/\/` negative lookbehind to preserve `http://` URLs while stripping comments. Individually-named allowlist entries with explicit reasons (no module-level allowlisting).
+- **CI gate** (`ci.yml`) — `no-raw-inference.mjs` wired between Build and Test steps.
+- **`conversation_id`** added to `SESSION_SAVE_HANDOFF_TOOL` and `SESSION_LOAD_CONTEXT_TOOL` schemas (was missing — caused permanent hard block for compliant clients).
+- **Operating boundaries** prepended to every `session_load_context` response for non-Claude hosts (belt + suspenders: server enforces, payload informs).
+
+### Fixed
+- **13 bugs caught across 4 adversarial review rounds** (R1–R4):
+  1. `(gate as any)` casts in `ledgerHandlers.ts` defeated TypeScript rename safety → proper discriminated-union narrowing
+  2. `SESSION_SAVE_HANDOFF_TOOL` missing `conversation_id` schema → compliant clients were permanently hard-blocked
+  3. `requireContextLoaded(undefined)` hard-blocked auto-push/resource-reader hosts → now returns `null` (allow)
+  4. `evictStale` while-loop truthy check → `""` session key stalled the loop → changed to `!== undefined`
+  5. `noteInferenceForSession` used `getOrInit` → created ghost stubs crowding out legitimate sessions → changed to `sessions.get()`
+  6. Comment-strip regex `/\/\/.*/g` matched `://` in URLs → URL bypass patterns went blind → fixed with `(?<!:)\/\/` lookbehind
+  7. Untracked `src/` files silently passed CI guard → exit 1 on untracked files
+  8. Empty-string `conversation_id` bypassed gate (`!""` is truthy) → changed to `=== undefined`
+  9. Stale intersection cast `args as typeof args & { conversation_id?: string }` after type guard → removed
+  10. `(args as any).max_tokens` after type guard already narrows field → changed to `args.max_tokens`
+  11. `isPrismInferArgs` missing `typeof a.conversation_id !== "string"` check → non-string truthy value passed guard
+  12. `args.conversation_id!` non-null assertion across async `.then()` boundary → captured `const _convId` synchronously
+  13. Stale ALLOWLIST entry for `layer1Integration.test.ts` → removed (file uses no SYMBOL_PATTERNS)
+- **`isSessionSaveLedgerArgs` / `isSessionSaveHandoffArgs` / `isSessionLoadContextArgs`** — `conversation_id` validation added to all three type guards.
+- **`isPrismInferArgs`** — `conversation_id` type-checked as string when present.
+
+### Changed
+- `session_save_ledger` and `session_save_handoff` now gate on `requireContextLoaded` at entry (hard block on unknown/expired session, soft warning on boundaries-version drift).
+- `session_load_context` calls `markContextLoaded` in all 3 success paths (normal, fresh-project early-return, and third assembly branch).
+- 3071 tests across 101 files.
+
+---
+
 ## [19.2.9] - 2026-07-05 — ⚡ Auto-Evict + 27B Routing Fix
 
 ### Added
