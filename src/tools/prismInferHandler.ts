@@ -561,6 +561,37 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         const ceilStart = effectiveCeiling
             ? Math.max(0, MODEL_TIERS.findIndex(t => t.tag.endsWith(`:${effectiveCeiling}`)))
             : 0;
+
+        // Auto-evict: if the ceiling tier is installed but not warm and smaller
+        // models are warm, unload them so their RAM is available. Avoids the
+        // caller having to manually free memory before requesting a large model.
+        if (loaded && loaded.size > 0) {
+            const ceilTier = MODEL_TIERS[ceilStart];
+            const ceilName = ceilTier ? resolveOllamaName(ceilTier.tag, installed) : null;
+            const ceilInstalled = ceilName ? installed.has(ceilName) : false;
+            const ceilWarm = ceilName ? loaded.has(ceilName) : false;
+            if (ceilInstalled && !ceilWarm) {
+                const warmBytes = [...loaded].reduce((sum, m) => {
+                    const t = MODEL_TIERS.find(t => resolveOllamaName(t.tag, installed) === m);
+                    return sum + (t ? t.weightsGb * 1024 ** 3 : 0);
+                }, 0);
+                if (freeBytes + warmBytes >= ceilTier.minFreeGb * 1024 ** 3) {
+                    for (const warmModel of loaded) {
+                        fetch(`${deps.ollamaUrl}/api/generate`, {
+                            method: "POST",
+                            body: JSON.stringify({ model: warmModel, keep_alive: 0 }),
+                        }).catch(() => {});
+                    }
+                    // Give Ollama a moment to release the buffers before the RAM check.
+                    await new Promise(r => setTimeout(r, 800));
+                    debugLog(`[prism_infer] auto-evicted ${[...loaded].join(", ")} to make room for ${ceilTier.tag}`);
+                }
+            }
+        }
+
+        // Re-read free RAM after potential eviction.
+        const freeAfterEvict = deps.freemem();
+
         let anyViable = false;
 
         for (let i = ceilStart; i < MODEL_TIERS.length; i++) {
@@ -577,7 +608,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // RAM gate — but skip the check if the tier is already warm in
             // Ollama. Reused models don't reallocate weight buffers.
             const isWarm = loaded.has(ollamaName);
-            if (!isWarm && freeBytes < tier.minFreeGb * (1024 ** 3)) {
+            if (!isWarm && freeAfterEvict < tier.minFreeGb * (1024 ** 3)) {
                 attempts.push({ tier: tier.tag, reason: "ram_insufficient" });
                 continue;
             }
