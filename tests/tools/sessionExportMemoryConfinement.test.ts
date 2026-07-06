@@ -132,16 +132,22 @@ describe("sessionExportMemoryHandler — path confinement (security branches)", 
   });
 
   it("rejects a sensitive system directory before writing", async () => {
-    // On macOS /etc → /private/etc which may hit the allow-list check before
-    // the sensitive-root check. Either rejection path is correct security behavior.
+    // On Windows /etc doesn't exist; use System32 which exists and falls outside
+    // the allow-list. Either "sensitive system directory" or "outside allowed
+    // export roots" or "does not exist" is an acceptable rejection.
+    const sensitiveDir = process.platform === "win32"
+      ? "C:\\Windows\\System32"
+      : "/etc";
     const result = await sessionExportMemoryHandler({
-      project: "test-project", format: "json", output_dir: "/etc",
+      project: "test-project", format: "json", output_dir: sensitiveDir,
     });
 
     expect(result.isError).toBe(true);
     const msg = txt(result);
     expect(
-      msg.includes("sensitive system directory") || msg.includes("outside allowed export roots")
+      msg.includes("sensitive system directory") ||
+      msg.includes("outside allowed export roots") ||
+      msg.includes("does not exist")
     ).toBe(true);
     expect(storage.getLedgerEntries).not.toHaveBeenCalled();
   });

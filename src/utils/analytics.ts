@@ -89,10 +89,15 @@ async function ensureTable(): Promise<void> {
     _tableReady = true;
 }
 
-/** Reset DB connection (for tests). */
+/** Reset DB connection and in-memory buffer (for tests). */
 export function _resetDb(): void {
     _db = null;
     _tableReady = false;
+    BUFFER.length = 0;
+    if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+    }
 }
 
 // ─── In-Memory Buffer ────────────────────────────────────────
