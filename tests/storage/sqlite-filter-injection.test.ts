@@ -75,6 +75,10 @@ describe("Bug 8.1 — allowed columns pass through without throwing", () => {
     expect(() => parse({ archived_at: "is.null" })).not.toThrow();
   });
 
+  it("allows embedding is.null filter", () => {
+    expect(() => parse({ embedding: "is.null" })).not.toThrow();
+  });
+
   it("allows importance gt filter", () => {
     expect(() => parse({ importance: "gt.0.5" })).not.toThrow();
   });

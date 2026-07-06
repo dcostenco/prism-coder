@@ -837,7 +837,7 @@ export class SqliteStorage implements StorageBackend {
     "id", "project", "user_id", "conversation_id", "summary",
     "archived_at", "deleted_at", "is_rollup", "role", "event_type",
     "created_at", "updated_at", "session_date", "importance", "title",
-    "agent_name", "last_accessed_at", "confidence_score", "rollup_count",
+    "agent_name", "last_accessed_at", "confidence_score", "rollup_count", "embedding",
   ]);
 
   private parsePostgRESTFilters(
