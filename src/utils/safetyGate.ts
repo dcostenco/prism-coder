@@ -77,8 +77,8 @@ const BCBA_OUTPUT_RE = [
     /\bseclusion\s+(?:room|protocol|procedure|space)\b/i,
     /\bplace\s+(?:the\s+)?client\s+in\s+(?:a\s+)?(?:seclusion|hold|timeout\s+room)\b/i,
     // Staff-instruction framing (high-precision: requires staff + restraint verb + client)
-    /\bstaff\s+(?:should|must|will)\s+(?:hold|restrain|physically)\s+(?:the\s+)?client\b/i,
-    /\bcaregiver\s+(?:should|must|will)\s+(?:hold|restrain|physically)\s+(?:the\s+)?client\b/i,
+    /\bstaff\s+(?:should|must|will)\s+(?:physically\s+)?(?:hold|restrain|manage)\s+(?:the\s+)?client\b/i,
+    /\bcaregiver\s+(?:should|must|will)\s+(?:physically\s+)?(?:hold|restrain|manage)\s+(?:the\s+)?client\b/i,
 ];
 
 export const BCBA_RESPONSE = "This output contains physical management content (restraint, hold, or seclusion procedure). Consequence strategy and crisis/safety sections require cloud review — they cannot generate locally per BCBA clinical standards. Escalating to cloud.";

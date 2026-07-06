@@ -1088,7 +1088,7 @@ describe("ledgerHandlers", () => {
 
     afterEach(async () => {
       // Clean up vault directory if created
-      const vaultDir = join(os.homedir(), ".prism-mcp", "media", "test-project");
+      const vaultDir = join(os.homedir(), ".prism-mcp", "media", "__test-img__");
       if (fs.existsSync(vaultDir)) {
         await rm(vaultDir, { recursive: true, force: true });
       }
@@ -1097,7 +1097,7 @@ describe("ledgerHandlers", () => {
 
     it("saves an image and returns success with image ID", async () => {
       const result = await sessionSaveImageHandler({
-        project: "test-project",
+        project: "__test-img__",
         file_path: testImagePath,
         description: "Dashboard screenshot",
       });
@@ -1110,7 +1110,7 @@ describe("ledgerHandlers", () => {
 
     it("updates handoff metadata with visual memory entry", async () => {
       await sessionSaveImageHandler({
-        project: "test-project",
+        project: "__test-img__",
         file_path: testImagePath,
         description: "UI mockup",
       });
@@ -1123,7 +1123,7 @@ describe("ledgerHandlers", () => {
 
     it("returns error for non-existent file", async () => {
       const result = await sessionSaveImageHandler({
-        project: "test-project",
+        project: "__test-img__",
         file_path: join(tempDir, "does-not-exist.png"),
         description: "Missing image",
       });
@@ -1137,7 +1137,7 @@ describe("ledgerHandlers", () => {
       fs.writeFileSync(bmpPath, Buffer.from([0x42, 0x4d]));
 
       const result = await sessionSaveImageHandler({
-        project: "test-project",
+        project: "__test-img__",
         file_path: bmpPath,
         description: "BMP image",
       });
@@ -1150,7 +1150,7 @@ describe("ledgerHandlers", () => {
       storage.loadContext.mockResolvedValue(null);
 
       const result = await sessionSaveImageHandler({
-        project: "test-project",
+        project: "__test-img__",
         file_path: testImagePath,
         description: "No context image",
       });
@@ -1163,7 +1163,7 @@ describe("ledgerHandlers", () => {
 
     it("returns error for invalid args (missing required fields)", async () => {
       const result = await sessionSaveImageHandler({
-        project: "test-project",
+        project: "__test-img__",
       });
 
       expect(result.isError).toBe(true);
@@ -1187,7 +1187,7 @@ describe("ledgerHandlers", () => {
 
     beforeEach(async () => {
       tempDir = await mkdtemp(join(tmpdir(), "prism-view-image-test-"));
-      vaultDir = join(os.homedir(), ".prism-mcp", "media", "test-project");
+      vaultDir = join(os.homedir(), ".prism-mcp", "media", "__test-img__");
       fs.mkdirSync(vaultDir, { recursive: true });
 
       // Create a test image in the vault
@@ -1220,7 +1220,7 @@ describe("ledgerHandlers", () => {
       });
 
       const result = await sessionViewImageHandler({
-        project: "test-project",
+        project: "__test-img__",
         image_id: "abc12345",
       });
 
@@ -1246,7 +1246,7 @@ describe("ledgerHandlers", () => {
       });
 
       const result = await sessionViewImageHandler({
-        project: "test-project",
+        project: "__test-img__",
         image_id: "nonexistent",
       });
 
@@ -1261,7 +1261,7 @@ describe("ledgerHandlers", () => {
       });
 
       const result = await sessionViewImageHandler({
-        project: "test-project",
+        project: "__test-img__",
         image_id: "any-id",
       });
 
@@ -1286,7 +1286,7 @@ describe("ledgerHandlers", () => {
       });
 
       const result = await sessionViewImageHandler({
-        project: "test-project",
+        project: "__test-img__",
         image_id: "abc12345",
       });
 
@@ -1310,7 +1310,7 @@ describe("ledgerHandlers", () => {
       });
 
       const result = await sessionViewImageHandler({
-        project: "test-project",
+        project: "__test-img__",
         image_id: "abc12345",
       });
 
@@ -1323,7 +1323,7 @@ describe("ledgerHandlers", () => {
 
     it("returns error for invalid args (missing image_id)", async () => {
       const result = await sessionViewImageHandler({
-        project: "test-project",
+        project: "__test-img__",
       });
       expect(result.isError).toBe(true);
     });

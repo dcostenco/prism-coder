@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { checkInputSafety, checkOutputSafety, CRISIS_RESPONSE, MEDICAL_RESPONSE } from "../src/utils/safetyGate.js";
+import { checkInputSafety, checkOutputSafety, BCBA_RESPONSE, CRISIS_RESPONSE, MEDICAL_RESPONSE } from "../src/utils/safetyGate.js";
 
 describe("checkInputSafety", () => {
     // ── BUCKET 1: True positives — MUST intercept ─────────────────────────
@@ -189,6 +189,40 @@ describe("checkOutputSafety", () => {
         it("intercepts take-this-amount", () => {
             expect(checkOutputSafety("Take this amount of pills every day")).toBe(MEDICAL_RESPONSE);
         });
+    });
+
+    // ── BUCKET 1b: BCBA restraint/seclusion — must intercept ─────────────
+    describe("BCBA restraint and seclusion (must intercept)", () => {
+        const restraintPhrases = [
+            "Staff should hold the client using a prone restraint",
+            "Apply a basket hold to prevent the client from eloping",
+            "Use a two-person hold technique",
+            "Place the client in the seclusion room until calm",
+            "Staff must physically restrain the client",
+            "Staff must restrain the client during the episode",
+            "Use a supine hold while waiting for backup",
+            "The client may need a therapeutic hold",
+            "Physical intervention may be necessary",
+        ];
+        for (const phrase of restraintPhrases) {
+            it(`intercepts: "${phrase.slice(0, 70)}"`, () => {
+                expect(checkOutputSafety(phrase)).toBe(BCBA_RESPONSE);
+            });
+        }
+    });
+
+    // ── BUCKET 1c: BCBA false positives — must NOT intercept ─────────────
+    describe("BCBA false positives (must pass through)", () => {
+        const safePhrasees = [
+            "Guide the client firmly to the floor",           // euphemism — structural gate handles
+            "document the hold in the incident report",       // documenting, not instructing
+            "The timeout procedure was implemented per BIP",  // timeout ≠ seclusion room
+        ];
+        for (const phrase of safePhrasees) {
+            it(`passes through: "${phrase.slice(0, 70)}"`, () => {
+                expect(checkOutputSafety(phrase)).toBe(phrase);
+            });
+        }
     });
 
     // ── BUCKET 2: Clinical false positives — must NOT intercept ───────────
