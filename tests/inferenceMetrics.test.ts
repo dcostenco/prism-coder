@@ -105,6 +105,40 @@ describe("getInferenceSnapshot", () => {
     });
 });
 
+describe("cloudTokensSavedEst", () => {
+    it("accumulates on local calls only", () => {
+        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 50, prompt_tokens: 100, completion_tokens: 50 });
+        recordInference({ backend: "ollama-27b", model_picked: "prism-coder:27b", used_cloud: false, latency_ms: 80, prompt_tokens: 200, completion_tokens: 80 });
+        const snap = getInferenceSnapshot();
+        expect(snap.cloudTokensSavedEst).toBe(100 + 50 + 200 + 80);
+    });
+
+    it("does not accumulate on cloud calls", () => {
+        recordInference({ backend: "synalux", model_picked: null, used_cloud: true, latency_ms: 200, prompt_tokens: 300, completion_tokens: 100 });
+        const snap = getInferenceSnapshot();
+        expect(snap.cloudTokensSavedEst).toBe(0);
+    });
+
+    it("resets to zero on session boundary", () => {
+        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 50, prompt_tokens: 150, completion_tokens: 70 });
+        expect(getInferenceSnapshot().cloudTokensSavedEst).toBe(220);
+        resetInferenceMetrics();
+        expect(getInferenceSnapshot().cloudTokensSavedEst).toBe(0);
+    });
+
+    it("displays in output when > 0", () => {
+        recordInference({ backend: "ollama-9b", model_picked: "prism-coder:9b", used_cloud: false, latency_ms: 50, prompt_tokens: 1000, completion_tokens: 500 });
+        const out = formatInferenceMetrics();
+        expect(out).toContain("Cloud tokens saved (est.): 1,500");
+    });
+
+    it("shows zero when only cloud calls", () => {
+        recordInference({ backend: "synalux", model_picked: null, used_cloud: true, latency_ms: 200, prompt_tokens: 100, completion_tokens: 50 });
+        const snap = getInferenceSnapshot();
+        expect(snap.cloudTokensSavedEst).toBe(0);
+    });
+});
+
 describe("resetInferenceMetrics", () => {
     it("clears all state", () => {
         recordInference({ backend: "ollama-27b", model_picked: "prism-coder:27b", used_cloud: false, latency_ms: 100, prompt_tokens: 500, completion_tokens: 200 });
