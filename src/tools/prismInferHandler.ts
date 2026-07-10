@@ -11,7 +11,7 @@
  *   3. Call /api/generate locally — return on success
  *   4. On local fail, if cloud_fallback=true:
  *        - exchange synalux_sk_ → JWT (cached)
- *        - POST synalux portal /api/v1/prism-aac/inference
+ *        - POST synalux portal /api/v1/prism/inference
  *        - portal runs its own cascade (9B/27B/Claude by tier)
  *   5. Return { output, backend, model_picked, ram_free_mb, latency_ms, used_cloud }
  *
@@ -317,7 +317,7 @@ async function callSynaluxInference(
     const jwt = await getSynaluxJwt();
     if (!jwt) return { ok: false, reason: "jwt_exchange_failed" };
 
-    const url = `${PRISM_SYNALUX_BASE_URL}/api/v1/prism-aac/inference`;
+    const url = `${PRISM_SYNALUX_BASE_URL}/api/v1/prism/inference`;
     try {
         let res = await fetch(url, {
             method: "POST",
