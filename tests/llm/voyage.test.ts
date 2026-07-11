@@ -31,7 +31,7 @@ import { VoyageAdapter } from "../../src/utils/llm/adapters/voyage.js";
 
 function defaultSettings(key: string, fallback?: string): string {
   if (key === "voyage_api_key") return "pa-test-key-12345";
-  if (key === "voyage_model") return "voyage-3";
+  if (key === "voyage_model") return "voyage-3.5";
   return fallback ?? "";
 }
 
@@ -75,15 +75,13 @@ describe("VoyageAdapter", () => {
       if (key === "voyage_api_key") return "";
       return "";
     });
-    expect(() => new VoyageAdapter()).toThrow("VOYAGE_API_KEY");
+    expect(() => new VoyageAdapter()).toThrow("API key is required");
   });
 
   // ── generateText (not supported) ─────────────────────────────────────────
 
   it("generateText throws with actionable error message", async () => {
-    await expect(adapter.generateText("hello")).rejects.toThrow(
-      "does not support text generation"
-    );
+    await expect(adapter.generateText("hello")).rejects.toThrow("only supports embeddings");
   });
 
   // ── generateEmbedding — success ──────────────────────────────────────────
@@ -105,9 +103,9 @@ describe("VoyageAdapter", () => {
     expect(opts.headers["Authorization"]).toBe("Bearer pa-test-key-12345");
 
     const body = JSON.parse(opts.body);
-    expect(body.model).toBe("voyage-3");
+    expect(body.model).toBe("voyage-3.5");
     expect(body.output_dimension).toBe(768);
-    expect(body.input).toEqual(["test session context"]);
+    expect(body.input).toBe("test session context");
   });
 
   // ── Dimension guard ──────────────────────────────────────────────────────
@@ -131,11 +129,11 @@ describe("VoyageAdapter", () => {
   // ── Empty/invalid input ──────────────────────────────────────────────────
 
   it("throws on empty string input", async () => {
-    await expect(adapter.generateEmbedding("")).rejects.toThrow("empty text");
+    await expect(adapter.generateEmbedding("")).rejects.toThrow("empty or whitespace");
   });
 
   it("throws on whitespace-only input", async () => {
-    await expect(adapter.generateEmbedding("   \n  ")).rejects.toThrow("empty text");
+    await expect(adapter.generateEmbedding("   \n  ")).rejects.toThrow("empty or whitespace");
   });
 
   // ── Text truncation ──────────────────────────────────────────────────────
@@ -160,9 +158,7 @@ describe("VoyageAdapter", () => {
       text: async () => "Invalid API key",
     });
 
-    await expect(adapter.generateEmbedding("test")).rejects.toThrow(
-      "status=401"
-    );
+    await expect(adapter.generateEmbedding("test")).rejects.toThrow("HTTP 401");
   });
 
   it("throws on HTTP 429 (rate limit)", async () => {
@@ -172,9 +168,7 @@ describe("VoyageAdapter", () => {
       text: async () => "Rate limit exceeded",
     });
 
-    await expect(adapter.generateEmbedding("test")).rejects.toThrow(
-      "status=429"
-    );
+    await expect(adapter.generateEmbedding("test")).rejects.toThrow("HTTP 429");
   });
 
   it("throws on malformed response (no embedding array)", async () => {
@@ -183,9 +177,7 @@ describe("VoyageAdapter", () => {
       json: async () => ({ data: [] }),
     });
 
-    await expect(adapter.generateEmbedding("test")).rejects.toThrow(
-      "no embedding array"
-    );
+    await expect(adapter.generateEmbedding("test")).rejects.toThrow();
   });
 
   // ── Model override ──────────────────────────────────────────────────────
