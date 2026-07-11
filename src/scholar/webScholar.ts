@@ -1,4 +1,4 @@
-import { // Web Scholar config
+import {
   BRAVE_API_KEY, FIRECRAWL_API_KEY, GOOGLE_SEARCH_API_KEY,
   GOOGLE_SEARCH_CX, SEMANTIC_SCHOLAR_API_KEY,
   PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN, PRISM_USER_ID,
@@ -232,7 +232,7 @@ export async function runWebScholar(overrideTopic?: string, overrideProject?: st
       const braveResponse = await performWebSearchRaw(topic, PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN);
       const braveData = JSON.parse(braveResponse);
       urls = (braveData.web?.results || []).map((r: any) => r.url).filter(Boolean);
-    } else { // academic fallback when no Brave key
+    } else {
       // Parallel Academic Discovery (PubMed + ERIC + Semantic Scholar)
       const academicCount = Math.ceil(PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN / 2);
       const academicResults = await Promise.all([

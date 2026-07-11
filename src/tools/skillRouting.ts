@@ -63,8 +63,8 @@ interface CacheEntry { resp: PortalResp; at: number; live: boolean }
 const cache = new Map<string, CacheEntry>();
 const inflightMap = new Map<string, Promise<PortalResp | null>>();
 
-function cacheKey(project: string, prompt?: string, role?: string): string {
-  return `${project}|${prompt || ''}|${role || ''}`;
+function cacheKey(project: string, prompt?: string): string {
+  return `${project}|${prompt || ''}`;
 }
 
 // Persist last-good to local DB for offline fallback
@@ -106,7 +106,7 @@ function makeOffline(skillBlock?: string): ResolvedSkills {
 // -- Public API ---------------------------------------------------------------
 
 export async function resolveSkills(project: string, prompt?: string, role?: string): Promise<ResolvedSkills> {
-  const key = cacheKey(project, prompt, role);
+  const key = cacheKey(project, prompt);
   const now = Date.now();
   const entry = cache.get(key);
   const ttl = (entry?.live ?? true) ? LIVE_TTL : FAIL_TTL;
