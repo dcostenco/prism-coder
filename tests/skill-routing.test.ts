@@ -1,18 +1,26 @@
 /**
- * Skill routing client tests (v8 format with priority + protected)
+ * Skill routing thin-client tests
  *
- * Verify that prism-mcp's `resolveSkillsForProject` correctly:
- *   - returns the universal skill set when no project pattern matches
- *   - unions multiple matching project patterns
- *   - falls back to OFFLINE_FALLBACK when synalux is unreachable
- *   - caches the routing table in-memory across calls
- *   - case-insensitively substring-matches the project name
- *   - sorts skills by priority
- *   - preserves protected flag on entries
- *   - handles both string and SkillEntry formats (v7 compat)
+ * Verify that prism-mcp's skill routing client:
+ *   - calls portal API with correct shape
+ *   - returns portal response as ResolvedSkills
+ *   - falls back to offline mode when portal is unreachable
+ *   - caches responses (5-min live, 30s failure)
+ *   - resolveSkillsForPrompt is a no-op (portal-side now)
+ *   - exports backward-compat types and OFFLINE_FALLBACK
+ *
+ * NOTE: Routing logic (budget tranching, pattern matching, project resolution)
+ * is tested in the portal at src/__tests__/skills-routing.test.ts.
+ * This file only tests the thin client behavior.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { resolveSkillsForProject, _invalidateRoutingCache, _OFFLINE_FALLBACK } from '../src/tools/skillRouting.js';
+import {
+  resolveSkillsForProject,
+  resolveSkillsForPrompt,
+  resolveSkills,
+  _invalidateRoutingCache,
+  OFFLINE_FALLBACK,
+} from '../src/tools/skillRouting.js';
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
@@ -25,232 +33,106 @@ afterEach(() => {
   _invalidateRoutingCache();
 });
 
-function mockFetch(table: unknown, ok = true) {
+function mockPortalResponse(resp: unknown, ok = true) {
   globalThis.fetch = vi.fn().mockResolvedValue({
     ok,
-    json: async () => table,
+    json: async () => resp,
     status: ok ? 200 : 500,
   } as Response);
 }
 
-describe('skill routing — happy path', () => {
-  it('returns universal skill for any project', async () => {
-    mockFetch({
-      version: 8,
-      universal: [{ name: 'bcba_ai_assistant', priority: 0 }],
-      projects: { 'prism-aac': ['i18n-tts'] },
-      user_local: { enabled: false, key_prefix: 'user_skill:' },
-    });
-    const result = await resolveSkillsForProject('unknown-project');
-    expect(result.names).toContain('bcba_ai_assistant');
-    expect(result.user_local.enabled).toBe(false);
+const PORTAL_RESP = {
+  skillBlock: '\n\n[📜 SKILL: prime-directive]\nTest content',
+  loaded: ['prime-directive', 'bcba_ai_assistant'],
+  skipped: ['military-code-review'],
+  phantom: [],
+  routing_version: 16,
+};
+
+describe('skill routing — portal call', () => {
+  it('calls portal API with project', async () => {
+    mockPortalResponse(PORTAL_RESP);
+    await resolveSkillsForProject('prism-mcp');
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/prism/skills'),
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 
-  it('matches project pattern as substring', async () => {
-    mockFetch({
-      version: 8,
-      universal: [{ name: 'bcba_ai_assistant', priority: 0 }],
-      projects: { 'prism-aac': ['i18n-tts'] },
-      user_local: { enabled: false, key_prefix: 'user_skill:' },
-    });
-    const result = await resolveSkillsForProject('my-prism-aac-fork');
-    expect(result.names).toContain('i18n-tts');
-    expect(result.names).toContain('bcba_ai_assistant');
-  });
-
-  it('unions multiple matching patterns', async () => {
-    mockFetch({
-      version: 8,
-      universal: [{ name: 'bcba_ai_assistant', priority: 0 }],
-      projects: {
-        'prism': ['session-memory'],
-        'prism-mcp': ['ai-agent-super-skill'],
-      },
-      user_local: { enabled: false, key_prefix: 'user_skill:' },
-    });
+  it('returns loaded skill names from portal response', async () => {
+    mockPortalResponse(PORTAL_RESP);
     const result = await resolveSkillsForProject('prism-mcp');
-    expect(result.names).toContain('session-memory');
-    expect(result.names).toContain('ai-agent-super-skill');
-    expect(result.names).toContain('bcba_ai_assistant');
+    expect(result.names).toEqual(['prime-directive', 'bcba_ai_assistant']);
+    expect(result.isOffline).toBe(false);
   });
 
-  it('matches case-insensitively', async () => {
-    mockFetch({
-      version: 8,
-      universal: [],
-      projects: { 'prism-aac': ['i18n-tts'] },
-      user_local: { enabled: false, key_prefix: 'user_skill:' },
-    });
-    expect((await resolveSkillsForProject('Prism-AAC')).names).toContain('i18n-tts');
-    expect((await resolveSkillsForProject('PRISM-AAC')).names).toContain('i18n-tts');
+  it('returns skillBlock from portal response', async () => {
+    mockPortalResponse(PORTAL_RESP);
+    const result = await resolveSkills('prism-mcp');
+    expect(result.skillBlock).toContain('[📜 SKILL: prime-directive]');
   });
 
-  it('returns no duplicates when universal + project skill match', async () => {
-    mockFetch({
-      version: 8,
-      universal: [{ name: 'shared-skill', priority: 0 }],
-      projects: { 'prism': ['shared-skill', 'unique-skill'] },
-      user_local: { enabled: false, key_prefix: 'user_skill:' },
-    });
-    const result = await resolveSkillsForProject('prism');
-    expect(result.names.filter((s) => s === 'shared-skill').length).toBe(1);
-    expect(result.names).toContain('unique-skill');
-  });
-
-  it('user_local.enabled=true is returned when routing table sets it', async () => {
-    mockFetch({
-      version: 8,
-      universal: [{ name: 'bcba_ai_assistant', priority: 0 }],
-      projects: {},
-      user_local: { enabled: true, key_prefix: 'user_skill:' },
-    });
-    const result = await resolveSkillsForProject('any');
-    expect(result.user_local.enabled).toBe(true);
-    expect(result.user_local.key_prefix).toBe('user_skill:');
-  });
-});
-
-describe('skill routing — priority and protected', () => {
-  it('sorts skills by priority', async () => {
-    mockFetch({
-      version: 8,
-      universal: [
-        { name: 'low-priority', priority: 10 },
-        { name: 'high-priority', priority: 1 },
-        { name: 'mid-priority', priority: 5 },
-      ],
-      projects: {},
-      user_local: { enabled: false, key_prefix: 'user_skill:' },
-    });
-    const result = await resolveSkillsForProject('any');
-    expect(result.names).toEqual(['high-priority', 'mid-priority', 'low-priority']);
-  });
-
-  it('preserves protected flag', async () => {
-    mockFetch({
-      version: 8,
-      universal: [
-        { name: 'prime-directive', priority: 0, protected: true },
-        { name: 'regular-skill', priority: 5 },
-      ],
-      projects: {},
-      user_local: { enabled: false, key_prefix: 'user_skill:' },
-    });
-    const result = await resolveSkillsForProject('any');
-    expect(result.skills[0].name).toBe('prime-directive');
-    expect(result.skills[0].protected).toBe(true);
-    expect(result.skills[1].name).toBe('regular-skill');
-    expect(result.skills[1].protected).toBe(false);
-  });
-
-  it('project skills sort after universal', async () => {
-    mockFetch({
-      version: 8,
-      universal: [{ name: 'universal-skill', priority: 0 }],
-      projects: { 'prism': ['project-skill'] },
-      user_local: { enabled: false, key_prefix: 'user_skill:' },
-    });
-    const result = await resolveSkillsForProject('prism');
-    expect(result.names[0]).toBe('universal-skill');
-    expect(result.names[1]).toBe('project-skill');
-  });
-
-  it('handles v7 string format (backward compat)', async () => {
-    mockFetch({
-      version: 7,
-      universal: ['skill-a', 'skill-b'],
-      projects: {},
-      user_local: { enabled: false, key_prefix: 'user_skill:' },
-    });
-    const result = await resolveSkillsForProject('any');
-    expect(result.names).toContain('skill-a');
-    expect(result.names).toContain('skill-b');
-    expect(result.skills[0].priority).toBe(0);
-    expect(result.skills[1].priority).toBe(1);
-    expect(result.skills[0].protected).toBe(false);
+  it('passes prompt and role to portal', async () => {
+    mockPortalResponse(PORTAL_RESP);
+    await resolveSkills('prism-coder', 'train with LoRA', 'dev');
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const body = JSON.parse(call[1].body);
+    expect(body.project).toBe('prism-coder');
+    expect(body.prompt).toBe('train with LoRA');
+    expect(body.role).toBe('dev');
   });
 });
 
 describe('skill routing — offline fallback', () => {
-  it('returns OFFLINE_FALLBACK names when synalux unreachable', async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network'));
-    const result = await resolveSkillsForProject('prism-aac');
-    const fallbackNames = _OFFLINE_FALLBACK.universal.map(
-      (e) => typeof e === 'string' ? e : e.name
-    );
-    expect(result.names).toEqual(fallbackNames);
+  it('returns offline result when portal is unreachable', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    const result = await resolveSkillsForProject('prism-mcp');
+    expect(result.isOffline).toBe(true);
+    expect(result.names).toEqual([]);
+  });
+
+  it('returns offline result when portal returns 500', async () => {
+    mockPortalResponse({}, false);
+    const result = await resolveSkillsForProject('prism-mcp');
+    expect(result.isOffline).toBe(true);
+  });
+
+  it('returns offline on consecutive failures', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('timeout'));
+    const r1 = await resolveSkillsForProject('prism-mcp');
+    expect(r1.isOffline).toBe(true);
+
+    const r2 = await resolveSkillsForProject('prism-mcp');
+    expect(r2.isOffline).toBe(true);
+  });
+});
+
+describe('skill routing — caching', () => {
+  it('caches live response for 5 minutes', async () => {
+    mockPortalResponse(PORTAL_RESP);
+    const r1 = await resolveSkillsForProject('prism-mcp');
+    const r2 = await resolveSkillsForProject('prism-mcp');
+    expect(r1.names).toEqual(r2.names);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('skill routing — backward compat', () => {
+  it('resolveSkillsForPrompt is a no-op', async () => {
+    const result = await resolveSkillsForPrompt('some prompt', ['skill1']);
+    expect(result).toEqual([]);
+  });
+
+  it('exports OFFLINE_FALLBACK with expected shape', () => {
+    expect(OFFLINE_FALLBACK.version).toBe(1);
+    expect(Array.isArray(OFFLINE_FALLBACK.universal)).toBe(true);
+    expect(typeof OFFLINE_FALLBACK.projects).toBe('object');
+  });
+
+  it('user_local defaults to disabled', async () => {
+    mockPortalResponse(PORTAL_RESP);
+    const result = await resolveSkillsForProject('any');
     expect(result.user_local.enabled).toBe(false);
-  });
-
-  it('returns OFFLINE_FALLBACK on 500 error', async () => {
-    mockFetch({}, false);
-    const result = await resolveSkillsForProject('any');
-    const fallbackNames = _OFFLINE_FALLBACK.universal.map(
-      (e) => typeof e === 'string' ? e : e.name
-    );
-    expect(result.names).toEqual(fallbackNames);
-  });
-
-  it('rejects malformed routing table', async () => {
-    mockFetch({ version: 'wrong-type', universal: 'not-array' });
-    const result = await resolveSkillsForProject('any');
-    const fallbackNames = _OFFLINE_FALLBACK.universal.map(
-      (e) => typeof e === 'string' ? e : e.name
-    );
-    expect(result.names).toEqual(fallbackNames);
-  });
-});
-
-describe('skill routing — caching behavior', () => {
-  it('uses cache on second call within TTL', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        version: 8,
-        universal: [{ name: 'bcba_ai_assistant', priority: 0 }],
-        projects: { 'prism': ['session-memory'] },
-        user_local: { enabled: false, key_prefix: 'user_skill:' },
-      }),
-      status: 200,
-    } as Response);
-    globalThis.fetch = fetchMock;
-
-    await resolveSkillsForProject('prism');
-    await resolveSkillsForProject('prism');
-    await resolveSkillsForProject('prism');
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('refetches after invalidation', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        version: 8, universal: [], projects: {},
-        user_local: { enabled: false, key_prefix: 'user_skill:' },
-      }),
-      status: 200,
-    } as Response);
-    globalThis.fetch = fetchMock;
-
-    await resolveSkillsForProject('prism');
-    _invalidateRoutingCache();
-    await resolveSkillsForProject('prism');
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('skill routing — fail-safe defaults', () => {
-  it('OFFLINE_FALLBACK includes prime-directive and evidence-first-protocol', () => {
-    const names = _OFFLINE_FALLBACK.universal.map(
-      (e) => typeof e === 'string' ? e : e.name
-    );
-    expect(names).toContain('prime-directive');
-    expect(names).toContain('evidence-first-protocol');
-  });
-
-  it('OFFLINE_FALLBACK has no project-specific skills', () => {
-    expect(Object.keys(_OFFLINE_FALLBACK.projects).length).toBe(0);
+    expect(result.user_local.key_prefix).toBe('user_skill:');
   });
 });

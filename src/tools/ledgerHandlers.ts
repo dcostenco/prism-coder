@@ -774,12 +774,21 @@ export async function sessionLoadContextHandler(args: unknown) {
   if (!data) {
     let freshSkillBlock = "";
     try {
-      const { resolveSkillsForProject: resolveForFresh } = await import("./skillRouting.js");
-      const freshResolved = await resolveForFresh(project);
-      for (const entry of freshResolved.skills.filter(e => e.protected)) {
-        const content = await getSetting(`skill:${entry.name}`, "");
-        if (!content?.trim()) continue;
-        freshSkillBlock += `\n\n[📜 SKILL: ${entry.name}]\n${content.trim()}`;
+      const { resolveSkills: resolveForFresh } = await import("./skillRouting.js");
+      const freshResolution = await resolveForFresh(project);
+      if (freshResolution.skillBlock) {
+        freshSkillBlock = freshResolution.skillBlock;
+      }
+      // Offline fallback: load protected skills from local DB
+      if (freshResolution.isOffline) {
+        const protectedNames = ['prime-directive', 'evidence-first-protocol', 'behavioral-verifier', 'occam-razor-protocol', 'session-drift-detection', 'pre-commit-protocol', 'pre-push-audit', 'implementation-integrity-audit', 'bcba_ai_assistant'];
+        for (const name of protectedNames) {
+          if (freshResolution.names?.includes(name)) continue;
+          const content = await getSetting(`skill:${name}`, "");
+          if (content?.trim()) {
+            freshSkillBlock += `\n\n[📜 SKILL: ${name}]\n${content.trim()}`;
+          }
+        }
       }
     } catch {
       debugLog(`[session_load_context] Fresh project skill injection failed — continuing without`);
@@ -1062,172 +1071,28 @@ export async function sessionLoadContextHandler(args: unknown) {
     }
   }
 
-  // ─── Project-Aware Skill Injection ──────────────────────────
-  // Skills are priority-sorted and cap-aware. Protected skills always load
-  // (they bypass the cap check). This prevents the silent-truncation bug
-  // where important behavioral skills were dropped because large low-priority
-  // skills consumed the budget first.
-  const { resolveSkillsForProject } = await import("./skillRouting.js");
-  const resolved = await resolveSkillsForProject(project);
-  const sortedSkills = resolved.skills;
-  const userLocalPolicy = resolved.user_local;
-  // F5: surface offline routing to the agent so it knows project/keyword skills may be missing
-  if (resolved.isOffline) {
-    skillBlock += `\n\n[⚠️ OFFLINE ROUTING: synalux.ai unreachable — using stale or fallback routing table. Project-specific and keyword-triggered skills may be missing. Universal protected skills still load.]`;
-  }
+  // ─── All other skills resolved by portal API ───────────────
+  const { resolveSkills } = await import("./skillRouting.js");
+  const skillResolution = await resolveSkills(project, prompt, effectiveRole);
 
-  // ─── Prompt-Keyword Skill Routing (replaces hook-based skill_router.py) ───
-  if (prompt && typeof prompt === 'string') {
-    const { resolveSkillsForPrompt } = await import("./skillRouting.js");
-    const promptSkills = await resolveSkillsForPrompt(prompt, loadedSkills);
-    for (const skillName of promptSkills) {
-      const existing = sortedSkills.find(s => s.name === skillName);
-      if (existing) {
-        existing.category = 'prompt';
-      } else {
-        sortedSkills.push({ name: skillName, priority: 200 + sortedSkills.length, protected: false, category: 'prompt' });
-      }
-    }
-  }
-
-  let synaluxContent: Record<string, string> = {};
-  if (SYNALUX_CONFIGURED && storage && typeof (storage as unknown as { fetchSkillContent?: unknown }).fetchSkillContent === "function") {
-    const missing = sortedSkills.map(s => s.name).filter(n => !loadedSkills.includes(n));
-    synaluxContent = await (storage as unknown as { fetchSkillContent: (n: string[]) => Promise<Record<string,string>> })
-      .fetchSkillContent(missing).catch(() => ({}));
-    debugLog(`[session_load_context] Synalux skill content fetched: ${Object.keys(synaluxContent).join(", ") || "none"}`);
-  }
-
-  // Tranched budget — prevents any category from starving another
-  const BUDGET = {
-    protected: 32_000,    // hard cap for protected universal skills
-    universal: 40_000,    // non-protected universal skills (~35K actual)
-    project: 35_000,      // reserved floor for project-specific skills (military-code-review alone = 16K)
-    promptKeyword: 25_000, // task-specific skills from user prompt (autonomous-training-protocol = 19K)
-    contextAndUser: 8_000, // context-discovery + user-local
-  };
-  let protectedUsed = 0;
-  let universalUsed = 0;
-  let projectUsed = 0;
-  let promptUsed = 0;
-  let contextUsed = 0;
-
-  const skippedSkills: string[] = [];
-  const phantomSkills: string[] = [];
-  for (const entry of sortedSkills) {
-    if (loadedSkills.includes(entry.name)) continue;
-    const content = synaluxContent[entry.name] || await getSetting(`skill:${entry.name}`, "");
-    if (!content || !content.trim()) {
-      phantomSkills.push(entry.name);
-      continue;
-    }
-    const trimmed = content.trim();
-
-    if (entry.protected) {
-      if (protectedUsed + trimmed.length > BUDGET.protected) {
-        debugLog(`[session_load_context] [⚠️ Protected skill "${entry.name}" exceeds protected budget (${protectedUsed + trimmed.length}/${BUDGET.protected} chars) — LOADED ANYWAY but sync-time validation needed]`);
-      }
-      protectedUsed += trimmed.length;
-      skillBlock += `\n\n[📜 SKILL: ${entry.name}]\n${trimmed}`;
-      loadedSkills.push(entry.name);
-      skillLoaded = true;
-      debugLog(`[session_load_context] Skill "${entry.name}" loaded (protected, p${entry.priority}) [protected: ${protectedUsed}/${BUDGET.protected} chars]`);
-      continue;
-    }
-
-    const isPromptSkill = entry.category === 'prompt';
-    const isProjectSkill = entry.category === 'project';
-    if (isPromptSkill) {
-      if (promptUsed + trimmed.length > BUDGET.promptKeyword) {
-        skippedSkills.push(entry.name);
-        debugLog(`[session_load_context] Skill "${entry.name}" skipped — would exceed prompt budget (${promptUsed}+${trimmed.length} > ${BUDGET.promptKeyword})`);
-        continue;
-      }
-      promptUsed += trimmed.length;
-    } else if (isProjectSkill) {
-      if (projectUsed + trimmed.length > BUDGET.project) {
-        skippedSkills.push(entry.name);
-        debugLog(`[session_load_context] Skill "${entry.name}" skipped — would exceed project budget (${projectUsed}+${trimmed.length} > ${BUDGET.project})`);
-        continue;
-      }
-      projectUsed += trimmed.length;
-    } else {
-      if (universalUsed + trimmed.length > BUDGET.universal) {
-        skippedSkills.push(entry.name);
-        debugLog(`[session_load_context] Skill "${entry.name}" skipped — would exceed universal budget (${universalUsed}+${trimmed.length} > ${BUDGET.universal})`);
-        continue;
-      }
-      universalUsed += trimmed.length;
-    }
-
-    const source = synaluxContent[entry.name] ? "synalux" : "local-platform";
-    skillBlock += `\n\n[📜 SKILL: ${entry.name}]\n${trimmed}`;
-    loadedSkills.push(entry.name);
+  if (skillResolution.skillBlock) {
+    skillBlock += skillResolution.skillBlock;
     skillLoaded = true;
-    const budgetLabel = isPromptSkill ? `prompt: ${promptUsed}/${BUDGET.promptKeyword}` : isProjectSkill ? `project: ${projectUsed}/${BUDGET.project}` : `universal: ${universalUsed}/${BUDGET.universal}`;
-    debugLog(`[session_load_context] Skill "${entry.name}" loaded (${source}, p${entry.priority}) [${budgetLabel} chars]`);
+    loadedSkills.push(...(skillResolution.names || []));
   }
 
-  // ─── User-Local Skills ──────────────────────────────────────
-  // Loaded ONLY when user_local.enabled=true (set in Synalux routing table
-  // or explicitly requested). Stored under user_skill: prefix — users can
-  // write here via dashboard; they CANNOT write to the platform skill: keys.
-  if (userLocalPolicy.enabled) {
-    const prefix = userLocalPolicy.key_prefix || "user_skill:";
-    const allSettings = await storage.getAllSettings?.() || {};
-    for (const [k, v] of Object.entries(allSettings)) {
-      if (!k.startsWith(prefix) || !v) continue;
-      const skillName = k.replace(prefix, "");
-      if (loadedSkills.includes(skillName)) continue;
-      const trimmed = (v as string).trim();
-      if (contextUsed + trimmed.length > BUDGET.contextAndUser) {
-        skippedSkills.push(skillName);
-        debugLog(`[session_load_context] User-local skill "${skillName}" skipped — would exceed contextAndUser budget (${contextUsed}+${trimmed.length} > ${BUDGET.contextAndUser})`);
-        continue;
-      }
-      contextUsed += trimmed.length;
-      skillBlock += `\n\n[📜 USER SKILL: ${skillName}]\n${trimmed}`;
-      loadedSkills.push(skillName);
-      skillLoaded = true;
-      debugLog(`[session_load_context] User-local skill "${skillName}" loaded [contextAndUser: ${contextUsed}/${BUDGET.contextAndUser} chars]`);
-    }
-  }
-
-  // ─── Memory-Based Skill Discovery ──────────────────────────
-  // If recent handoff/ledger mentions a platform skill name, auto-load it.
-  // Only scans platform skill: keys — user_skill: discovery is not automatic.
-  // Uses word-boundary regex to avoid false matches (e.g. "supabase" in prose).
-  if (formattedContext.length > 0) {
-    const contextText = formattedContext.toLowerCase();
-    const allSkillKeys = await storage.getAllSettings?.() || {};
-    for (const [k, v] of Object.entries(allSkillKeys)) {
-      if (!k.startsWith("skill:") || !v) continue;
-      const skillName = k.replace("skill:", "");
-      if (loadedSkills.includes(skillName)) continue;
-      const wordBoundaryPattern = new RegExp('\\b' + skillName.replace(/[-]/g, '[- ]') + '\\b', 'i');
-      if (wordBoundaryPattern.test(contextText)) {
-        const trimmed = (v as string).trim();
-        if (contextUsed + trimmed.length > BUDGET.contextAndUser) {
-          skippedSkills.push(skillName);
-          debugLog(`[session_load_context] Context skill "${skillName}" skipped — would exceed contextAndUser budget (${contextUsed}+${trimmed.length} > ${BUDGET.contextAndUser})`);
-          continue;
-        }
-        contextUsed += trimmed.length;
-        skillBlock += `\n\n[📜 CONTEXT SKILL: ${skillName}]\n${trimmed}`;
-        loadedSkills.push(skillName);
-        debugLog(`[session_load_context] Context-triggered skill "${skillName}" [contextAndUser: ${contextUsed}/${BUDGET.contextAndUser} chars]`);
+  // Offline fallback: load protected skills from local DB
+  if (skillResolution.isOffline) {
+    const protectedNames = ['prime-directive', 'evidence-first-protocol', 'behavioral-verifier', 'occam-razor-protocol', 'session-drift-detection', 'pre-commit-protocol', 'pre-push-audit', 'implementation-integrity-audit', 'bcba_ai_assistant'];
+    for (const name of protectedNames) {
+      if (loadedSkills.includes(name)) continue;
+      const content = await getSetting('skill:' + name, "");
+      if (content && content.trim()) {
+        skillBlock += '\n\n[📜 SKILL: ' + name + ']\n' + content.trim();
+        loadedSkills.push(name);
+        skillLoaded = true;
       }
     }
-  }
-
-  if (skippedSkills.length > 0) {
-    const totalBudget = BUDGET.protected + BUDGET.universal + BUDGET.project + BUDGET.contextAndUser;
-    skillBlock += `\n\n[⚠️ ${skippedSkills.length} skills TRUNCATED by budget caps (protected:${BUDGET.protected}/universal:${BUDGET.universal}/project:${BUDGET.project}/contextAndUser:${BUDGET.contextAndUser} = ${totalBudget} total) — NOT loaded: ${skippedSkills.join(", ")}. These rules are NOT in your context. Do not claim to follow them.]`;
-  }
-
-  if (phantomSkills.length > 0) {
-    skillBlock += `\n\n[⚠️ ${phantomSkills.length} skills ROUTED but MISSING content: ${phantomSkills.join(", ")} — these are configured in the routing table but have no SKILL.md synced]`;
-    debugLog(`[session_load_context] Phantom skills (routed but empty): ${phantomSkills.join(", ")}`);
   }
 
   // ─── Agent Greeting Block ────────────────────────────────────

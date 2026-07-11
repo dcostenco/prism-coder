@@ -1,33 +1,18 @@
 /**
- * src/session/sessionContext.ts
+ * Session state tracking — connection-scoped, in-process.
  *
- * Server-side session state, keyed on conversation_id (the same id threaded
- * through session_load_context / session_save_ledger / prism_infer).
+ * This is NOT business logic — it's MCP connection lifecycle state.
+ * Business logic (skill routing, budget tranching, content resolution)
+ * lives in the synalux portal at /api/v1/prism/skills.
  *
- * WHY THIS EXISTS
- * ---------------
- * On Claude Code, "call session_load_context first" was enforced by the
- * guard_on_submit hook injecting a MANDATORY STARTUP reminder, and by
- * mark_loaded.py flipping a pending flag. Neither mechanism runs on a
- * non-Claude host (Gemini, autonomous script, cron job).
+ * What stays here (connection-scoped, cannot be portal-side):
+ *   markContextLoaded / requireContextLoaded — write-gate for session tools
+ *   noteInferenceForSession — telemetry counter
+ *   drift timer — connection-scoped GATE 5 enforcement
  *
- * This module moves that state server-side so any host that calls
- * session_load_context gets its conversation marked as loaded — regardless
- * of whether it ran the hook.
- *
- * TWO DELIBERATE BOUNDARIES
- * -------------------------
- * 1. This is NOT a safety mechanism. prism_infer's input/output safety gates
- *    run unconditionally before and after every model call. A host that never
- *    loads context still cannot reach an un-gated model.
- *
- * 2. requireContextLoaded gates only CORRECTNESS-requiring, project-scoped
- *    actions (save_ledger, save_handoff) — tools that act on a specific project
- *    and produce wrong results if the agent hasn't confirmed its working context.
- *    Do NOT gate prism_infer on this; a host that never loads context must still
- *    be able to run inference (safety is already unconditional there).
- *
- * Fail-closed: an unknown or expired conversation_id → context not loaded.
+ * What moved to portal (business logic):
+ *   Skill routing, budget tranching, content loading, phantom detection,
+ *   prompt-keyword matching, user-local skill loading, context-discovery.
  */
 
 import { BOUNDARIES_VERSION as CURRENT_BOUNDARIES_VERSION } from "../boundaries/boundaries.js";
