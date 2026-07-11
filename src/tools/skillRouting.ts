@@ -32,8 +32,8 @@ export interface SkillEntry {
 export interface SkillRoutingTable {
   version: number;
   universal: (string | SkillEntry)[];
-  /** project-name substring → list of skill names */
-  projects: Record<string, string[]>;
+  /** project-name substring → list of skill names or {name,priority} objects */
+  projects: Record<string, (string | SkillEntry)[]>;
   /** regex pattern → list of skill names. Matched against user prompt. */
   prompt_keywords?: Record<string, string[]>;
   /**
@@ -98,6 +98,7 @@ export interface ResolvedSkill {
   name: string;
   priority: number;
   protected: boolean;
+  category: 'universal' | 'project' | 'prompt';
 }
 
 export interface ResolvedSkills {
@@ -114,11 +115,11 @@ export interface ResolvedSkills {
  * skills. Also returns the user_local policy so callers know whether to
  * load user_skill:* entries from local SQLite.
  */
-function normalizeEntry(entry: string | SkillEntry, defaultPriority: number): ResolvedSkill {
+function normalizeEntry(entry: string | SkillEntry, defaultPriority: number, category: 'universal' | 'project' | 'prompt' = 'universal'): ResolvedSkill {
   if (typeof entry === 'string') {
-    return { name: entry, priority: defaultPriority, protected: false };
+    return { name: entry, priority: defaultPriority, protected: false, category };
   }
-  return { name: entry.name, priority: entry.priority ?? defaultPriority, protected: entry.protected ?? false };
+  return { name: entry.name, priority: entry.priority ?? defaultPriority, protected: entry.protected ?? false, category };
 }
 
 export async function resolveSkillsForProject(project: string): Promise<ResolvedSkills> {
@@ -143,7 +144,7 @@ export async function resolveSkillsForProject(project: string): Promise<Resolved
   const skills: ResolvedSkill[] = [];
 
   for (let i = 0; i < table.universal.length; i++) {
-    const entry = normalizeEntry(table.universal[i], i);
+    const entry = normalizeEntry(table.universal[i], i, 'universal');
     if (!seen.has(entry.name)) {
       seen.add(entry.name);
       skills.push(entry);
@@ -155,9 +156,10 @@ export async function resolveSkillsForProject(project: string): Promise<Resolved
   for (const [pattern, projectSkills] of Object.entries(table.projects)) {
     if (projectLower.includes(pattern)) {
       for (const s of projectSkills) {
-        if (!seen.has(s)) {
-          seen.add(s);
-          skills.push({ name: s, priority: projectPriority++, protected: false });
+        const entry = normalizeEntry(s, projectPriority++, 'project');
+        if (!seen.has(entry.name)) {
+          seen.add(entry.name);
+          skills.push(entry);
         }
       }
     }

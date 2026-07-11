@@ -1,8 +1,17 @@
 #!/bin/bash
 # Sync skills → Prism DB
-# The skills directory is the single source of truth. No local mirror.
+# Flow: skills directory (git) → this script → Prism DB (SQLite)
+# No rsync needed — we read directly from the git-managed directory.
+# Skills are pushed to Prism DB via /api/v1/admin/skills on deploy.
 
-SYNALUX_SKILLS="${SYNALUX_SKILLS_DIR:-$HOME/.synalux/skills}"
+# Prefer SYNALUX_SKILLS_DIR env var; fall back to ~/.synalux/skills for compat
+if [ -n "$SYNALUX_SKILLS_DIR" ]; then
+  SYNALUX_SKILLS="$SYNALUX_SKILLS_DIR"
+elif [ -d "$HOME/.synalux/skills" ]; then
+  SYNALUX_SKILLS="$HOME/.synalux/skills"
+else
+  SYNALUX_SKILLS="$HOME/.synalux/skills"
+fi
 PRISM_DIR="$HOME/.prism-mcp"
 DB="$PRISM_DIR/prism-config.db"
 

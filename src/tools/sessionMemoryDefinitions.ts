@@ -160,6 +160,10 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
         type: "string",
         description: "Optional. Session key for this conversation (same id used in session_save_ledger). When provided, marks the session as context-loaded server-side so project-scoped tools can verify working context without relying on hook-based enforcement. Required on non-Claude hosts.",
       },
+      prompt: {
+        type: "string",
+        description: "Optional. User prompt text for keyword-triggered skill loading. When provided, the server matches against prompt_keywords in the routing table and loads additional skills. Fires on every call — enables mid-session re-routing when the user's focus changes.",
+      },
     },
     required: ["project", "toolAction", "toolSummary"],
   },
@@ -619,7 +623,7 @@ export function isBackfillLinksArgs(
 
 export function isSessionLoadContextArgs(
   args: unknown
-): args is { project: string; level?: "quick" | "standard" | "deep"; role?: string; max_tokens?: number; toolAction?: string; toolSummary?: string; conversation_id?: string } {
+): args is { project: string; level?: "quick" | "standard" | "deep"; role?: string; max_tokens?: number; toolAction?: string; toolSummary?: string; conversation_id?: string; prompt?: string } {
   if (typeof args !== "object" || args === null) return false;
   const a = args as Record<string, unknown>;
   if (typeof a.project !== "string") return false;
@@ -629,6 +633,7 @@ export function isSessionLoadContextArgs(
   if (a.toolAction !== undefined && typeof a.toolAction !== "string") return false;
   if (a.toolSummary !== undefined && typeof a.toolSummary !== "string") return false;
   if (a.conversation_id !== undefined && typeof a.conversation_id !== "string") return false;
+  if (a.prompt !== undefined && typeof a.prompt !== "string") return false;
   return true;
 }
 
@@ -1920,6 +1925,12 @@ export const SESSION_DETECT_DRIFT_TOOL: Tool = {
   inputSchema: {
     type: "object",
     properties: {
+      conversation_id: {
+        type: "string",
+        description:
+          "Optional. Session key (same id used in session_load_context). " +
+          "When provided, resets the server-side drift timer for this conversation.",
+      },
       project: {
         type: "string",
         description: "Project identifier. Must match the project used in session_save_ledger.",
@@ -1977,6 +1988,7 @@ export const SESSION_DETECT_DRIFT_TOOL: Tool = {
 };
 
 export interface SessionDetectDriftArgs {
+  conversation_id?: string;
   project: string;
   goal: string;
   window_hours?: number;
@@ -1993,6 +2005,7 @@ export function isSessionDetectDriftArgs(
 ): args is SessionDetectDriftArgs {
   if (typeof args !== "object" || args === null) return false;
   const a = args as Record<string, unknown>;
+  if (a.conversation_id !== undefined && typeof a.conversation_id !== "string") return false;
   if (typeof a.project !== "string" || !a.project.trim()) return false;
   if (typeof a.goal !== "string" || !a.goal.trim()) return false;
   if (a.window_hours !== undefined && typeof a.window_hours !== "number") return false;

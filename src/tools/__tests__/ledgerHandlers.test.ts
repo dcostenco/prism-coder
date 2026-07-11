@@ -145,6 +145,9 @@ vi.mock("../../../src/session/sessionContext.js", () => ({
   requireContextLoaded: vi.fn(() => null),
   noteInferenceForSession: vi.fn(),
   getSessionState: vi.fn(() => null),
+  noteDriftSessionStart: vi.fn(),
+  noteDriftCheck: vi.fn(),
+  getDriftReminder: vi.fn(() => ""),
 }));
 
 // Boundaries — return minimal stubs so load-context tests don't depend on exact text.

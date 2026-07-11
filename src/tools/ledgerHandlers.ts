@@ -743,7 +743,7 @@ export async function sessionLoadContextHandler(args: unknown) {
     resetInferenceMetrics();
   }
 
-  const { project, level = "standard", role, conversation_id: convId } = args;
+  const { project, level = "standard", role, conversation_id: convId, prompt } = args;
   // T6 fix: explicit Number() coercion prevents string "2000" from later concatenating instead of adding
   const _maxTokensArg = Number(args.max_tokens);
   const _maxTokensSetting = parseInt(await getSetting("max_tokens", "0"), 10);
@@ -785,9 +785,10 @@ export async function sessionLoadContextHandler(args: unknown) {
       debugLog(`[session_load_context] Fresh project skill injection failed — continuing without`);
     }
     if (convId) {
-      const { markContextLoaded } = await import("../session/sessionContext.js");
+      const { markContextLoaded, noteDriftSessionStart } = await import("../session/sessionContext.js");
       const { BOUNDARIES_VERSION } = await import("../boundaries/boundaries.js");
       markContextLoaded(convId, project, BOUNDARIES_VERSION);
+      noteDriftSessionStart(convId);
     }
     const { BOUNDARIES_TEXT: BT0, BOUNDARIES_VERSION: BV0 } = await import("../boundaries/boundaries.js");
     const boundariesHeader0 =
@@ -1075,6 +1076,20 @@ export async function sessionLoadContextHandler(args: unknown) {
     skillBlock += `\n\n[⚠️ OFFLINE ROUTING: synalux.ai unreachable — using stale or fallback routing table. Project-specific and keyword-triggered skills may be missing. Universal protected skills still load.]`;
   }
 
+  // ─── Prompt-Keyword Skill Routing (replaces hook-based skill_router.py) ───
+  if (prompt && typeof prompt === 'string') {
+    const { resolveSkillsForPrompt } = await import("./skillRouting.js");
+    const promptSkills = await resolveSkillsForPrompt(prompt, loadedSkills);
+    for (const skillName of promptSkills) {
+      const existing = sortedSkills.find(s => s.name === skillName);
+      if (existing) {
+        existing.category = 'prompt';
+      } else {
+        sortedSkills.push({ name: skillName, priority: 200 + sortedSkills.length, protected: false, category: 'prompt' });
+      }
+    }
+  }
+
   let synaluxContent: Record<string, string> = {};
   if (SYNALUX_CONFIGURED && storage && typeof (storage as unknown as { fetchSkillContent?: unknown }).fetchSkillContent === "function") {
     const missing = sortedSkills.map(s => s.name).filter(n => !loadedSkills.includes(n));
@@ -1083,32 +1098,74 @@ export async function sessionLoadContextHandler(args: unknown) {
     debugLog(`[session_load_context] Synalux skill content fetched: ${Object.keys(synaluxContent).join(", ") || "none"}`);
   }
 
-  const SKILL_BLOCK_CAP = 40_000;
+  // Tranched budget — prevents any category from starving another
+  const BUDGET = {
+    protected: 32_000,    // hard cap for protected universal skills
+    universal: 40_000,    // non-protected universal skills (~35K actual)
+    project: 35_000,      // reserved floor for project-specific skills (military-code-review alone = 16K)
+    promptKeyword: 25_000, // task-specific skills from user prompt (autonomous-training-protocol = 19K)
+    contextAndUser: 8_000, // context-discovery + user-local
+  };
+  let protectedUsed = 0;
+  let universalUsed = 0;
+  let projectUsed = 0;
+  let promptUsed = 0;
+  let contextUsed = 0;
+
   const skippedSkills: string[] = [];
+  const phantomSkills: string[] = [];
   for (const entry of sortedSkills) {
     if (loadedSkills.includes(entry.name)) continue;
     const content = synaluxContent[entry.name] || await getSetting(`skill:${entry.name}`, "");
-    if (!content || !content.trim()) continue;
+    if (!content || !content.trim()) {
+      phantomSkills.push(entry.name);
+      continue;
+    }
     const trimmed = content.trim();
 
     if (entry.protected) {
+      if (protectedUsed + trimmed.length > BUDGET.protected) {
+        debugLog(`[session_load_context] [⚠️ Protected skill "${entry.name}" exceeds protected budget (${protectedUsed + trimmed.length}/${BUDGET.protected} chars) — LOADED ANYWAY but sync-time validation needed]`);
+      }
+      protectedUsed += trimmed.length;
       skillBlock += `\n\n[📜 SKILL: ${entry.name}]\n${trimmed}`;
       loadedSkills.push(entry.name);
       skillLoaded = true;
-      debugLog(`[session_load_context] Skill "${entry.name}" loaded (protected, p${entry.priority}) [${skillBlock.length} chars]`);
+      debugLog(`[session_load_context] Skill "${entry.name}" loaded (protected, p${entry.priority}) [protected: ${protectedUsed}/${BUDGET.protected} chars]`);
       continue;
     }
 
-    if (skillBlock.length + trimmed.length > SKILL_BLOCK_CAP) {
-      skippedSkills.push(entry.name);
-      debugLog(`[session_load_context] Skill "${entry.name}" skipped — would exceed cap (${skillBlock.length}+${trimmed.length} > ${SKILL_BLOCK_CAP})`);
-      continue;
+    const isPromptSkill = entry.category === 'prompt';
+    const isProjectSkill = entry.category === 'project';
+    if (isPromptSkill) {
+      if (promptUsed + trimmed.length > BUDGET.promptKeyword) {
+        skippedSkills.push(entry.name);
+        debugLog(`[session_load_context] Skill "${entry.name}" skipped — would exceed prompt budget (${promptUsed}+${trimmed.length} > ${BUDGET.promptKeyword})`);
+        continue;
+      }
+      promptUsed += trimmed.length;
+    } else if (isProjectSkill) {
+      if (projectUsed + trimmed.length > BUDGET.project) {
+        skippedSkills.push(entry.name);
+        debugLog(`[session_load_context] Skill "${entry.name}" skipped — would exceed project budget (${projectUsed}+${trimmed.length} > ${BUDGET.project})`);
+        continue;
+      }
+      projectUsed += trimmed.length;
+    } else {
+      if (universalUsed + trimmed.length > BUDGET.universal) {
+        skippedSkills.push(entry.name);
+        debugLog(`[session_load_context] Skill "${entry.name}" skipped — would exceed universal budget (${universalUsed}+${trimmed.length} > ${BUDGET.universal})`);
+        continue;
+      }
+      universalUsed += trimmed.length;
     }
+
     const source = synaluxContent[entry.name] ? "synalux" : "local-platform";
     skillBlock += `\n\n[📜 SKILL: ${entry.name}]\n${trimmed}`;
     loadedSkills.push(entry.name);
     skillLoaded = true;
-    debugLog(`[session_load_context] Skill "${entry.name}" loaded (${source}, p${entry.priority}) [${skillBlock.length}/${SKILL_BLOCK_CAP} chars]`);
+    const budgetLabel = isPromptSkill ? `prompt: ${promptUsed}/${BUDGET.promptKeyword}` : isProjectSkill ? `project: ${projectUsed}/${BUDGET.project}` : `universal: ${universalUsed}/${BUDGET.universal}`;
+    debugLog(`[session_load_context] Skill "${entry.name}" loaded (${source}, p${entry.priority}) [${budgetLabel} chars]`);
   }
 
   // ─── User-Local Skills ──────────────────────────────────────
@@ -1120,44 +1177,57 @@ export async function sessionLoadContextHandler(args: unknown) {
     const allSettings = await storage.getAllSettings?.() || {};
     for (const [k, v] of Object.entries(allSettings)) {
       if (!k.startsWith(prefix) || !v) continue;
-      if (skillBlock.length >= SKILL_BLOCK_CAP) break;
       const skillName = k.replace(prefix, "");
       if (loadedSkills.includes(skillName)) continue;
       const trimmed = (v as string).trim();
-      if (skillBlock.length + trimmed.length > SKILL_BLOCK_CAP && loadedSkills.length > 0) continue;
+      if (contextUsed + trimmed.length > BUDGET.contextAndUser) {
+        skippedSkills.push(skillName);
+        debugLog(`[session_load_context] User-local skill "${skillName}" skipped — would exceed contextAndUser budget (${contextUsed}+${trimmed.length} > ${BUDGET.contextAndUser})`);
+        continue;
+      }
+      contextUsed += trimmed.length;
       skillBlock += `\n\n[📜 USER SKILL: ${skillName}]\n${trimmed}`;
       loadedSkills.push(skillName);
       skillLoaded = true;
-      debugLog(`[session_load_context] User-local skill "${skillName}" loaded`);
+      debugLog(`[session_load_context] User-local skill "${skillName}" loaded [contextAndUser: ${contextUsed}/${BUDGET.contextAndUser} chars]`);
     }
   }
 
   // ─── Memory-Based Skill Discovery ──────────────────────────
   // If recent handoff/ledger mentions a platform skill name, auto-load it.
   // Only scans platform skill: keys — user_skill: discovery is not automatic.
-  if (formattedContext.length > 0 && skillBlock.length < SKILL_BLOCK_CAP) {
+  // Uses word-boundary regex to avoid false matches (e.g. "supabase" in prose).
+  if (formattedContext.length > 0) {
     const contextText = formattedContext.toLowerCase();
     const allSkillKeys = await storage.getAllSettings?.() || {};
     for (const [k, v] of Object.entries(allSkillKeys)) {
       if (!k.startsWith("skill:") || !v) continue;
-      if (skillBlock.length >= SKILL_BLOCK_CAP) break;
       const skillName = k.replace("skill:", "");
       if (loadedSkills.includes(skillName)) continue;
-      if (contextText.includes(skillName.replace(/-/g, " ")) || contextText.includes(skillName)) {
+      const wordBoundaryPattern = new RegExp('\\b' + skillName.replace(/[-]/g, '[- ]') + '\\b', 'i');
+      if (wordBoundaryPattern.test(contextText)) {
         const trimmed = (v as string).trim();
-        if (skillBlock.length + trimmed.length > SKILL_BLOCK_CAP && loadedSkills.length > 0) {
+        if (contextUsed + trimmed.length > BUDGET.contextAndUser) {
           skippedSkills.push(skillName);
+          debugLog(`[session_load_context] Context skill "${skillName}" skipped — would exceed contextAndUser budget (${contextUsed}+${trimmed.length} > ${BUDGET.contextAndUser})`);
           continue;
         }
+        contextUsed += trimmed.length;
         skillBlock += `\n\n[📜 CONTEXT SKILL: ${skillName}]\n${trimmed}`;
         loadedSkills.push(skillName);
-        debugLog(`[session_load_context] Context-triggered skill "${skillName}"`);
+        debugLog(`[session_load_context] Context-triggered skill "${skillName}" [contextAndUser: ${contextUsed}/${BUDGET.contextAndUser} chars]`);
       }
     }
   }
 
   if (skippedSkills.length > 0) {
-    skillBlock += `\n\n[⚠️ ${skippedSkills.length} skills TRUNCATED by ${SKILL_BLOCK_CAP}-char cap — NOT loaded: ${skippedSkills.join(", ")}. These rules are NOT in your context. Do not claim to follow them.]`;
+    const totalBudget = BUDGET.protected + BUDGET.universal + BUDGET.project + BUDGET.contextAndUser;
+    skillBlock += `\n\n[⚠️ ${skippedSkills.length} skills TRUNCATED by budget caps (protected:${BUDGET.protected}/universal:${BUDGET.universal}/project:${BUDGET.project}/contextAndUser:${BUDGET.contextAndUser} = ${totalBudget} total) — NOT loaded: ${skippedSkills.join(", ")}. These rules are NOT in your context. Do not claim to follow them.]`;
+  }
+
+  if (phantomSkills.length > 0) {
+    skillBlock += `\n\n[⚠️ ${phantomSkills.length} skills ROUTED but MISSING content: ${phantomSkills.join(", ")} — these are configured in the routing table but have no SKILL.md synced]`;
+    debugLog(`[session_load_context] Phantom skills (routed but empty): ${phantomSkills.join(", ")}`);
   }
 
   // ─── Agent Greeting Block ────────────────────────────────────
@@ -1282,9 +1352,10 @@ export async function sessionLoadContextHandler(args: unknown) {
     }
 
     if (convId) {
-      const { markContextLoaded } = await import("../session/sessionContext.js");
+      const { markContextLoaded, noteDriftSessionStart } = await import("../session/sessionContext.js");
       const { BOUNDARIES_VERSION } = await import("../boundaries/boundaries.js");
       markContextLoaded(convId, project, BOUNDARIES_VERSION);
+      noteDriftSessionStart(convId);
     }
 
     const { BOUNDARIES_TEXT, BOUNDARIES_VERSION: BV } = await import("../boundaries/boundaries.js");
@@ -1303,9 +1374,10 @@ export async function sessionLoadContextHandler(args: unknown) {
   let responseText = criticalPrefix + lowerPriority + historySection;
 
   if (convId) {
-    const { markContextLoaded } = await import("../session/sessionContext.js");
+    const { markContextLoaded, noteDriftSessionStart } = await import("../session/sessionContext.js");
     const { BOUNDARIES_VERSION } = await import("../boundaries/boundaries.js");
     markContextLoaded(convId, project, BOUNDARIES_VERSION);
+    noteDriftSessionStart(convId);
   }
 
   const { BOUNDARIES_TEXT, BOUNDARIES_VERSION: BV2 } = await import("../boundaries/boundaries.js");

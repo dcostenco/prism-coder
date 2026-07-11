@@ -40,6 +40,11 @@ interface SessionState {
   lastSeen: number;
   inferenceCalls: number;
   usedCloudCalls: number;
+  // Drift detection timer (GATE 5 — server-side tracking)
+  /** Epoch ms when session_load_context was called (session start). */
+  driftSessionStart?: number;
+  /** Epoch ms of the last session_detect_drift or session_save_ledger call. */
+  driftLastCheck?: number;
 }
 
 /** Return type for requireContextLoaded — discriminated union. */
@@ -50,6 +55,13 @@ export type GateResult =
 
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000; // 6 h — conversation-scoped
 const MAX_SESSIONS   = 10_000;
+
+/**
+ * Connection-scoped fallback: remember the last conversation_id seen via
+ * markContextLoaded so that tools which don't carry conversation_id
+ * (e.g. prism_infer) still benefit from drift reminders.
+ */
+let lastSeenConversationId: string | undefined;
 
 // JS Map preserves insertion order. Touch-on-access (delete + re-insert) keeps
 // the Map ordered LRU-last so eviction can pop the first key in O(1).
@@ -111,6 +123,7 @@ export function markContextLoaded(
   s.contextLoaded = true;
   s.project = project;
   s.boundariesVersion = boundariesVersion;
+  lastSeenConversationId = conversationId;
 }
 
 /**
@@ -197,4 +210,78 @@ export function noteInferenceForSession(
 /** For metrics / session health checks. */
 export function getSessionState(conversationId: string): Readonly<SessionState> | null {
   return sessions.get(conversationId) ?? null;
+}
+
+// ─── GATE 5: Server-Side Drift Timer ────────────────────────
+// These functions track drift detection timing per conversation so the
+// server can inject GATE 5 reminders into tool responses without relying
+// on external hooks (guard_on_submit.py). The server is pull-based — it
+// can only inject when a tool is called, so we piggyback on every
+// prism-mcp tool response when the timer is overdue.
+
+const DRIFT_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 60 minutes
+
+/**
+ * Called by sessionLoadContextHandler to mark session start for drift timing.
+ */
+export function noteDriftSessionStart(conversationId: string): void {
+  const s = sessions.get(conversationId);
+  if (!s) return;
+  s.driftSessionStart = Date.now();
+  // Don't set driftLastCheck — the first check should happen 60 min after start
+}
+
+/**
+ * Called after session_detect_drift or session_save_ledger completes
+ * to reset the drift timer for this conversation.
+ */
+export function noteDriftCheck(conversationId: string): void {
+  const s = sessions.get(conversationId);
+  if (!s) return;
+  s.driftLastCheck = Date.now();
+  touch(conversationId, s);
+}
+
+/**
+ * Returns a GATE 5 drift reminder string if 60+ minutes have elapsed
+ * since session start AND 60+ minutes since the last drift check.
+ * Returns empty string if no reminder is due or if the session is too
+ * young (< 60 min).
+ *
+ * This is called from the common tool response path in server.ts and
+ * appended to every prism-mcp tool response when overdue.
+ */
+export function getDriftReminder(conversationId: string | undefined): string {
+  const effectiveId = conversationId || lastSeenConversationId;
+  if (!effectiveId) return "";
+
+  const s = sessions.get(effectiveId);
+  if (!s || !s.contextLoaded || !s.driftSessionStart) return "";
+
+  const now = Date.now();
+  const sessionAge = now - s.driftSessionStart;
+
+  // Session must be at least 60 minutes old before reminders kick in
+  if (sessionAge < DRIFT_CHECK_INTERVAL_MS) return "";
+
+  // If a drift check has been done, only remind if 60+ min since last check
+  if (s.driftLastCheck) {
+    const sinceLastCheck = now - s.driftLastCheck;
+    if (sinceLastCheck < DRIFT_CHECK_INTERVAL_MS) return "";
+  }
+
+  // Drift reminder is overdue
+  const minutesSinceStart = Math.round(sessionAge / 60_000);
+  const minutesSinceCheck = s.driftLastCheck
+    ? Math.round((now - s.driftLastCheck) / 60_000)
+    : minutesSinceStart;
+
+  return (
+    `\n\n[⏰ GATE 5 — DRIFT CHECK OVERDUE (${minutesSinceCheck} min since last check, session ${minutesSinceStart} min old)]\n` +
+    `Long-session drift protocol requires action NOW:\n` +
+    `1. Call session_save_ledger — snapshot current state\n` +
+    `2. Call session_detect_drift — check drift vs original goals\n` +
+    `3. If major_drift returned: call session_compact_ledger + reload context\n` +
+    `This check is MANDATORY every 60 minutes. Do not skip.`
+  );
 }
