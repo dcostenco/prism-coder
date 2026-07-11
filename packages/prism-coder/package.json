@@ -37,7 +37,7 @@
     "url": "git+https://github.com/dcostenco/prism-coder.git"
   },
   "author": "Dmitri Costenco",
-  "license": "AGPL-3.0",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=18"
   }

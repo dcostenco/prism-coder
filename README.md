@@ -4,7 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm)](https://www.npmjs.com/package/prism-mcp-server)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8)](https://github.com/modelcontextprotocol/servers)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Models on HuggingFace](https://img.shields.io/badge/🤗-prism--coder-yellow)](https://huggingface.co/dcostenco)
 
 <p align="center">
@@ -623,15 +623,30 @@ It reads `~/.prism-mcp/data.db` and POSTs entries to the portal. Ledger entries 
 
 ---
 
-## License
+## License & Tiers
+
+- **This repository (the Prism MCP client)** is licensed under [Apache-2.0](./LICENSE).
+- **Free tier**: run Prism MCP locally against your own machine. No account required.
+- **Paid tiers**: cloud features (hosted inference cascade, cross-device memory,
+  team features) are provided by the Synalux cloud service and governed by the
+  Synalux Terms of Service — they are not part of this repository or its license.
+- Contributions require signing the [CLA](./CLA.md).
+- "Prism" and "Synalux" are trade names of Synalux LLC; the Apache license does
+  not grant trademark rights (see §6 of the license).
+
+### License change (v20)
+
+As of this release, prism-mcp is relicensed from AGPL-3.0 to Apache-2.0.
+Prior versions remain under AGPL-3.0. Existing forks retain all rights
+received under the original license.
 
 | Product | License |
 |---|---|
-| **prism-mcp-server** (this repo) | [AGPL-3.0](LICENSE) |
+| **prism-mcp-server** (this repo) | [Apache-2.0](LICENSE) |
 | **VS Code extension** (synalux-ai.synalux) | BSL-1.1 |
 | **Web IDE** (synalux.ai/coder) | Synalux Terms of Service |
-| **Prism AAC** | AGPL-3.0 |
+| **Prism AAC** | Apache-2.0 |
 
-The AGPL-3.0 license covers the MCP server and its source code. The VS Code extension and Web IDE are separate products with their own licenses. Commercial hosted/managed deployment of the MCP server is available via the Synalux subscription.
+This repository is licensed under Apache-2.0. Cloud features (hosted inference, cross-device memory, team features) are provided by the Synalux cloud service under separate terms.
 
 © 2026 Synalux, LLC.
