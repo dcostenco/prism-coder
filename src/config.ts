@@ -16,9 +16,8 @@ import { fileURLToPath } from "node:url";
  *   SUPABASE_KEY           — (optional) Your Supabase anon/service key. Enables session memory tools.
  *   PRISM_USER_ID          — (optional) Unique tenant ID for multi-user Supabase instances.
  *                            Defaults to "default". Set per-user in Claude Desktop config.
- *   VOYAGE_API_KEY         — (optional) API key for Voyage AI embeddings. Enables embedding_provider=voyage.
- *                            Voyage AI is the embedding provider recommended by Anthropic for use with
- *                            Claude. Get a free key at https://dash.voyageai.com.
+ *   VOYAGE_API_KEY         — (optional) Voyage AI API key for embeddings.
+ *                            Set embedding_provider=voyage to use. https://dash.voyageai.com
  *
  * If a required key is missing, the process exits immediately.
  * If an optional key is missing, a warning is logged but the server continues
@@ -74,14 +73,8 @@ if (!BRAVE_ANSWERS_API_KEY && process.env.PRISM_DEBUG_LOGGING === "true") {
   console.error("Warning: BRAVE_ANSWERS_API_KEY environment variable is missing. Brave Answers tool will be unavailable.");
 }
 
-// ─── Optional: Voyage AI API Key ──────────────────────────────
-// Used when embedding_provider = "voyage" in the dashboard.
-// Voyage AI is the embedding provider recommended by Anthropic for use
-// alongside Claude. voyage-3 supports 768-dim output via MRL truncation,
-// matching Prism's storage schema for zero-migration drop-in replacement.
-// Without this, VoyageAdapter construction will throw at server start if
-// embedding_provider=voyage is selected.
-
+// ─── Optional: Voyage AI Embeddings ──────────────────────────
+// Set embedding_provider=voyage to enable. Requires VOYAGE_API_KEY.
 export const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
 
 // ─── Optional: Google Search (Scholar Pipeline Fallback) ──────

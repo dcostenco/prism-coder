@@ -75,7 +75,7 @@ describe("VoyageAdapter", () => {
       if (key === "voyage_api_key") return "";
       return "";
     });
-    expect(() => new VoyageAdapter()).toThrow("Voyage AI API key");
+    expect(() => new VoyageAdapter()).toThrow("VOYAGE_API_KEY");
   });
 
   // ── generateText (not supported) ─────────────────────────────────────────
@@ -112,22 +112,20 @@ describe("VoyageAdapter", () => {
 
   // ── Dimension guard ──────────────────────────────────────────────────────
 
-  it("throws dimension mismatch for 512-dim response (voyage-3-lite)", async () => {
+  it("returns embedding even with 512-dim response (logs warning)", async () => {
     const wrongDims = Array.from({ length: 512 }, () => 0.1);
     mockFetch.mockResolvedValueOnce(makeVoyageResponse(wrongDims, "voyage-3-lite"));
 
-    await expect(adapter.generateEmbedding("test")).rejects.toThrow(
-      "dimension mismatch"
-    );
+    const result = await adapter.generateEmbedding("test");
+    expect(result).toHaveLength(512);
   });
 
-  it("throws dimension mismatch for unexpected 1024-dim response", async () => {
+  it("returns embedding even with 1024-dim response (logs warning)", async () => {
     const wrongDims = Array.from({ length: 1024 }, () => 0.1);
     mockFetch.mockResolvedValueOnce(makeVoyageResponse(wrongDims));
 
-    await expect(adapter.generateEmbedding("test")).rejects.toThrow(
-      "expected 768"
-    );
+    const result = await adapter.generateEmbedding("test");
+    expect(result).toHaveLength(1024);
   });
 
   // ── Empty/invalid input ──────────────────────────────────────────────────
@@ -142,15 +140,15 @@ describe("VoyageAdapter", () => {
 
   // ── Text truncation ──────────────────────────────────────────────────────
 
-  it("truncates text longer than 8000 chars", async () => {
-    const longText = "a".repeat(10000);
+  it("truncates text longer than 120K chars", async () => {
+    const longText = "a".repeat(130_000);
     const expected = make768Embedding();
     mockFetch.mockResolvedValueOnce(makeVoyageResponse(expected));
 
     await adapter.generateEmbedding(longText);
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.input[0].length).toBeLessThanOrEqual(8000);
+    expect(body.input[0].length).toBeLessThanOrEqual(120_000);
   });
 
   // ── API error handling ───────────────────────────────────────────────────

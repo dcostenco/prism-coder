@@ -1,5 +1,5 @@
 /**
- * LLM Provider Factory (v4.5 — Voyage AI Embedding Support)
+ * LLM Provider Factory (v5 — split text + embedding providers)
  * ─────────────────────────────────────────────────────────────────────────────
  * PURPOSE:
  *   Single point of resolution for the active LLMProvider.
@@ -16,16 +16,16 @@
  *   When embedding_provider = "auto":
  *     * If text_provider is gemini or openai → use same provider for embeddings
  *     * If text_provider is anthropic → auto-fallback to gemini for embeddings
- *       (Anthropic has no native embedding API; consider setting
- *        embedding_provider=voyage for the Anthropic-recommended pairing)
+ *       (Anthropic has no native embedding API; set embedding_provider=voyage
+ *        to use Voyage AI embeddings alongside Claude)
  *
  * EXAMPLE CONFIGURATIONS:
  *   text_provider=gemini,    embedding_provider=auto   → Gemini+Gemini (default)
  *   text_provider=openai,    embedding_provider=auto   → OpenAI+OpenAI
  *   text_provider=anthropic, embedding_provider=auto   → Claude+Gemini (auto-bridge)
- *   text_provider=anthropic, embedding_provider=voyage → Claude+Voyage (Anthropic-recommended)
+ *   text_provider=anthropic, embedding_provider=voyage → Claude + Voyage AI embeddings
  *   text_provider=anthropic, embedding_provider=openai → Claude+Ollama (cost-optimized)
- *   text_provider=gemini,    embedding_provider=voyage → Gemini+Voyage (mixed)
+ *   text_provider=gemini,    embedding_provider=voyage → Gemini + Voyage AI embeddings
  *
  * SINGLETON + GRACEFUL DEGRADATION:
  *   Same as before — instance cached per process, errors fall back to Gemini.
@@ -45,7 +45,7 @@ import type { LLMProvider } from "./provider.js";
 import { GeminiAdapter } from "./adapters/gemini.js";
 import { OpenAIAdapter } from "./adapters/openai.js";
 import { AnthropicAdapter } from "./adapters/anthropic.js";
-import { VoyageAdapter } from "./adapters/voyage.js";
+import { VoyageAdapter } from "./adapters/voyage.js"; // clean-room rewrite
 import { LocalEmbeddingAdapter } from "./adapters/local.js";
 import { DisabledTextAdapter } from "./adapters/disabledText.js";
 import { TracingLLMProvider } from "./adapters/traced.js";
@@ -72,10 +72,10 @@ function buildEmbeddingAdapter(type: string): LLMProvider {
   // Note: "anthropic" is intentionally absent from this switch.
   // Anthropic has no embedding API, so it can never be an embedding provider.
   // The factory resolves "auto" away from "anthropic" before calling this.
-  // For Anthropic text users, "voyage" is the Anthropic-recommended pairing.
+  // Anthropic users: set embedding_provider=voyage to use Voyage AI.
   switch (type) {
     case "openai": return new OpenAIAdapter();
-    case "voyage": return new VoyageAdapter();
+    case "voyage": return new VoyageAdapter(); // clean-room adapter
     case "local":  return new LocalEmbeddingAdapter();
     case "gemini":
     default:       return new GeminiAdapter();
@@ -136,9 +136,8 @@ export function getLLMProvider(): LLMProvider {
       console.info(
         "[LLMFactory] text_provider=anthropic with embedding_provider=auto: " +
         "routing embeddings to GeminiAdapter (Anthropic has no native embedding API). " +
-        "For the Anthropic-recommended pairing, set embedding_provider=voyage in the dashboard " +
-        "(voyage-3 supports 768-dim output via MRL). " +
-        "Alternatively, set embedding_provider=openai to use Ollama/OpenAI."
+        "To use Voyage AI embeddings, set embedding_provider=voyage in the dashboard. " +
+        "Alternatively, set embedding_provider=openai for Ollama/OpenAI."
       );
     }
   }
