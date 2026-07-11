@@ -1,7 +1,8 @@
 /**
  * Skill routing thin client — all routing logic is portal-side.
- * POST SYNALUX_BASE/api/v1/prism/skills → { skillBlock, loaded, skipped, phantom, routing_version }
- * Cache: 5-min live, 30s failure backoff. Offline → empty skills + warning.
+ * POST SYNALUX_BASE/api/v1/prism/skills with bearer auth.
+ * Cache: keyed on (project,prompt,role), 5-min live / 30s failure.
+ * Offline: last-good from local DB, or empty with warning.
  */
 
 // -- Type exports (backward compat) ------------------------------------------
@@ -34,11 +35,11 @@ export interface ResolvedSkills {
 // -- Constants ----------------------------------------------------------------
 
 const SYNALUX_BASE = process.env.SYNALUX_BASE_URL || 'https://synalux.ai';
+const SKILLS_TOKEN = process.env.PRISM_SKILLS_TOKEN || '';
 const LIVE_TTL = 5 * 60 * 1000;
 const FAIL_TTL = 30_000;
 const DEFAULT_UL: UserLocalPolicy = { enabled: false, key_prefix: 'user_skill:' };
 
-/** Backward-compat export for tests. Not used in live routing. */
 export const OFFLINE_FALLBACK: SkillRoutingTable = {
   version: 1,
   universal: [
@@ -50,78 +51,128 @@ export const OFFLINE_FALLBACK: SkillRoutingTable = {
   user_local: DEFAULT_UL,
 };
 
-// -- Cache + API --------------------------------------------------------------
+// -- Cache (keyed on project+prompt+role) -------------------------------------
 
 interface PortalResp {
   skillBlock: string; loaded: string[]; skipped: string[];
   phantom: string[]; routing_version: number;
 }
 
-let cached: { resp: PortalResp; at: number; live: boolean } | null = null;
-let inflight: Promise<PortalResp | null> | null = null;
+interface CacheEntry { resp: PortalResp; at: number; live: boolean }
+
+const cache = new Map<string, CacheEntry>();
+const inflightMap = new Map<string, Promise<PortalResp | null>>();
+
+function cacheKey(project: string, prompt?: string, role?: string): string {
+  return `${project}|${prompt || ''}|${role || ''}`;
+}
+
+// Persist last-good to local DB for offline fallback
+let persistFn: ((key: string, value: string) => Promise<void>) | null = null;
+let readFn: ((key: string) => Promise<string>) | null = null;
+
+export function _setStorage(persist: typeof persistFn, read: typeof readFn): void {
+  persistFn = persist;
+  readFn = read;
+}
 
 async function callPortal(project: string, prompt?: string, role?: string): Promise<PortalResp | null> {
   try {
     const body: Record<string, string> = { project };
     if (prompt) body.prompt = prompt;
     if (role) body.role = role;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    };
+    if (SKILLS_TOKEN) headers['Authorization'] = `Bearer ${SKILLS_TOKEN}`;
+
     const res = await fetch(`${SYNALUX_BASE}/api/v1/prism/skills`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(2_500),
+      method: 'POST', headers, body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as PortalResp;
   } catch { return null; }
 }
 
-function offline(): ResolvedSkills {
-  return { names: [], skills: [], user_local: DEFAULT_UL, isOffline: true,
-    skillBlock: '[WARNING: OFFLINE] Portal unreachable — no skills loaded. Retry in 30s.' };
+function makeOffline(skillBlock?: string): ResolvedSkills {
+  return {
+    names: [], skills: [], user_local: DEFAULT_UL, isOffline: true,
+    skillBlock: skillBlock || '',
+  };
 }
 
 // -- Public API ---------------------------------------------------------------
 
-/** Resolve skills via portal API. Caches 5 min (live) / 30s (failure). */
 export async function resolveSkills(project: string, prompt?: string, role?: string): Promise<ResolvedSkills> {
+  const key = cacheKey(project, prompt, role);
   const now = Date.now();
-  const ttl = (cached?.live ?? true) ? LIVE_TTL : FAIL_TTL;
-  if (!cached || now - cached.at > ttl) {
-    if (!inflight) {
-      inflight = callPortal(project, prompt, role).then((r) => {
-        if (r) cached = { resp: r, at: Date.now(), live: true };
-        else if (cached) cached = { ...cached, at: Date.now(), live: false };
-        return r;
-      }).finally(() => { inflight = null; });
-    }
-    await inflight;
-  }
-  if (!cached) return offline();
+  const entry = cache.get(key);
+  const ttl = (entry?.live ?? true) ? LIVE_TTL : FAIL_TTL;
 
-  const { resp } = cached;
-  return {
-    names: resp.loaded,
-    skills: resp.loaded.map((name, i) => ({ name, priority: i, protected: false, category: 'universal' as const })),
-    user_local: DEFAULT_UL,
-    isOffline: !cached.live,
-    skillBlock: resp.skillBlock,
-    routing_version: resp.routing_version,
-  };
+  if (!entry || now - entry.at > ttl) {
+    if (!inflightMap.has(key)) {
+      const p = callPortal(project, prompt, role).then(async (r) => {
+        if (r) {
+          cache.set(key, { resp: r, at: Date.now(), live: true });
+          // Persist last-good for offline fallback
+          if (persistFn) {
+            try { await persistFn(`skill_cache:${project}`, JSON.stringify(r)); } catch {}
+          }
+        } else if (entry) {
+          cache.set(key, { ...entry, at: Date.now(), live: false });
+        }
+        return r;
+      }).finally(() => { inflightMap.delete(key); });
+      inflightMap.set(key, p);
+    }
+    await inflightMap.get(key);
+  }
+
+  const cached = cache.get(key);
+  if (cached) {
+    return {
+      names: cached.resp.loaded,
+      skills: cached.resp.loaded.map((name, i) => ({
+        name, priority: i, protected: false, category: 'universal' as const,
+      })),
+      user_local: DEFAULT_UL,
+      isOffline: !cached.live,
+      skillBlock: cached.resp.skillBlock,
+      routing_version: cached.resp.routing_version,
+    };
+  }
+
+  // No cached response — try last-good from local DB
+  if (readFn) {
+    try {
+      const stored = await readFn(`skill_cache:${project}`);
+      if (stored) {
+        const resp = JSON.parse(stored) as PortalResp;
+        return {
+          names: resp.loaded, skills: [], user_local: DEFAULT_UL,
+          isOffline: true, skillBlock: resp.skillBlock,
+          routing_version: resp.routing_version,
+        };
+      }
+    } catch {}
+  }
+
+  return makeOffline();
 }
 
-/** Thin wrapper — project-only resolution (no prompt/role). */
 export async function resolveSkillsForProject(project: string): Promise<ResolvedSkills> {
   return resolveSkills(project);
 }
 
-/** No-op — prompt matching is portal-side now. */
 export async function resolveSkillsForPrompt(_prompt: string, _baseSkills: string[] = []): Promise<string[]> {
   return [];
 }
 
-/** Force re-fetch on next call. For tests + admin tooling. */
-export function _invalidateRoutingCache(): void { cached = null; inflight = null; }
+export function _invalidateRoutingCache(): void {
+  cache.clear();
+  inflightMap.clear();
+}
 
-/** Test/debug only. */
 export const _OFFLINE_FALLBACK = OFFLINE_FALLBACK;

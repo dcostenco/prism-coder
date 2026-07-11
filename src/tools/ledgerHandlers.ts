@@ -1072,7 +1072,11 @@ export async function sessionLoadContextHandler(args: unknown) {
   }
 
   // ─── All other skills resolved by portal API ───────────────
-  const { resolveSkills } = await import("./skillRouting.js");
+  const { resolveSkills, _setStorage } = await import("./skillRouting.js");
+  _setStorage(
+    async (k, v) => { try { await storage.setSetting?.(k, v); } catch {} },
+    async (k) => { try { return await getSetting(k, ""); } catch { return ""; } },
+  );
   const skillResolution = await resolveSkills(project, prompt, effectiveRole);
 
   if (skillResolution.skillBlock) {
@@ -1081,12 +1085,15 @@ export async function sessionLoadContextHandler(args: unknown) {
     loadedSkills.push(...(skillResolution.names || []));
   }
 
-  // Offline fallback: load protected skills from local DB
-  if (skillResolution.isOffline) {
-    const protectedNames = ['prime-directive', 'evidence-first-protocol', 'behavioral-verifier', 'occam-razor-protocol', 'session-drift-detection', 'pre-commit-protocol', 'pre-push-audit', 'implementation-integrity-audit', 'bcba_ai_assistant'];
-    for (const name of protectedNames) {
+  // Offline fallback: last-good skillBlock was already tried by skillRouting.ts.
+  // If still offline with no skillBlock, load whatever's in local DB as final resort.
+  if (skillResolution.isOffline && !skillResolution.skillBlock) {
+    const allSettings = await storage.getAllSettings?.() || {};
+    for (const [k, v] of Object.entries(allSettings)) {
+      if (!k.startsWith("skill:") || !v) continue;
+      const name = k.replace("skill:", "");
       if (loadedSkills.includes(name)) continue;
-      const content = await getSetting('skill:' + name, "");
+      const content = (v as string).trim();
       if (content && content.trim()) {
         skillBlock += '\n\n[📜 SKILL: ' + name + ']\n' + content.trim();
         loadedSkills.push(name);
