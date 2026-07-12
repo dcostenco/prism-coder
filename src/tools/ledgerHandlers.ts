@@ -776,8 +776,12 @@ export async function sessionLoadContextHandler(args: unknown) {
     try {
       const { resolveSkills: resolveForFresh } = await import("./skillRouting.js");
       const freshResolution = await resolveForFresh(project);
-      if (freshResolution.skillBlock) {
-        freshSkillBlock = freshResolution.skillBlock;
+      // Client-renders-content: load from local DB by resolved names
+      for (const name of freshResolution.names || []) {
+        const content = await getSetting(`skill:${name}`, "");
+        if (content?.trim()) {
+          freshSkillBlock += `\n\n[📜 SKILL: ${name}]\n${content.trim()}`;
+        }
       }
       // Offline fallback: load protected skills from local DB
       if (freshResolution.isOffline) {
@@ -1079,15 +1083,19 @@ export async function sessionLoadContextHandler(args: unknown) {
   );
   const skillResolution = await resolveSkills(project, prompt, effectiveRole);
 
-  if (skillResolution.skillBlock) {
-    skillBlock += skillResolution.skillBlock;
-    skillLoaded = true;
-    loadedSkills.push(...(skillResolution.names || []));
+  // Client-renders-content: portal returns names, we load content from local DB
+  for (const name of skillResolution.names || []) {
+    if (loadedSkills.includes(name)) continue;
+    const content = await getSetting(`skill:${name}`, "");
+    if (content?.trim()) {
+      skillBlock += `\n\n[📜 SKILL: ${name}]\n${content.trim()}`;
+      loadedSkills.push(name);
+      skillLoaded = true;
+    }
   }
 
-  // Offline fallback: last-good skillBlock was already tried by skillRouting.ts.
-  // If still offline with no skillBlock, load whatever's in local DB as final resort.
-  if (skillResolution.isOffline && !skillResolution.skillBlock) {
+  // Offline fallback: load whatever's in local DB
+  if (skillResolution.isOffline) {
     const allSettings = await storage.getAllSettings?.() || {};
     for (const [k, v] of Object.entries(allSettings)) {
       if (!k.startsWith("skill:") || !v) continue;

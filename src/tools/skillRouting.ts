@@ -28,7 +28,6 @@ export interface ResolvedSkills {
   skills: ResolvedSkill[];
   user_local: UserLocalPolicy;
   isOffline: boolean;
-  skillBlock?: string;
   routing_version?: number;
 }
 
@@ -54,8 +53,8 @@ export const OFFLINE_FALLBACK: SkillRoutingTable = {
 // -- Cache (keyed on project+prompt+role) -------------------------------------
 
 interface PortalResp {
-  skillBlock: string; loaded: string[]; skipped: string[];
-  phantom: string[]; routing_version: number;
+  loaded: string[]; skipped: string[];
+  routing_version: number; tier: string;
 }
 
 interface CacheEntry { resp: PortalResp; at: number; live: boolean }
@@ -96,11 +95,8 @@ async function callPortal(project: string, prompt?: string, role?: string): Prom
   } catch { return null; }
 }
 
-function makeOffline(skillBlock?: string): ResolvedSkills {
-  return {
-    names: [], skills: [], user_local: DEFAULT_UL, isOffline: true,
-    skillBlock: skillBlock || '',
-  };
+function makeOffline(): ResolvedSkills {
+  return { names: [], skills: [], user_local: DEFAULT_UL, isOffline: true };
 }
 
 // -- Public API ---------------------------------------------------------------
@@ -139,7 +135,6 @@ export async function resolveSkills(project: string, prompt?: string, role?: str
       })),
       user_local: DEFAULT_UL,
       isOffline: !cached.live,
-      skillBlock: cached.resp.skillBlock,
       routing_version: cached.resp.routing_version,
     };
   }
@@ -152,7 +147,7 @@ export async function resolveSkills(project: string, prompt?: string, role?: str
         const resp = JSON.parse(stored) as PortalResp;
         return {
           names: resp.loaded, skills: [], user_local: DEFAULT_UL,
-          isOffline: true, skillBlock: resp.skillBlock,
+          isOffline: true,
           routing_version: resp.routing_version,
         };
       }

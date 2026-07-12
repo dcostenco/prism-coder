@@ -42,11 +42,10 @@ function mockPortalResponse(resp: unknown, ok = true) {
 }
 
 const PORTAL_RESP = {
-  skillBlock: '\n\n[📜 SKILL: prime-directive]\nTest content',
   loaded: ['prime-directive', 'bcba_ai_assistant'],
   skipped: ['military-code-review'],
-  phantom: [],
   routing_version: 16,
+  tier: 'paid',
 };
 
 describe('skill routing — portal call', () => {
@@ -54,7 +53,7 @@ describe('skill routing — portal call', () => {
     mockPortalResponse(PORTAL_RESP);
     await resolveSkillsForProject('prism-mcp');
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/v1/prism/skills'),
+      expect.stringContaining('/api/v1/prism/resolve'),
       expect.objectContaining({ method: 'POST' }),
     );
   });
@@ -66,10 +65,10 @@ describe('skill routing — portal call', () => {
     expect(result.isOffline).toBe(false);
   });
 
-  it('returns skillBlock from portal response', async () => {
+  it('returns loaded names from portal response', async () => {
     mockPortalResponse(PORTAL_RESP);
     const result = await resolveSkills('prism-mcp');
-    expect(result.skillBlock).toContain('[📜 SKILL: prime-directive]');
+    expect(result.names).toContain('prime-directive');
   });
 
   it('passes prompt and role to portal', async () => {
