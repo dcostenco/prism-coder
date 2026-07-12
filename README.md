@@ -668,6 +668,8 @@ Everything in Free, plus:
 | Grounding verifier | L3 NLI verification on model outputs |
 | Team features | Multi-agent Hivemind, workspace collaboration |
 
+The paid tier adds **intelligent routing** — the Synalux portal determines which skills are relevant to your current project and prompt, so your agent gets domain expertise (stripe patterns, training protocols, clinical standards) instead of loading everything. Free users with the repo can run `sync-skills.sh` to populate all skills locally; paid routing adds project-aware and prompt-aware selection.
+
 - Contributions require signing the [CLA](./CLA.md).
 - "Prism" and "Synalux" are trade names of Synalux LLC; the Apache license does
   not grant trademark rights (see §6 of the license).

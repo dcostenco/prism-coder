@@ -1094,7 +1094,10 @@ export async function sessionLoadContextHandler(args: unknown) {
     }
   }
 
-  // Offline fallback: load whatever's in local DB
+  // Offline fallback: load ALL local skill: content (no tier gating).
+  // Deliberate: offline = degraded = best-effort. A repo-holder with
+  // sync-skills.sh has the full library locally regardless of tier.
+  // Tier gating is portal-side (name resolution); offline bypasses it.
   if (skillResolution.isOffline) {
     const allSettings = await storage.getAllSettings?.() || {};
     for (const [k, v] of Object.entries(allSettings)) {
