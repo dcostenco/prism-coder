@@ -644,11 +644,36 @@ It reads `~/.prism-mcp/data.db` and POSTs entries to the portal. Ledger entries 
 
 ## License & Tiers
 
-- **This repository (the Prism MCP client)** is licensed under [Apache-2.0](./LICENSE).
-- **Free tier**: run Prism MCP locally against your own machine. No account required.
-- **Paid tiers**: cloud features (hosted inference cascade, cross-device memory,
-  team features) are provided by the Synalux cloud service and governed by the
-  Synalux Terms of Service — they are not part of this repository or its license.
+**This repository (the Prism MCP client)** is licensed under [Apache-2.0](./LICENSE).
+
+### Free (no account)
+
+| Feature | Details |
+|---------|---------|
+| Local inference | Full Ollama cascade (2B → 4B → 9B → 27B) based on free RAM |
+| Session memory | Persistent sessions, handoffs, ledger — all local SQLite |
+| Knowledge search | Semantic search across session history |
+| Model ceiling | 4B (upgradeable with your own Ollama models) |
+| Daily inference | 50 calls/day via `prism_infer` |
+| Skills | Protected behavioral skills (safety gates, evidence-first, ask-first) |
+| Drift detection | Server-side GATE 5 reminders |
+
+### Paid (Synalux subscription)
+
+Everything in Free, plus:
+
+| Feature | Details |
+|---------|---------|
+| Cloud inference | Cascade through 9B → 27B → Claude when local is unavailable |
+| Skill routing | Portal resolves project-specific + prompt-matched skills from the full library |
+| Model ceiling | Up to 27B (plan-dependent) |
+| Daily inference | 500+ calls/day (plan-dependent) |
+| Cross-device memory | Supabase cloud sync — sessions survive across machines |
+| Grounding verifier | L3 NLI verification on model outputs |
+| Team features | Multi-agent Hivemind, workspace collaboration |
+
+Skills content is loaded locally from your machine's SQLite database. The paid tier adds **intelligent routing** — the Synalux portal determines which skills are relevant to your current project and prompt, so you get domain expertise (stripe patterns, training protocols, clinical standards) instead of a flat dump.
+
 - Contributions require signing the [CLA](./CLA.md).
 - "Prism" and "Synalux" are trade names of Synalux LLC; the Apache license does
   not grant trademark rights (see §6 of the license).
