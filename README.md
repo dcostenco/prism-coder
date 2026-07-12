@@ -18,6 +18,25 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
+## What's New in v20
+
+### License: AGPL-3.0 → Apache-2.0
+Prism MCP is now Apache-2.0. The thin-client architecture means all proprietary value (skill resolution, tier gating, billing, cloud inference) lives server-side — the open client carries no moat to protect. Apache-2.0 removes the enterprise adoption friction that AGPL caused.
+
+### Thin Client Architecture
+Skill routing, budget management, and content resolution have moved server-side to the Synalux portal. The MCP client is now a thin API caller — simpler, smaller, and portable across any host (Claude Code, Gemini, Cursor, autonomous scripts). Offline fallback reads the last successful response from local SQLite.
+
+### Clean-Room Voyage AI Adapter
+The Voyage AI embedding adapter was independently reimplemented from the [Voyage API docs](https://docs.voyageai.com/reference/embeddings-api) to ensure 100% project-owned copyright. Default model updated to `voyage-3.5`. See [PROVENANCE.md](./PROVENANCE.md) for details.
+
+### Server-Side Drift Detection
+Session drift detection (GATE 5) no longer requires Claude Code hooks. The timer runs server-side per conversation, piggybacked on every MCP tool response. Works for any host.
+
+### CLA Requirement
+External contributions now require signing the [Individual CLA](./CLA.md). The CLA check is merge-blocking on the `main` branch.
+
+---
+
 ## Quickstart
 
 The free tier needs no account, no API key, and no cloud. Add the server to your MCP client:
