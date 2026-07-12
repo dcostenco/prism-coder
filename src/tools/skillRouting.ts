@@ -1,6 +1,6 @@
 /**
  * Skill routing thin client — all routing logic is portal-side.
- * POST SYNALUX_BASE/api/v1/prism/skills with bearer auth.
+ * POST SYNALUX_BASE/api/v1/prism/resolve with bearer auth.
  * Cache: keyed on (project,prompt,role), 5-min live / 30s failure.
  * Offline: last-good from local DB, or empty with warning.
  */
@@ -87,7 +87,7 @@ async function callPortal(project: string, prompt?: string, role?: string): Prom
     };
     if (SKILLS_TOKEN) headers['Authorization'] = `Bearer ${SKILLS_TOKEN}`;
 
-    const res = await fetch(`${SYNALUX_BASE}/api/v1/prism/skills`, {
+    const res = await fetch(`${SYNALUX_BASE}/api/v1/prism/resolve`, {
       method: 'POST', headers, body: JSON.stringify(body),
       signal: AbortSignal.timeout(5_000),
     });
