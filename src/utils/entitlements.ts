@@ -36,7 +36,7 @@ export interface PrismEntitlements {
 export const FREE_ENTITLEMENTS: PrismEntitlements = {
     plan: "free",
     model_ceiling: "4b",
-    daily_infer_limit: 50,
+    daily_infer_limit: 50, // reserved, not enforced; cloud limits are portal-side
     max_tokens: 512,
     max_seats: 1,
     features: {
