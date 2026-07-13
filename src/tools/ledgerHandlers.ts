@@ -803,13 +803,10 @@ export async function sessionLoadContextHandler(args: unknown) {
       markContextLoaded(convId, project, BOUNDARIES_VERSION);
       noteDriftSessionStart(convId);
     }
-    const { BOUNDARIES_TEXT: BT0, BOUNDARIES_VERSION: BV0 } = await import("../boundaries/boundaries.js");
-    const boundariesHeader0 = `[Safety Boundaries v${BV0}] ${BT0}\n\n---\n\n`;
     return {
       content: [{
         type: "text",
-        text: boundariesHeader0 +
-          `No session context found for project "${project}" at level ${level}.\n` +
+        text: `No session context found for project "${project}" at level ${level}.\n` +
           `This project has no previous session history. Starting fresh.` +
           freshSkillBlock,
       }],
@@ -1237,11 +1234,8 @@ export async function sessionLoadContextHandler(args: unknown) {
       noteDriftSessionStart(convId);
     }
 
-    const { BOUNDARIES_TEXT, BOUNDARIES_VERSION: BV } = await import("../boundaries/boundaries.js");
-    const boundariesHeader = `[Safety Boundaries v${BV}] ${BOUNDARIES_TEXT}\n\n---\n\n`;
-
     return {
-      content: [{ type: "text", text: boundariesHeader + responseText + MEMORY_BOUNDARY_SUFFIX }],
+      content: [{ type: "text", text: responseText + MEMORY_BOUNDARY_SUFFIX }],
       isError: false,
     };
   }
@@ -1255,11 +1249,8 @@ export async function sessionLoadContextHandler(args: unknown) {
     noteDriftSessionStart(convId);
   }
 
-  const { BOUNDARIES_TEXT, BOUNDARIES_VERSION: BV2 } = await import("../boundaries/boundaries.js");
-  const boundariesHeader2 = `[Safety Boundaries v${BV2}] ${BOUNDARIES_TEXT}\n\n---\n\n`;
-
   return {
-    content: [{ type: "text", text: boundariesHeader2 + responseText + MEMORY_BOUNDARY_SUFFIX }],
+    content: [{ type: "text", text: responseText + MEMORY_BOUNDARY_SUFFIX }],
     isError: false,
   };
 }
