@@ -16,7 +16,7 @@
 export const BOUNDARIES_VERSION = "2";
 
 export const BOUNDARIES_TEXT = `
-## Safety boundaries (enforced in code — shown so hosts avoid wasted round-trips)
+Safety boundaries are enforced in code — shown so hosts avoid wasted round-trips.
 
 - **Crisis/self-harm** inputs are intercepted before reaching any model.
 - **BCBA reserved categories** (restraint, seclusion, physical management, dosing) route to cloud or are refused. They are NEVER generated locally. If cloud is unavailable and the prompt is reserved, the request is refused — never downgraded to local.

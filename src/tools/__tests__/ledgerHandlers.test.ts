@@ -688,10 +688,38 @@ describe("ledgerHandlers", () => {
       expect(vi.mocked(markContextLoaded)).not.toHaveBeenCalled();
     });
 
-    it("prepends BOUNDARIES header to every response", async () => {
+    it("prepends safety header on no-history path", async () => {
       storage.loadContext.mockResolvedValue(null);
 
       const result = await sessionLoadContextHandler(validArgs);
+      const text = result.content[0].text as string;
+
+      expect(text).toContain("Safety Boundaries");
+      expect(text).toContain("BOUNDARIES STUB");
+      expect(text).toContain("no previous session history");
+    });
+
+    it("prepends safety header on history-found path (standard/deep)", async () => {
+      storage.loadContext.mockResolvedValue({
+        last_summary: "Did some work",
+        version: 1,
+      });
+
+      const result = await sessionLoadContextHandler({ ...validArgs, level: "standard" });
+      const text = result.content[0].text as string;
+
+      expect(text).toContain("Safety Boundaries");
+      expect(text).toContain("BOUNDARIES STUB");
+      expect(text).toContain("Did some work");
+    });
+
+    it("prepends safety header on quick path", async () => {
+      storage.loadContext.mockResolvedValue({
+        last_summary: "Quick summary",
+        version: 2,
+      });
+
+      const result = await sessionLoadContextHandler({ ...validArgs, level: "quick" });
       const text = result.content[0].text as string;
 
       expect(text).toContain("Safety Boundaries");
