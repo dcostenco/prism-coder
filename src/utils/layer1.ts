@@ -67,18 +67,37 @@ export function parseLayer1(raw: string | null | undefined): Layer1Verdict {
     return VALID.has(token) ? (token as Layer1Verdict) : "ERROR";
 }
 
-// p95 measured 484–511ms on warm 4b; 1500ms is a generous ceiling that still
-// fails closed on model stall without blocking the handler for too long.
 const LAYER1_TIMEOUT_MS = 1_500;
+const LAYER1_RETRY_TIMEOUT_MS = 5_000;
+
+// Deterministic reserved-vocabulary backstop for the ERROR path.
+// These patterns catch reserved content when the classifier is unavailable.
+// Not sufficient alone (adversaries can paraphrase), but as an ERROR-path
+// floor they block the obvious cases that padding/injection attacks
+// would otherwise smuggle through.
+const RESERVED_KEYWORDS = /\b(restraint|seclusion|physical\s*hold|containment|self[- ]harm|suicid|overdose|dosage\s*mg|dosing\s*schedule|crisis\s*de[- ]?escalation|meltdown\s*management|elopement\s*incident)\b/i;
 
 /**
- * Run the Layer 1 classifier. Returns a verdict; never throws.
- * On ANY failure path returns "ERROR" so the caller escalates to cloud.
+ * Deterministic keyword check — the ERROR-path floor.
+ * Returns OBVIOUS_RESERVED if reserved vocabulary is present,
+ * OBVIOUS_NOT_RESERVED otherwise. Used only when the LLM classifier
+ * fails (timeout, model not loaded, injection attack).
+ */
+export function keywordBackstop(prompt: string): Layer1Verdict {
+    return RESERVED_KEYWORDS.test(prompt) ? "OBVIOUS_RESERVED" : "OBVIOUS_NOT_RESERVED";
+}
+
+// Over-length prompts are attacker-controlled — don't let length
+// select the ERROR branch. Classify as UNCERTAIN (conservative)
+// rather than feeding a huge prompt to a 4B classifier that will timeout.
+const MAX_CLASSIFIER_PROMPT_LENGTH = 4_000;
+
+/**
+ * Run the Layer 1 classifier with retry on cold-model timeout.
+ * Returns a verdict; never throws.
  *
- * @param userPrompt  the end-user prompt being classified (NOT the LAYER1_PROMPT)
- * @param ollamaUrl   Ollama base URL
- * @param model       classifier model tag (caller-resolved via resolveOllamaName)
- * @param fetchImpl   injected for tests; defaults to global fetch
+ * Flow: classify → if ERROR, retry once with longer timeout →
+ * if still ERROR, return ERROR (caller uses keywordBackstop).
  */
 export async function callLayer1(
     userPrompt: string,
@@ -88,36 +107,45 @@ export async function callLayer1(
 ): Promise<Layer1Verdict> {
     if (!userPrompt || !userPrompt.trim()) return "ERROR";
 
-    let res: Response;
-    try {
-        res = await fetchImpl(`${ollamaUrl}/api/chat`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                model,
-                messages: [
-                    { role: "user", content: LAYER1_PROMPT.replace("{prompt}", userPrompt) },
-                ],
-                stream: false,
-                think: false,
-                options: { num_predict: 16, temperature: 0 },
-            }),
-            signal: AbortSignal.timeout(LAYER1_TIMEOUT_MS),
-        });
-    } catch {
-        return "ERROR";
-    }
+    if (userPrompt.length > MAX_CLASSIFIER_PROMPT_LENGTH) return "UNCERTAIN";
 
-    if (!res.ok) return "ERROR";
+    const classify = async (timeoutMs: number): Promise<Layer1Verdict> => {
+        let res: Response;
+        try {
+            res = await fetchImpl(`${ollamaUrl}/api/chat`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    model,
+                    messages: [
+                        { role: "user", content: LAYER1_PROMPT.replace("{prompt}", userPrompt) },
+                    ],
+                    stream: false,
+                    think: false,
+                    options: { num_predict: 16, temperature: 0 },
+                }),
+                signal: AbortSignal.timeout(timeoutMs),
+            });
+        } catch {
+            return "ERROR";
+        }
 
-    let data: unknown;
-    try {
-        data = await res.json();
-    } catch {
-        return "ERROR";
-    }
+        if (!res.ok) return "ERROR";
 
-    if ((data as { error?: string })?.error) return "ERROR";
-    const text = (data as { message?: { content?: string } })?.message?.content;
-    return parseLayer1(text);
+        let data: unknown;
+        try {
+            data = await res.json();
+        } catch {
+            return "ERROR";
+        }
+
+        if ((data as { error?: string })?.error) return "ERROR";
+        const text = (data as { message?: { content?: string } })?.message?.content;
+        return parseLayer1(text);
+    };
+
+    const first = await classify(LAYER1_TIMEOUT_MS);
+    if (first !== "ERROR") return first;
+
+    return classify(LAYER1_RETRY_TIMEOUT_MS);
 }

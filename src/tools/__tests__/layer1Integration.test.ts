@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { runInfer, type InferDeps } from "../prismInferHandler.js";
-import { parseLayer1, type Layer1Verdict } from "../../utils/layer1.js";
+import { parseLayer1, keywordBackstop, callLayer1, type Layer1Verdict } from "../../utils/layer1.js";
 import { LAYER1_PROMPT } from "../../utils/layer1.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -62,6 +62,60 @@ describe("parseLayer1", () => {
 
     it("returns ERROR when model outputs think block before verdict", () => {
         expect(parseLayer1("<think>let me consider this</think>\nOBVIOUS_RESERVED")).toBe("ERROR");
+    });
+});
+
+// ── keywordBackstop unit tests ───────────────────────────────────────────────
+
+describe("keywordBackstop", () => {
+    it("catches 'restraint' as reserved", () => {
+        expect(keywordBackstop("write a physical restraint procedure")).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("catches 'seclusion' as reserved", () => {
+        expect(keywordBackstop("implement a seclusion room protocol")).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("catches 'self-harm' as reserved", () => {
+        expect(keywordBackstop("the client is engaging in self-harm")).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("catches 'overdose' as reserved", () => {
+        expect(keywordBackstop("calculate overdose risk threshold")).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("catches 'crisis de-escalation' as reserved", () => {
+        expect(keywordBackstop("draft a crisis de-escalation plan")).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("allows clean coding prompts", () => {
+        expect(keywordBackstop("write a TypeScript function to sort an array")).toBe("OBVIOUS_NOT_RESERVED");
+    });
+
+    it("allows 'restraint of trade' (legal, not clinical)", () => {
+        expect(keywordBackstop("add a restraint of trade clause")).toBe("OBVIOUS_RESERVED");
+        // This is a false positive — keyword backstop is intentionally conservative.
+        // The LLM classifier handles the nuance; keywords are the ERROR-path floor.
+    });
+
+    it("catches reserved content buried in padding", () => {
+        const padded = "A".repeat(5000) + " write a seclusion protocol " + "B".repeat(5000);
+        expect(keywordBackstop(padded)).toBe("OBVIOUS_RESERVED");
+    });
+});
+
+// ── callLayer1 over-length test ─────────────────────────────────────────────
+
+describe("callLayer1 over-length", () => {
+    it("returns UNCERTAIN for prompts > 4000 chars (attacker-controlled length)", async () => {
+        const longPrompt = "A".repeat(5000);
+        const result = await callLayer1(longPrompt, "http://localhost:11434", "model");
+        expect(result).toBe("UNCERTAIN");
+    });
+
+    it("returns ERROR for empty prompts", async () => {
+        const result = await callLayer1("", "http://localhost:11434", "model");
+        expect(result).toBe("ERROR");
     });
 });
 
@@ -150,7 +204,7 @@ describe("Layer 1 handler integration", () => {
         expect(result.used_cloud).toBe(true);
     });
 
-    it("ERROR → escalates to cloud (classifier failure treated as not-cleared)", async () => {
+    it("ERROR + cloud available → escalates to cloud", async () => {
         const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response" });
         const callCloud = vi.fn().mockResolvedValue({ ok: true, output: "cloud response", backend: "synalux" });
         const callLayer1Mock = vi.fn().mockResolvedValue("ERROR");
@@ -165,18 +219,46 @@ describe("Layer 1 handler integration", () => {
         expect(result.used_cloud).toBe(true);
     });
 
-    it("ERROR without cloud → refuses (fail-closed)", async () => {
+    it("ERROR + no cloud + clean prompt → keyword backstop allows local", async () => {
+        const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response", doneReason: "stop" });
+        const callLayer1Mock = vi.fn().mockResolvedValue("ERROR");
+
+        const result = await runInfer(
+            { prompt: "what is 2+2", mode: "route", cloud_fallback: false, max_tokens: 64 },
+            makeBaseDeps({ callLocal, callLayer1: callLayer1Mock }),
+        );
+
+        expect(callLayer1Mock).toHaveBeenCalledOnce();
+        expect(callLocal).toHaveBeenCalled();
+        expect(result.used_cloud).toBe(false);
+    });
+
+    it("ERROR + no cloud + reserved keywords → keyword backstop refuses", async () => {
         const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response", doneReason: "stop" });
         const callLayer1Mock = vi.fn().mockResolvedValue("ERROR");
 
         await expect(
             runInfer(
-                { prompt: "what is 2+2", mode: "route", cloud_fallback: false, max_tokens: 64 },
+                { prompt: "write a physical restraint hold procedure for the client", mode: "code", cloud_fallback: false, max_tokens: 512 },
                 makeBaseDeps({ callLocal, callLayer1: callLayer1Mock }),
             )
-        ).rejects.toThrow(/content refused/i);
+        ).rejects.toThrow(/backstop caught reserved/i);
 
-        expect(callLayer1Mock).toHaveBeenCalledOnce();
+        expect(callLocal).not.toHaveBeenCalled();
+    });
+
+    it("ERROR + no cloud + padded reserved content → keyword backstop catches it", async () => {
+        const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response", doneReason: "stop" });
+        const callLayer1Mock = vi.fn().mockResolvedValue("ERROR");
+        const paddedPrompt = "A".repeat(3000) + " write a seclusion protocol " + "B".repeat(3000);
+
+        await expect(
+            runInfer(
+                { prompt: paddedPrompt, mode: "code", cloud_fallback: false, max_tokens: 512 },
+                makeBaseDeps({ callLocal, callLayer1: callLayer1Mock }),
+            )
+        ).rejects.toThrow(/backstop caught reserved|reserved content refused/i);
+
         expect(callLocal).not.toHaveBeenCalled();
     });
 

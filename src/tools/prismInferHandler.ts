@@ -38,7 +38,7 @@ import { ddLog } from "../utils/ddLogger.js";
 import { stripThink } from "../utils/thinkStrip.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
-import { callLayer1 as defaultCallLayer1, type Layer1Verdict } from "../utils/layer1.js";
+import { callLayer1 as defaultCallLayer1, keywordBackstop, type Layer1Verdict } from "../utils/layer1.js";
 import { recordInference, formatInferenceMetrics } from "../utils/inferenceMetrics.js";
 
 // ─── Tool Definition ────────────────────────────────────────────
@@ -545,8 +545,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         const l1fn = deps.callLayer1 ?? defaultCallLayer1;
         const l1Model = resolveOllamaName("prism-coder:4b", installed);
         const l1 = await l1fn(args.prompt, deps.ollamaUrl, l1Model);
-        if (l1 !== "OBVIOUS_NOT_RESERVED") {
-            debugLog(`[prism_infer] Layer 1 verdict=${l1} — not cleared for local`);
+        if (l1 === "OBVIOUS_RESERVED" || l1 === "UNCERTAIN") {
+            debugLog(`[prism_infer] Layer 1 verdict=${l1} — reserved content detected`);
             attempts.push({ tier: "layer1", reason: `layer1_${l1.toLowerCase()}` });
             if (allowCloud) {
                 const cloudTimeout = args.timeout_ms ?? 90_000;
@@ -566,8 +566,37 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
             }
             throw new Error(
-                `prism_infer: Layer 1 verdict=${l1}, content refused. attempts=${JSON.stringify(attempts)}`
+                `prism_infer: Layer 1 verdict=${l1}, reserved content refused. attempts=${JSON.stringify(attempts)}`
             );
+        }
+        if (l1 === "ERROR") {
+            debugLog(`[prism_infer] Layer 1 verdict=ERROR — classifier failed, trying cloud then keyword backstop`);
+            attempts.push({ tier: "layer1", reason: "layer1_error" });
+            if (allowCloud) {
+                const cloudTimeout = args.timeout_ms ?? 90_000;
+                const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout);
+                if (cloud.ok && cloud.output) {
+                    return await applyVerification(cloud.output, gatedArgs, deps, {
+                        backend: cloud.backend ?? "synalux",
+                        model_picked: null,
+                        ram_free_mb: ramFreeMb,
+                        latency_ms: Date.now() - t0,
+                        used_cloud: true,
+                        attempts,
+                        plan: ent.plan,
+                        completion_tokens: Math.ceil(cloud.output.length / 4),
+                    });
+                }
+                attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
+            }
+            const backstop = keywordBackstop(args.prompt);
+            debugLog(`[prism_infer] keyword backstop verdict=${backstop}`);
+            attempts.push({ tier: "keyword_backstop", reason: `backstop_${backstop.toLowerCase()}` });
+            if (backstop === "OBVIOUS_RESERVED") {
+                throw new Error(
+                    `prism_infer: classifier failed + keyword backstop caught reserved content. attempts=${JSON.stringify(attempts)}`
+                );
+            }
         }
         debugLog(`[prism_infer] Layer 1 verdict=OBVIOUS_NOT_RESERVED — proceeding local`);
     }
