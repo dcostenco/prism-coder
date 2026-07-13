@@ -150,9 +150,9 @@ describe("Layer 1 handler integration", () => {
         expect(result.used_cloud).toBe(true);
     });
 
-    it("ERROR → falls through to local (classifier failure, not a safety signal)", async () => {
-        const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response", doneReason: "stop" });
-        const callCloud = vi.fn();
+    it("ERROR → escalates to cloud (classifier failure treated as not-cleared)", async () => {
+        const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response" });
+        const callCloud = vi.fn().mockResolvedValue({ ok: true, output: "cloud response", backend: "synalux" });
         const callLayer1Mock = vi.fn().mockResolvedValue("ERROR");
 
         const result = await runInfer(
@@ -161,23 +161,23 @@ describe("Layer 1 handler integration", () => {
         );
 
         expect(callLayer1Mock).toHaveBeenCalledOnce();
-        expect(callLocal).toHaveBeenCalled();
-        expect(callCloud).not.toHaveBeenCalled();
-        expect(result.used_cloud).toBe(false);
+        expect(callLocal).not.toHaveBeenCalled();
+        expect(result.used_cloud).toBe(true);
     });
 
-    it("ERROR without cloud → still falls through to local", async () => {
+    it("ERROR without cloud → refuses (fail-closed)", async () => {
         const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response", doneReason: "stop" });
         const callLayer1Mock = vi.fn().mockResolvedValue("ERROR");
 
-        const result = await runInfer(
-            { prompt: "what is 2+2", mode: "route", cloud_fallback: false, max_tokens: 64 },
-            makeBaseDeps({ callLocal, callLayer1: callLayer1Mock }),
-        );
+        await expect(
+            runInfer(
+                { prompt: "what is 2+2", mode: "route", cloud_fallback: false, max_tokens: 64 },
+                makeBaseDeps({ callLocal, callLayer1: callLayer1Mock }),
+            )
+        ).rejects.toThrow(/content refused/i);
 
         expect(callLayer1Mock).toHaveBeenCalledOnce();
-        expect(callLocal).toHaveBeenCalled();
-        expect(result.used_cloud).toBe(false);
+        expect(callLocal).not.toHaveBeenCalled();
     });
 
     it("OBVIOUS_NOT_RESERVED → proceeds to local tier", async () => {
@@ -204,7 +204,7 @@ describe("Layer 1 handler integration", () => {
                 { prompt: "write something", mode: "code", cloud_fallback: false, max_tokens: 512 },
                 makeBaseDeps({ callLayer1: callLayer1Mock, callLocal }),
             )
-        ).rejects.toThrow(/reserved content refused/i);
+        ).rejects.toThrow(/content refused/i);
 
         expect(callLayer1Mock).toHaveBeenCalled();
         expect(callLocal).not.toHaveBeenCalled();

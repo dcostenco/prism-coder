@@ -1137,7 +1137,7 @@ export async function sessionLoadContextHandler(args: unknown) {
 
         const topMatches = await decodeSdmVector(project, targetVector, 3, 0.55);
         if (topMatches.length > 0) {
-          sdmRecallBlock = `\n\n[🧠 INTUITIVE RECALL]\nThe deeper Superposed Memory matrix resonated with your current task and surfaced these latent patterns:\n`;
+          sdmRecallBlock = `\n\n[🔍 ASSOCIATIVE RECALL]\nSimilarity-matched session summaries (cosine ≥ 0.55, not verified facts):\n`;
           for (const match of topMatches) {
              sdmRecallBlock += `- [Sim: ${(match.similarity * 100).toFixed(1)}%] ${match.summary}\n`;
           }
@@ -1146,32 +1146,6 @@ export async function sessionLoadContextHandler(args: unknown) {
       }
     } catch (err) {
       debugLog(`[session_load_context] SDM Recall failed (non-fatal): ${err instanceof Error ? err.message : err}`);
-    }
-  }
-
-  // ─── v20.0.2: Local-first inference on startup prompt ─────────
-  // When the caller passes a prompt, run it through prism_infer and
-  // include the local model's response. The host agent gets the answer
-  // without choosing to call prism_infer — server-side, not agent-optional.
-  let localInferBlock = "";
-  if (prompt && prompt.trim().length > 10) {
-    try {
-      const { prismInferHandler } = await import("./prismInferHandler.js");
-      const inferResponse = await prismInferHandler({
-        prompt: prompt.trim(), max_tokens: 512, mode: "route",
-      });
-      const header = inferResponse.content?.[0]?.text || "";
-      const output = inferResponse.content?.[1]?.text || "";
-      const backendMatch = header.match(/backend=(\S+)/);
-      const latencyMatch = header.match(/latency=(\d+)ms/);
-      if (output.trim()) {
-        const backend = backendMatch?.[1] || "local";
-        const latency = latencyMatch?.[1] || "?";
-        localInferBlock = `\n\n[🧠 LOCAL INFERENCE (${backend}, ${latency}ms)]\n${output.trim()}`;
-        debugLog(`[session_load_context] Local inference: backend=${backend} latency=${latency}ms output=${output.length} chars`);
-      }
-    } catch (err) {
-      debugLog(`[session_load_context] Local inference failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -1213,7 +1187,6 @@ export async function sessionLoadContextHandler(args: unknown) {
     splitBrainWarning;
 
   const lowerPriority =
-    localInferBlock +
     driftReport +
     briefingBlock +
     sdmRecallBlock +
