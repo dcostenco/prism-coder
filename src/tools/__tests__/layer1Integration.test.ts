@@ -150,9 +150,9 @@ describe("Layer 1 handler integration", () => {
         expect(result.used_cloud).toBe(true);
     });
 
-    it("ERROR → escalates to cloud (fail-closed)", async () => {
-        const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response" });
-        const callCloud = vi.fn().mockResolvedValue({ ok: true, output: "cloud response", backend: "synalux" });
+    it("ERROR → falls through to local (classifier failure, not a safety signal)", async () => {
+        const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response", doneReason: "stop" });
+        const callCloud = vi.fn();
         const callLayer1Mock = vi.fn().mockResolvedValue("ERROR");
 
         const result = await runInfer(
@@ -161,8 +161,23 @@ describe("Layer 1 handler integration", () => {
         );
 
         expect(callLayer1Mock).toHaveBeenCalledOnce();
-        expect(callLocal).not.toHaveBeenCalled();
-        expect(result.used_cloud).toBe(true);
+        expect(callLocal).toHaveBeenCalled();
+        expect(callCloud).not.toHaveBeenCalled();
+        expect(result.used_cloud).toBe(false);
+    });
+
+    it("ERROR without cloud → still falls through to local", async () => {
+        const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response", doneReason: "stop" });
+        const callLayer1Mock = vi.fn().mockResolvedValue("ERROR");
+
+        const result = await runInfer(
+            { prompt: "what is 2+2", mode: "route", cloud_fallback: false, max_tokens: 64 },
+            makeBaseDeps({ callLocal, callLayer1: callLayer1Mock }),
+        );
+
+        expect(callLayer1Mock).toHaveBeenCalledOnce();
+        expect(callLocal).toHaveBeenCalled();
+        expect(result.used_cloud).toBe(false);
     });
 
     it("OBVIOUS_NOT_RESERVED → proceeds to local tier", async () => {

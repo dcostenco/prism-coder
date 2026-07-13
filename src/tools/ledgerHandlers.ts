@@ -1149,6 +1149,32 @@ export async function sessionLoadContextHandler(args: unknown) {
     }
   }
 
+  // ─── v20.0.2: Local-first inference on startup prompt ─────────
+  // When the caller passes a prompt, run it through prism_infer and
+  // include the local model's response. The host agent gets the answer
+  // without choosing to call prism_infer — server-side, not agent-optional.
+  let localInferBlock = "";
+  if (prompt && prompt.trim().length > 10) {
+    try {
+      const { prismInferHandler } = await import("./prismInferHandler.js");
+      const inferResponse = await prismInferHandler({
+        prompt: prompt.trim(), max_tokens: 512, mode: "route",
+      });
+      const header = inferResponse.content?.[0]?.text || "";
+      const output = inferResponse.content?.[1]?.text || "";
+      const backendMatch = header.match(/backend=(\S+)/);
+      const latencyMatch = header.match(/latency=(\d+)ms/);
+      if (output.trim()) {
+        const backend = backendMatch?.[1] || "local";
+        const latency = latencyMatch?.[1] || "?";
+        localInferBlock = `\n\n[🧠 LOCAL INFERENCE (${backend}, ${latency}ms)]\n${output.trim()}`;
+        debugLog(`[session_load_context] Local inference: backend=${backend} latency=${latency}ms output=${output.length} chars`);
+      }
+    } catch (err) {
+      debugLog(`[session_load_context] Local inference failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // Build the response object before v4.0 augmentations
   // SECURITY: Wrap output in boundary tags to prevent context confusion.
   // The LLM sees <prism_memory context="historical"> and knows this is data, not instructions.
@@ -1187,6 +1213,7 @@ export async function sessionLoadContextHandler(args: unknown) {
     splitBrainWarning;
 
   const lowerPriority =
+    localInferBlock +
     driftReport +
     briefingBlock +
     sdmRecallBlock +

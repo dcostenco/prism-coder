@@ -545,7 +545,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         const l1fn = deps.callLayer1 ?? defaultCallLayer1;
         const l1Model = resolveOllamaName("prism-coder:4b", installed);
         const l1 = await l1fn(args.prompt, deps.ollamaUrl, l1Model);
-        if (l1 !== "OBVIOUS_NOT_RESERVED") {
+        if (l1 === "OBVIOUS_RESERVED" || l1 === "UNCERTAIN") {
             debugLog(`[prism_infer] Layer 1 verdict=${l1} — reserved content detected`);
             attempts.push({ tier: "layer1", reason: `layer1_${l1.toLowerCase()}` });
             if (allowCloud) {
@@ -568,6 +568,10 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             throw new Error(
                 `prism_infer: Layer 1 verdict=${l1}, reserved content refused. attempts=${JSON.stringify(attempts)}`
             );
+        }
+        if (l1 === "ERROR") {
+            debugLog(`[prism_infer] Layer 1 verdict=ERROR (classifier timeout/failure) — proceeding to local`);
+            attempts.push({ tier: "layer1", reason: "layer1_error_fallthrough" });
         }
         debugLog(`[prism_infer] Layer 1 verdict=OBVIOUS_NOT_RESERVED — proceeding local`);
     }
