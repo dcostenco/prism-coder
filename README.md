@@ -18,7 +18,23 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
-## What's New in v20
+## What's New in v20.0.2
+
+### Reserved-Category Safety Gate — All Tiers
+The Layer 1 semantic classifier now runs for **every** user, not just paid tiers. Reserved clinical content (restraint, seclusion, crisis protocols) is refused on free tier when cloud is unavailable — fail-closed, never silently served locally. This closes a real gap where free-tier users bypassed classification entirely.
+
+### Compressed Safety Banner (500 → 120 tokens/call)
+The per-call operating boundaries text was split: safety declaration stays in every `session_load_context` response (~120 tokens); architecture/routing docs moved to the MCP server description (loaded once at connection). Saves ~350 tokens per call with no loss of defense-in-depth.
+
+### Ledger Dedup
+`session_save_ledger` now deduplicates identical entries within a 5-minute window, preventing the retry-storm pattern that produced duplicate rows.
+
+### Evidence Script
+`scripts/generate-evidence.sh` regenerates all 5 evidence files with built-in assertions (skill counts, tier gating, version consistency, inference correctness). Run `bash scripts/generate-evidence.sh` to verify the full pipeline.
+
+---
+
+## What's New in v20.0.0
 
 ### License: AGPL-3.0 → Apache-2.0
 Prism MCP is now Apache-2.0. The thin-client architecture means all proprietary value (skill resolution, tier gating, billing, cloud inference) lives server-side — the open client carries no moat to protect. Apache-2.0 removes the enterprise adoption friction that AGPL caused.
