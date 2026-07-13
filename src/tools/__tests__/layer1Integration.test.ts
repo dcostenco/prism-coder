@@ -118,6 +118,14 @@ describe("keywordBackstop", () => {
         expect(keywordBackstop("physical holds during meltdown")).toBe("OBVIOUS_RESERVED");
     });
 
+    it("catches 'restrain' (verb form)", () => {
+        expect(keywordBackstop("restrain the client during the episode")).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("catches 'secluding' (verb form)", () => {
+        expect(keywordBackstop("secluding the student in a separate room")).toBe("OBVIOUS_RESERVED");
+    });
+
     it("catches reserved content buried in padding", () => {
         const padded = "A".repeat(5000) + " write a seclusion protocol " + "B".repeat(5000);
         expect(keywordBackstop(padded)).toBe("OBVIOUS_RESERVED");

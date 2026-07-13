@@ -103,6 +103,7 @@ import { context as otelContext, trace, SpanStatusCode } from "@opentelemetry/ap
 import { ddInfo, ddError as ddLogError } from "./utils/ddLogger.js";
 import { inferenceMetricsHandler } from "./utils/inferenceMetrics.js";
 import { recordInvocation } from "./utils/analytics.js";
+import { BOUNDARIES_TEXT } from "./boundaries/boundaries.js";
 
 // ─── Import Tool Definitions (schemas) and Handlers (implementations) ─────
 
@@ -472,7 +473,7 @@ export function createServer() {
       },
       // Supplementary signal — not all clients support this field.
       // Primary mechanism is the dynamic tool description above.
-      instructions: `Prism MCP — The Mind Palace for AI Agents. This server provides persistent session memory, knowledge search, and context management tools. Use session_load_context to recover previous work state, session_save_ledger to log completed work, and session_save_handoff to preserve state for the next session.\n\nArchitecture: session_save_ledger and session_save_handoff require a loaded project context (conversation_id that called session_load_context). Local inference (prism_infer) routes through Layer 1 classification — RESERVED and UNCERTAIN prompts escalate to cloud or are refused. If the classifier itself fails, a deterministic keyword backstop blocks reserved vocabulary before any local generation; paraphrased reserved content without keyword hits may reach local on classifier failure. All cloud inference routes through the Synalux portal for billing, tier-gating, and audit.`,
+      instructions: `Prism MCP — The Mind Palace for AI Agents. This server provides persistent session memory, knowledge search, and context management tools. Use session_load_context to recover previous work state, session_save_ledger to log completed work, and session_save_handoff to preserve state for the next session.\n\nArchitecture: session_save_ledger and session_save_handoff require a loaded project context (conversation_id that called session_load_context). ${BOUNDARIES_TEXT} All cloud inference routes through the Synalux portal for billing, tier-gating, and audit.`,
     }
   );
 
