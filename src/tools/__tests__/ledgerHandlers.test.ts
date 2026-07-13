@@ -694,7 +694,7 @@ describe("ledgerHandlers", () => {
       const result = await sessionLoadContextHandler(validArgs);
       const text = result.content[0].text as string;
 
-      expect(text).toContain("Safety Boundaries");
+      expect(text).toContain("[Safety Boundaries");
       expect(text).toContain("BOUNDARIES STUB");
       expect(text).toContain("no previous session history");
     });
@@ -708,7 +708,7 @@ describe("ledgerHandlers", () => {
       const result = await sessionLoadContextHandler({ ...validArgs, level: "standard" });
       const text = result.content[0].text as string;
 
-      expect(text).toContain("Safety Boundaries");
+      expect(text).toContain("[Safety Boundaries");
       expect(text).toContain("BOUNDARIES STUB");
       expect(text).toContain("Did some work");
     });
@@ -722,7 +722,7 @@ describe("ledgerHandlers", () => {
       const result = await sessionLoadContextHandler({ ...validArgs, level: "quick" });
       const text = result.content[0].text as string;
 
-      expect(text).toContain("Safety Boundaries");
+      expect(text).toContain("[Safety Boundaries");
       expect(text).toContain("BOUNDARIES STUB");
     });
   });

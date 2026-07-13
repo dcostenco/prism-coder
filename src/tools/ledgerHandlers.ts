@@ -804,7 +804,7 @@ export async function sessionLoadContextHandler(args: unknown) {
       noteDriftSessionStart(convId);
     }
     const { BOUNDARIES_TEXT: BT0, BOUNDARIES_VERSION: BV0 } = await import("../boundaries/boundaries.js");
-    const boundariesHeader0 = `# Safety Boundaries (v${BV0})\n${BT0}\n\n---\n\n`;
+    const boundariesHeader0 = `[Safety Boundaries v${BV0}] ${BT0}\n\n---\n\n`;
     return {
       content: [{
         type: "text",
@@ -1238,7 +1238,7 @@ export async function sessionLoadContextHandler(args: unknown) {
     }
 
     const { BOUNDARIES_TEXT, BOUNDARIES_VERSION: BV } = await import("../boundaries/boundaries.js");
-    const boundariesHeader = `# Safety Boundaries (v${BV})\n${BOUNDARIES_TEXT}\n\n---\n\n`;
+    const boundariesHeader = `[Safety Boundaries v${BV}] ${BOUNDARIES_TEXT}\n\n---\n\n`;
 
     return {
       content: [{ type: "text", text: boundariesHeader + responseText + MEMORY_BOUNDARY_SUFFIX }],
@@ -1256,7 +1256,7 @@ export async function sessionLoadContextHandler(args: unknown) {
   }
 
   const { BOUNDARIES_TEXT, BOUNDARIES_VERSION: BV2 } = await import("../boundaries/boundaries.js");
-  const boundariesHeader2 = `# Safety Boundaries (v${BV2})\n${BOUNDARIES_TEXT}\n\n---\n\n`;
+  const boundariesHeader2 = `[Safety Boundaries v${BV2}] ${BOUNDARIES_TEXT}\n\n---\n\n`;
 
   return {
     content: [{ type: "text", text: boundariesHeader2 + responseText + MEMORY_BOUNDARY_SUFFIX }],
