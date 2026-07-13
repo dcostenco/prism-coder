@@ -1005,6 +1005,20 @@ export class SqliteStorage implements StorageBackend {
     const id = entry.id || randomUUID();
     const now = new Date().toISOString();
 
+    // Dedup: skip if an identical (project, conversation_id, summary) exists within 5 minutes
+    if (entry.project && entry.conversation_id && entry.summary) {
+      const dup = await this.db.execute({
+        sql: `SELECT id FROM session_ledger
+          WHERE project = ? AND conversation_id = ? AND summary = ?
+          AND created_at > datetime('now', '-5 minutes')
+          LIMIT 1`,
+        args: [entry.project, entry.conversation_id, entry.summary],
+      });
+      if (dup.rows.length > 0) {
+        return { id: (dup.rows[0] as unknown as { id: string }).id, deduplicated: true };
+      }
+    }
+
     await this.db.execute({
       sql: `INSERT INTO session_ledger
         (id, project, conversation_id, user_id, role, summary, todos, files_changed,

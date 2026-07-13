@@ -106,6 +106,7 @@ function mockDeps(overrides: Partial<InferDeps> = {}): InferDeps {
             backend: "synalux-14b",
         })),
         ollamaUrl: "http://localhost:11434",
+        callLayer1: vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const),
         callVerifier: vi.fn(async ({ draft }) => ({
             action: "accept" as const,
             finalText: draft,

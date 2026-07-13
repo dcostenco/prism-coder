@@ -79,6 +79,7 @@ const os = require('os');
       listTags: async () => { const r = await fetch('http://localhost:11434/api/tags').catch(()=>null); if(!r) return null; return new Set((await r.json()).models?.map(m=>m.name)||[]); },
       listLoaded: async () => { const r = await fetch('http://localhost:11434/api/ps').catch(()=>null); if(!r) return new Set(); return new Set((await r.json()).models?.map(m=>m.name)||[]); },
       callLocal: async (url,model,prompt,sys,max,temp,timeout,think) => { const body={model,messages:[{role:'user',content:prompt}],stream:false,think:!!think,options:{num_predict:max,temperature:temp}}; const r=await fetch(url+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(timeout)}); const d=await r.json(); return {ok:true,text:d.message?.content||''}; },
+      callLayer1: async () => 'OBVIOUS_NOT_RESERVED',
       callCloud: async () => ({ok:false,reason:'no_cloud'}),
       ollamaUrl: 'http://localhost:11434' }
   );

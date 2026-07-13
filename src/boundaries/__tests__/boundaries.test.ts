@@ -1,11 +1,10 @@
 /**
  * boundaries.ts unit tests
  *
- * Verifies structural invariants of the operating boundaries export:
+ * Verifies structural invariants of the safety declaration:
  * - BOUNDARIES_VERSION is present and non-empty
- * - BOUNDARIES_TEXT covers the five required sections
- * - Safety-critical concepts are mentioned (so a future edit doesn't silently
- *   remove them without also bumping the version and updating tests)
+ * - BOUNDARIES_TEXT covers safety-critical concepts
+ * - Architecture/routing docs moved to server instructions (not per-call)
  */
 
 import { describe, it, expect } from "vitest";
@@ -19,54 +18,39 @@ describe("BOUNDARIES_VERSION", () => {
 });
 
 describe("BOUNDARIES_TEXT structure", () => {
-  it("is a non-empty string", () => {
+  it("is a non-empty string under 500 chars (compressed from ~2000)", () => {
     expect(typeof BOUNDARIES_TEXT).toBe("string");
-    expect(BOUNDARIES_TEXT.length).toBeGreaterThan(100);
+    expect(BOUNDARIES_TEXT.length).toBeGreaterThan(50);
+    expect(BOUNDARIES_TEXT.length).toBeLessThan(600);
   });
 
   it("has no leading or trailing whitespace (trim() was applied)", () => {
     expect(BOUNDARIES_TEXT).toBe(BOUNDARIES_TEXT.trim());
   });
 
-  it("contains a safety gates section", () => {
-    expect(BOUNDARIES_TEXT).toMatch(/safety gates/i);
+  it("references BCBA reserved categories", () => {
+    expect(BOUNDARIES_TEXT).toMatch(/BCBA reserved/i);
   });
 
-  it("contains a BCBA clinical standards section", () => {
-    expect(BOUNDARIES_TEXT).toMatch(/bcba/i);
-  });
-
-  it("contains a correctness gates section", () => {
-    expect(BOUNDARIES_TEXT).toMatch(/correctness gates/i);
-  });
-
-  it("contains an inference routing section", () => {
-    expect(BOUNDARIES_TEXT).toMatch(/inference routing/i);
-  });
-
-  it("contains a host note section", () => {
-    expect(BOUNDARIES_TEXT).toMatch(/host note/i);
-  });
-
-  it("asserts that enforcement is server-side (not instruction-based)", () => {
-    expect(BOUNDARIES_TEXT).toMatch(/server.*enforc|enforc.*server/i);
-  });
-
-  it("references the fail-closed rule for reserved + no-cloud", () => {
-    expect(BOUNDARIES_TEXT).toMatch(/fail.?closed|refused/i);
+  it("references fail-closed refusal for reserved content", () => {
+    expect(BOUNDARIES_TEXT).toMatch(/refused/i);
   });
 
   it("states AAC access is never restricted as a consequence", () => {
     expect(BOUNDARIES_TEXT).toMatch(/AAC access is never restricted/i);
   });
 
-  it("references restraint as a RESERVED category", () => {
+  it("references restraint as reserved", () => {
     expect(BOUNDARIES_TEXT).toMatch(/restraint/i);
-    expect(BOUNDARIES_TEXT).toMatch(/RESERVED/i);
   });
 
-  it("mentions session_save_ledger and session_save_handoff in correctness section", () => {
-    expect(BOUNDARIES_TEXT).toContain("session_save_ledger");
-    expect(BOUNDARIES_TEXT).toContain("session_save_handoff");
+  it("references crisis/self-harm interception", () => {
+    expect(BOUNDARIES_TEXT).toMatch(/crisis|self-harm/i);
+  });
+
+  it("does NOT contain architecture/routing docs (those moved to server instructions)", () => {
+    expect(BOUNDARIES_TEXT).not.toContain("session_save_ledger");
+    expect(BOUNDARIES_TEXT).not.toContain("inference routing");
+    expect(BOUNDARIES_TEXT).not.toMatch(/host note/i);
   });
 });

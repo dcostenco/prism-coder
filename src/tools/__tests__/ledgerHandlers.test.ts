@@ -694,7 +694,7 @@ describe("ledgerHandlers", () => {
       const result = await sessionLoadContextHandler(validArgs);
       const text = result.content[0].text as string;
 
-      expect(text).toContain("OPERATING BOUNDARIES");
+      expect(text).toContain("Safety Boundaries");
       expect(text).toContain("BOUNDARIES STUB");
     });
   });

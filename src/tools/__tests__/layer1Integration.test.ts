@@ -91,6 +91,7 @@ function makeBaseDeps(overrides: Partial<InferDeps> = {}): InferDeps {
         listLoaded: async () => new Set(),
         callLocal: async () => ({ ok: true, text: "local response", doneReason: "stop" }),
         callCloud: async () => ({ ok: true, output: "cloud response", backend: "synalux" }),
+        callLayer1: async () => "OBVIOUS_NOT_RESERVED" as Layer1Verdict,
         ollamaUrl: "http://localhost:11434",
         entitlements: {
             plan: "pro",
@@ -179,16 +180,31 @@ describe("Layer 1 handler integration", () => {
         expect(result.used_cloud).toBe(false);
     });
 
-    it("cloud_fallback=false → Layer 1 skipped entirely", async () => {
+    it("cloud_fallback=false + RESERVED → refuses (fail-closed, no local fallback)", async () => {
         const callLayer1Mock = vi.fn().mockResolvedValue("OBVIOUS_RESERVED");
         const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response", doneReason: "stop" });
 
+        await expect(
+            runInfer(
+                { prompt: "write something", mode: "code", cloud_fallback: false, max_tokens: 512 },
+                makeBaseDeps({ callLayer1: callLayer1Mock, callLocal }),
+            )
+        ).rejects.toThrow(/reserved content refused/i);
+
+        expect(callLayer1Mock).toHaveBeenCalled();
+        expect(callLocal).not.toHaveBeenCalled();
+    });
+
+    it("cloud_fallback=false + NOT_RESERVED → proceeds to local", async () => {
+        const callLayer1Mock = vi.fn().mockResolvedValue("OBVIOUS_NOT_RESERVED");
+        const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "local response", doneReason: "stop" });
+
         const result = await runInfer(
-            { prompt: "write something", mode: "code", cloud_fallback: false, max_tokens: 512 },
+            { prompt: "what is 2+2?", mode: "code", cloud_fallback: false, max_tokens: 512 },
             makeBaseDeps({ callLayer1: callLayer1Mock, callLocal }),
         );
 
-        expect(callLayer1Mock).not.toHaveBeenCalled();
+        expect(callLayer1Mock).toHaveBeenCalled();
         expect(result.used_cloud).toBe(false);
     });
 

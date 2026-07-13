@@ -534,37 +534,39 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     }
 
     // ── §E Layer 1 semantic pre-classifier ──────────────────────────────────
-    // Catches adversarial paraphrases the keyword stub misses.
-    // Runs only when cloud escalation is possible — without cloud, there is
-    // nowhere to route a RESERVED verdict.
+    // Runs for ALL tiers when Ollama is reachable. RESERVED prompts escalate
+    // to cloud if available; otherwise refuse (fail-closed). Free-tier users
+    // without cloud still get classified — a RESERVED verdict refuses the
+    // request rather than silently routing to local.
     // Recursion guard: skip when this call IS the Layer 1 classification
     // (mode="route" + max_tokens<=16 is the Layer 1 call signature).
     const layer1RecursionGuard = mode === "route" && maxTokens <= 16;
-    if (allowCloud && !layer1RecursionGuard) {
+    if (installed && !layer1RecursionGuard) {
         const l1fn = deps.callLayer1 ?? defaultCallLayer1;
-        const l1Model = resolveOllamaName("prism-coder:4b", installed ?? new Set());
+        const l1Model = resolveOllamaName("prism-coder:4b", installed);
         const l1 = await l1fn(args.prompt, deps.ollamaUrl, l1Model);
         if (l1 !== "OBVIOUS_NOT_RESERVED") {
-            debugLog(`[prism_infer] Layer 1 verdict=${l1} — escalating to cloud`);
+            debugLog(`[prism_infer] Layer 1 verdict=${l1} — reserved content detected`);
             attempts.push({ tier: "layer1", reason: `layer1_${l1.toLowerCase()}` });
-            const cloudTimeout = args.timeout_ms ?? 90_000;
-            const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout);
-            if (cloud.ok && cloud.output) {
-                return await applyVerification(cloud.output, gatedArgs, deps, {
-                    backend: cloud.backend ?? "synalux",
-                    model_picked: null,
-                    ram_free_mb: ramFreeMb,
-                    latency_ms: Date.now() - t0,
-                    used_cloud: true,
-                    attempts,
-                    plan: ent.plan,
-                    completion_tokens: Math.ceil(cloud.output.length / 4),
-                });
+            if (allowCloud) {
+                const cloudTimeout = args.timeout_ms ?? 90_000;
+                const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout);
+                if (cloud.ok && cloud.output) {
+                    return await applyVerification(cloud.output, gatedArgs, deps, {
+                        backend: cloud.backend ?? "synalux",
+                        model_picked: null,
+                        ram_free_mb: ramFreeMb,
+                        latency_ms: Date.now() - t0,
+                        used_cloud: true,
+                        attempts,
+                        plan: ent.plan,
+                        completion_tokens: Math.ceil(cloud.output.length / 4),
+                    });
+                }
+                attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
             }
-            attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
-            // Layer 1 flagged RESERVED but cloud unavailable — fail closed, never fall through to local.
             throw new Error(
-                `prism_infer: Layer 1 verdict=${l1} but cloud unavailable. attempts=${JSON.stringify(attempts)}`
+                `prism_infer: Layer 1 verdict=${l1}, reserved content refused. attempts=${JSON.stringify(attempts)}`
             );
         }
         debugLog(`[prism_infer] Layer 1 verdict=OBVIOUS_NOT_RESERVED — proceeding local`);

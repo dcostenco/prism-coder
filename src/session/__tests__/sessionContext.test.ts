@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { GateResult } from "../../session/sessionContext.js";
+import { BOUNDARIES_VERSION } from "../../boundaries/boundaries.js";
 
 // Reset module registry before each test so the in-memory Map starts empty.
 let markContextLoaded: (conversationId: string, project: string, version: string) => void;
@@ -64,7 +65,7 @@ describe("requireContextLoaded — fail-closed defaults", () => {
 
 describe("markContextLoaded → requireContextLoaded lifecycle", () => {
   it("returns null (pass) after markContextLoaded is called", () => {
-    markContextLoaded("conv-abc", "project-x", "1");
+    markContextLoaded("conv-abc", "project-x", BOUNDARIES_VERSION);
     expect(requireContextLoaded("conv-abc")).toBeNull();
   });
 
@@ -78,17 +79,17 @@ describe("markContextLoaded → requireContextLoaded lifecycle", () => {
   });
 
   it("is idempotent — calling twice does not break state", () => {
-    // Use the actual BOUNDARIES_VERSION ("1") so no drift warning fires.
-    markContextLoaded("conv-idem", "proj", "1");
-    markContextLoaded("conv-idem", "proj-updated", "1");
+    // Use the actual BOUNDARIES_VERSION so no drift warning fires.
+    markContextLoaded("conv-idem", "proj", BOUNDARIES_VERSION);
+    markContextLoaded("conv-idem", "proj-updated", BOUNDARIES_VERSION);
     const state = getSessionState("conv-idem") as any;
     expect(state.project).toBe("proj-updated");
-    expect(state.boundariesVersion).toBe("1");
+    expect(state.boundariesVersion).toBe(BOUNDARIES_VERSION);
     expect(requireContextLoaded("conv-idem")).toBeNull();
   });
 
   it("isolates sessions — loading one does not unblock another", () => {
-    markContextLoaded("conv-A", "proj", "1");
+    markContextLoaded("conv-A", "proj", BOUNDARIES_VERSION);
     expect(requireContextLoaded("conv-A")).toBeNull();
     expect(requireContextLoaded("conv-B")).not.toBeNull();
   });
@@ -96,7 +97,7 @@ describe("markContextLoaded → requireContextLoaded lifecycle", () => {
 
 describe("noteInferenceForSession", () => {
   it("increments inferenceCalls on every call", () => {
-    markContextLoaded("conv-inf", "proj", "1");
+    markContextLoaded("conv-inf", "proj", BOUNDARIES_VERSION);
     noteInferenceForSession("conv-inf", { backend: "local", usedCloud: false });
     noteInferenceForSession("conv-inf", { backend: "local", usedCloud: false });
     const state = getSessionState("conv-inf") as any;
@@ -104,7 +105,7 @@ describe("noteInferenceForSession", () => {
   });
 
   it("increments usedCloudCalls only for cloud calls", () => {
-    markContextLoaded("conv-cloud", "proj", "1");
+    markContextLoaded("conv-cloud", "proj", BOUNDARIES_VERSION);
     noteInferenceForSession("conv-cloud", { backend: "cloud", usedCloud: true });
     noteInferenceForSession("conv-cloud", { backend: "local", usedCloud: false });
     const state = getSessionState("conv-cloud") as any;
@@ -128,7 +129,7 @@ describe("getSessionState", () => {
   });
 
   it("returns the current state object for a known session", () => {
-    markContextLoaded("conv-get", "proj", "1");
+    markContextLoaded("conv-get", "proj", BOUNDARIES_VERSION);
     const state = getSessionState("conv-get") as any;
     expect(state).not.toBeNull();
     expect(state.contextLoaded).toBe(true);
@@ -137,7 +138,7 @@ describe("getSessionState", () => {
 
 describe("lastSeen update", () => {
   it("updates lastSeen on every requireContextLoaded call", async () => {
-    markContextLoaded("conv-ts", "proj", "1");
+    markContextLoaded("conv-ts", "proj", BOUNDARIES_VERSION);
     const before = (getSessionState("conv-ts") as any).lastSeen;
     // Advance time by mocking Date.now via vi.useFakeTimers
     vi.useFakeTimers();
