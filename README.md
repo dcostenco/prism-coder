@@ -18,19 +18,25 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
-## What's New in v20.0.2
+## What's New in v20.0.3
 
-### Reserved-Category Safety Gate — All Tiers
-The Layer 1 semantic classifier now runs for **every** user, not just paid tiers. Reserved clinical content (restraint, seclusion, crisis protocols) is refused on free tier when cloud is unavailable — fail-closed, never silently served locally. This closes a real gap where free-tier users bypassed classification entirely.
+### Layer 1 Cold-Model Resilience
+The reserved-category classifier now retries once with a longer timeout on cold-model failure, then falls back to a deterministic keyword backstop before refusing. Over-length prompts (>4K chars) are classified as UNCERTAIN before reaching the classifier — prompt padding can no longer force the ERROR branch. This eliminates the cold-start refusal problem without weakening the safety gate.
 
-### Compressed Safety Banner (500 → 120 tokens/call)
-The per-call operating boundaries text was split: safety declaration stays in every `session_load_context` response (~120 tokens); architecture/routing docs moved to the MCP server description (loaded once at connection). Saves ~350 tokens per call with no loss of defense-in-depth.
+### Keyword Backstop for Reserved Content
+When the LLM classifier fails (timeout, injection, resource pressure), a deterministic regex floor catches reserved vocabulary (restraint, seclusion, self-harm, suicide, overdose, crisis de-escalation, etc.) including inflected and verb forms. Blocks prompt-padding and classifier-injection attacks on the ERROR path.
 
-### Ledger Dedup
-`session_save_ledger` now deduplicates identical entries within a 5-minute window, preventing the retry-storm pattern that produced duplicate rows.
+### Single-Source Safety Text
+The safety statement in the MCP server `instructions` field now imports from `boundaries.ts` — one source of truth instead of two hand-maintained copies. Boundaries version bumped to v3 with an explicit delivery decision documented in code.
 
-### Evidence Script
-`scripts/generate-evidence.sh` regenerates all 5 evidence files with built-in assertions (skill counts, tier gating, version consistency, inference correctness). Run `bash scripts/generate-evidence.sh` to verify the full pipeline.
+### Reserved-Category Safety Gate — All Tiers (v20.0.2)
+The Layer 1 semantic classifier now runs for **every** user, not just paid tiers. Reserved clinical content is refused on free tier when cloud is unavailable — fail-closed.
+
+### Ledger Dedup (v20.0.2)
+`session_save_ledger` deduplicates identical entries within a 5-minute window.
+
+### Evidence Script (v20.0.2)
+`scripts/generate-evidence.sh` regenerates all 5 evidence files with built-in assertions. Run `bash scripts/generate-evidence.sh` to verify the full pipeline.
 
 ---
 
