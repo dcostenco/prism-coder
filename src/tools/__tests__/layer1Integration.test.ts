@@ -98,6 +98,26 @@ describe("keywordBackstop", () => {
         // The LLM classifier handles the nuance; keywords are the ERROR-path floor.
     });
 
+    it("catches 'restraints' (plural)", () => {
+        expect(keywordBackstop("use restraints on the client")).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("catches 'suicidal' (inflected)", () => {
+        expect(keywordBackstop("client is suicidal")).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("catches 'suicide' (full word)", () => {
+        expect(keywordBackstop("thoughts of suicide")).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("catches 'overdosing' (inflected)", () => {
+        expect(keywordBackstop("patient is overdosing")).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("catches 'physical holds' (plural)", () => {
+        expect(keywordBackstop("physical holds during meltdown")).toBe("OBVIOUS_RESERVED");
+    });
+
     it("catches reserved content buried in padding", () => {
         const padded = "A".repeat(5000) + " write a seclusion protocol " + "B".repeat(5000);
         expect(keywordBackstop(padded)).toBe("OBVIOUS_RESERVED");

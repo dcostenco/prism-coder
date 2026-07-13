@@ -75,7 +75,7 @@ const LAYER1_RETRY_TIMEOUT_MS = 5_000;
 // Not sufficient alone (adversaries can paraphrase), but as an ERROR-path
 // floor they block the obvious cases that padding/injection attacks
 // would otherwise smuggle through.
-const RESERVED_KEYWORDS = /\b(restraint|seclusion|physical\s*hold|containment|self[- ]harm|suicid|overdose|dosage\s*mg|dosing\s*schedule|crisis\s*de[- ]?escalation|meltdown\s*management|elopement\s*incident)\b/i;
+const RESERVED_KEYWORDS = /\b(restraints?|seclusion|physical\s*holds?|containment|self[- ]?harm\w*|suicid\w*|overdos\w*|dos(?:age|ing)\s*(?:mg|schedule)|crisis\s*de[- ]?escalation|meltdown\s*management|elopement\s*incident)\b/i;
 
 /**
  * Deterministic keyword check — the ERROR-path floor.
