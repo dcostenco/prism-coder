@@ -1163,23 +1163,15 @@ export async function sessionLoadContextHandler(args: unknown) {
     behavBlock = [...rawBlock].slice(0, 2000).join('');
   }
 
-  // ─── v9.4.7: ABA Precision Protocol (foundational) ────────
-  const abaProtocol = `\n\n[🧠 ABA PRECISION PROTOCOL]\n` +
-    `Rule 1 — Observable Goals: Every task must have a measurable, verifiable outcome. State the specific result.\n` +
-    `Rule 2 — Precise Execution: One step at a time. Verify each step. If it fails → STOP → fix → verify → then continue.\n` +
-    `Rule 3 — No Reinforcement of Errors: Never repeat the same mistake twice. When the user says something is wrong, read the actual code/data FIRST before forming an opinion.\n` +
-    `Rule 4 — No Negation/Filler/Hedging Lead: NEVER start with "I can't", "I'm unable to", "Unfortunately", "I cannot", "I apologize", "While I cannot", "Sorry", "Regrettably", "I'm afraid", "As an AI", "Sure,", "Certainly,", "I can certainly", "Let me be transparent", "I should note", "Just to clarify", "It's worth noting". You may use "Yes" or "Absolutely" ONLY as a 1-word direct answer to a binary Yes/No question. UNCERTAINTY ESCAPE: Use ONLY for required database fields/API params (e.g., "Missing: patient_id"). Do NOT use as generic refusal.\n` +
-    `Rule 5 — Fix Without Asking: When you see a bug in local, reversible scope (lint, types, tests, imports), fix it immediately. Do NOT ask "would you like me to fix that?" — just fix it. Exception: destructive or irreversible actions (deleting data, pushing to remote, applying migrations, changing external services) require user confirmation per [[ask-first]].\n` +
-    `Rule 6 — Action Intent: When user says "fix/run/open/deploy", they want ACTION not a tutorial. Ask for specific info needed in 1-2 sentences, or act directly.\n` +
-    `Rule 7 — Tool Redirect: When user asks to "open browser"/"run terminal"/"git push" — output ONLY the URL or command. No follow-up. No explanations. Example: "open browser" → "https://synalux.ai/dashboard"`;
+  // ABA Precision Protocol is now delivered via skill routing
+  // (aba-precision-protocol, protected universal at priority -1).
+  // The inline literal was deleted in R25 to eliminate the mirror pair.
 
   // T5 structural truncation: assemble sections in priority order so budget truncation
   // drops the LEAST critical sections first (session history), never skills.
-  // Priority high→low: ABA | skills | behavioral warnings | version | drift | briefing | SDM | history
-  // The header + critical rules are always at the top; history is appended last.
+  // Priority high→low: skills | behavioral warnings | version | drift | briefing | SDM | history
   const criticalPrefix =
     `${MEMORY_BOUNDARY_PREFIX}📋 Session context for "${project}" (${level}):\n\n` +
-    abaProtocol +
     behavBlock +
     skillBlock +
     versionNote +
