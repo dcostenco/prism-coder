@@ -89,6 +89,8 @@ OUTPUT_LEN=$(python3 -c "import json; print(len(json.load(open('$OUT/05-prism-in
 BACKEND=$(python3 -c "import json; print(json.load(open('$OUT/05-prism-infer.json')).get('backend','?'))")
 echo "$BACKEND, output=$OUTPUT_LEN chars"
 [ "$OUTPUT_LEN" -gt 0 ] || { echo "FAIL: prism_infer returned empty output"; exit 1; }
+OUTPUT=$(python3 -c "import json; print(json.load(open('$OUT/05-prism-infer.json')).get('output',''))")
+echo "$OUTPUT" | grep -q "4" || { echo "FAIL: prism_infer output '$OUTPUT' does not contain expected answer '4'"; exit 1; }
 
 # Version consistency
 echo -n "version check... "
