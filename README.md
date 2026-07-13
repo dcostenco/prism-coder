@@ -382,9 +382,9 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 |---|---|---|---|---|
 | Seats | 1 | 1 | up to 5 | up to 25 |
 | Local model ceiling | up to 4b | up to 9b | up to 27b | up to 27b |
-| Daily cloud inference | -- | 200 | 2,000 | 100,000 |
-| Cloud Coder (Web IDE) | -- | 100/day | 1,000/day | 100,000/day |
-| Cloud search | -- | 50/day | 500/day | 100,000/day |
+| Cloud inference | -- | ✅ | ✅ | ✅ (priority) |
+| Cloud Coder (Web IDE) | -- | ✅ | ✅ | ✅ (priority) |
+| Cloud search | -- | ✅ | ✅ | ✅ |
 | Max output tokens | 512 | 1,024 | 2,048 | 4,096 |
 | Cloud fallback | -- | Claude Opus 4.7 | Claude Opus 4.7 | Priority + Opus 4.7 |
 | Grounding verifier (fact-check AI output) | -- | ✅ | ✅ | ✅ |
