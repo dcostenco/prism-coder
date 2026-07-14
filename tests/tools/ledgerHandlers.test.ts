@@ -538,7 +538,7 @@ describe("ledgerHandlers", () => {
       expect(text).toContain("</prism_memory>");
     });
 
-    it("includes ABA Precision Protocol in every response", async () => {
+    it("does not contain inline ABA protocol (delivered via skill routing)", async () => {
       storage.loadContext.mockResolvedValue({
         last_summary: "Summary",
         version: 1,
@@ -546,8 +546,7 @@ describe("ledgerHandlers", () => {
 
       const result = await sessionLoadContextHandler(validArgs);
       const text = result.content[0].text as string;
-      expect(text).toContain("ABA PRECISION PROTOCOL");
-      expect(text).toContain("Observable Goals");
+      expect(text).not.toContain("ABA PRECISION PROTOCOL");
     });
 
     it("passes role to loadContext when provided", async () => {
