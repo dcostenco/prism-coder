@@ -18,6 +18,16 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
+## What's New in v20.0.4
+
+### Think-Only Retry
+Qwen 3.5 models (9B/27B) with thinking enabled could burn all tokens on `<think>` blocks and return empty content, causing a cascade to 4B. Now detects think-only responses and retries the same tier with thinking disabled — preserving model quality instead of falling to a smaller model.
+
+### Local-First Skill Rewrite
+The `local-inference-first` skill now uses a hard falsifiable trigger list (format conversion, regex, i18n, boilerplate CRUD, deterministic tests) with no self-assessment escape. Clinical content removed from delegation — it conflicts with the Layer 1 reserved-category safety floor. Honest target: 15-25% of prompts delegated at equal quality.
+
+---
+
 ## What's New in v20.0.3
 
 ### Layer 1 Cold-Model Resilience
