@@ -38,6 +38,7 @@ export interface InferenceSnapshot {
      *  This is the "opportunity savings" — what would have gone to Claude/Synalux portal. */
     cloudTokensSavedEst: number;
     thinkOnlyRetries: number;
+    thinkOnlyRetryPct: number;
     byModel: Record<string, ModelStats>;
 }
 
@@ -152,6 +153,7 @@ export function getInferenceSnapshot(): InferenceSnapshot {
         avgLatencyMs: total > 0 ? Math.round(totalLatencyMs / total) : 0,
         cloudTokensSavedEst,
         thinkOnlyRetries,
+        thinkOnlyRetryPct: localCalls > 0 ? Math.round((thinkOnlyRetries / localCalls) * 100) : 0,
         byModel: modelCopy,
     };
 }
