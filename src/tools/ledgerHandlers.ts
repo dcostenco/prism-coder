@@ -1118,8 +1118,10 @@ export async function sessionLoadContextHandler(args: unknown) {
     greetingBlock = `\n\n[👤 AGENT IDENTITY]\n${namePart}${rolePart}${skillPart}`;
   }
 
-  // ─── SDM Intuitive Recall (v5.5) ───
-  // Generate embedding of current context and fetch latent SDM patterns
+  // ─── SDM Associative Recall (v5.5) ───
+  // Accepted as-is (R27): cosine similarity at 0.55 threshold, 3 matches max.
+  // Relabeled from "Intuitive Recall" to "Associative Recall" in R16.
+  // Not a verified-fact source — label says "similarity-matched, not verified facts."
   let sdmRecallBlock = "";
   if (level !== "quick") {
     try {
