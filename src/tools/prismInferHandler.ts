@@ -708,6 +708,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             );
             // Think-only retry: model burned all tokens on <think>, empty content.
             // Retry same model with think=false rather than falling to a smaller tier.
+            // One-shot: think=false cannot re-trigger think_only (no thinking to burn).
             if (!result.ok && result.reason === "think_only" && enableThink) {
                 debugLog(`[prism_infer] ${tier.tag} returned think-only — retrying with think=false`);
                 result = await deps.callLocal(

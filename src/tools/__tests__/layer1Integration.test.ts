@@ -359,6 +359,26 @@ describe("Layer 1 handler integration", () => {
 
         expect(callLocal).not.toHaveBeenCalled();
     });
+
+    it("think_only → retries same tier with think=false, succeeds", async () => {
+        let callCount = 0;
+        const callLocal = vi.fn().mockImplementation(async (_url, _model, _prompt, _sys, _max, _temp, _timeout, think) => {
+            callCount++;
+            if (think) return { ok: false, reason: "think_only" };
+            return { ok: true, text: "answer without thinking", doneReason: "stop" };
+        });
+
+        const result = await runInfer(
+            { prompt: "write a regex for emails", mode: "code", cloud_fallback: false, max_tokens: 256 },
+            makeBaseDeps({ callLocal }),
+        );
+
+        expect(callCount).toBe(2);
+        expect(callLocal).toHaveBeenNthCalledWith(1, expect.anything(), expect.anything(), expect.anything(), undefined, expect.anything(), expect.anything(), expect.anything(), true);
+        expect(callLocal).toHaveBeenNthCalledWith(2, expect.anything(), expect.anything(), expect.anything(), undefined, expect.anything(), expect.anything(), expect.anything(), false);
+        expect(result.output).toBe("answer without thinking");
+        expect(result.used_cloud).toBe(false);
+    });
 });
 
 // ── Auto-evict unit tests ─────────────────────────────────────────────────────
