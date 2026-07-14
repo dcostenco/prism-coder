@@ -37,6 +37,7 @@ export interface InferenceSnapshot {
      *  Accumulated as submittedEst + completionTokens for every used_cloud=false call.
      *  This is the "opportunity savings" — what would have gone to Claude/Synalux portal. */
     cloudTokensSavedEst: number;
+    thinkOnlyRetries: number;
     byModel: Record<string, ModelStats>;
 }
 
@@ -66,6 +67,11 @@ let promptTokensSubmittedEst = 0;
 let totalCompletionTokens = 0;
 let totalLatencyMs = 0;
 let cloudTokensSavedEst = 0;
+let thinkOnlyRetries = 0;
+
+export function recordThinkOnlyRetry(): void {
+    thinkOnlyRetries++;
+}
 
 export function recordInference(result: {
     backend: string;
@@ -145,6 +151,7 @@ export function getInferenceSnapshot(): InferenceSnapshot {
         totalTokens: promptTokensSubmittedEst + totalCompletionTokens,
         avgLatencyMs: total > 0 ? Math.round(totalLatencyMs / total) : 0,
         cloudTokensSavedEst,
+        thinkOnlyRetries,
         byModel: modelCopy,
     };
 }
@@ -157,6 +164,7 @@ export function resetInferenceMetrics(): void {
     totalCompletionTokens = 0;
     totalLatencyMs = 0;
     cloudTokensSavedEst = 0;
+    thinkOnlyRetries = 0;
     for (const key of Object.keys(byModel)) {
         delete byModel[key];
     }

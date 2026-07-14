@@ -39,7 +39,7 @@ import { stripThink } from "../utils/thinkStrip.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
 import { callLayer1 as defaultCallLayer1, keywordBackstop, type Layer1Verdict } from "../utils/layer1.js";
-import { recordInference, formatInferenceMetrics } from "../utils/inferenceMetrics.js";
+import { recordInference, recordThinkOnlyRetry, formatInferenceMetrics } from "../utils/inferenceMetrics.js";
 
 // ─── Tool Definition ────────────────────────────────────────────
 
@@ -711,6 +711,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // One-shot: think=false cannot re-trigger think_only (no thinking to burn).
             if (!result.ok && result.reason === "think_only" && enableThink) {
                 debugLog(`[prism_infer] ${tier.tag} returned think-only — retrying with think=false`);
+                recordThinkOnlyRetry();
                 result = await deps.callLocal(
                     deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout, false,
                 );
