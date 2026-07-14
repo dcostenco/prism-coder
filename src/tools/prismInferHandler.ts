@@ -290,7 +290,13 @@ async function callOllamaGenerate(
         const data = (await res.json()) as OllamaChatResp;
         if (data.error) return { ok: false, reason: `ollama_err:${data.error}` };
         const text = (data.message?.content ?? "").trim();
-        if (!text) return { ok: false, reason: "empty_response" };
+        if (!text) {
+            // When think=true, the model may burn all tokens on <think> and
+            // produce empty content. Report this distinctly so the tier loop
+            // can retry the same model with think=false rather than skipping.
+            const hadThinking = !!((data.message as any)?.thinking);
+            return { ok: false, reason: hadThinking ? "think_only" : "empty_response" };
+        }
         return { ok: true, text, doneReason: data.done_reason, promptTokens: data.prompt_eval_count, completionTokens: data.eval_count };
     } catch (err) {
         const name = err instanceof Error ? err.name : "Unknown";
@@ -697,9 +703,17 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             anyViable = true;
             const timeout = args.timeout_ms ?? DEFAULT_TIMEOUTS[tier.tag] ?? 60_000;
             const enableThink = args.think ?? (mode !== "route");
-            const result = await deps.callLocal(
+            let result = await deps.callLocal(
                 deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout, enableThink,
             );
+            // Think-only retry: model burned all tokens on <think>, empty content.
+            // Retry same model with think=false rather than falling to a smaller tier.
+            if (!result.ok && result.reason === "think_only" && enableThink) {
+                debugLog(`[prism_infer] ${tier.tag} returned think-only — retrying with think=false`);
+                result = await deps.callLocal(
+                    deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout, false,
+                );
+            }
             if (result.ok) {
                 const { stripped, thinkOnly } = stripThink(result.text);
                 const output = stripped;
