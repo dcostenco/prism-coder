@@ -31,15 +31,21 @@ echo -n "ev2 (content delivery)... "
 node -e "
 const { sessionLoadContextHandler } = require('./dist/tools/ledgerHandlers.js');
 (async () => {
+  const t0 = Date.now();
   const r = await sessionLoadContextHandler({ project: 'prism-mcp', level: 'quick', conversation_id: 'evidence' });
+  const latency_ms = Date.now() - t0;
   const text = r.content[0].text;
   const skills = (text.match(/\[📜 SKILL: ([^\]]+)\]/g) || []).map(s => s.replace(/\[📜 SKILL: |\]/g, ''));
-  console.log(JSON.stringify({ skills_loaded: skills.length, has_content: text.includes('---\nname:'), all_skills: skills }));
+  const total_chars = text.length;
+  console.log(JSON.stringify({ skills_loaded: skills.length, has_content: text.includes('---\nname:'), total_chars, latency_ms, all_skills: skills }));
 })().catch(e => { console.error(e.message); process.exit(1); });
 " 2>/dev/null > "$OUT/02-session-load-content.json"
 CONTENT_COUNT=$(python3 -c "import json; print(json.load(open('$OUT/02-session-load-content.json'))['skills_loaded'])")
 HAS_CONTENT=$(python3 -c "import json; print(json.load(open('$OUT/02-session-load-content.json'))['has_content'])")
-echo "$CONTENT_COUNT skills, content=$HAS_CONTENT"
+LATENCY=$(python3 -c "import json; print(json.load(open('$OUT/02-session-load-content.json')).get('latency_ms','?'))")
+CHARS=$(python3 -c "import json; print(json.load(open('$OUT/02-session-load-content.json')).get('total_chars','?'))")
+echo "$CONTENT_COUNT skills, content=$HAS_CONTENT, ${LATENCY}ms, ${CHARS} chars"
+[ "$CHARS" -lt 150000 ] || { echo "WARN: session_load_context output is ${CHARS} chars — context budget growing"; }
 [ "$CONTENT_COUNT" -gt 20 ] || { echo "FAIL: should load >20 skills with content, got $CONTENT_COUNT"; exit 1; }
 [ "$HAS_CONTENT" = "True" ] || { echo "FAIL: skill content should include frontmatter"; exit 1; }
 
@@ -92,6 +98,27 @@ echo "$BACKEND, output=$OUTPUT_LEN chars"
 [ "$OUTPUT_LEN" -gt 0 ] || { echo "FAIL: prism_infer returned empty output"; exit 1; }
 OUTPUT=$(python3 -c "import json; print(json.load(open('$OUT/05-prism-infer.json')).get('output',''))")
 echo "$OUTPUT" | grep -q "4" || { echo "FAIL: prism_infer output '$OUTPUT' does not contain expected answer '4'"; exit 1; }
+
+# Ev6: Layer 1 classifier latency (cold + warm)
+echo -n "ev6 (layer1 latency)... "
+node -e "
+const { callLayer1 } = require('./dist/utils/layer1.js');
+(async () => {
+  const model = 'dcostenco/prism-coder:4b';
+  const url = 'http://localhost:11434';
+  const prompt = 'write a Python hello world script';
+  const t1 = Date.now();
+  const v1 = await callLayer1(prompt, url, model);
+  const cold_ms = Date.now() - t1;
+  const t2 = Date.now();
+  const v2 = await callLayer1(prompt, url, model);
+  const warm_ms = Date.now() - t2;
+  console.log(JSON.stringify({ cold_ms, warm_ms, verdict_cold: v1, verdict_warm: v2 }));
+})().catch(e => { console.error(e.message); process.exit(1); });
+" 2>/dev/null > "$OUT/06-layer1-latency.json"
+COLD=$(python3 -c "import json; print(json.load(open('$OUT/06-layer1-latency.json')).get('cold_ms','?'))")
+WARM=$(python3 -c "import json; print(json.load(open('$OUT/06-layer1-latency.json')).get('warm_ms','?'))")
+echo "cold=${COLD}ms, warm=${WARM}ms"
 
 # Version consistency
 echo -n "version check... "
