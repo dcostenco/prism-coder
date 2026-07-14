@@ -18,13 +18,13 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
-## What's New in v20.0.4
+## What's New in v20.0.5
 
-### Think-Only Retry
+### Local-First Delegation — 15 Categories, Measured Rate
+The `local-inference-first` skill covers 15 hard-trigger categories (code gen, regex, format conversion, summarization, documentation, factual lookup, classification, shell commands, config gen, and more). Pasted code blocks now trigger delegation regardless of question phrasing. Measured delegation rate: **30-35% on engineering sessions, 40-60% on transform/content sessions**. Rate depends on prompt mix, not the skill — the instruments now self-validate with `nonDelegatedCount` to prevent curated-set tautologies.
+
+### Think-Only Retry (v20.0.4)
 Qwen 3.5 models (9B/27B) with thinking enabled could burn all tokens on `<think>` blocks and return empty content, causing a cascade to 4B. Now detects think-only responses and retries the same tier with thinking disabled — preserving model quality instead of falling to a smaller model.
-
-### Local-First Skill Rewrite
-The `local-inference-first` skill now uses a hard falsifiable trigger list (format conversion, regex, i18n, boilerplate CRUD, deterministic tests) with no self-assessment escape. Clinical content removed from delegation — it conflicts with the Layer 1 reserved-category safety floor. Honest target: 15-25% of prompts delegated at equal quality.
 
 ---
 
