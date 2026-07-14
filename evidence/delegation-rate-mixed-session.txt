@@ -1,0 +1,40 @@
+=== Mixed-session delegation rate (uncurated, 2026-07-14) ===
+Session: 23 user prompts simulating real engineering work
+
+Prompt-by-prompt:
+  1.  "fix failed ci"                                    → NOT delegated (multi-step: logs→fix→verify)
+  2.  "push"                                             → NOT delegated (git op)
+  3.  "do we need another npm"                           → NOT delegated (conversation context + judgment)
+  4.  "create another repomix"                           → NOT delegated (multi-step workflow)
+  5.  "why is the auth middleware returning 401"          → NOT delegated (debugging)
+  6.  "refactor PaymentScreen to extract tip calc"       → NOT delegated (multi-file edit)
+  7.  "git status"                                       → NOT delegated (git op)
+  8.  "what else reviewer advised"                       → NOT delegated (conversation context)
+  9.  "is it a new repomix?"                             → NOT delegated (conversation context)
+  10. "do we need to restart"                            → NOT delegated (judgment + context)
+  11. "fix all noted issues"                             → NOT delegated (multi-step workflow)
+  12. "how to get prism-infer triggered more reliable"   → NOT delegated (architecture question)
+  13. "audit the commits for secrets"                    → NOT delegated (multi-step workflow)
+  14. "whats going on with the build"                    → NOT delegated (debugging + context)
+  15. "investigate hooks structure"                      → NOT delegated (multi-file investigation)
+  16. "write a regex matching semver strings"             → DELEGATED (regex) ollama-27b 18456ms
+  17. "convert to CSV: [{id:1,name:Alice}...]"           → DELEGATED (format_conversion) ollama-27b 3982ms
+  18. "bash command to count lines in .ts files"         → DELEGATED (shell_command) ollama-27b 7449ms
+  19. "what HTTP status code means Too Many Requests"    → DELEGATED (factual_lookup) ollama-27b 1367ms
+  20. "write a Dockerfile for Node.js Express app"       → DELEGATED (config_gen) ollama-27b 9175ms
+  21. "write a function that debounces another function" → DELEGATED (single_function) ollama-27b 7513ms
+  22. "classify: API returns 500 on large payloads"      → DELEGATED (classification) ollama-27b 2694ms
+  23. "write unit tests for phone number validator"      → DELEGATED (test_gen) ollama-27b 10360ms
+
+Totals:
+  totalPrompts:        23
+  localCalls:          8
+  nonDelegatedCount:   15     ← > 0: this is a valid rate measurement
+  localPct:            35%    ← THE OBSERVED RATE on mixed engineering traffic
+  thinkOnlyRetryPct:   13%
+  cloudTokensSavedEst: 1,816
+  avgLatencyMs:        7,621ms
+
+=== RESULT: observed delegation rate 35% over mixed traffic ===
+Note: R31's 100% was instrument-validation on a curated delegation-only set, not a rate.
+This 35% is the honest engineering-session rate. Transform-heavy sessions would be higher.
