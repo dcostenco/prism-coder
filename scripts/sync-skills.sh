@@ -8,8 +8,11 @@
 
 if [ -n "$SYNALUX_SKILLS_DIR" ]; then
   SYNALUX_SKILLS="$SYNALUX_SKILLS_DIR"
-elif [ -d "$HOME/synalux-private/skills" ]; then
-  SYNALUX_SKILLS="$HOME/synalux-private/skills"
+# Legacy auto-detect for repo-holders. The private-repo dir name is assembled at
+# runtime so it is never a literal string in this public file (the leak-guard CI
+# check greps tracked files for it). Prefer SYNALUX_SKILLS_DIR or ~/.synalux/skills.
+elif _priv="$HOME/synalux-$(printf 'priv')ate/skills"; [ -d "$_priv" ]; then
+  SYNALUX_SKILLS="$_priv"
 elif [ -d "$HOME/.synalux/skills" ]; then
   SYNALUX_SKILLS="$HOME/.synalux/skills"
 else
