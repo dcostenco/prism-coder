@@ -499,12 +499,6 @@ Unread count, mail sync (IMAP→501, OAuth→real Gmail fetch), inbox thread 503
 **Twilio env fix**
 `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` were set but empty in Vercel production. Values pushed from `.env.local`.
 
-**Training infrastructure** (vast.ai)
-- `autonomous-training-protocol` skill: mandatory layer3 corpus assert (≥40 examples), BFCL ≥90% gate before "done".
-- `train_max_quality_vastai.py`: DoRA SFT script with paged_adamw_8bit, TRL API compat, crash.log, PID file, SIGTERM handler.
-- `monitor_training.sh`: 5-min polling daemon with macOS alerts, crash dedup, GPU stall detection, disk threshold.
-- Layer3 corpus (45 examples) merged into training data for 32B/35B tier.
-
 ### Why a major bump
 
 The drift detection + evidence-first protocol represent a change in how Prism agents operate — not just what they can do. These behavioral guarantees are additive but meaningful enough to warrant a major version signal.
@@ -547,7 +541,7 @@ External systems were already building on Prism algorithms with hand-tuned appro
 
 ---
 
-## [13.1.1] - 2026-05-05 — Tool-call format normalizer + Modal training resilience
+## [13.1.1] - 2026-05-05 — Tool-call format normalizer
 
 ### Local LLM client
 - **`normalizeToolCallFormat`** new helper at `src/utils/normalizeToolCallFormat.ts` — coerces three stochastic v18-clean tool-call format variants into the canonical singular wrapper:
@@ -558,16 +552,6 @@ External systems were already building on Prism algorithms with hand-tuned appro
   All three normalize to: `<tool_call>{"name":"X","arguments":{"Y":"Z"}}</tool_call>`
 - **`callLocalLlm`** pipes raw model output through the normalizer before the existing think-tag / multi-format extractor, so downstream parsers see only canonical input.
 - **12-test suite** at `tests/normalizeToolCallFormat.test.ts` — covers each variant + multi-call + surrounding text + canonical pass-through + malformed JSON fallback.
-
-### Training infra hardening
-- **`modal-training-resilience` skill applied to 32B resume + polish scripts** (`training/modal_v18coder_32b_resume.py`, `training/modal_v18coder_32b_polish_phase1_5.py`):
-  - `GracefulExitCallback` at `0.92 × MODAL_TIMEOUT_S` — saves + clean-stops before Modal's hard kill (Phase 1 lost 481 steps to a hard kill we want to never repeat)
-  - `save_steps` tightened: resume 500→200, polish 200→100
-  - `local_entrypoint()` now raises with explicit `--detach` instructions — the silent `.spawn()` failure mode is documented in the error message
-- **103-file training infra catchup** committed — Python builders, deploy scripts, eval tools, DoRA YAML config, and research notes that had accumulated untracked over the v17/v18 campaign. `.gitignore` extended to drop iterative `Modelfile.v[0-9]*` experiments and BFCL output dumps.
-
-### Production Modelfiles
-- `training/Modelfile.published` and `training/Modelfile.restore` now committed — these were untracked but are the canonical production / rollback Modelfiles for `prism-coder:7b`.
 
 ### Test counts
 - `tests/normalizeToolCallFormat.test.ts`: 12/12 passing in 82ms.
@@ -593,11 +577,6 @@ Coordinated cross-product release with **portal v0.14.4** and **prism-aac v0.2.1
 
 ### Azure Neural TTS unblocked for all tiers
 - Removed free-tier 403 gate on `/api/v1/tts`. Azure Neural voice + auto-tone-switch now work for every authenticated tier. Cost ≈ $480/mo at 10K users — acceptable AAC dignity baseline.
-
-### Phase 0 of the 32B/72B campaign — Synalux/Prism-Memory training data
-- Built `synalux_sft_pipeline.py` (~570 lines): extracts from local `~/.prism-mcp/data.db` SQLite + Prism Supabase, anonymises (PII / customer names / paths / secrets / clinical), chunks long content, renders Qwen `<|im_start|>` ChatML.
-- 5,721 training rows generated, **zero PII leaks** across 5-pattern audit (customer names, emails, phones, paths, API keys).
-- Phase 1 (32B SFT, ~$340) launched on Modal H100×4 today; Phase 2 (72B) queued.
 
 ## [13.0.1] - 2026-05-02 — 🔧 Executable bin permissions
 
@@ -642,7 +621,7 @@ The adaptive engine observes 5 dimensions of user behavior and shapes runtime pa
 4. **Background noise** — EMA noise floor with `threshold = floor + 15dB`, **clamped at ≤ -20dB** so a loud environment never pushes the threshold above what voice can hit.
 5. **Prompt patterns** — frequency-weighted category preference (`count × exp(-age_days/14)`), 30-day decay on time-of-day vocabulary so summer routines don't haunt the autumn UI.
 
-`PROFILE_VERSION = 2` with v1 → v2 migration. Schema lives canonically at `the Synalux portal`; PrismAAC mirrors it for offline operation, with `training/sync_adaptive_engine.sh` as a structural drift check.
+`PROFILE_VERSION = 2` with v1 → v2 migration. Schema lives canonically at `the Synalux portal`; PrismAAC mirrors it for offline operation, with an internal structural drift check.
 
 Hysteresis: `dominantMood` only flips when ≥6 of last 10 events agree, so a single emergency doesn't trap the system in `'urgent'` for the next half hour.
 </details>
@@ -694,10 +673,6 @@ For MCP clients (Claude Desktop, IDE assistants, voice agents), 5 new tools expo
 - synalux portal: 31 new tests for PHI clinical-allowlist + emergency endpoint validation.
 - prism-aac: 121 tests pass (48 adaptive, 53 camera tracking + identity locking, 20 head-tracker edge cases).
 
-```bash
-# Adaptive engine drift check across repos
-bash /Users/admin/prism/training/sync_adaptive_engine.sh
-```
 </details>
 
 ### Migration
