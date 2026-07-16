@@ -15,7 +15,9 @@ import * as os from 'os';
 
 // ── Test Fixtures ──────────────────────────────────────────────
 
-const tmpDir = path.join(os.tmpdir(), `prism-runner-test-${Date.now()}`);
+// Unique, owner-only temp dir (mkdtemp random suffix) — not a predictable path,
+// so a pre-planted symlink on a shared host can't be followed.
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prism-runner-test-'));
 
 const FILE_EXISTS_ASSERTION: TestAssertion = {
   id: 'file-exists-check',

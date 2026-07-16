@@ -3,6 +3,7 @@ import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { mkdtempSync } from 'node:fs';
 import * as os from 'os';
 import { fileURLToPath } from 'url';
 import { SqliteStorage } from '../../src/storage/sqlite.js';
@@ -14,10 +15,11 @@ const __dirname = path.dirname(__filename);
 describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000 }, () => {
   const cliPath = path.resolve(__dirname, '../../dist/cli.js');
   
-  // Use stable temp paths for the duration of this test file
-  const testId = Date.now();
-  const dbPath = path.resolve(os.tmpdir(), `prism-test-${testId}.db`);
-  const harnessPath = path.resolve(os.tmpdir(), `harness-${testId}.json`);
+  // Unique, owner-only temp dir (mkdtemp random suffix) for the duration of this
+  // test file — not a predictable path, so a pre-planted symlink can't be followed.
+  const tmpBase = mkdtempSync(path.join(os.tmpdir(), 'prism-cli-'));
+  const dbPath = path.join(tmpBase, 'prism-test.db');
+  const harnessPath = path.join(tmpBase, 'harness.json');
   
   const baseEnv = { 
     ...process.env, 
@@ -57,10 +59,7 @@ describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000
   });
 
   afterAll(async () => {
-    await fs.rm(dbPath, { force: true }).catch(() => {});
-    await fs.rm(`${dbPath}-wal`, { force: true }).catch(() => {});
-    await fs.rm(`${dbPath}-shm`, { force: true }).catch(() => {});
-    await fs.rm(harnessPath, { force: true }).catch(() => {});
+    await fs.rm(tmpBase, { recursive: true, force: true }).catch(() => {});
   });
 
   it('verify status (text mode) outputs human readable text', async () => {
