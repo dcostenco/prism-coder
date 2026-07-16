@@ -87,10 +87,12 @@ function makeTextOnlyProvider() {
 // ─── File system helper ───────────────────────────────────────────────────────
 
 let tmpFile: string;
+let tmpDir: string;
 
 beforeEach(() => {
-  // Create a tiny fake PNG in tmp dir for file-read tests
-  tmpFile = nodePath.join(os.tmpdir(), `test-prism-img-${Date.now()}.png`);
+  // Unique, owner-only temp dir (mkdtemp random suffix) — not a predictable path.
+  tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "prism-img-"));
+  tmpFile = nodePath.join(tmpDir, "test-prism-img.png");
   // 1x1 transparent PNG (89 bytes) — valid enough to not fail fs.existsSync
   const minimalPng = Buffer.from(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489" +
@@ -101,7 +103,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+  if (tmpDir && fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
   vi.clearAllMocks();
 });
 
@@ -189,8 +191,8 @@ describe("ImageCaptioner — fireCaptionAsync pipeline", () => {
     mockGetLLMProvider.mockReturnValue(provider as any);
     mockGetStorage.mockResolvedValue(storage as any);
 
-    // Write a fake 6MB file (over 5MB Anthropic limit)
-    const bigFile = nodePath.join(os.tmpdir(), "prism-bigtest.png");
+    // Write a fake 6MB file (over 5MB Anthropic limit) inside the per-run temp dir
+    const bigFile = nodePath.join(tmpDir, "prism-bigtest.png");
     fs.writeFileSync(bigFile, Buffer.alloc(6 * 1024 * 1024, 0));
     try {
       fireCaptionAsync("prism", "abc12345", bigFile, "large image");
