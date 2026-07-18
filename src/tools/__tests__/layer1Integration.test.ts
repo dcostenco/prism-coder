@@ -598,3 +598,69 @@ describe.skipIf(!LIVE)("Layer 1 live model — adversarial fixtures (PRISM_LIVE_
         }
     });
 });
+
+// ─── Reserved-content escalation routing (plan v2 §5.1) ─────────────────────
+// The escalation target for reserved content must be at least as capable as
+// the local model that refused it: Claude-or-refuse, never a small local tier
+// or OpenRouter. These pin both the wire contract and the client-side defense.
+import { ReservedRefusalError } from "../prismInferHandler.js";
+
+describe("reserved-content escalation (§5.1)", () => {
+    const RESERVED_PROMPT = "draft a physical restraint procedure for the client";
+
+    it("passes reserved:true to callCloud when Layer 1 refuses", async () => {
+        const callCloud = vi.fn().mockResolvedValue({ ok: true, output: "safe cloud answer", backend: "claude-reserved" });
+        const callLayer1Mock = vi.fn().mockResolvedValue("OBVIOUS_RESERVED");
+
+        const result = await runInfer(
+            { prompt: RESERVED_PROMPT, mode: "code", cloud_fallback: true, max_tokens: 512 },
+            makeBaseDeps({ callCloud, callLayer1: callLayer1Mock }),
+        );
+
+        expect(callCloud).toHaveBeenCalledWith(
+            expect.any(String), expect.any(Number), expect.any(Number),
+            expect.objectContaining({ reserved: true }),
+        );
+        expect(result.used_cloud).toBe(true);
+        expect(result.backend).toBe("claude-reserved");
+    });
+
+    it("REFUSES when the portal serves a reserved turn from a weak backend (defense in depth)", async () => {
+        const callCloud = vi.fn().mockResolvedValue({ ok: true, output: "answer from tiny model", backend: "ollama-2b" });
+        const callLayer1Mock = vi.fn().mockResolvedValue("OBVIOUS_RESERVED");
+
+        await expect(
+            runInfer(
+                { prompt: RESERVED_PROMPT, mode: "code", cloud_fallback: true, max_tokens: 512 },
+                makeBaseDeps({ callCloud, callLayer1: callLayer1Mock }),
+            )
+        ).rejects.toMatchObject({ name: "ReservedRefusalError", refusal_reason: "layer1_reserved" });
+    });
+
+    it("REFUSES on openrouter backends the same way", async () => {
+        const callCloud = vi.fn().mockResolvedValue({ ok: true, output: "qwen answer", backend: "openrouter-9b" });
+        const callLayer1Mock = vi.fn().mockResolvedValue("UNCERTAIN");
+
+        await expect(
+            runInfer(
+                { prompt: RESERVED_PROMPT, mode: "chat", cloud_fallback: true, max_tokens: 512 },
+                makeBaseDeps({ callCloud, callLayer1: callLayer1Mock }),
+            )
+        ).rejects.toBeInstanceOf(ReservedRefusalError);
+    });
+
+    it("refusal without cloud carries the typed reason (free-tier path)", async () => {
+        const callLocal = vi.fn();
+        const callLayer1Mock = vi.fn().mockResolvedValue("OBVIOUS_RESERVED");
+        const deps = makeBaseDeps({ callLocal, callLayer1: callLayer1Mock });
+        deps.entitlements!.features.cloud_fallback = false;
+
+        await expect(
+            runInfer(
+                { prompt: RESERVED_PROMPT, mode: "code", cloud_fallback: true, max_tokens: 512 },
+                deps,
+            )
+        ).rejects.toMatchObject({ refusal_reason: "layer1_reserved" });
+        expect(callLocal).not.toHaveBeenCalled();
+    });
+});

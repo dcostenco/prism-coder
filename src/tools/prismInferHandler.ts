@@ -40,6 +40,7 @@ import { passesQualityGate } from "../utils/qualityGate.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
 import { callLayer1 as defaultCallLayer1, keywordBackstop, type Layer1Verdict } from "../utils/layer1.js";
 import { recordInference, recordThinkOnlyRetry, formatInferenceMetrics } from "../utils/inferenceMetrics.js";
+import { appendInferMetric } from "../storage/inferMetricsLedger.js";
 
 // ─── Tool Definition ────────────────────────────────────────────
 
@@ -306,6 +307,30 @@ async function callOllamaGenerate(
 
 // ─── Cloud fallback via synalux portal ─────────────────────────
 
+/**
+ * Typed refusal for reserved clinical content (plan v2 §5.1) — callers can
+ * distinguish "refused for safety" from infrastructure failure via
+ * `refusal_reason` instead of parsing the message. Also ledgered so refusals
+ * are visible in delegation metrics (backend='refused').
+ */
+export class ReservedRefusalError extends Error {
+    readonly refusal_reason = "layer1_reserved";
+    constructor(verdict: string, public readonly attempts: Array<{ tier: string; reason: string }>) {
+        super(`prism_infer: Layer 1 verdict=${verdict}, reserved content refused. attempts=${JSON.stringify(attempts)}`);
+        this.name = "ReservedRefusalError";
+    }
+}
+
+function makeReservedRefusal(verdict: string, attempts: Array<{ tier: string; reason: string }>): ReservedRefusalError {
+    // Ledger the refusal (fire-and-forget). No prompt content is persisted —
+    // same HIPAA posture as the safety_gate exclusion.
+    appendInferMetric({
+        backend: "refused", model: null, used_cloud: false,
+        refusal_reason: "layer1_reserved",
+    });
+    return new ReservedRefusalError(verdict, attempts);
+}
+
 interface CloudResult {
     ok: boolean;
     output?: string;
@@ -317,6 +342,7 @@ async function callSynaluxInference(
     prompt: string,
     maxTokens: number,
     timeoutMs: number,
+    opts?: { reserved?: boolean },
 ): Promise<CloudResult> {
     if (!PRISM_SYNALUX_BASE_URL) return { ok: false, reason: "no_synalux_base_url" };
 
@@ -324,6 +350,10 @@ async function callSynaluxInference(
     if (!jwt) return { ok: false, reason: "jwt_exchange_failed" };
 
     const url = `${PRISM_SYNALUX_BASE_URL}/api/v1/prism/inference`;
+    // reserved=true tells the portal this prompt was refused by local Layer-1
+    // as reserved clinical content: it must be served by Claude or refused —
+    // never by a small local model or OpenRouter (plan v2 §5.1).
+    const reqBody = JSON.stringify({ prompt, max_tokens: maxTokens, ...(opts?.reserved ? { reserved: true } : {}) });
     try {
         let res = await fetch(url, {
             method: "POST",
@@ -331,7 +361,7 @@ async function callSynaluxInference(
                 "Authorization": `Bearer ${jwt}`,
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({ prompt, max_tokens: maxTokens }),
+            body: reqBody,
             signal: AbortSignal.timeout(timeoutMs),
             redirect: "error",
         });
@@ -347,7 +377,7 @@ async function callSynaluxInference(
                     "Authorization": `Bearer ${fresh}`,
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ prompt, max_tokens: maxTokens }),
+                body: reqBody,
                 signal: AbortSignal.timeout(timeoutMs),
                 redirect: "error",
             });
@@ -556,8 +586,18 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             attempts.push({ tier: "layer1", reason: `layer1_${l1.toLowerCase()}` });
             if (allowCloud) {
                 const cloudTimeout = args.timeout_ms ?? 90_000;
-                const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout);
+                const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout, { reserved: true });
                 if (cloud.ok && cloud.output) {
+                    // Defense in depth (§5.1): the escalation target for reserved
+                    // content must be STRONGER than the local model that refused
+                    // it. An old/unpatched portal that ignores the reserved flag
+                    // can answer from a small local tier or OpenRouter — never
+                    // serve that; refuse instead.
+                    const weakBackend = /^(ollama-|openrouter-)/.test(cloud.backend ?? "");
+                    if (weakBackend) {
+                        attempts.push({ tier: "synalux", reason: `reserved_weak_backend:${cloud.backend}` });
+                        throw makeReservedRefusal(l1, attempts);
+                    }
                     return await applyVerification(cloud.output, gatedArgs, deps, {
                         backend: cloud.backend ?? "synalux",
                         model_picked: null,
@@ -571,9 +611,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 }
                 attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
             }
-            throw new Error(
-                `prism_infer: Layer 1 verdict=${l1}, reserved content refused. attempts=${JSON.stringify(attempts)}`
-            );
+            throw makeReservedRefusal(l1, attempts);
         }
         if (l1 === "ERROR") {
             debugLog(`[prism_infer] Layer 1 verdict=ERROR — classifier failed, trying cloud then keyword backstop`);
