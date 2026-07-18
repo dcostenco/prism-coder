@@ -5,6 +5,8 @@
  * Offline: last-good from local DB, or empty with warning.
  */
 
+import { getSynaluxJwt, invalidateSynaluxJwt } from '../utils/synaluxJwt.js';
+
 // -- Type exports (backward compat) ------------------------------------------
 
 export interface UserLocalPolicy { enabled: boolean; key_prefix: string }
@@ -34,7 +36,6 @@ export interface ResolvedSkills {
 // -- Constants ----------------------------------------------------------------
 
 const SYNALUX_BASE = process.env.SYNALUX_BASE_URL || 'https://synalux.ai';
-const SKILLS_TOKEN = process.env.PRISM_SKILLS_TOKEN || '';
 const LIVE_TTL = 5 * 60 * 1000;
 const FAIL_TTL = 30_000;
 const DEFAULT_UL: UserLocalPolicy = { enabled: false, key_prefix: 'user_skill:' };
@@ -84,12 +85,42 @@ async function callPortal(project: string, prompt?: string, role?: string): Prom
       'Content-Type': 'application/json',
       'Accept': 'application/json',
     };
-    if (SKILLS_TOKEN) headers['Authorization'] = `Bearer ${SKILLS_TOKEN}`;
+    // Auth precedence: static PRISM_SKILLS_TOKEN (legacy/CI) → JWT exchanged
+    // from the synalux API key. The JWT path uses the same per-user identity
+    // as inference, so skills and inference resolve the SAME tier — without
+    // it, machines with only PRISM_SYNALUX_API_KEY silently resolve tier=free
+    // and never receive unprotected/prompt-routed skills.
+    const staticToken = process.env.PRISM_SKILLS_TOKEN || '';
+    let usedJwt = false;
+    if (staticToken) {
+      headers['Authorization'] = `Bearer ${staticToken}`;
+    } else {
+      // Bound the exchange so a hanging JWT endpoint cannot stall
+      // session_load_context startup: after 4s proceed unauthenticated
+      // (free-tier resolve) — the exchange keeps running and its cached
+      // result authenticates the next call.
+      const jwt = await Promise.race([
+        getSynaluxJwt(),
+        new Promise<null>((r) => setTimeout(r, 4_000, null)),
+      ]);
+      if (jwt) { headers['Authorization'] = `Bearer ${jwt}`; usedJwt = true; }
+    }
 
-    const res = await fetch(`${SYNALUX_BASE}/api/v1/prism/resolve`, {
+    const doFetch = () => fetch(`${SYNALUX_BASE}/api/v1/prism/resolve`, {
       method: 'POST', headers, body: JSON.stringify(body),
       signal: AbortSignal.timeout(5_000),
+      redirect: 'error', // never follow a redirect with a credential attached
     });
+    let res = await doFetch();
+    if (res.status === 401 && usedJwt) {
+      // Expired/rotated JWT — invalidate and retry once with a fresh one.
+      invalidateSynaluxJwt();
+      const fresh = await getSynaluxJwt();
+      if (fresh) {
+        headers['Authorization'] = `Bearer ${fresh}`;
+        res = await doFetch();
+      }
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as PortalResp;
   } catch { return null; }

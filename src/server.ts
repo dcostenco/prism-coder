@@ -1095,7 +1095,7 @@ export function createServer() {
             result = await knowledgeIngestHandler(args); break;
 
           case "inference_metrics":
-            result = await inferenceMetricsHandler(); break;
+            result = await inferenceMetricsHandler(args as { period?: string }); break;
 
           default:
             result = {

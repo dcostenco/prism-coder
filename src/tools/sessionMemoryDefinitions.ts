@@ -2065,12 +2065,19 @@ export function isVerifyBehaviorArgs(a: unknown): a is {
 export const INFERENCE_METRICS_TOOL: Tool = {
   name: "inference_metrics",
   description:
-    "Returns the current session's local-model inference metrics — call count, " +
-    "local vs cloud split, token totals, per-model breakdown, and average latency. " +
-    "Read-only, no arguments. Reflects prism_infer delegation usage only, not the " +
-    "host model's (Claude's) own token spend (use /cost for that).",
+    "Returns local-model inference metrics — call count, local vs cloud split, " +
+    "token totals, per-model breakdown, and average latency. Reflects prism_infer " +
+    "delegation usage only, not the host model's (Claude's) own token spend " +
+    "(use /cost for that). period: 'session' (default, in-memory since server " +
+    "start) or 'all' (persisted ledger across restarts).",
   inputSchema: {
     type: "object",
-    properties: {},
+    properties: {
+      period: {
+        type: "string",
+        enum: ["session", "all"],
+        description: "Metrics window: 'session' (this server process) or 'all' (durable ledger).",
+      },
+    },
   },
 };

@@ -868,7 +868,9 @@ export async function prismInferHandler(args: unknown): Promise<{
         // Local accumulator — sole source of the user-facing metrics block.
         // T4: pass prompt_text so recordInference computes submittedEst via
         // estimateTokens() — critical for cloud path where prompt_tokens is unset.
-        recordInference({ ...result, prompt_text: args.prompt });
+        // mode lives on args, not the result — pass it explicitly or the
+        // ledger's mode column is silently NULL forever.
+        recordInference({ ...result, prompt_text: args.prompt, mode: args.mode ?? "route" });
 
         // Best-effort session telemetry — records that inference ran for this
         // conversation. Never affects routing or safety decisions.

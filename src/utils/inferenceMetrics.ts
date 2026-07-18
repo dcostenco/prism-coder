@@ -13,6 +13,7 @@
  */
 
 import { debugLog } from "./logger.js";
+import { appendInferMetric, queryInferMetrics } from "../storage/inferMetricsLedger.js";
 
 export interface ModelStats {
     calls: number;
@@ -97,8 +98,26 @@ export function recordInference(result: {
      *  Ollama returns prompt_eval_count=0 (KV-cache hit). */
     prompt_text?: string;
     prompt_length?: number;
+    /** Persisted to the durable ledger when present (Phase 0, plan §5.6). */
+    mode?: string;
+    ram_free_mb?: number;
+    quality_gate_failed?: boolean;
 }): void {
     if (result.backend === "safety_gate") return;
+
+    // Durable ledger row (fire-and-forget; in-memory counters below remain the
+    // per-session view). safety_gate is excluded by the early return above.
+    appendInferMetric({
+        backend: result.backend,
+        model: result.model_picked,
+        used_cloud: result.used_cloud,
+        mode: result.mode,
+        gate_outcome: result.quality_gate_failed ? "gate_failed_served" : undefined,
+        prompt_tokens: result.prompt_tokens,
+        completion_tokens: result.completion_tokens,
+        latency_ms: result.latency_ms,
+        ram_free_mb: result.ram_free_mb,
+    });
 
     const key = result.model_picked ?? result.backend;
 
@@ -189,10 +208,33 @@ export function resetInferenceMetrics(): void {
     debugLog("[inference-metrics] Session metrics reset");
 }
 
-export async function inferenceMetricsHandler(): Promise<{
+export async function inferenceMetricsHandler(args?: { period?: string }): Promise<{
     content: Array<{ type: "text"; text: string }>;
     isError?: boolean;
 }> {
+    if (args?.period === "all") {
+        const agg = await queryInferMetrics();
+        if (!agg || agg.total === 0) {
+            return { content: [{ type: "text", text: "No persisted prism_infer calls yet (ledger empty)." }] };
+        }
+        const localPct = agg.total ? Math.round((agg.local / agg.total) * 100) : 0;
+        const cloudPct = agg.total ? Math.round((agg.cloud / agg.total) * 100) : 0;
+        const span = agg.first_ts && agg.last_ts
+            ? `${new Date(agg.first_ts).toISOString().slice(0, 10)} → ${new Date(agg.last_ts).toISOString().slice(0, 10)}`
+            : "n/a";
+        const byB = Object.entries(agg.by_backend)
+            .sort((a, b) => b[1] - a[1])
+            .map(([k, v]) => `  ${k}: ${v}`).join("\n");
+        return {
+            content: [{
+                type: "text",
+                text: `📊 Delegation Metrics — ALL TIME (persisted ledger, ${span})\n` +
+                    `Total calls: ${agg.total} — Local: ${agg.local} (${localPct}%) | Cloud: ${agg.cloud} (${cloudPct}%)\n` +
+                    `Prompt tokens: ${agg.prompt_tokens} | Completion tokens: ${agg.completion_tokens}\n` +
+                    `Avg latency: ${agg.avg_latency_ms}ms\nBy backend:\n${byB}`,
+            }],
+        };
+    }
     const block = formatInferenceMetrics();
     return {
         content: [{
