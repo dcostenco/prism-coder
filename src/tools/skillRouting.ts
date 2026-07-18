@@ -56,6 +56,27 @@ export const OFFLINE_FALLBACK: SkillRoutingTable = {
 interface PortalResp {
   loaded: string[]; skipped: string[];
   routing_version: number; tier: string;
+  /** Per-skill metadata (portal ≥ routing v23). Older portals omit it. */
+  skills?: Array<{ name: string; priority: number; protected: boolean; category: string }>;
+}
+
+/**
+ * Map a portal response to ResolvedSkill[]. Uses the portal's per-skill
+ * metadata when present; for older portals that send names only, falls back
+ * to neutral defaults (protected:false) — the budgeting floor then relies on
+ * the caller's own knowledge (e.g. OFFLINE_FALLBACK). NEVER fabricate
+ * protected:true here: an over-broad floor would defeat budgeting entirely.
+ */
+function toResolvedSkills(resp: PortalResp): ResolvedSkill[] {
+  if (resp.skills && resp.skills.length > 0) {
+    return resp.skills.map((s) => ({
+      name: s.name, priority: s.priority, protected: s.protected,
+      category: (s.category as ResolvedSkill['category']) ?? 'universal',
+    }));
+  }
+  return resp.loaded.map((name, i) => ({
+    name, priority: i, protected: false, category: 'universal' as const,
+  }));
 }
 
 interface CacheEntry { resp: PortalResp; at: number; live: boolean }
@@ -161,9 +182,7 @@ export async function resolveSkills(project: string, prompt?: string, role?: str
   if (cached) {
     return {
       names: cached.resp.loaded,
-      skills: cached.resp.loaded.map((name, i) => ({
-        name, priority: i, protected: false, category: 'universal' as const,
-      })),
+      skills: toResolvedSkills(cached.resp),
       user_local: DEFAULT_UL,
       isOffline: !cached.live,
       routing_version: cached.resp.routing_version,
@@ -177,7 +196,7 @@ export async function resolveSkills(project: string, prompt?: string, role?: str
       if (stored) {
         const resp = JSON.parse(stored) as PortalResp;
         return {
-          names: resp.loaded, skills: [], user_local: DEFAULT_UL,
+          names: resp.loaded, skills: toResolvedSkills(resp), user_local: DEFAULT_UL,
           isOffline: true,
           routing_version: resp.routing_version,
         };

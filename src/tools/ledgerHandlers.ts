@@ -1055,15 +1055,16 @@ export async function sessionLoadContextHandler(args: unknown) {
   // If the active role has a skill document stored, append it so the
   // agent loads its rules/conventions automatically at session start.
   let skillBlock = "";
-  let skillLoaded = false;
   const loadedSkills: string[] = [];
+
+  const skillEntries: import("../utils/skillBudget.js").SkillEntryForBudget[] = [];
 
   if (effectiveRole) {
     const skillContent = await getSetting(`skill:${effectiveRole}`, "");
     if (skillContent && skillContent.trim()) {
-      skillBlock = `\n\n[📜 ROLE SKILL: ${effectiveRole}]\n${skillContent.trim()}`;
-      skillLoaded = true;
-      loadedSkills.push(effectiveRole);
+      // protected: the role skill is deliberate per-agent configuration and
+      // was unconditionally injected before budgeting existed.
+      skillEntries.push({ name: effectiveRole, content: skillContent, protected: true, category: "role", priority: -1 });
       debugLog(`[session_load_context] Injecting skill for role="${effectiveRole}" (${skillContent.length} chars)`);
     }
   }
@@ -1077,13 +1078,26 @@ export async function sessionLoadContextHandler(args: unknown) {
   const skillResolution = await resolveSkills(project, prompt, effectiveRole);
 
   // Client-renders-content: portal returns names, we load content from local DB
+  const resolvedMeta = new Map(
+    (skillResolution.skills || []).map((s) => [s.name, s]),
+  );
+  // Legacy last-good caches carry names without metadata; OFFLINE_FALLBACK
+  // membership is the floor of last resort so core rules stay inlined.
+  const { OFFLINE_FALLBACK } = await import("./skillRouting.js");
+  const fallbackFloor = new Set(
+    OFFLINE_FALLBACK.universal.map((e) => (typeof e === "string" ? e : e.name)),
+  );
   for (const name of skillResolution.names || []) {
-    if (loadedSkills.includes(name)) continue;
+    if (skillEntries.some((e) => e.name === name)) continue;
     const content = await getSetting(`skill:${name}`, "");
     if (content?.trim()) {
-      skillBlock += `\n\n[📜 SKILL: ${name}]\n${content.trim()}`;
-      loadedSkills.push(name);
-      skillLoaded = true;
+      const meta = resolvedMeta.get(name);
+      skillEntries.push({
+        name, content,
+        protected: meta?.protected ?? (skillResolution.isOffline && fallbackFloor.has(name)),
+        category: (meta?.category as "universal" | "project" | "prompt") ?? "universal",
+        priority: meta?.priority ?? 999,
+      });
     }
   }
 
@@ -1096,14 +1110,33 @@ export async function sessionLoadContextHandler(args: unknown) {
     for (const [k, v] of Object.entries(allSettings)) {
       if (!k.startsWith("skill:") || !v) continue;
       const name = k.replace("skill:", "");
-      if (loadedSkills.includes(name)) continue;
+      if (skillEntries.some((e) => e.name === name)) continue;
       const content = (v as string).trim();
-      if (content && content.trim()) {
-        skillBlock += '\n\n[📜 SKILL: ' + name + ']\n' + content.trim();
-        loadedSkills.push(name);
-        skillLoaded = true;
+      if (content) {
+        // Offline can't know protected flags; OFFLINE_FALLBACK names are the
+        // best available floor — mark those protected so they always inline.
+        skillEntries.push({ name, content, protected: fallbackFloor.has(name), category: "offline", priority: 999 });
       }
     }
+  }
+
+  // ─── Skill delivery budget (local-first plan v2 Phase 1) ────
+  // Paid-tier resolution returns 30+ skills (~114KB measured). Unbudgeted
+  // inlining exceeds host tool-result caps and the whole response gets
+  // file-diverted — the agent receives NOTHING. Budgeted assembly: protected
+  // always full, prompt-matched next, tail by priority, overflow by name.
+  // 60% of the response budget: skills must not saturate the whole allowance
+  // or T5 truncation zeroes out briefing/history — the memory this tool
+  // exists to deliver. The protected floor may still exceed this tranche
+  // (always inlined); the reserved 40% keeps history alive whenever the
+  // caller's budget covers the floor at all.
+  const skillBudgetChars = maxTokens && maxTokens > 0 ? Math.floor(maxTokens * 3.5 * 0.6) : Number.POSITIVE_INFINITY;
+  const { assembleSkillBlock } = await import("../utils/skillBudget.js");
+  const budgeted = assembleSkillBlock(skillEntries, skillBudgetChars);
+  skillBlock = budgeted.block;
+  loadedSkills.push(...budgeted.inlined);
+  if (budgeted.overflow.length > 0) {
+    debugLog(`[session_load_context] skill budget: inlined ${budgeted.inlined.length}, overflow ${budgeted.overflow.length} (${skillBudgetChars} chars)`);
   }
 
   // ─── Agent Greeting Block ────────────────────────────────────
