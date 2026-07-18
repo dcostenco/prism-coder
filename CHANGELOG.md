@@ -2,6 +2,66 @@
 
 All notable changes to this project will be documented in this file.
 
+## [20.0.7] - 2026-07-18 — 🛡️ Reserved-Content Safety + Skills Auth + Persistent Delegation Metrics
+
+### Security
+- **Reserved-content escalation is now Claude-or-refuse** — reserved clinical
+  content (restraint / seclusion / physical-management class) refused by local
+  Layer-1 could previously be escalated to the portal cascade and served by a
+  SMALLER model (2B / OpenRouter) than the one that refused it. The client now
+  sends `reserved: true` on escalation; the portal routes such requests to
+  Claude directly or refuses — never a small local tier, on any plan.
+- **Defense in depth** — if an unpatched portal still answers a reserved turn
+  from an `ollama-*` / `openrouter-*` backend, the client refuses to serve it.
+- **Typed refusals** — `ReservedRefusalError` with
+  `refusal_reason='layer1_reserved'` lets callers distinguish a safety refusal
+  from an infrastructure failure. Refusals are recorded in the metrics ledger
+  with zero prompt content.
+- **Credentialed portal fetches hardened** — `redirect: 'error'` on the skill
+  resolve path (matches the existing `synaluxJwt` standard).
+
+### Added
+- **Skills JWT auth fallback** — when `PRISM_SKILLS_TOKEN` is absent,
+  `skillRouting` exchanges `PRISM_SYNALUX_API_KEY` for a JWT (same per-user
+  identity as inference). Fixes machines that resolved paid entitlements for
+  inference but silently `tier=free` for skill delivery — the cause of
+  behavioral skills (e.g. `local-inference-first`) never reaching sessions.
+  Bounded 4s exchange; 401-invalidate + single retry; static token keeps
+  precedence.
+- **Persistent inference-metrics ledger** — append-only `infer_metrics` table
+  in `prism-config.db` records every `prism_infer` call (backend, mode, tier,
+  tokens, latency, RAM, gate outcome, refusal reason). The in-memory session
+  counters previously reset with every server restart, making long-term
+  local-vs-cloud delegation unmeasurable. `inference_metrics` tool gains
+  `period: 'session' | 'all'`. Test-suite writes are sandboxed via
+  `PRISM_DATA_DIR`; `safety_gate` calls are never persisted.
+- **Skill-delivery budgeting** — `session_load_context` skill assembly now
+  honors the caller's `max_tokens`: protected skills always inline in full
+  (the documented floor), prompt-matched skills next, remaining skills by
+  priority within a 60% tranche of the budget (the rest is reserved for
+  session history/briefing), and everything else is listed in an overflow
+  manifest — never silently dropped. Fixes paid-tier resolutions (~114KB
+  measured) exceeding host tool-result caps, which caused the whole response
+  to be file-diverted with the agent receiving nothing.
+- **Per-skill routing metadata** — the portal resolve response now carries
+  `{name, priority, protected, category}` per skill and the client consumes
+  it (older portals fall back safely to name-only behavior).
+
+### Fixed
+- 3 review rounds (2 adversarial multi-agent) caught before release: protected
+  flags fabricated client-side (floor was dead code), skill budget saturating
+  the whole response budget (zero history delivered), offline floor defeated
+  by dedupe, ledger rows from test suites polluting the production DB, silent
+  permanent ledger disable on one transient init failure, and a mode column
+  that would have been NULL forever.
+
+### Release notes
+- **20.0.6** (2026-07-15) was published from the same tree as 20.0.5
+  (`gitHead d53b641`) with no code changes and no changelog entry — treat it
+  as a republish of 20.0.5. 20.0.7 is the first release containing the
+  changes above, plus the sync-skills leak-guard fix and CLA action pin from
+  #98.
+
 ## [19.3.1] - 2026-07-06 — Cloud Tokens Saved Metric + Gemini Host Verification
 
 ### Added
