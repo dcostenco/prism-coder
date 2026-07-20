@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [20.0.8] - 2026-07-20 — Fix: verify_behavior MCP result contract
+
+### Fixed
+- **`verify_behavior` crashed on every invocation** — the handler
+  (`src/tools/behavioralVerifierHandler.ts`) returned a bare
+  `Promise<string>` instead of a `CallToolResult` object
+  (`{ content: [{ type: "text", text }] }`). The MCP SDK (^1.27.1) strictly
+  validates tool results and rejected the string at the root:
+  `-32602 Invalid tools/call result: expected object, received string`.
+  The bug shipped with the tool's introducing commit and had no test
+  coverage, so it went unnoticed until the tool was invoked against a
+  strict-validating SDK. The scenario text is now wrapped in a content
+  array (`verifyBehaviorHandler` → `buildScenarioText`); all fail-closed
+  branches (portal unreachable, missing JWT, non-OK response, malformed
+  JSON) are preserved.
+
+### Added
+- **`tests/behavioralVerifierContract.test.ts`** — contract regression test
+  asserting `verify_behavior` returns `{ content: [{ type: "text", text }] }`,
+  not a bare string. Fails against the string-returning bug, passes with
+  the fix.
+- **`tests/behavioralVerifierPaths.test.ts`** — fail-closed-path tests
+  pinning that the safety gate never skips: no-config, no-JWT, portal
+  error, and malformed-JSON branches all return a valid result object.
+
 ## [20.0.7] - 2026-07-18 — 🛡️ Reserved-Content Safety + Skills Auth + Persistent Delegation Metrics
 
 ### Security

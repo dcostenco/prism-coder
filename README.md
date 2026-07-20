@@ -18,6 +18,16 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
+## What's New in v20.0.8
+
+### verify_behavior Works Again
+The `verify_behavior` tool crashed on every call (`-32602 expected object, received string`) — the handler returned a bare string instead of an MCP `CallToolResult` object. Fixed, with contract + fail-closed regression tests so the safety gate can never silently break again. If you're on 20.0.6/20.0.7, update.
+
+### From v20.0.7: Reserved-Content Safety, Skills Auth, Delegation Metrics
+Reserved clinical content is now Claude-or-refuse (never served by a smaller model than the one that refused it), skill delivery gained a JWT auth fallback (paid-tier skills now reach machines using only `PRISM_SYNALUX_API_KEY`), and every `prism_infer` call is recorded in a persistent `infer_metrics` ledger. Full details in [CHANGELOG.md](CHANGELOG.md).
+
+---
+
 ## What's New in v20.0.5
 
 ### Local-First Delegation — 15 Categories, Measured Rate
