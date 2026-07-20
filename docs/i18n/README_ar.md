@@ -18,22 +18,137 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
+## What's New in v20.2.1
+
+### Subscription-Aware Memory Storage
+`prism connect` now carries an explicit `PRISM_STORAGE=auto|local|synalux|supabase`
+into every managed host registration and rejects invalid values before changing a
+config file. In `auto`, a portal-confirmed free tier uses local SQLite, while
+Standard, Advanced, and Enterprise use Synalux cloud memory. If entitlement
+resolution is unavailable, Prism fails closed instead of splitting history across
+backends. Storage remains independent of local-first model routing.
+
+---
+
+## What's New in v20.2.0
+
+### One Command Connects Every Supported Host
+Install Prism globally and run `prism connect`. It detects Claude Code, Claude
+Desktop on macOS, Windows, and Linux (beta), Cursor, Gemini CLI, and Codex, then safely registers the
+server from the installed package. Existing custom entries are untouched;
+`--dry-run` previews changes and `--refresh` updates only Prism-managed entries.
+
+---
+
+## What's New in v20.1.0
+
+### Every Inference Outcome Is Now Observable
+`prism_infer` gains a failure contract: pass `escalation: "report"` and every call returns a structured `gate_outcome` — `success`, `degraded` (gate-failed output served anyway, explicitly flagged), or `refused` (typed, with reason, instead of a thrown error). Degraded output can no longer serve silently.
+
+### Big Prompts Work Locally
+Prompts over 4000 chars were blanket-refused when cloud was off. Now the full text gets a deterministic reserved-keyword scan plus a head+middle+tail excerpt classification — clean oversize prompts serve locally with a distinct `UNCERTAIN_LENGTH` audit marker. Clinical/reserved handling is unchanged (and its keyword floor got stronger).
+
+### No More Silent Truncation
+Tier context limits now match the live Modelfiles (27b/9b are 4096-token models; 4b/2b are 32768 — the old table had it backwards). Tiers that can't hold your prompt are skipped with a visible `ctx_insufficient` reason; if nothing fits, you get the full prompt on cloud or a loud error — never an answer computed from a silently-clipped prompt.
+
+### Know Which Plan You're Actually Running Under
+Entitlements carry a `source` field: `portal` (real), `unconfigured` (free by design), or `fallback_free` (portal unreachable — free limits ASSUMED). Pass `strict_entitlements: true` to fail loud instead of running degraded.
+
+---
+
+## What's New in v20.0.8
+
+### verify_behavior Works Again
+The `verify_behavior` tool crashed on every call (`-32602 expected object, received string`) — the handler returned a bare string instead of an MCP `CallToolResult` object. Fixed, with contract + fail-closed regression tests so the safety gate can never silently break again. If you're on 20.0.6/20.0.7, update.
+
+### From v20.0.7: Reserved-Content Safety, Skills Auth, Delegation Metrics
+Reserved clinical content is now Claude-or-refuse (never served by a smaller model than the one that refused it), skill delivery gained a JWT auth fallback (paid-tier skills now reach machines using only `PRISM_SYNALUX_API_KEY`), and every `prism_infer` call is recorded in a persistent `infer_metrics` ledger. Full details in [CHANGELOG.md](../../CHANGELOG.md).
+
+---
+
+## What's New in v20.0.5
+
+### Local-First Delegation — 15 Categories, Measured Rate
+The `local-inference-first` skill covers 15 hard-trigger categories (code gen, regex, format conversion, summarization, documentation, factual lookup, classification, shell commands, config gen, and more). Pasted code blocks now trigger delegation regardless of question phrasing. Measured delegation rate: **30-35% on engineering sessions, 40-60% on transform/content sessions**. Rate depends on prompt mix, not the skill — the instruments now self-validate with `nonDelegatedCount` to prevent curated-set tautologies.
+
+### Think-Only Retry (v20.0.4)
+Qwen 3.5 models (9B/27B) with thinking enabled could burn all tokens on `<think>` blocks and return empty content, causing a cascade to 4B. Now detects think-only responses and retries the same tier with thinking disabled — preserving model quality instead of falling to a smaller model.
+
+---
+
+## What's New in v20.0.3
+
+### Layer 1 Cold-Model Resilience
+The reserved-category classifier now retries once with a longer timeout on cold-model failure, then falls back to a deterministic keyword backstop before refusing. Over-length prompts (>4K chars) are classified as UNCERTAIN before reaching the classifier — prompt padding can no longer force the ERROR branch. This eliminates the cold-start refusal problem without weakening the safety gate.
+
+### Keyword Backstop for Reserved Content
+When the LLM classifier fails (timeout, injection, resource pressure), a deterministic regex floor catches reserved vocabulary (restraint, seclusion, self-harm, suicide, overdose, crisis de-escalation, etc.) including inflected and verb forms. Blocks prompt-padding and classifier-injection attacks on the ERROR path.
+
+### Single-Source Safety Text
+The safety statement in the MCP server `instructions` field now imports from `boundaries.ts` — one source of truth instead of two hand-maintained copies. Boundaries version bumped to v3 with an explicit delivery decision documented in code.
+
+### Reserved-Category Safety Gate — All Tiers (v20.0.2)
+The Layer 1 semantic classifier now runs for **every** user, not just paid tiers. Reserved clinical content is refused on free tier when cloud is unavailable — fail-closed.
+
+### Ledger Dedup (v20.0.2)
+`session_save_ledger` deduplicates identical entries within a 5-minute window.
+
+### Evidence Script (v20.0.2)
+`scripts/generate-evidence.sh` regenerates all 5 evidence files with built-in assertions. Run `bash scripts/generate-evidence.sh` to verify the full pipeline.
+
+---
+
+## What's New in v20.0.0
+
+### License: AGPL-3.0 → Apache-2.0
+Prism MCP is now Apache-2.0. The thin-client architecture means all proprietary value (skill resolution, tier gating, billing, cloud inference) lives server-side — the open client carries no moat to protect. Apache-2.0 removes the enterprise adoption friction that AGPL caused.
+
+### Thin Client Architecture
+Skill routing, budget management, and content resolution have moved server-side to the Synalux portal. The MCP client is now a thin API caller — simpler, smaller, and portable across any host (Claude Code, Gemini, Cursor, autonomous scripts). Offline fallback reads the last successful response from local SQLite.
+
+### Clean-Room Voyage AI Adapter
+The Voyage AI embedding adapter was independently reimplemented from the [Voyage API docs](https://docs.voyageai.com/reference/embeddings-api) to ensure 100% project-owned copyright. Default model updated to `voyage-3.5`. See [PROVENANCE.md](../../PROVENANCE.md) for details.
+
+### Server-Side Drift Detection
+Session drift detection (GATE 5) no longer requires Claude Code hooks. The timer runs server-side per conversation, piggybacked on every MCP tool response. Works for any host.
+
+### CLA Requirement
+External contributions now require signing the [Individual CLA](../../CLA.md). The CLA check is merge-blocking on the `main` branch.
+
+---
+
 ## Quickstart
 
-The free tier needs no account, no API key, and no cloud. Add the server to your MCP client:
+The free tier needs no account, no API key, and no cloud. Install Prism, then
+register it with every supported MCP host already installed on your machine:
 
-```json
-{
-  "mcpServers": {
-    "prism": {
-      "command": "npx",
-      "args": ["-y", "prism-mcp-server"]
-    }
-  }
-}
+```bash
+npm install --global prism-mcp-server
+prism connect
 ```
 
-Open Claude Desktop or Cursor and your agent now has memory backed by a local SQLite database (`~/.prism-mcp/data.db`).
+`prism connect` detects Claude Code, Claude Desktop (macOS/Windows/Linux), Cursor,
+Gemini CLI, and Codex.
+Use `prism connect --all` to target all five, `--host <name>` for one host, or
+`--dry-run` to preview the files that would change. Existing `prism` and
+`prism-mcp` entries are never overwritten by default. `--refresh` updates only
+an entry previously created by Prism; custom entries remain untouched.
+Close the target MCP hosts before a non-dry-run registration so they cannot
+edit their configuration at the same time.
+
+Set `PRISM_STORAGE` before running `prism connect` to preserve an explicit
+storage choice in the generated host entries. This does not change local-model
+routing; Synalux cloud storage separately requires an active cloud-memory
+entitlement.
+
+Codex registration preserves `~/.codex/config.toml` and appends only a marked
+Prism-managed block. `CODEX_HOME` is respected when set and must already exist,
+matching Codex's own contract. Restart Codex CLI, the
+IDE extension, or the ChatGPT desktop app after connecting.
+
+Restart the connected host and your agent now has memory backed by a local
+SQLite database (`~/.prism-mcp/data.db`). See [IDE setup](../IDE_SETUP.md)
+for manual configuration and host-specific paths.
 
 **Optional — local model fleet** for offline tool-routing. Pull whichever fits your hardware:
 
@@ -363,9 +478,9 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 |---|---|---|---|---|
 | Seats | 1 | 1 | up to 5 | up to 25 |
 | Local model ceiling | up to 4b | up to 9b | up to 27b | up to 27b |
-| Daily cloud inference | -- | 200 | 2,000 | 100,000 |
-| Cloud Coder (Web IDE) | -- | 100/day | 1,000/day | 100,000/day |
-| Cloud search | -- | 50/day | 500/day | 100,000/day |
+| Cloud inference | -- | ✅ | ✅ | ✅ (priority) |
+| Cloud Coder (Web IDE) | -- | ✅ | ✅ | ✅ (priority) |
+| Cloud search | -- | ✅ | ✅ | ✅ |
 | Max output tokens | 512 | 1,024 | 2,048 | 4,096 |
 | Cloud fallback | -- | Claude Opus 4.7 | Claude Opus 4.7 | Priority + Opus 4.7 |
 | Grounding verifier (fact-check AI output) | -- | ✅ | ✅ | ✅ |
@@ -594,7 +709,7 @@ Routing is automatic: `9b → 4b → cloud fallback` on desktop/server, `2b → 
 | `PRISM_FORCE_LOCAL` | Force local SQLite regardless of credentials | `false` |
 | `TELEMETRY_WRITE_TOKEN` | Portal analytics token (optional — metrics display works without it) | -- |
 
-With no variables set, Prism runs fully local. Set `PRISM_SYNALUX_API_KEY` (and leave `PRISM_STORAGE=auto`) to use the cloud backend.
+With no variables set, Prism runs fully local. With an active cloud-memory subscription, set `PRISM_SYNALUX_API_KEY` (and leave `PRISM_STORAGE=auto`) to use the Synalux backend; a portal-confirmed free tier remains on local SQLite.
 
 ---
 
@@ -625,11 +740,32 @@ It reads `~/.prism-mcp/data.db` and POSTs entries to the portal. Ledger entries 
 
 ## License & Tiers
 
-- **This repository (the Prism MCP client)** is licensed under [Apache-2.0](../../LICENSE).
-- **Free tier**: run Prism MCP locally against your own machine. No account required.
-- **Paid tiers**: cloud features (hosted inference cascade, cross-device memory,
-  team features) are provided by the Synalux cloud service and governed by the
-  Synalux Terms of Service — they are not part of this repository or its license.
+**This repository (the Prism MCP client)** is licensed under [Apache-2.0](../../LICENSE).
+
+### Free (no account)
+
+| Feature | Details |
+|---------|---------|
+| Local inference | Ollama via `prism_infer`, capped at the 4B model tier |
+| Session memory | Persistent sessions, handoffs, ledger — all local SQLite |
+| Knowledge search | Semantic search across session history |
+| Skills | All skills available locally (run `sync-skills.sh` to populate) |
+| Drift detection | Server-side GATE 5 reminders |
+
+### Paid (Synalux subscription)
+
+Everything in Free, plus:
+
+| Feature | Details |
+|---------|---------|
+| Model ceiling | Up to 27B locally + cloud cascade (9B → 27B → Claude) when local is unavailable |
+| Skill routing | Portal resolves which skills to load based on your project and prompt |
+| Cross-device memory | Supabase cloud sync — sessions survive across machines |
+| Grounding verifier | L3 NLI verification on model outputs |
+| Team features | Multi-agent Hivemind, workspace collaboration |
+
+The paid tier adds **intelligent routing** — the Synalux portal determines which skills are relevant to your current project and prompt, so your agent gets domain expertise (stripe patterns, training protocols, clinical standards) instead of loading everything. Free users with the repo can run `sync-skills.sh` to populate all skills locally; paid routing adds project-aware and prompt-aware selection.
+
 - Contributions require signing the [CLA](../../CLA.md).
 - "Prism" and "Synalux" are trade names of Synalux LLC; the Apache license does
   not grant trademark rights (see §6 of the license).
