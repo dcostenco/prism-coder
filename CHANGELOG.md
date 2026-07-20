@@ -2,6 +2,67 @@
 
 All notable changes to this project will be documented in this file.
 
+## [20.1.0] - 2026-07-20 — 🧭 Failure Contract, Oversize Prompts, Ctx Gate, Entitlements Provenance
+
+Local-first plan v2 Phase 1 complete (§5.2–§5.5). Every terminal path of
+`prism_infer` is now observable, oversize prompts are no longer blanket-refused,
+silent prompt truncation is structurally impossible, and degraded entitlement
+resolution is visible and optionally fail-loud.
+
+### Added
+- **Failure contract (`escalation: 'serve' | 'report'`)** — §5.2. Default
+  `'serve'` keeps legacy behavior. Under `'report'`, safety refusals return a
+  typed `{gate_outcome: {status:'refused'}, output:''}` result instead of
+  throwing, and every serve carries a structured
+  `gate_outcome {status: success|degraded|refused, reason, served_anyway}`.
+  The gate-fail-without-cloud path previously served degraded output with NO
+  flag at all — now marked on both `quality_gate_failed` and `gate_outcome`.
+  Infra exhaustion still throws in both modes (an infrastructure failure is
+  not a refusal). Refused results never touch the session accumulators —
+  they previously would have counted as local serves and inflated
+  cloud-tokens-saved.
+- **Layer-1 oversize verdict `UNCERTAIN_LENGTH`** — §5.3. Prompts >4000 chars
+  previously got a blanket UNCERTAIN → reserved handling → with cloud off,
+  every big benign prompt was refused. Now: the deterministic keyword floor
+  scans the FULL text first (reserved vocabulary anywhere short-circuits to
+  OBVIOUS_RESERVED with no classifier call), then a bounded head+middle+tail
+  excerpt is classified. A clean excerpt yields the distinct UNCERTAIN_LENGTH
+  verdict, which routes LOCAL with an audit marker. Semantic UNCERTAIN still
+  gets full reserved handling. The keyword floor also gains previously-missing
+  vocabulary (basket/prone/supine/two-person holds, holding-the-client-down,
+  rage episode).
+- **Per-tier ctx gate (`ctx_insufficient`)** — §5.4. MODEL_TIERS context values
+  are now aligned with the LIVE Modelfile `num_ctx` (verified inverted from
+  the old table: 27b/9b bake 4096, 4b/2b bake 32768 — the old config was
+  wrong on 3 of 4 tiers). The tier walk skips tiers whose ctx cannot hold the
+  prompt; if no tier fits, cloud receives the FULL prompt when allowed,
+  otherwise a loud error with the per-tier trail. Ollama previously truncated
+  over-ctx prompts silently and answered from the fragment.
+- **Entitlements provenance + strict mode** — §5.5. `PrismEntitlements.source`
+  distinguishes `'portal'` (real data, incl. portal-confirmed free) from
+  `'unconfigured'` (no key — free is correct) from `'fallback_free'` (portal
+  configured but unreachable — free clamps were ASSUMED). New
+  `strict_entitlements: true` arg fails loud on `fallback_free` instead of
+  silently running under assumed limits. `fallback_free` never enters the
+  5-min cache (recovery is immediate); a 25s negative cache caps retry cost
+  during outages. Every result carries `entitlements_source`.
+
+### Fixed
+- Ledger rows now carry the structured `gate_outcome` and `refusal_reason`
+  (columns pre-provisioned in 20.0.7); serve-mode keyword-backstop refusals
+  now write a ledger row (previously silent).
+- Stale "cached 1hr" entitlements docs corrected (resolution was already
+  per-call with a 5-min cache).
+
+### Tests
+- 70+ new tests across four suites: three-terminal-path contract fixtures with
+  drift guard, oversize excerpt/keyword-floor coverage (incl. an explicit
+  pinned-residual fixture), ctx-gate tier skipping with never-silent-truncation
+  proof, entitlements provenance per resolution path, negative-cache window,
+  strict-mode contract. Full suite 108 files / 3200+ tests green. Each plan
+  item shipped through an adversarial review pass; all confirmed findings
+  fixed in the same commits.
+
 ## [20.0.8] - 2026-07-20 — Fix: verify_behavior MCP result contract
 
 ### Fixed
