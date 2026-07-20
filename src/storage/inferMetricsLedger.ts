@@ -187,8 +187,9 @@ export async function queryInferMetrics(sinceTs?: number): Promise<InferMetricsA
 
 /** Test hook — reset module state so a fresh DB path/env can be exercised. */
 export function _resetInferLedgerForTest(): void {
-    // libSQL keeps the SQLite file open until close() is called. Dropping the
-    // reference alone leaves Windows unable to remove the test directory.
+    // Close the logical client instead of only dropping its reference.
+    // libsql 0.5.29 can still retain native prepared-statement handles until
+    // V8 GC (libsql-js#228), so this is not a synchronous file-unlock barrier.
     closeClient("test reset");
     ensured = null;
     disabled = false;
