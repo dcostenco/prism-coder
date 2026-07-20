@@ -34,15 +34,27 @@ prism connect             # auto-detect installed hosts
 prism connect --dry-run   # preview without writing
 ```
 
-The command supports Claude Code, Claude Desktop (macOS/Windows/Linux), Cursor, and
-Gemini CLI. Use
-`prism connect --all` to target all four or `prism connect --host <name>` to
+The command supports Claude Code, Claude Desktop (macOS/Windows/Linux), Cursor,
+Gemini CLI, and Codex. Use
+`prism connect --all` to target all five or `prism connect --host <name>` to
 target one. Existing `prism` and `prism-mcp` entries are never overwritten.
 `--refresh` updates only entries previously created by Prism; custom entries
 stay untouched. The host-specific sections below retain the equivalent manual
 configuration.
 Close the target MCP hosts before a non-dry-run registration so they cannot
 edit their configuration concurrently.
+
+### Codex
+
+Run `prism connect --host codex` to add Prism to Codex's shared
+`~/.codex/config.toml` (or `$CODEX_HOME/config.toml`). Prism preserves the
+existing TOML byte-for-byte and appends only a marked block that it can safely
+refresh later. If `CODEX_HOME` is set, that directory must already exist.
+Codex CLI, the IDE extension, and the ChatGPT desktop app share
+this configuration. Restart the active client after connecting, then run
+`codex mcp list` to verify the registration. See the
+[official Codex MCP guide](https://learn.chatgpt.com/docs/extend/mcp) for the
+underlying configuration contract.
 
 The free tier needs **no account, no API key, and no cloud**. Memory is stored in a local
 SQLite database at `~/.prism-mcp/data.db`. A dashboard launches automatically at

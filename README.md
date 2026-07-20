@@ -22,7 +22,7 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ### One Command Connects Every Supported Host
 Install Prism globally and run `prism connect`. It detects Claude Code, Claude
-Desktop on macOS, Windows, and Linux (beta), Cursor, and Gemini CLI, then safely registers the
+Desktop on macOS, Windows, and Linux (beta), Cursor, Gemini CLI, and Codex, then safely registers the
 server from the installed package. Existing custom entries are untouched;
 `--dry-run` previews changes and `--refresh` updates only Prism-managed entries.
 
@@ -116,13 +116,18 @@ prism connect
 ```
 
 `prism connect` detects Claude Code, Claude Desktop (macOS/Windows/Linux), Cursor,
-and Gemini CLI.
-Use `prism connect --all` to target all four, `--host <name>` for one host, or
+Gemini CLI, and Codex.
+Use `prism connect --all` to target all five, `--host <name>` for one host, or
 `--dry-run` to preview the files that would change. Existing `prism` and
 `prism-mcp` entries are never overwritten by default. `--refresh` updates only
 an entry previously created by Prism; custom entries remain untouched.
 Close the target MCP hosts before a non-dry-run registration so they cannot
 edit their configuration at the same time.
+
+Codex registration preserves `~/.codex/config.toml` and appends only a marked
+Prism-managed block. `CODEX_HOME` is respected when set and must already exist,
+matching Codex's own contract. Restart Codex CLI, the
+IDE extension, or the ChatGPT desktop app after connecting.
 
 Restart the connected host and your agent now has memory backed by a local
 SQLite database (`~/.prism-mcp/data.db`). See [IDE setup](docs/IDE_SETUP.md)

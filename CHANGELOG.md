@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **`prism connect`** — Detects Claude Code, Claude Desktop on macOS, Windows,
-  and Linux, Cursor, and Gemini CLI, then registers the installed Prism server
+  and Linux, Cursor, Gemini CLI, and Codex, then registers the installed Prism server
   using absolute runtime and package paths. Supports `--host`, `--all`, and
   write-free `--dry-run` operation.
 - **Safe managed refreshes** — `--refresh` updates only entries previously
@@ -15,15 +15,18 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Host configuration uses atomic writes, preserves symlinked config files,
-  detects concurrent edits, and leaves existing `prism` or `prism-mcp`
+  detects concurrent edits observed before atomic replacement, and leaves
+  existing `prism` or `prism-mcp`
   registrations untouched by default.
+- Codex registration respects `CODEX_HOME` and preserves existing TOML while
+  owning only a clearly marked `mcp_servers.prism-mcp` block.
 - Onboarding and IDE setup now direct users through the single `prism connect`
   path instead of maintaining separate generated snippets.
 
 ### Tests
 - Added cross-platform registration coverage for idempotency, refresh,
-  dry-run, application detection, invalid JSON, symlinks, and concurrent host
-  writes.
+  dry-run, application detection, invalid JSON/TOML, symlinks, and concurrent
+  host writes.
 
 ## [20.1.0] - 2026-07-20 — 🧭 Failure Contract, Oversize Prompts, Ctx Gate, Entitlements Provenance
 

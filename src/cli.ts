@@ -26,7 +26,7 @@ program
 program
   .command('connect')
   .description('Register Prism with installed MCP hosts (close hosts before writing)')
-  .option('--host <name>', 'Target one host: claude-code, claude-desktop, cursor, or gemini')
+  .option('--host <name>', 'Target one host: claude-code, claude-desktop, cursor, gemini, or codex')
   .option('--all', 'Target all supported hosts instead of auto-detecting installed hosts')
   .option('--dry-run', 'Preview configuration changes without writing files')
   .option('--refresh', 'Refresh only entries previously created by Prism; custom entries stay untouched')
