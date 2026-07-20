@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
-      - run: npm install
+      - run: npm ci
       - run: npm run build
       # Skip publish if this version is already on npm (e.g. tag was force-
       # moved after a history rewrite). Without this guard the workflow

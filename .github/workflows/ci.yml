@@ -30,7 +30,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm install
+        run: npm ci
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
