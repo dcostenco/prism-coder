@@ -5,9 +5,14 @@
  * a prompt is OBVIOUS_RESERVED, OBVIOUS_NOT_RESERVED, or UNCERTAIN.
  *
  * Fail-closed contract:
- *   OBVIOUS_NOT_RESERVED → the ONLY verdict that permits local routing
+ *   OBVIOUS_NOT_RESERVED → permits local routing
  *   OBVIOUS_RESERVED     → escalate to cloud
  *   UNCERTAIN            → escalate to cloud (conservative)
+ *   UNCERTAIN_LENGTH     → §5.3: prompt too long to classify in full, but the
+ *                          full-text keyword floor is clean AND a head+tail
+ *                          excerpt classified clean — permits local routing
+ *                          with a distinct audit marker ("too long to classify"
+ *                          ≠ "semantically uncertain")
  *   ERROR                → escalate to cloud (never fail-open)
  *
  * The prompt below is VERBATIM from §E of prism-infer-boundaries/SKILL.md.
@@ -21,6 +26,7 @@ export type Layer1Verdict =
     | "OBVIOUS_RESERVED"
     | "OBVIOUS_NOT_RESERVED"
     | "UNCERTAIN"
+    | "UNCERTAIN_LENGTH"
     | "ERROR";
 
 // VERBATIM — §E prism-infer-boundaries/SKILL.md. Do not edit without re-running eval-layer1.mjs.
@@ -75,7 +81,7 @@ const LAYER1_RETRY_TIMEOUT_MS = 5_000;
 // Not sufficient alone (adversaries can paraphrase), but as an ERROR-path
 // floor they block the obvious cases that padding/injection attacks
 // would otherwise smuggle through.
-const RESERVED_KEYWORDS = /\b(restrain\w*|seclu(?:sion|d\w*)|physical\s*holds?|containment|self[- ]?harm\w*|suicid\w*|overdos\w*|dos(?:age|ing)\s*(?:mg|schedule)|crisis\s*de[- ]?escalation|meltdown\s*management|elopement\s*incident)\b/i;
+const RESERVED_KEYWORDS = /\b(restrain\w*|seclu(?:sion|d\w*)|physical\s*holds?|(?:prone|supine|basket|therapeutic|manual|two[- ]?person)\s+holds?|hold(?:ing)?\s+(?:the\s+)?(?:client|child|student|patient)\s+down|containment|self[- ]?harm\w*|suicid\w*|overdos\w*|dos(?:age|ing)\s*(?:mg|schedule)|crisis\s*de[- ]?escalation|meltdown\s*management|rage\s+episode|elopement\s*incident)\b/i;
 
 /**
  * Deterministic keyword check — the ERROR-path floor.
@@ -88,9 +94,38 @@ export function keywordBackstop(prompt: string): Layer1Verdict {
 }
 
 // Over-length prompts are attacker-controlled — don't let length
-// select the ERROR branch. Classify as UNCERTAIN (conservative)
-// rather than feeding a huge prompt to a 4B classifier that will timeout.
+// select the ERROR branch. §5.3: instead of a blanket UNCERTAIN (which
+// routed every big benign prompt to cloud-or-refuse — v1 FATAL #3), run
+// the deterministic keyword floor over the FULL text, then classify a
+// bounded head+tail excerpt. A clean floor + clean excerpt yields the
+// distinct UNCERTAIN_LENGTH verdict so callers can tell "too long to
+// classify" from "semantically uncertain".
 const MAX_CLASSIFIER_PROMPT_LENGTH = 4_000;
+// Excerpt budget: head + middle + tail must stay under the classifier cap
+// with room for the LAYER1_PROMPT template. The sampled middle window
+// narrows the region an attacker can hide paraphrased reserved content in
+// (adversarial-review finding: keyword-free paraphrases in the unseen
+// middle are the residual gap — the window makes padding placement
+// harder; the full-text keyword floor remains the deterministic net).
+const EXCERPT_HEAD_CHARS = 2_000;
+const EXCERPT_MID_CHARS = 400;
+const EXCERPT_TAIL_CHARS = 1_400;
+
+/** Bounded head+middle+tail excerpt of an oversize prompt (§5.3). Exported for tests. */
+export function buildOversizeExcerpt(prompt: string): string {
+    const midStart = Math.max(
+        EXCERPT_HEAD_CHARS,
+        Math.floor(prompt.length / 2) - EXCERPT_MID_CHARS / 2,
+    );
+    const middle = prompt.slice(midStart, midStart + EXCERPT_MID_CHARS);
+    return (
+        prompt.slice(0, EXCERPT_HEAD_CHARS) +
+        "\n[…]\n" +
+        middle +
+        "\n[…]\n" +
+        prompt.slice(-EXCERPT_TAIL_CHARS)
+    );
+}
 
 /**
  * Run the Layer 1 classifier with retry on cold-model timeout.
@@ -98,6 +133,10 @@ const MAX_CLASSIFIER_PROMPT_LENGTH = 4_000;
  *
  * Flow: classify → if ERROR, retry once with longer timeout →
  * if still ERROR, return ERROR (caller uses keywordBackstop).
+ *
+ * Oversize flow (§5.3): full-text keyword floor → excerpt classification →
+ * reserved/uncertain excerpt verdicts keep full reserved handling;
+ * a clean excerpt returns UNCERTAIN_LENGTH.
  */
 export async function callLayer1(
     userPrompt: string,
@@ -107,7 +146,14 @@ export async function callLayer1(
 ): Promise<Layer1Verdict> {
     if (!userPrompt || !userPrompt.trim()) return "ERROR";
 
-    if (userPrompt.length > MAX_CLASSIFIER_PROMPT_LENGTH) return "UNCERTAIN";
+    const oversize = userPrompt.length > MAX_CLASSIFIER_PROMPT_LENGTH;
+    if (oversize && keywordBackstop(userPrompt) === "OBVIOUS_RESERVED") {
+        // The regex floor has no length limit — reserved vocabulary anywhere
+        // in the full text (including the middle the excerpt can't see)
+        // short-circuits to reserved handling.
+        return "OBVIOUS_RESERVED";
+    }
+    const classifierInput = oversize ? buildOversizeExcerpt(userPrompt) : userPrompt;
 
     const classify = async (timeoutMs: number): Promise<Layer1Verdict> => {
         let res: Response;
@@ -118,7 +164,7 @@ export async function callLayer1(
                 body: JSON.stringify({
                     model,
                     messages: [
-                        { role: "user", content: LAYER1_PROMPT.replace("{prompt}", userPrompt) },
+                        { role: "user", content: LAYER1_PROMPT.replace("{prompt}", classifierInput) },
                     ],
                     stream: false,
                     think: false,
@@ -145,7 +191,16 @@ export async function callLayer1(
     };
 
     const first = await classify(LAYER1_TIMEOUT_MS);
-    if (first !== "ERROR") return first;
+    const verdict = first !== "ERROR" ? first : await classify(LAYER1_RETRY_TIMEOUT_MS);
 
-    return classify(LAYER1_RETRY_TIMEOUT_MS);
+    if (!oversize) return verdict;
+
+    // §5.3 oversize mapping:
+    //   excerpt OBVIOUS_RESERVED / UNCERTAIN → keep full reserved handling
+    //   excerpt OBVIOUS_NOT_RESERVED        → UNCERTAIN_LENGTH (distinct verdict)
+    //   excerpt ERROR                       → UNCERTAIN_LENGTH — the deterministic
+    //     keyword floor already cleared the FULL text above, which is the same
+    //     floor the normal-size ERROR path falls back to via the caller.
+    if (verdict === "OBVIOUS_RESERVED" || verdict === "UNCERTAIN") return verdict;
+    return "UNCERTAIN_LENGTH";
 }

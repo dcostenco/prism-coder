@@ -39,7 +39,7 @@ import { stripThink } from "../utils/thinkStrip.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
 import { callLayer1 as defaultCallLayer1, keywordBackstop, type Layer1Verdict } from "../utils/layer1.js";
-import { recordInference, recordThinkOnlyRetry, formatInferenceMetrics } from "../utils/inferenceMetrics.js";
+import { recordInference, recordThinkOnlyRetry, formatInferenceMetrics, estimateTokens } from "../utils/inferenceMetrics.js";
 import { appendInferMetric } from "../storage/inferMetricsLedger.js";
 
 // ─── Tool Definition ────────────────────────────────────────────
@@ -669,6 +669,16 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             if (wantReport) return refusedResult("layer1_reserved");
             throw makeReservedRefusal(l1, attempts);
         }
+        if (l1 === "UNCERTAIN_LENGTH") {
+            // §5.3: prompt too long to classify in full, but the full-text
+            // keyword floor was clean AND the head+tail excerpt classified
+            // clean. Proceed to the local tier walk with a distinct audit
+            // marker — "too long to classify" is not a safety verdict.
+            // Whether the prompt FITS a local tier's context is the §5.4
+            // ctx gate's job, not Layer 1's.
+            debugLog(`[prism_infer] Layer 1 verdict=UNCERTAIN_LENGTH — oversize prompt cleared by keyword floor + excerpt, proceeding local`);
+            attempts.push({ tier: "layer1", reason: "layer1_uncertain_length" });
+        }
         if (l1 === "ERROR") {
             debugLog(`[prism_infer] Layer 1 verdict=ERROR — classifier failed, trying cloud then keyword backstop`);
             attempts.push({ tier: "layer1", reason: "layer1_error" });
@@ -707,7 +717,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 );
             }
         }
-        debugLog(`[prism_infer] Layer 1 verdict=OBVIOUS_NOT_RESERVED — proceeding local`);
+        if (l1 === "OBVIOUS_NOT_RESERVED") {
+            debugLog(`[prism_infer] Layer 1 verdict=OBVIOUS_NOT_RESERVED — proceeding local`);
+        }
     }
     // ── end Layer 1 ─────────────────────────────────────────────────────────
 
@@ -801,6 +813,23 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             const isWarm = loaded.has(ollamaName);
             if (!isWarm && freeAfterEvict < tier.minFreeGb * (1024 ** 3)) {
                 attempts.push({ tier: tier.tag, reason: "ram_insufficient" });
+                continue;
+            }
+            // Ctx gate (§5.4): skip tiers whose live Modelfile num_ctx cannot
+            // hold the PROMPT (+ system + small template margin). Ollama
+            // silently truncates an over-ctx prompt and answers from the
+            // fragment — "never silent truncation" (plan §7). Generated
+            // tokens shift the window rather than truncate the prompt, so
+            // max_tokens is deliberately NOT reserved here — requiring
+            // prompt+output ≤ ctx would make a max_tokens=4096 request
+            // unroutable to the 4096-ctx tiers even for tiny prompts.
+            // ctxTokens mirrors the live Modelfile values (see MODEL_TIERS).
+            const CTX_TEMPLATE_MARGIN = 64;
+            const promptTokensEst = estimateTokens(args.prompt)
+                + (args.system ? estimateTokens(args.system) : 0)
+                + CTX_TEMPLATE_MARGIN;
+            if (promptTokensEst > tier.ctxTokens) {
+                attempts.push({ tier: tier.tag, reason: "ctx_insufficient" });
                 continue;
             }
             anyViable = true;

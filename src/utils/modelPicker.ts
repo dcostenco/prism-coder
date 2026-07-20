@@ -33,12 +33,21 @@ export interface ModelChoice {
 /**
  * Tier table, ordered LARGEST → SMALLEST. Picker walks this and returns
  * the first row whose minFreeGb fits within freeBytes.
+ *
+ * ctxTokens (§5.4): aligned with the LIVE Modelfile `num_ctx` values
+ * (verified via `ollama show <tag> --modelfile` on 2026-07-20). The values
+ * are inverted from intuition — the 27b/9b Modelfiles bake num_ctx 4096
+ * while 4b/2b bake 32768. The tier walk skips tiers whose ctx cannot hold
+ * prompt + output (reason: ctx_insufficient) — Ollama otherwise silently
+ * truncates the prompt and answers from the fragment. If a Modelfile's
+ * num_ctx is ever raised, update the row here (a raise is a measured
+ * decision with KV-cache RAM costed — plan v2 §5.4).
  */
 export const MODEL_TIERS: ReadonlyArray<ModelChoice> = [
-    { tag: 'prism-coder:27b',  weightsGb: 16, minFreeGb: 20, ctxTokens: 32_768 },
-    { tag: 'prism-coder:9b',   weightsGb:  5.8, minFreeGb:  8, ctxTokens: 32_768 },
+    { tag: 'prism-coder:27b',  weightsGb: 16, minFreeGb: 20, ctxTokens: 4_096 },
+    { tag: 'prism-coder:9b',   weightsGb:  5.8, minFreeGb:  8, ctxTokens: 4_096 },
     { tag: 'prism-coder:4b',   weightsGb:  3.4, minFreeGb:  5, ctxTokens: 32_768 },
-    { tag: 'prism-coder:2b',   weightsGb:  2.3, minFreeGb:  3, ctxTokens:  8_192 },
+    { tag: 'prism-coder:2b',   weightsGb:  2.3, minFreeGb:  3, ctxTokens: 32_768 },
 ];
 
 /**

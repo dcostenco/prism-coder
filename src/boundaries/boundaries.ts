@@ -18,13 +18,13 @@
  * drift detection — bump it when the safety contract changes.
  */
 
-export const BOUNDARIES_VERSION = "3";
+export const BOUNDARIES_VERSION = "4";
 
 export const BOUNDARIES_TEXT = `
 Safety boundaries are enforced in code — shown so hosts avoid wasted round-trips.
 
 - **Crisis/self-harm** inputs are intercepted before reaching any model.
-- **BCBA reserved categories** (restraint, seclusion, physical management, dosing) are classified by Layer 1. RESERVED and UNCERTAIN prompts escalate to cloud or are refused. On classifier failure, a keyword backstop blocks reserved vocabulary before local generation.
+- **BCBA reserved categories** (restraint, seclusion, physical management, dosing): Layer 1 classifies; RESERVED/UNCERTAIN escalate to cloud or are refused. A keyword backstop covers classifier failure; oversize prompts get a full-text keyword scan + excerpt classification.
 - **Dangerous output** (restraint instructions, overdose methods, self-harm guidance) is blocked regardless of host.
 - AAC access is never restricted as a consequence.
 `.trim();

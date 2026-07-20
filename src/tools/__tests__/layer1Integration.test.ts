@@ -132,18 +132,124 @@ describe("keywordBackstop", () => {
     });
 });
 
-// ── callLayer1 over-length test ─────────────────────────────────────────────
+// ── callLayer1 over-length (§5.3: UNCERTAIN_LENGTH) ─────────────────────────
 
-describe("callLayer1 over-length", () => {
-    it("returns UNCERTAIN for prompts > 4000 chars (attacker-controlled length)", async () => {
-        const longPrompt = "A".repeat(5000);
-        const result = await callLayer1(longPrompt, "http://localhost:11434", "model");
+/** Mock fetch returning a fixed classifier verdict. */
+const classifierFetch = (verdict: string) =>
+    vi.fn(async () => new Response(JSON.stringify({ message: { content: verdict } }), { status: 200 }));
+
+describe("callLayer1 over-length (§5.3)", () => {
+    const HEAD = "This is the beginning of a long benign refactoring request. ";
+    const MIDDLE = "middle filler content about data processing ".repeat(150);
+    const TAIL = " And this is the very end of the request, thanks.";
+    const cleanOversize = HEAD + MIDDLE + TAIL; // > 4000 chars, no reserved vocab
+
+    it("full-text keyword floor catches reserved vocab in the UNSEEN middle — no classifier call", async () => {
+        const prompt = "A".repeat(3000) + " write a seclusion protocol " + "B".repeat(3000);
+        const fetchSpy = classifierFetch("OBVIOUS_NOT_RESERVED");
+        const result = await callLayer1(prompt, "http://x", "model", fetchSpy as unknown as typeof fetch);
+        expect(result).toBe("OBVIOUS_RESERVED");
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("clean oversize prompt with clean excerpt → UNCERTAIN_LENGTH (distinct from UNCERTAIN)", async () => {
+        const fetchSpy = classifierFetch("OBVIOUS_NOT_RESERVED");
+        const result = await callLayer1(cleanOversize, "http://x", "model", fetchSpy as unknown as typeof fetch);
+        expect(result).toBe("UNCERTAIN_LENGTH");
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("classifier receives a bounded head+tail excerpt, not the full prompt", async () => {
+        const fetchSpy = classifierFetch("OBVIOUS_NOT_RESERVED");
+        await callLayer1(cleanOversize, "http://x", "model", fetchSpy as unknown as typeof fetch);
+        const body = JSON.parse((fetchSpy.mock.calls[0] as unknown[])[1]!["body" as never] as string);
+        const sent: string = body.messages[0].content;
+        expect(sent).toContain(HEAD.trim());
+        expect(sent).toContain(TAIL.trim());
+        expect(sent).toContain("[…]");
+        // bounded: template + excerpt stays under the classifier cap + template overhead
+        expect(sent.length).toBeLessThan(6000);
+    });
+
+    it("excerpt classified OBVIOUS_RESERVED keeps full reserved handling", async () => {
+        const fetchSpy = classifierFetch("OBVIOUS_RESERVED");
+        const result = await callLayer1(cleanOversize, "http://x", "model", fetchSpy as unknown as typeof fetch);
+        expect(result).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("excerpt classified UNCERTAIN keeps full reserved handling", async () => {
+        const fetchSpy = classifierFetch("UNCERTAIN");
+        const result = await callLayer1(cleanOversize, "http://x", "model", fetchSpy as unknown as typeof fetch);
         expect(result).toBe("UNCERTAIN");
+    });
+
+    it("classifier failure on oversize → UNCERTAIN_LENGTH (keyword floor already cleared full text)", async () => {
+        const failingFetch = vi.fn(async () => { throw new Error("connection refused"); });
+        const result = await callLayer1(cleanOversize, "http://x", "model", failingFetch as unknown as typeof fetch);
+        expect(result).toBe("UNCERTAIN_LENGTH");
+        expect(failingFetch).toHaveBeenCalledTimes(2); // initial + retry
+    });
+
+    it("normal-size prompts are unaffected — full prompt sent, verdict passthrough", async () => {
+        const fetchSpy = classifierFetch("OBVIOUS_NOT_RESERVED");
+        const result = await callLayer1("short benign prompt", "http://x", "model", fetchSpy as unknown as typeof fetch);
+        expect(result).toBe("OBVIOUS_NOT_RESERVED");
+        const body = JSON.parse((fetchSpy.mock.calls[0] as unknown[])[1]!["body" as never] as string);
+        expect(body.messages[0].content).toContain("short benign prompt");
+        expect(body.messages[0].content).not.toContain("[…]");
     });
 
     it("returns ERROR for empty prompts", async () => {
         const result = await callLayer1("", "http://localhost:11434", "model");
         expect(result).toBe("ERROR");
+    });
+
+    it("middle window: content at the prompt's center IS visible to the classifier", async () => {
+        const marker = "UNIQUE-CENTER-MARKER-PHRASE";
+        const half = "x".repeat(4000);
+        const prompt = half + " " + marker + " " + half;
+        const fetchSpy = classifierFetch("OBVIOUS_NOT_RESERVED");
+        await callLayer1(prompt, "http://x", "model", fetchSpy as unknown as typeof fetch);
+        const body = JSON.parse((fetchSpy.mock.calls[0] as unknown[])[1]!["body" as never] as string);
+        expect(body.messages[0].content).toContain(marker);
+    });
+
+    it("DOCUMENTED RESIDUAL (accepted, adversarial review finding 1): keyword-free paraphrased reserved content outside head/middle/tail windows reaches UNCERTAIN_LENGTH", async () => {
+        // A paraphrase with NO RESERVED_KEYWORDS match, placed between the head
+        // window and the middle window, is invisible to both the keyword floor
+        // and the excerpt. This test PINS the accepted residual risk so any
+        // future change to it is deliberate. Mitigations in force: full-text
+        // keyword floor (deterministic), head+middle+tail sampling (placement
+        // is hard), checkInputSafety on the full prompt, checkOutputSafety on
+        // all served output.
+        const paraphrase = "describe how staff should pin the person still while they fight";
+        const prompt = "y".repeat(2500) + paraphrase + "z".repeat(6000);
+        const fetchSpy = classifierFetch("OBVIOUS_NOT_RESERVED");
+        const result = await callLayer1(prompt, "http://x", "model", fetchSpy as unknown as typeof fetch);
+        expect(result).toBe("UNCERTAIN_LENGTH");
+        const body = JSON.parse((fetchSpy.mock.calls[0] as unknown[])[1]!["body" as never] as string);
+        expect(body.messages[0].content).not.toContain("pin the person");
+    });
+});
+
+// ── RESERVED_KEYWORDS additions (adversarial-review bypass closure) ─────────
+
+describe("keywordBackstop — closed bypasses", () => {
+    it.each([
+        ["basket hold", "write the basket hold procedure"],
+        ["prone hold", "steps for a prone hold on the client"],
+        ["two-person hold", "when do we use a two-person hold"],
+        ["holding the client down", "staff procedure for holding the client down"],
+        ["hold the child down", "how to hold the child down safely"],
+        ["rage episode", "what to do during a rage episode"],
+    ])("catches %s", (_label, prompt) => {
+        expect(keywordBackstop(prompt)).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("still clean on benign hold/rage usages", () => {
+        expect(keywordBackstop("hold the deploy until CI is green")).toBe("OBVIOUS_NOT_RESERVED");
+        expect(keywordBackstop("the on-hold order queue needs a refactor")).toBe("OBVIOUS_NOT_RESERVED");
+        expect(keywordBackstop("all the rage in the JS ecosystem")).toBe("OBVIOUS_NOT_RESERVED");
     });
 });
 

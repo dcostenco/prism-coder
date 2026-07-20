@@ -343,6 +343,107 @@ describe("failure contract — verification interplay", () => {
     });
 });
 
+// ── §5.3: UNCERTAIN_LENGTH routing ───────────────────────────────
+
+describe("§5.3 — UNCERTAIN_LENGTH is not a safety verdict", () => {
+    it("oversize-cleared prompt proceeds LOCAL with a distinct audit marker (no cloud, no refusal)", async () => {
+        const deps = mockDeps({
+            entitlements: FREE, // no cloud — old behavior refused here
+            callLayer1: vi.fn(async () => "UNCERTAIN_LENGTH" as const),
+        });
+        const r = await runInfer(baseArgs, deps);
+        expect(r.output).toBe("a clean, complete answer"); // served locally
+        expect(r.used_cloud).toBe(false);
+        expect(r.gate_outcome).toEqual({ status: "success", served_anyway: false });
+        expect(r.attempts).toContainEqual({ tier: "layer1", reason: "layer1_uncertain_length" });
+    });
+
+    it("oversize prompt that FITS the tier ctx serves locally with the length marker visible", async () => {
+        const bigPrompt = "benign words about refactoring the data pipeline ".repeat(2400); // ~117K chars ≈ 29K tokens < 4b's 32K ctx
+        const deps = mockDeps({
+            entitlements: FREE,
+            callLayer1: vi.fn(async () => "UNCERTAIN_LENGTH" as const),
+        });
+        const r = await runInfer({ prompt: bigPrompt, model_ceiling: "4b" }, deps);
+        expect(r.attempts).toContainEqual({ tier: "layer1", reason: "layer1_uncertain_length" });
+        expect(r.backend).toBe("ollama-4b");
+    });
+
+    it("UNCERTAIN (semantic) still gets reserved handling — the two verdicts stay distinct", async () => {
+        const deps = mockDeps({
+            entitlements: FREE,
+            callLayer1: vi.fn(async () => "UNCERTAIN" as const),
+        });
+        await expect(runInfer(baseArgs, deps)).rejects.toBeInstanceOf(ReservedRefusalError);
+    });
+});
+
+// ── §5.4: per-tier ctx gate — never silent truncation ────────────
+
+describe("§5.4 — ctx gate", () => {
+    // 32 GB free so 27b passes the RAM gate and the CTX gate is what triggers.
+    const bigRam = () => 32 * 1024 ** 3;
+    // ~20K chars ≈ 5K tokens: exceeds 27b/9b's live num_ctx (4096), fits 4b/2b (32768).
+    const midPrompt = "benign refactoring context words repeated for sizing purposes here ".repeat(300);
+    // ~144K chars ≈ 36K tokens: exceeds every tier's ctx.
+    const hugePrompt = "benign refactoring context words repeated for sizing purposes here ".repeat(2200);
+
+    it("skips under-ctx tiers with reason ctx_insufficient and serves from a fitting tier", async () => {
+        const deps = mockDeps({
+            entitlements: STANDARD,
+            freemem: bigRam,
+            callLayer1: vi.fn(async () => "UNCERTAIN_LENGTH" as const),
+        });
+        const r = await runInfer({ prompt: midPrompt, model_ceiling: "27b" }, deps);
+        expect(r.attempts).toContainEqual({ tier: "prism-coder:27b", reason: "ctx_insufficient" });
+        expect(r.attempts).toContainEqual({ tier: "prism-coder:9b", reason: "ctx_insufficient" });
+        expect(r.backend).toBe("ollama-4b"); // first tier whose ctx fits
+        expect(r.gate_outcome?.status).toBe("success");
+    });
+
+    it("plan §7: prompt exceeding EVERY tier's ctx + no cloud → LOUD failure with ctx_insufficient visible, never a truncated answer", async () => {
+        const deps = mockDeps({
+            entitlements: FREE,
+            freemem: bigRam,
+            callLayer1: vi.fn(async () => "UNCERTAIN_LENGTH" as const),
+        });
+        let thrown: unknown;
+        try {
+            await runInfer({ prompt: hugePrompt }, deps);
+        } catch (e) {
+            thrown = e;
+        }
+        expect(thrown).toBeInstanceOf(Error);
+        expect((thrown as Error).message).toMatch(/no backend produced output/);
+        const attempts = (thrown as { attempts?: Array<{ tier: string; reason: string }> }).attempts ?? [];
+        expect(attempts.some(a => a.reason === "ctx_insufficient")).toBe(true);
+        // the local model was never called — nothing truncated, nothing served
+        expect(deps.callLocal).not.toHaveBeenCalled();
+    });
+
+    it("prompt exceeding every tier's ctx WITH cloud → cloud serves the full prompt", async () => {
+        const deps = mockDeps({
+            entitlements: STANDARD,
+            freemem: bigRam,
+            callLayer1: vi.fn(async () => "UNCERTAIN_LENGTH" as const),
+        });
+        const r = await runInfer({ prompt: hugePrompt, cloud_fallback: true }, deps);
+        expect(r.used_cloud).toBe(true);
+        expect(deps.callLocal).not.toHaveBeenCalled();
+        expect(r.gate_outcome).toEqual({ status: "success", served_anyway: false });
+        // cloud received the FULL prompt, not an excerpt
+        const cloudCalls = (deps.callCloud as ReturnType<typeof vi.fn>).mock.calls;
+        expect(cloudCalls[0][0]).toBe(hugePrompt);
+    });
+
+    it("normal-size prompts are unaffected by the ctx gate", async () => {
+        const deps = mockDeps({ entitlements: STANDARD, freemem: bigRam });
+        const r = await runInfer({ ...baseArgs, model_ceiling: "27b" }, deps);
+        expect(r.attempts.filter(a => a.reason === "ctx_insufficient")).toHaveLength(0);
+        expect(r.backend).toBe("ollama-27b");
+    });
+});
+
 // ── Out-of-contract paths pinned ─────────────────────────────────
 
 describe("failure contract — boundaries", () => {
