@@ -16,6 +16,8 @@
     "dist"
   ],
   "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "prebuild": "npm run clean",
     "build": "tsc && npm run chmod-bins",
     "chmod-bins": "node -e \"['dist/cli.js','dist/server.js','dist/utils/universalImporter.js'].forEach(f => { try { require('fs').chmodSync(f, 0o755); } catch (e) { console.warn('chmod skipped', f, e.message); } })\"",
     "prepublishOnly": "npm run build",
