@@ -102,22 +102,42 @@ export function recordInference(result: {
     mode?: string;
     ram_free_mb?: number;
     quality_gate_failed?: boolean;
+    /** §5.2 failure contract — structured terminal disposition. */
+    gate_outcome?: { status: "success" | "degraded" | "refused"; reason?: string; served_anyway: boolean };
 }): void {
     if (result.backend === "safety_gate") return;
 
     // Durable ledger row (fire-and-forget; in-memory counters below remain the
     // per-session view). safety_gate is excluded by the early return above.
+    // §5.2: prefer the structured gate_outcome; keep the legacy
+    // "gate_failed_served" string for degraded rows so existing ledger
+    // queries stay valid. Refused rows (escalation:"report") carry the
+    // refusal reason — the serve-mode throw paths ledger directly at the
+    // refusal site (makeReservedRefusal / backstop), so exactly one row
+    // is written either way.
+    const gateOutcomeStr = result.gate_outcome
+        ? (result.gate_outcome.status === "degraded" ? "gate_failed_served" : result.gate_outcome.status)
+        : (result.quality_gate_failed ? "gate_failed_served" : undefined);
     appendInferMetric({
         backend: result.backend,
         model: result.model_picked,
         used_cloud: result.used_cloud,
         mode: result.mode,
-        gate_outcome: result.quality_gate_failed ? "gate_failed_served" : undefined,
+        gate_outcome: gateOutcomeStr,
+        refusal_reason: result.gate_outcome?.status === "refused" ? result.gate_outcome.reason : undefined,
         prompt_tokens: result.prompt_tokens,
         completion_tokens: result.completion_tokens,
         latency_ms: result.latency_ms,
         ram_free_mb: result.ram_free_mb,
     });
+
+    // §5.2: refused results (escalation:"report") get a ledger row above but
+    // must NOT touch the session accumulators — no model ran and nothing was
+    // served, so counting them as local serves would inflate local% and
+    // cloudTokensSavedEst (the GATE 6 KPI: "improves only when local inference
+    // replaces a cloud call"). Serve-mode refusals throw and never reach here,
+    // so skipping keeps both modes' accounting identical.
+    if (result.backend === "refused") return;
 
     const key = result.model_picked ?? result.backend;
 

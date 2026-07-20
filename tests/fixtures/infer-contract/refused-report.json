@@ -1,0 +1,8 @@
+{
+  "backend": "refused",
+  "model_picked": null,
+  "used_cloud": false,
+  "quality_gate_failed": null,
+  "gate_outcome": { "status": "refused", "reason": "layer1_reserved", "served_anyway": false },
+  "output_empty": true
+}

@@ -1,0 +1,8 @@
+{
+  "backend": "ollama-4b",
+  "model_picked": "prism-coder:4b",
+  "used_cloud": false,
+  "quality_gate_failed": true,
+  "gate_outcome": { "status": "degraded", "reason": "hard_truncation", "served_anyway": true },
+  "output_empty": false
+}

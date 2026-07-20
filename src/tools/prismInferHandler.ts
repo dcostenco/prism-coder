@@ -138,6 +138,18 @@ export const PRISM_INFER_TOOL: Tool = {
                     "Enable thinking mode (<think> blocks). Default: true for chat/code, false for route. " +
                     "Thinking improves quality on complex tasks but adds latency (~2-5s).",
             },
+            escalation: {
+                type: "string",
+                enum: ["serve", "report"],
+                description:
+                    "Failure contract (plan v2 §5.2). 'serve' (default) keeps legacy behavior: " +
+                    "safety refusals throw, gate-failed output may be served. 'report' returns a " +
+                    "structured gate_outcome on every terminal path — refused results come back as " +
+                    "{status:'refused', output:''} instead of an error, and degraded (gate-failed, " +
+                    "served-anyway) output is explicitly flagged so callers can distinguish " +
+                    "success / degraded / refused.",
+                default: "serve",
+            },
         },
         required: ["prompt"],
     },
@@ -172,6 +184,11 @@ export interface PrismInferArgs {
     /** Session key. Same id used by session_load_context / session_save_ledger.
      *  When provided, inference telemetry is recorded server-side for session health. */
     conversation_id?: string;
+    /** Failure contract (plan v2 §5.2). Default "serve" = legacy behavior
+     *  (refusals throw; gate-failed output may serve silently-flagged).
+     *  "report" = every terminal path returns a structured `gate_outcome`;
+     *  safety refusals return {status:"refused", output:""} instead of throwing. */
+    escalation?: "serve" | "report";
 }
 
 export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
@@ -192,6 +209,8 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (a.verify !== undefined && typeof a.verify !== "boolean") return false;
     if (a.verifier_model !== undefined && typeof a.verifier_model !== "string") return false;
     if (a.verifier_timeout_ms !== undefined && typeof a.verifier_timeout_ms !== "number") return false;
+    if (a.escalation !== undefined &&
+        !["serve", "report"].includes(a.escalation as string)) return false;
     if (a.evidence !== undefined) {
         if (!Array.isArray(a.evidence)) return false;
         for (const e of a.evidence) {
@@ -323,9 +342,11 @@ export class ReservedRefusalError extends Error {
 
 function makeReservedRefusal(verdict: string, attempts: Array<{ tier: string; reason: string }>): ReservedRefusalError {
     // Ledger the refusal (fire-and-forget). No prompt content is persisted —
-    // same HIPAA posture as the safety_gate exclusion.
+    // same HIPAA posture as the safety_gate exclusion. gate_outcome mirrors
+    // the §5.2 report-mode row so refusal queries see both modes.
     appendInferMetric({
         backend: "refused", model: null, used_cloud: false,
+        gate_outcome: "refused",
         refusal_reason: "layer1_reserved",
     });
     return new ReservedRefusalError(verdict, attempts);
@@ -453,6 +474,21 @@ export interface PrismInferResult {
     };
     /** True when local output was served despite quality gate failure (cloud unavailable/failed). */
     quality_gate_failed?: boolean;
+    /** Failure contract (plan v2 §5.2) — structured terminal disposition,
+     *  populated on every pipeline serve/refuse path (the pre-pipeline
+     *  crisis intercept, backend "safety_gate", is outside the contract)
+     *  so callers can distinguish success / degraded / refused without
+     *  parsing errors or debug logs.
+     *  - success: output passed the quality gate (or came from cloud).
+     *  - degraded: quality gate failed but output was served anyway
+     *    (`served_anyway: true`, `reason` = gate failure reason).
+     *  - refused: safety refusal — only returned (with output:"") when
+     *    escalation:"report"; in the default "serve" mode refusals throw. */
+    gate_outcome?: {
+        status: "success" | "degraded" | "refused";
+        reason?: string;
+        served_anyway: boolean;
+    };
 }
 
 /**
@@ -534,6 +570,23 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // Strip verification args if plan lacks grounding_verifier
     const gatedArgs = canVerify ? args : { ...args, verify: false, evidence: undefined };
 
+    // §5.2 failure contract: under escalation:"report", safety refusals return
+    // a typed result (output:"") instead of throwing. Infra exhaustion (no
+    // backend produced output) still throws in BOTH modes — an infrastructure
+    // failure is not a refusal (§5.1 distinction).
+    const wantReport = args.escalation === "report";
+    const refusedResult = (reason: string): PrismInferResult => ({
+        output: "",
+        backend: "refused",
+        model_picked: null,
+        ram_free_mb: ramFreeMb,
+        latency_ms: Date.now() - t0,
+        used_cloud: false,
+        attempts,
+        plan: ent.plan,
+        gate_outcome: { status: "refused", reason, served_anyway: false },
+    });
+
     debugLog(`[prism_infer] plan=${ent.plan} ceiling=${effectiveCeiling} max_tokens=${maxTokens} cloud=${allowCloud} verify=${canVerify}`);
 
     // Log tier enforcement to Datadog for monetization visibility
@@ -596,6 +649,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     const weakBackend = /^(ollama-|openrouter-)/.test(cloud.backend ?? "");
                     if (weakBackend) {
                         attempts.push({ tier: "synalux", reason: `reserved_weak_backend:${cloud.backend}` });
+                        if (wantReport) return refusedResult("layer1_reserved");
                         throw makeReservedRefusal(l1, attempts);
                     }
                     return await applyVerification(cloud.output, gatedArgs, deps, {
@@ -607,10 +661,12 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                         attempts,
                         plan: ent.plan,
                         completion_tokens: Math.ceil(cloud.output.length / 4),
+                        gate_outcome: { status: "success", served_anyway: false },
                     });
                 }
                 attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
             }
+            if (wantReport) return refusedResult("layer1_reserved");
             throw makeReservedRefusal(l1, attempts);
         }
         if (l1 === "ERROR") {
@@ -629,6 +685,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                         attempts,
                         plan: ent.plan,
                         completion_tokens: Math.ceil(cloud.output.length / 4),
+                        gate_outcome: { status: "success", served_anyway: false },
                     });
                 }
                 attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
@@ -637,6 +694,14 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             debugLog(`[prism_infer] keyword backstop verdict=${backstop}`);
             attempts.push({ tier: "keyword_backstop", reason: `backstop_${backstop.toLowerCase()}` });
             if (backstop === "OBVIOUS_RESERVED") {
+                if (wantReport) return refusedResult("keyword_backstop_reserved");
+                // Serve-mode backstop refusal previously wrote NO ledger row —
+                // ledger it like every other refusal (no prompt content persisted).
+                appendInferMetric({
+                    backend: "refused", model: null, used_cloud: false,
+                    gate_outcome: "refused",
+                    refusal_reason: "keyword_backstop_reserved",
+                });
                 throw new Error(
                     `prism_infer: classifier failed + keyword backstop caught reserved content. attempts=${JSON.stringify(attempts)}`
                 );
@@ -649,7 +714,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // Walk the tier table top → bottom, capped by model_ceiling. Each tier
     // logs its skip reason ("not_pulled" / "ram_insufficient" / fail reason)
     // so the caller can see exactly why each tier was bypassed.
-    let localDraft: { output: string; tier: string; promptTokens?: number; completionTokens?: number } | null = null;
+    let localDraft: { output: string; tier: string; gateReason?: string; promptTokens?: number; completionTokens?: number } | null = null;
 
     if (installed) {
         // F4 fix: guard ceiling-not-found — Math.max(0,-1) silently targets tier 0 (27b).
@@ -764,11 +829,14 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     debugLog(`[prism_infer] quality gate FAIL (${gate.reason}) — escalating to cloud`);
                     attempts.push({ tier: tier.tag, reason: `quality_gate:${gate.reason}` });
                     if (gate.reason === "hard_truncation" || gate.reason === "loop_detected") {
-                        localDraft = { output, tier: tier.tag, promptTokens: result.promptTokens, completionTokens: result.completionTokens };
+                        localDraft = { output, tier: tier.tag, gateReason: gate.reason, promptTokens: result.promptTokens, completionTokens: result.completionTokens };
                     }
                     break;
                 }
                 if (!gate.pass) {
+                    // §5.2: this served-anyway path used to be silent — the result
+                    // carried no flag at all. Now both quality_gate_failed and
+                    // gate_outcome mark it degraded.
                     debugLog(`[prism_infer] quality gate FAIL (${gate.reason}) — no cloud, serving local`);
                 }
 
@@ -782,6 +850,10 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     plan: ent.plan,
                     prompt_tokens: result.promptTokens,
                     completion_tokens: result.completionTokens,
+                    quality_gate_failed: gate.pass ? undefined : true,
+                    gate_outcome: gate.pass
+                        ? { status: "success", served_anyway: false }
+                        : { status: "degraded", reason: gate.reason, served_anyway: true },
                 });
             }
             attempts.push({ tier: tier.tag, reason: result.reason });
@@ -810,6 +882,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 // recordInference receives prompt_text and computes submittedEst via
                 // estimateTokens(), keeping promptTokensEvaluated=0 (correct for cloud).
                 completion_tokens: Math.ceil(cloud.output.length / 4),
+                gate_outcome: { status: "success", served_anyway: false },
             });
         }
         attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
@@ -831,6 +904,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             prompt_tokens: localDraft.promptTokens,
             completion_tokens: localDraft.completionTokens,
             quality_gate_failed: true,
+            gate_outcome: { status: "degraded", reason: localDraft.gateReason, served_anyway: true },
         });
     }
 
@@ -947,6 +1021,9 @@ export async function prismInferHandler(args: unknown): Promise<{
             ` used_cloud=${result.used_cloud}` +
             tokenStr +
             (result.quality_gate_failed ? ` quality_gate_failed=true` : "") +
+            (result.gate_outcome && result.gate_outcome.status !== "success"
+                ? ` gate=${result.gate_outcome.status}${result.gate_outcome.reason ? `:${result.gate_outcome.reason}` : ""}`
+                : "") +
             (result.verification ? ` verify=${result.verification.action}` : "") +
             (result.attempts.length ? ` attempts=${JSON.stringify(result.attempts)}` : "");
 
