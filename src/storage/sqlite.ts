@@ -1,7 +1,7 @@
 /**
  * SQLite Local Storage Backend (v2.0 — Step 2)
  *
- * Zero-cloud, local-first storage using @libsql/client (libSQL/SQLite).
+ * Zero-cloud local SQLite storage using @libsql/client (libSQL/SQLite).
  * Data lives at ~/.prism-mcp/data.db — no account, no API keys, no network.
  *
  * ═══════════════════════════════════════════════════════════════════
@@ -3810,4 +3810,3 @@ export class SqliteStorage implements StorageBackend {
     // No-op
   }
 }
-

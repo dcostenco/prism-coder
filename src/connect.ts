@@ -90,6 +90,7 @@ const HOST_ALIASES: Record<string, ConnectHostName> = {
 
 const CODEX_MANAGED_START = "# >>> prism connect managed: prism-mcp";
 const CODEX_MANAGED_END = "# <<< prism connect managed: prism-mcp";
+const CONNECT_STORAGE_BACKENDS = ["auto", "local", "synalux", "supabase"] as const;
 
 export function normalizeHostName(value: string): ConnectHostName {
   const normalized = value.trim().toLowerCase();
@@ -319,10 +320,17 @@ function executableExists(name: string, platform: NodeJS.Platform, pathEnv: stri
 }
 
 function buildMcpEntry(nodePath: string, serverPath: string, env: NodeJS.ProcessEnv): JsonObject {
+  const storage = env.PRISM_STORAGE ?? "auto";
+  if (!CONNECT_STORAGE_BACKENDS.includes(storage as (typeof CONNECT_STORAGE_BACKENDS)[number])) {
+    throw new Error(
+      `Invalid PRISM_STORAGE "${storage}". Choose one of: ${CONNECT_STORAGE_BACKENDS.join(", ")}`,
+    );
+  }
+
   const serverEnv: Record<string, string> = {
     PRISM_INSTANCE: "prism-mcp",
     PRISM_SYNALUX_BASE_URL: env.PRISM_SYNALUX_BASE_URL || "https://synalux.ai",
-    PRISM_STORAGE: "auto",
+    PRISM_STORAGE: storage,
   };
   if (env.PRISM_SYNALUX_API_KEY) {
     serverEnv.PRISM_SYNALUX_API_KEY = env.PRISM_SYNALUX_API_KEY;

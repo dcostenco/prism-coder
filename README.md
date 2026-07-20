@@ -18,6 +18,18 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
+## What's New in v20.2.1
+
+### Subscription-Aware Memory Storage
+`prism connect` now carries an explicit `PRISM_STORAGE=auto|local|synalux|supabase`
+into every managed host registration and rejects invalid values before changing a
+config file. In `auto`, a portal-confirmed free tier uses local SQLite, while
+Standard, Advanced, and Enterprise use Synalux cloud memory. If entitlement
+resolution is unavailable, Prism fails closed instead of splitting history across
+backends. Storage remains independent of local-first model routing.
+
+---
+
 ## What's New in v20.2.0
 
 ### One Command Connects Every Supported Host
@@ -123,6 +135,11 @@ Use `prism connect --all` to target all five, `--host <name>` for one host, or
 an entry previously created by Prism; custom entries remain untouched.
 Close the target MCP hosts before a non-dry-run registration so they cannot
 edit their configuration at the same time.
+
+Set `PRISM_STORAGE` before running `prism connect` to preserve an explicit
+storage choice in the generated host entries. This does not change local-model
+routing; Synalux cloud storage separately requires an active cloud-memory
+entitlement.
 
 Codex registration preserves `~/.codex/config.toml` and appends only a marked
 Prism-managed block. `CODEX_HOME` is respected when set and must already exist,
@@ -692,7 +709,7 @@ Routing is automatic: `9b → 4b → cloud fallback` on desktop/server, `2b → 
 | `PRISM_FORCE_LOCAL` | Force local SQLite regardless of credentials | `false` |
 | `TELEMETRY_WRITE_TOKEN` | Portal analytics token (optional — metrics display works without it) | -- |
 
-With no variables set, Prism runs fully local. Set `PRISM_SYNALUX_API_KEY` (and leave `PRISM_STORAGE=auto`) to use the cloud backend.
+With no variables set, Prism runs fully local. With an active cloud-memory subscription, set `PRISM_SYNALUX_API_KEY` (and leave `PRISM_STORAGE=auto`) to use the Synalux backend; a portal-confirmed free tier remains on local SQLite.
 
 ---
 

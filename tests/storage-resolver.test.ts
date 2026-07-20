@@ -16,6 +16,19 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const mockGetEntitlements = vi.hoisted(() => vi.fn());
+vi.mock("../src/utils/entitlements.js", () => ({
+  getEntitlements: mockGetEntitlements,
+}));
+
+function entitlement(plan: string, memory: boolean, source = "portal") {
+  return {
+    plan,
+    source,
+    features: { session_memory_unlimited: memory },
+  };
+}
+
 // ─── Mock config DB ─────────────────────────────────────────────
 // Each test mutates `mockSettings` to simulate what the dashboard wrote.
 const mockSettings: Record<string, string> = {};
@@ -85,6 +98,7 @@ const SYNALUX_ENV_KEYS = [
   "SUPABASE_URL",
   "SUPABASE_KEY",
   "PRISM_STORAGE",
+  "PRISM_FORCE_LOCAL",
 ];
 const savedEnv: Record<string, string | undefined> = {};
 
@@ -95,6 +109,8 @@ beforeEach(() => {
   sqliteInstances.length = 0;
   supabaseInstances.length = 0;
   synaluxInstances.length = 0;
+  mockGetEntitlements.mockReset();
+  mockGetEntitlements.mockResolvedValue(entitlement("standard", true));
   vi.resetModules();
 });
 
@@ -134,6 +150,109 @@ describe("getStorage — synalux dashboard-config fallback", () => {
 
     expect((storage as { tag?: string }).tag).toBe("synalux");
     expect(process.env.PRISM_SYNALUX_BASE_URL).toBe("https://portal.synalux.example");
+    expect(mockGetEntitlements).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["free", false, "sqlite"],
+    ["standard", true, "synalux"],
+    ["advanced", true, "synalux"],
+    ["enterprise", true, "synalux"],
+  ])("auto storage honors the %s tier memory entitlement", async (plan, memory, expected) => {
+    process.env.PRISM_STORAGE = "auto";
+    process.env.PRISM_SYNALUX_BASE_URL = "https://portal.synalux.example";
+    process.env.PRISM_SYNALUX_API_KEY = "synalux_sk_test";
+    mockGetEntitlements.mockResolvedValue(entitlement(plan, memory));
+
+    const storage = await freshGetStorage();
+
+    expect((storage as { tag?: string }).tag).toBe(expected);
+    expect(synaluxInstances).toHaveLength(memory ? 1 : 0);
+    expect(sqliteInstances).toHaveLength(memory ? 0 : 1);
+  });
+
+  it("fails closed when a configured account's entitlement cannot be resolved", async () => {
+    process.env.PRISM_STORAGE = "auto";
+    process.env.PRISM_SYNALUX_BASE_URL = "https://portal.synalux.example";
+    process.env.PRISM_SYNALUX_API_KEY = "synalux_sk_test";
+    mockGetEntitlements.mockResolvedValue(entitlement("free", false, "fallback_free"));
+
+    await expect(freshGetStorage()).rejects.toThrow(/Could not verify.*entitlement.*split session history/i);
+    expect(synaluxInstances).toHaveLength(0);
+    expect(sqliteInstances).toHaveLength(0);
+    expect(supabaseInstances).toHaveLength(0);
+  });
+
+  it("fails closed on an inconsistent unconfigured result after credentials were found", async () => {
+    process.env.PRISM_STORAGE = "auto";
+    process.env.PRISM_SYNALUX_BASE_URL = "https://portal.synalux.example";
+    process.env.PRISM_SYNALUX_API_KEY = "synalux_sk_test";
+    mockGetEntitlements.mockResolvedValue(entitlement("free", false, "unconfigured"));
+
+    await expect(freshGetStorage()).rejects.toThrow(/Could not verify.*entitlement/i);
+    expect(sqliteInstances).toHaveLength(0);
+  });
+
+  it("fails closed when entitlement provenance is not the portal", async () => {
+    process.env.PRISM_STORAGE = "auto";
+    process.env.PRISM_SYNALUX_BASE_URL = "https://portal.synalux.example";
+    process.env.PRISM_SYNALUX_API_KEY = "synalux_sk_test";
+    mockGetEntitlements.mockResolvedValue(entitlement("standard", true, "legacy_cache"));
+
+    await expect(freshGetStorage()).rejects.toThrow(/Could not verify.*entitlement/i);
+    expect(synaluxInstances).toHaveLength(0);
+    expect(sqliteInstances).toHaveLength(0);
+    expect(supabaseInstances).toHaveLength(0);
+  });
+
+  it("honors explicit local storage without checking a paid Synalux entitlement", async () => {
+    process.env.PRISM_STORAGE = "local";
+    process.env.PRISM_SYNALUX_BASE_URL = "https://portal.synalux.example";
+    process.env.PRISM_SYNALUX_API_KEY = "synalux_sk_test";
+
+    const storage = await freshGetStorage();
+
+    expect((storage as { tag?: string }).tag).toBe("sqlite");
+    expect(mockGetEntitlements).not.toHaveBeenCalled();
+    expect(synaluxInstances).toHaveLength(0);
+  });
+
+  it("honors explicit direct Supabase storage without checking Synalux entitlements", async () => {
+    process.env.PRISM_STORAGE = "supabase";
+    process.env.SUPABASE_URL = "https://project.supabase.co";
+    process.env.SUPABASE_KEY = "supabase-test-key";
+
+    const storage = await freshGetStorage();
+
+    expect((storage as { tag?: string }).tag).toBe("supabase");
+    expect(mockGetEntitlements).not.toHaveBeenCalled();
+    expect(supabaseInstances).toHaveLength(1);
+  });
+
+  it("PRISM_FORCE_LOCAL overrides auto even when Synalux credentials are present", async () => {
+    process.env.PRISM_STORAGE = "auto";
+    process.env.PRISM_FORCE_LOCAL = "true";
+    process.env.PRISM_SYNALUX_BASE_URL = "https://portal.synalux.example";
+    process.env.PRISM_SYNALUX_API_KEY = "synalux_sk_test";
+
+    const storage = await freshGetStorage();
+
+    expect((storage as { tag?: string }).tag).toBe("sqlite");
+    expect(mockGetEntitlements).not.toHaveBeenCalled();
+    expect(synaluxInstances).toHaveLength(0);
+  });
+
+  it("auto preserves the legacy direct Supabase backend when no Synalux credentials exist", async () => {
+    process.env.PRISM_STORAGE = "auto";
+    process.env.SUPABASE_URL = "https://project.supabase.co";
+    process.env.SUPABASE_KEY = "supabase-test-key";
+
+    const storage = await freshGetStorage();
+
+    expect((storage as { tag?: string }).tag).toBe("supabase");
+    expect(mockGetEntitlements).not.toHaveBeenCalled();
+    expect(supabaseInstances).toHaveLength(1);
+    expect(sqliteInstances).toHaveLength(0);
   });
 
   it("falls back to local when neither env vars nor dashboard config have synalux credentials", async () => {

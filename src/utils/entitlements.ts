@@ -113,7 +113,11 @@ export function clampCeiling(
 // ── Fetch ─────────────────────────────────────────────────────────
 
 async function fetchEntitlements(): Promise<PrismEntitlements> {
-    if (!SYNALUX_CONFIGURED || !PRISM_SYNALUX_BASE_URL) {
+    // Re-read process.env because dashboard/bootstrap configuration can inject
+    // credentials after config.ts captured its module-load constants.
+    const baseUrl = process.env.PRISM_SYNALUX_BASE_URL?.trim() || PRISM_SYNALUX_BASE_URL;
+    const apiKey = process.env.PRISM_SYNALUX_API_KEY?.trim();
+    if ((!SYNALUX_CONFIGURED && !apiKey) || !baseUrl) {
         debugLog("[entitlements] no Synalux auth configured — free tier");
         return { ...FREE_ENTITLEMENTS, source: "unconfigured" };
     }
@@ -125,7 +129,7 @@ async function fetchEntitlements(): Promise<PrismEntitlements> {
     }
 
     try {
-        const url = `${PRISM_SYNALUX_BASE_URL}/api/v1/prism/entitlements`;
+        const url = `${baseUrl}/api/v1/prism/entitlements`;
         const res = await fetch(url, {
             method: "GET",
             headers: { Authorization: `Bearer ${jwt}` },

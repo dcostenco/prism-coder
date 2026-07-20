@@ -93,7 +93,8 @@ export const GOOGLE_SEARCH_CX = process.env.GOOGLE_SEARCH_CX;
 //
 // Auto-resolution (PRISM_STORAGE=auto, the default) picks in this order:
 //   1. PRISM_FORCE_LOCAL=true → "local" (override everything)
-//   2. SYNALUX_API_KEY + PRISM_SYNALUX_BASE_URL set → "synalux"
+//   2. Synalux credentials + portal-confirmed cloud-memory entitlement → "synalux"
+//      (portal-confirmed free → "local"; unverifiable entitlement → fail closed)
 //   3. SUPABASE_URL + SUPABASE_KEY set → "supabase" (legacy)
 //   4. else → "local"
 
@@ -601,4 +602,3 @@ export const PRISM_BACKUP_ENABLED =
 if (PRISM_BACKUP_ENABLED && PRISM_DEBUG_LOGGING) {
   console.error(`[Prism] Backup scheduler: ${PRISM_BACKUP_SCHEDULE}, max=${PRISM_BACKUP_MAX}`);
 }
-

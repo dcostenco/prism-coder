@@ -50,7 +50,11 @@ let inFlight: Promise<string | null> | null = null;
  * Concurrent callers share a single in-flight exchange (no thundering herd).
  */
 export async function getSynaluxJwt(): Promise<string | null> {
-    if (!PRISM_SYNALUX_BASE_URL || !PRISM_SYNALUX_API_KEY) {
+    // Re-read process.env because storage/dashboard configuration can inject
+    // credentials after config.ts captured its module-load constants.
+    const baseUrl = process.env.PRISM_SYNALUX_BASE_URL?.trim() || PRISM_SYNALUX_BASE_URL;
+    const apiKey = process.env.PRISM_SYNALUX_API_KEY?.trim() || PRISM_SYNALUX_API_KEY;
+    if (!baseUrl || !apiKey) {
         return null;
     }
 
@@ -63,11 +67,11 @@ export async function getSynaluxJwt(): Promise<string | null> {
 
     inFlight = (async () => {
         try {
-            const url = `${PRISM_SYNALUX_BASE_URL}/api/v1/auth/jwt`;
+            const url = `${baseUrl}/api/v1/auth/jwt`;
             const res = await fetch(url, {
                 method: "POST",
                 headers: {
-                    "Authorization": `Bearer ${PRISM_SYNALUX_API_KEY}`,
+                    "Authorization": `Bearer ${apiKey}`,
                     "Content-Type": "application/json",
                 },
                 signal: AbortSignal.timeout(10_000),

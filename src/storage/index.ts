@@ -76,9 +76,22 @@ export async function getStorage(): Promise<StorageBackend> {
   }
 
   // ─── Resolve "auto" → synalux > supabase > local ─────────────
+  // Synalux is eligible only when the portal is the entitlement source;
+  // direct Supabase remains an independent legacy backend.
   if (requested === "auto") {
     if (await ensureSynaluxCredentials()) {
-      requested = "synalux";
+      const { getEntitlements } = await import("../utils/entitlements.js");
+      const entitlements = await getEntitlements();
+      const memoryEntitled = entitlements.features?.session_memory_unlimited;
+
+      if (entitlements.source !== "portal" || typeof memoryEntitled !== "boolean") {
+        throw new Error(
+          "[Prism Storage] Could not verify the Synalux cloud-memory entitlement. " +
+          "Refusing to fall back to another backend because that could split session history. " +
+          "Retry when Synalux is reachable or set PRISM_STORAGE=local explicitly.",
+        );
+      }
+      requested = memoryEntitled ? "synalux" : "local";
     } else if (await ensureSupabaseCredentials()) {
       requested = "supabase";
     } else {

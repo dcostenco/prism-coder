@@ -84,6 +84,26 @@ describe("entitlements source (§5.5)", () => {
         expect(ent.source).toBe("unconfigured");
     });
 
+    it("recognizes credentials injected after config module initialization", async () => {
+        mockConfig.configured = false;
+        process.env.PRISM_SYNALUX_BASE_URL = "https://runtime.synalux.test";
+        process.env.PRISM_SYNALUX_API_KEY = "synalux_sk_runtime";
+        try {
+            const request = portalRespondsWith(PORTAL_STANDARD);
+            const ent = await getEntitlements();
+
+            expect(ent.plan).toBe("standard");
+            expect(ent.source).toBe("portal");
+            expect(request).toHaveBeenCalledWith(
+                "https://runtime.synalux.test/api/v1/prism/entitlements",
+                expect.any(Object),
+            );
+        } finally {
+            delete process.env.PRISM_SYNALUX_BASE_URL;
+            delete process.env.PRISM_SYNALUX_API_KEY;
+        }
+    });
+
     it("configured but JWT exchange fails → source='fallback_free'", async () => {
         mockJwt.value = null;
         const ent = await getEntitlements();

@@ -70,7 +70,7 @@ program
         console.log('\nDry run complete — no files changed.');
       }
       if (!summary.usedApiKey) {
-        console.log('PRISM_SYNALUX_API_KEY is not set; new registrations use local/free mode.');
+        console.log('PRISM_SYNALUX_API_KEY is not set; no Synalux subscription key was copied into new registrations.');
       }
     } catch (err) {
       console.error(`Connect failed: ${err instanceof Error ? err.message : String(err)}`);

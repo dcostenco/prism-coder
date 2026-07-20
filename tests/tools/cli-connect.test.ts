@@ -129,6 +129,44 @@ describe("prism connect", () => {
     expect(readFileSync(configPath(homeDir, "codex"), "utf8")).toBe(codexText);
   });
 
+  it("preserves every valid explicit storage backend independently of the Synalux key", () => {
+    for (const storage of ["auto", "local", "synalux", "supabase"]) {
+      const homeDir = makeHome();
+      connectHosts({
+        hosts: ["cursor"],
+        homeDir,
+        platform: "darwin",
+        serverPath: "/pkg/dist/server.js",
+        nodePath: "/usr/bin/node",
+        env: {
+          PRISM_STORAGE: storage,
+          PRISM_SYNALUX_API_KEY: "synalux_sk_test",
+        },
+      });
+
+      expect(readConfig(configPath(homeDir, "cursor")).mcpServers["prism-mcp"].env)
+        .toMatchObject({
+          PRISM_STORAGE: storage,
+          PRISM_SYNALUX_API_KEY: "synalux_sk_test",
+        });
+    }
+  });
+
+  it("rejects an invalid explicit storage backend before writing host config", () => {
+    const homeDir = makeHome();
+    const path = configPath(homeDir, "cursor");
+
+    expect(() => connectHosts({
+      hosts: ["cursor"],
+      homeDir,
+      platform: "darwin",
+      serverPath: "/pkg/dist/server.js",
+      nodePath: "/usr/bin/node",
+      env: { PRISM_STORAGE: "cloud" },
+    })).toThrow(/Invalid PRISM_STORAGE "cloud".*auto, local, synalux, supabase/);
+    expect(existsSync(path)).toBe(false);
+  });
+
   it("preserves existing Codex TOML byte-for-byte outside Prism's managed block", () => {
     const homeDir = makeHome();
     const path = configPath(homeDir, "codex");
@@ -362,13 +400,13 @@ describe("prism connect", () => {
     expect(lstatSync(path).isSymbolicLink()).toBe(true);
   });
 
-  it("copies the Synalux key from the environment but supports local/free mode without it", () => {
-    const paidHome = makeHome();
-    const freeHome = makeHome();
+  it("copies the Synalux key independently of storage and supports registration without it", () => {
+    const keyedHome = makeHome();
+    const noKeyHome = makeHome();
 
     connectHosts({
       hosts: ["cursor"],
-      homeDir: paidHome,
+      homeDir: keyedHome,
       platform: "darwin",
       serverPath: "/pkg/dist/server.js",
       nodePath: "/usr/bin/node",
@@ -379,18 +417,18 @@ describe("prism connect", () => {
     });
     connectHosts({
       hosts: ["cursor"],
-      homeDir: freeHome,
+      homeDir: noKeyHome,
       platform: "darwin",
       serverPath: "/pkg/dist/server.js",
       nodePath: "/usr/bin/node",
       env: {},
     });
 
-    expect(readConfig(configPath(paidHome, "cursor")).mcpServers["prism-mcp"].env).toMatchObject({
+    expect(readConfig(configPath(keyedHome, "cursor")).mcpServers["prism-mcp"].env).toMatchObject({
       PRISM_SYNALUX_API_KEY: "synalux_sk_test",
       PRISM_SYNALUX_BASE_URL: "https://staging.synalux.ai",
     });
-    expect(readConfig(configPath(freeHome, "cursor")).mcpServers["prism-mcp"].env)
+    expect(readConfig(configPath(noKeyHome, "cursor")).mcpServers["prism-mcp"].env)
       .not.toHaveProperty("PRISM_SYNALUX_API_KEY");
   });
 
@@ -416,7 +454,7 @@ describe("prism connect", () => {
       .toHaveProperty("PRISM_SYNALUX_API_KEY", "synalux_sk_now_valid");
   });
 
-  it("removes a stale Synalux key when a managed entry refreshes into local/free mode", () => {
+  it("removes a stale Synalux key when a managed entry refreshes without subscription credentials", () => {
     const homeDir = makeHome();
     const base = {
       hosts: ["cursor"] as ConnectHostName[],
@@ -743,6 +781,19 @@ describe("prism connect", () => {
     );
     expect(conflicting.status).toBe(1);
     expect(conflicting.stderr).toMatch(/either --all or --host/);
+
+    const beforeInvalidStorage = readFileSync(join(codexHome, "config.toml"), "utf8");
+    const invalidStorage = spawnSync(
+      process.execPath,
+      [cliPath, "connect", "--host", "codex", "--refresh"],
+      {
+        encoding: "utf8",
+        env: { ...env, PRISM_STORAGE: "cloud" },
+      },
+    );
+    expect(invalidStorage.status).toBe(1);
+    expect(invalidStorage.stderr).toMatch(/Invalid PRISM_STORAGE "cloud"/);
+    expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(beforeInvalidStorage);
 
     const invalid = "[mcp_servers.prism-mcp\n";
     writeFileSync(join(codexHome, "config.toml"), invalid);

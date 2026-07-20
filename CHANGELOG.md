@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [20.2.1] - 2026-07-20 — Subscription-Aware Memory
+
+### Changed
+- `PRISM_STORAGE=auto` now uses Synalux memory only when the portal confirms
+  `session_memory_unlimited`; portal-confirmed Free accounts stay on local
+  SQLite, while Standard, Advanced, and Enterprise use Synalux memory.
+- `prism connect` preserves an explicit `auto`, `local`, `synalux`, or
+  `supabase` storage choice independently of the Synalux API key.
+
+### Fixed
+- Entitlement outages fail closed instead of silently selecting another
+  backend and splitting session history.
+- Credentials injected after module initialization are now visible to the
+  entitlement and JWT clients.
+
+### Tests
+- Added tier-matrix, entitlement-provenance, explicit-storage, forced-local,
+  runtime-credential, and process-level `prism connect` regression coverage.
+
 ## [20.2.0] - 2026-07-20 — Host Auto-Registration
 
 ### Added
