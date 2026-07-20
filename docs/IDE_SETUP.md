@@ -26,7 +26,23 @@
 
 ## 1. Quick Start
 
-Every client needs the same thing: tell it to run `npx -y prism-mcp-server` over stdio.
+Install Prism and let the CLI register its installed server path with your MCP hosts:
+
+```bash
+npm install --global prism-mcp-server
+prism connect             # auto-detect installed hosts
+prism connect --dry-run   # preview without writing
+```
+
+The command supports Claude Code, Claude Desktop (macOS/Windows/Linux), Cursor, and
+Gemini CLI. Use
+`prism connect --all` to target all four or `prism connect --host <name>` to
+target one. Existing `prism` and `prism-mcp` entries are never overwritten.
+`--refresh` updates only entries previously created by Prism; custom entries
+stay untouched. The host-specific sections below retain the equivalent manual
+configuration.
+Close the target MCP hosts before a non-dry-run registration so they cannot
+edit their configuration concurrently.
 
 The free tier needs **no account, no API key, and no cloud**. Memory is stored in a local
 SQLite database at `~/.prism-mcp/data.db`. A dashboard launches automatically at
@@ -36,8 +52,9 @@ SQLite database at `~/.prism-mcp/data.db`. A dashboard launches automatically at
 
 ## 2. Claude Desktop
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or
-`%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS),
+`%APPDATA%\Claude\claude_desktop_config.json` (Windows), or
+`${XDG_CONFIG_HOME:-~/.config}/Claude/claude_desktop_config.json` (Linux):
 
 ```json
 {
@@ -118,7 +135,15 @@ Set `PRISM_USER_ID` to isolate each user's memory:
 
 ## 3. Claude Code (CLI)
 
-Add to `.claude/settings.json` in your project root (or `~/.claude/settings.json` for global):
+For a user-wide registration, add the server with Claude Code's CLI:
+
+```bash
+claude mcp add --transport stdio --scope user prism -- npx -y prism-mcp-server
+```
+
+The equivalent user configuration is stored under `mcpServers` in
+`~/.claude.json`. For a shared project registration, use `.mcp.json` in the
+project root instead:
 
 ```json
 {
@@ -134,7 +159,7 @@ Add to `.claude/settings.json` in your project root (or `~/.claude/settings.json
 }
 ```
 
-Or add it with the CLI:
+Or add it to the current project with the default local scope:
 
 ```bash
 claude mcp add prism -- npx -y prism-mcp-server

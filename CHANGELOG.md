@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [20.2.0] - 2026-07-20 — Host Auto-Registration
+
+### Added
+- **`prism connect`** — Detects Claude Code, Claude Desktop on macOS, Windows,
+  and Linux, Cursor, and Gemini CLI, then registers the installed Prism server
+  using absolute runtime and package paths. Supports `--host`, `--all`, and
+  write-free `--dry-run` operation.
+- **Safe managed refreshes** — `--refresh` updates only entries previously
+  created by Prism, allowing a validated Synalux API key to be added later
+  without overwriting custom configuration.
+
+### Changed
+- Host configuration uses atomic writes, preserves symlinked config files,
+  detects concurrent edits, and leaves existing `prism` or `prism-mcp`
+  registrations untouched by default.
+- Onboarding and IDE setup now direct users through the single `prism connect`
+  path instead of maintaining separate generated snippets.
+
+### Tests
+- Added cross-platform registration coverage for idempotency, refresh,
+  dry-run, application detection, invalid JSON, symlinks, and concurrent host
+  writes.
+
 ## [20.1.0] - 2026-07-20 — 🧭 Failure Contract, Oversize Prompts, Ctx Gate, Entitlements Provenance
 
 Local-first plan v2 Phase 1 complete (§5.2–§5.5). Every terminal path of

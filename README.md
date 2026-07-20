@@ -18,6 +18,16 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
+## What's New in v20.2.0
+
+### One Command Connects Every Supported Host
+Install Prism globally and run `prism connect`. It detects Claude Code, Claude
+Desktop on macOS, Windows, and Linux (beta), Cursor, and Gemini CLI, then safely registers the
+server from the installed package. Existing custom entries are untouched;
+`--dry-run` previews changes and `--refresh` updates only Prism-managed entries.
+
+---
+
 ## What's New in v20.1.0
 
 ### Every Inference Outcome Is Now Observable
@@ -97,20 +107,26 @@ External contributions now require signing the [Individual CLA](./CLA.md). The C
 
 ## Quickstart
 
-The free tier needs no account, no API key, and no cloud. Add the server to your MCP client:
+The free tier needs no account, no API key, and no cloud. Install Prism, then
+register it with every supported MCP host already installed on your machine:
 
-```json
-{
-  "mcpServers": {
-    "prism": {
-      "command": "npx",
-      "args": ["-y", "prism-mcp-server"]
-    }
-  }
-}
+```bash
+npm install --global prism-mcp-server
+prism connect
 ```
 
-Open Claude Desktop or Cursor and your agent now has memory backed by a local SQLite database (`~/.prism-mcp/data.db`).
+`prism connect` detects Claude Code, Claude Desktop (macOS/Windows/Linux), Cursor,
+and Gemini CLI.
+Use `prism connect --all` to target all four, `--host <name>` for one host, or
+`--dry-run` to preview the files that would change. Existing `prism` and
+`prism-mcp` entries are never overwritten by default. `--refresh` updates only
+an entry previously created by Prism; custom entries remain untouched.
+Close the target MCP hosts before a non-dry-run registration so they cannot
+edit their configuration at the same time.
+
+Restart the connected host and your agent now has memory backed by a local
+SQLite database (`~/.prism-mcp/data.db`). See [IDE setup](docs/IDE_SETUP.md)
+for manual configuration and host-specific paths.
 
 **Optional — local model fleet** for offline tool-routing. Pull whichever fits your hardware:
 

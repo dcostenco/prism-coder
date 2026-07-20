@@ -9,6 +9,7 @@ import { getSetting } from './storage/configStorage.js';
 import { PRISM_USER_ID, SERVER_CONFIG } from './config.js';
 import { getCurrentGitState } from './utils/git.js';
 import { sessionLoadContextHandler, sessionSaveLedgerHandler, sessionSaveHandoffHandler } from './tools/ledgerHandlers.js';
+import { connectHosts, normalizeHostName } from './connect.js';
 
 const program = new Command();
 
@@ -16,6 +17,66 @@ program
   .name('prism')
   .description('Prism — The Mind Palace for AI Agents')
   .version(SERVER_CONFIG.version);
+
+// ─── prism connect ────────────────────────────────────────────
+// Registers this installed package with supported MCP hosts. The
+// merge is additive: an existing `prism` or `prism-mcp` entry is
+// reported and left byte-for-byte untouched.
+
+program
+  .command('connect')
+  .description('Register Prism with installed MCP hosts (close hosts before writing)')
+  .option('--host <name>', 'Target one host: claude-code, claude-desktop, cursor, or gemini')
+  .option('--all', 'Target all supported hosts instead of auto-detecting installed hosts')
+  .option('--dry-run', 'Preview configuration changes without writing files')
+  .option('--refresh', 'Refresh only entries previously created by Prism; custom entries stay untouched')
+  .action((options: { host?: string; all?: boolean; dryRun?: boolean; refresh?: boolean }) => {
+    try {
+      if (!options.dryRun) {
+        console.log('Close target MCP hosts before registration so they cannot edit configuration concurrently.');
+      }
+      const hosts = options.host ? [normalizeHostName(options.host)] : undefined;
+      const summary = connectHosts({
+        all: !!options.all,
+        dryRun: !!options.dryRun,
+        refresh: !!options.refresh,
+        hosts,
+      });
+
+      if (summary.results.length === 0) {
+        console.error('No supported MCP hosts detected. Use --host <name> or --all to target one explicitly.');
+        process.exitCode = 1;
+        return;
+      }
+
+      for (const result of summary.results) {
+        if (result.status === 'registered') {
+          console.log(`✓ ${result.label}: registered (${result.path})`);
+        } else if (result.status === 'would-register') {
+          console.log(`• ${result.label}: would register (${result.path})`);
+        } else if (result.status === 'refreshed') {
+          console.log(`✓ ${result.label}: Prism-managed entry refreshed (${result.path})`);
+        } else if (result.status === 'would-refresh') {
+          console.log(`• ${result.label}: would refresh Prism-managed entry (${result.path})`);
+        } else if (result.status === 'existing') {
+          console.log(`− ${result.label}: already registered — untouched (${result.path})`);
+        } else {
+          console.error(`✗ ${result.label}: ${result.message || 'registration failed'} (${result.path})`);
+          process.exitCode = 1;
+        }
+      }
+
+      if (options.dryRun) {
+        console.log('\nDry run complete — no files changed.');
+      }
+      if (!summary.usedApiKey) {
+        console.log('PRISM_SYNALUX_API_KEY is not set; new registrations use local/free mode.');
+      }
+    } catch (err) {
+      console.error(`Connect failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  });
 
 // ─── prism load <project> ─────────────────────────────────────
 // Loads session context using the same storage layer as the MCP
@@ -647,4 +708,3 @@ program
   });
 
 program.parse(process.argv);
-

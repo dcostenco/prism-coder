@@ -142,43 +142,20 @@ session_save_ledger({
 function getIDEConfigContent(
     client: string = "claude_desktop"
 ): WizardStepContent {
-    const configs: Record<string, string> = {
-        claude_desktop: `{
-  "mcpServers": {
-    "prism-mcp": {
-      "command": "npx",
-      "args": ["-y", "prism-mcp@latest"],
-      "env": {
-        "BRAVE_API_KEY": "your-brave-key"
-      }
-    }
-  }
-}`,
-        cursor: `{
-  "mcpServers": {
-    "prism-mcp": {
-      "command": "npx",
-      "args": ["-y", "prism-mcp@latest"],
-      "env": {
-        "BRAVE_API_KEY": "your-brave-key"
-      }
-    }
-  }
-}`,
-    };
+    const host = client === "cursor" ? "cursor" : "claude-desktop";
 
     return {
         step: "ide_config",
         title: "⚙️ Configure Your IDE",
         description:
-            "Add Prism as an MCP server in your AI coding tool's configuration.",
+            "Register Prism as an MCP server in your AI coding tool.",
         instructions: [
-            "Copy the config below into your IDE's MCP configuration file",
-            "For Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json",
-            "For Cursor: .cursor/mcp.json in your workspace",
+            "Run the command below in a terminal",
+            "Prism adds only a missing registration and never overwrites custom entries",
+            "Use --dry-run first if you want to preview the target file",
             "Restart your IDE to pick up the new MCP server",
         ],
-        codeSnippet: configs[client] || configs.claude_desktop,
+        codeSnippet: `prism connect --host ${host}`,
         nextStep: "first_save",
         progress: 43,
     };
