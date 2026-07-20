@@ -468,6 +468,63 @@ describe("failure contract — boundaries", () => {
     });
 });
 
+// ── §5.5: strict entitlements — fail loud on fallback_free ───────
+
+describe("§5.5 — strict_entitlements", () => {
+    const fallbackFree: PrismEntitlements = { ...FREE_ENTITLEMENTS, source: "fallback_free" };
+
+    it("strict + fallback_free THROWS instead of running with assumed free clamps", async () => {
+        const deps = mockDeps({ entitlements: fallbackFree });
+        await expect(
+            runInfer({ ...baseArgs, strict_entitlements: true }, deps),
+        ).rejects.toThrow(/entitlements_unavailable/);
+        expect(deps.callLocal).not.toHaveBeenCalled();
+    });
+
+    it("strict + fallback_free throws even in report mode — infra failure is not a refusal", async () => {
+        const deps = mockDeps({ entitlements: fallbackFree });
+        await expect(
+            runInfer({ ...baseArgs, strict_entitlements: true, escalation: "report" }, deps),
+        ).rejects.toThrow(/entitlements_unavailable/);
+    });
+
+    it("strict + portal-sourced entitlements runs normally", async () => {
+        const deps = mockDeps({ entitlements: { ...STANDARD, source: "portal" } });
+        const r = await runInfer({ ...baseArgs, strict_entitlements: true }, deps);
+        expect(r.entitlements_source).toBe("portal");
+        expect(r.gate_outcome?.status).toBe("success");
+    });
+
+    it("strict + unconfigured runs normally — unconfigured free is legit, not a degradation", async () => {
+        const deps = mockDeps({ entitlements: { ...FREE, source: "unconfigured" } });
+        const r = await runInfer({ ...baseArgs, strict_entitlements: true }, deps);
+        expect(r.entitlements_source).toBe("unconfigured");
+    });
+
+    it("non-strict + fallback_free serves, with the provenance visible on the result", async () => {
+        const deps = mockDeps({ entitlements: fallbackFree });
+        const r = await runInfer(baseArgs, deps);
+        expect(r.output).toBe("a clean, complete answer");
+        expect(r.entitlements_source).toBe("fallback_free");
+    });
+
+    it("entitlements without a source field default to 'portal' (test-injected/back-compat)", async () => {
+        const deps = mockDeps({ entitlements: STANDARD });
+        const r = await runInfer(baseArgs, deps);
+        expect(r.entitlements_source).toBe("portal");
+    });
+
+    it("report-mode refused results also carry the provenance", async () => {
+        const deps = mockDeps({
+            entitlements: fallbackFree,
+            callLayer1: vi.fn(async () => "OBVIOUS_RESERVED" as const),
+        });
+        const r = await runInfer({ ...baseArgs, escalation: "report" }, deps);
+        expect(r.backend).toBe("refused");
+        expect(r.entitlements_source).toBe("fallback_free");
+    });
+});
+
 // ── Arg validation ───────────────────────────────────────────────
 
 describe("failure contract — escalation arg validation", () => {

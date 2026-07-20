@@ -29,6 +29,16 @@ export interface PrismEntitlements {
         analytics_dashboard: boolean;
     };
     upgrade_url: string;
+    /** §5.5 — provenance of these values. Distinguishes "the portal says
+     *  free" from "we ASSUMED free because resolution failed":
+     *  - "portal": real portal data (fresh, cached, or last-known-good)
+     *  - "unconfigured": no Synalux key on this machine — free is correct,
+     *    not a degradation
+     *  - "fallback_free": auth IS configured but JWT/fetch failed with no
+     *    cached data — free-tier clamps were assumed. Strict callers
+     *    (prism_infer strict_entitlements:true) fail loud on this.
+     *  Absent (e.g. test-injected entitlements) is treated as "portal". */
+    source?: "portal" | "unconfigured" | "fallback_free";
 }
 
 // ── Free-tier defaults (no auth) ──────────────────────────────────
@@ -60,6 +70,14 @@ interface CacheEntry {
 
 let cache: CacheEntry | null = null;
 let inFlight: Promise<PrismEntitlements> | null = null;
+
+// §5.5 negative cache: fallback_free is kept OUT of the main 5-min cache
+// (recovery must not wait a full TTL), but an un-cached failure would make
+// every sequential call during an outage pay the full JWT+fetch attempt
+// (worst case ~10s on a hanging network). A short negative TTL caps that
+// amplification while still retrying promptly.
+const FALLBACK_NEGATIVE_TTL_MS = 25_000;
+let negativeCache: { entitlements: PrismEntitlements; until: number } | null = null;
 
 // ── Model tier ordering for ceiling enforcement ───────────────────
 
@@ -97,13 +115,13 @@ export function clampCeiling(
 async function fetchEntitlements(): Promise<PrismEntitlements> {
     if (!SYNALUX_CONFIGURED || !PRISM_SYNALUX_BASE_URL) {
         debugLog("[entitlements] no Synalux auth configured — free tier");
-        return FREE_ENTITLEMENTS;
+        return { ...FREE_ENTITLEMENTS, source: "unconfigured" };
     }
 
     const jwt = await getSynaluxJwt();
     if (!jwt) {
-        debugLog("[entitlements] JWT exchange failed — free tier fallback");
-        return FREE_ENTITLEMENTS;
+        debugLog("[entitlements] JWT exchange failed — free tier fallback (fallback_free)");
+        return { ...FREE_ENTITLEMENTS, source: "fallback_free" };
     }
 
     try {
@@ -121,7 +139,7 @@ async function fetchEntitlements(): Promise<PrismEntitlements> {
                 debugLog("[entitlements] using last-known-good (safety fail-closed)");
                 return cache.entitlements;
             }
-            return FREE_ENTITLEMENTS;
+            return { ...FREE_ENTITLEMENTS, source: "fallback_free" };
         }
 
         const data = (await res.json()) as PrismEntitlements;
@@ -129,8 +147,11 @@ async function fetchEntitlements(): Promise<PrismEntitlements> {
         if (!data.plan || !data.model_ceiling) {
             debugLog("[entitlements] malformed response");
             if (cache) return cache.entitlements;
-            return FREE_ENTITLEMENTS;
+            return { ...FREE_ENTITLEMENTS, source: "fallback_free" };
         }
+        // §5.5: provenance — this is REAL portal data (a portal "free" plan
+        // gets source:"portal", distinguishing it from an assumed fallback).
+        data.source = "portal";
 
         // Normalize legacy ceiling values to the current fleet.
         if (data.model_ceiling === ("14b" as string)) {
@@ -157,21 +178,29 @@ async function fetchEntitlements(): Promise<PrismEntitlements> {
             debugLog("[entitlements] using last-known-good (safety fail-closed)");
             return cache.entitlements;
         }
-        debugLog("[entitlements] no cached entitlements — free tier fallback (cold start)");
-        return FREE_ENTITLEMENTS;
+        debugLog("[entitlements] no cached entitlements — free tier fallback (cold start, fallback_free)");
+        return { ...FREE_ENTITLEMENTS, source: "fallback_free" };
     }
 }
 
 // ── Public API ────────────────────────────────────────────────────
 
 /**
- * Get the current user's entitlements (cached for 1 hour).
- * Concurrent callers share a single in-flight fetch.
+ * Get the current user's entitlements (5-minute cache; resolved per call —
+ * plan v2 §5.5). Concurrent callers share a single in-flight fetch.
+ * fallback_free results are never cached, so degraded resolution retries
+ * on the next call.
  */
 export async function getEntitlements(): Promise<PrismEntitlements> {
     const now = Date.now();
     if (cache && cache.expiresAt > now) {
         return cache.entitlements;
+    }
+
+    // §5.5: within the short negative window after a fallback_free
+    // resolution, return it without re-attempting the portal.
+    if (negativeCache && negativeCache.until > now) {
+        return negativeCache.entitlements;
     }
 
     if (inFlight) return inFlight;
@@ -182,11 +211,19 @@ export async function getEntitlements(): Promise<PrismEntitlements> {
             // Only update cache if this is a REAL fetch (not a cached fallback).
             // fetchEntitlements returns cache.entitlements on error — detect by
             // checking if the returned object is the exact same reference.
-            const isFallback = cache && ent === cache.entitlements;
+            // §5.5: fallback_free results are also never cached — pinning an
+            // assumed-free degradation for the TTL would delay recovery; the
+            // next call retries the portal instead.
+            const isFallback = (cache && ent === cache.entitlements) || ent.source === "fallback_free";
             if (!isFallback) {
                 cache = { entitlements: ent, expiresAt: Date.now() + CACHE_TTL_MS };
             }
             // On fallback: DON'T refresh expiresAt — let it expire so we retry.
+            if (ent.source === "fallback_free") {
+                negativeCache = { entitlements: ent, until: Date.now() + FALLBACK_NEGATIVE_TTL_MS };
+            } else {
+                negativeCache = null;
+            }
             return ent;
         } finally {
             inFlight = null;
@@ -201,12 +238,14 @@ export async function getEntitlements(): Promise<PrismEntitlements> {
  */
 export function invalidateEntitlements(): void {
     cache = null;
+    negativeCache = null;
 }
 
 /** Test-only: reset all state. */
 export function _resetEntitlementsForTest(): void {
     cache = null;
     inFlight = null;
+    negativeCache = null;
 }
 
 /** Test-only: inject a cached entitlement. */

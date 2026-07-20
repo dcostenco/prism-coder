@@ -138,6 +138,16 @@ export const PRISM_INFER_TOOL: Tool = {
                     "Enable thinking mode (<think> blocks). Default: true for chat/code, false for route. " +
                     "Thinking improves quality on complex tasks but adds latency (~2-5s).",
             },
+            strict_entitlements: {
+                type: "boolean",
+                description:
+                    "Fail loud instead of running with ASSUMED free-tier limits (plan v2 §5.5). " +
+                    "When true and entitlement resolution fell back to free because the portal " +
+                    "was unreachable (source='fallback_free'), the call throws instead of " +
+                    "silently applying free clamps. Portal-confirmed free plans and " +
+                    "unconfigured machines are unaffected. Default: false.",
+                default: false,
+            },
             escalation: {
                 type: "string",
                 enum: ["serve", "report"],
@@ -189,6 +199,9 @@ export interface PrismInferArgs {
      *  "report" = every terminal path returns a structured `gate_outcome`;
      *  safety refusals return {status:"refused", output:""} instead of throwing. */
     escalation?: "serve" | "report";
+    /** §5.5: fail loud when entitlements resolved to fallback_free
+     *  (portal configured but unreachable → free clamps ASSUMED). */
+    strict_entitlements?: boolean;
 }
 
 export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
@@ -211,6 +224,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (a.verifier_timeout_ms !== undefined && typeof a.verifier_timeout_ms !== "number") return false;
     if (a.escalation !== undefined &&
         !["serve", "report"].includes(a.escalation as string)) return false;
+    if (a.strict_entitlements !== undefined && typeof a.strict_entitlements !== "boolean") return false;
     if (a.evidence !== undefined) {
         if (!Array.isArray(a.evidence)) return false;
         for (const e of a.evidence) {
@@ -489,6 +503,10 @@ export interface PrismInferResult {
         reason?: string;
         served_anyway: boolean;
     };
+    /** §5.5 — provenance of the entitlements this call ran under
+     *  ("portal" | "unconfigured" | "fallback_free"). fallback_free means
+     *  free-tier clamps were ASSUMED because portal resolution failed. */
+    entitlements_source?: string;
 }
 
 /**
@@ -544,9 +562,23 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     }
 
     // ── Entitlement enforcement ──────────────────────────────────
-    // Fetch user's plan limits (cached 1hr). Free users without auth
-    // get 4b ceiling, 50 calls/day, 512 max tokens.
+    // Resolved per call (§5.5) — getEntitlements dedupes via a 5-min cache.
+    // Free users without auth get 4b ceiling, 50 calls/day, 512 max tokens.
     const ent = deps.entitlements ?? await getEntitlements();
+    const entSource = ent.source ?? "portal";
+
+    // §5.5 fail-loud: "fallback_free" means auth IS configured but the
+    // portal couldn't be reached and no cached plan exists — the free-tier
+    // clamps below would be an ASSUMPTION, not the user's plan. Strict
+    // callers refuse to run on assumptions. This is an infrastructure
+    // failure, not a safety refusal — it throws in both escalation modes.
+    if (args.strict_entitlements && entSource === "fallback_free") {
+        throw new Error(
+            "prism_infer: entitlements_unavailable — portal resolution failed (source=fallback_free) " +
+            "and strict_entitlements=true; refusing to run with assumed free-tier limits. " +
+            "Retry, or drop strict_entitlements to accept free clamps.",
+        );
+    }
 
     // MF2: In chat/code modes, request the 27B tier (subject to plan ceiling + RAM).
     // mode:"code" implies quality → start higher in the cascade.
@@ -575,6 +607,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // backend produced output) still throws in BOTH modes — an infrastructure
     // failure is not a refusal (§5.1 distinction).
     const wantReport = args.escalation === "report";
+    // Shared per-result entitlement metadata (§5.5) — spread into every
+    // terminal result so callers can audit which plan/provenance applied.
+    const entMeta = { plan: ent.plan, entitlements_source: entSource } as const;
     const refusedResult = (reason: string): PrismInferResult => ({
         output: "",
         backend: "refused",
@@ -583,7 +618,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         latency_ms: Date.now() - t0,
         used_cloud: false,
         attempts,
-        plan: ent.plan,
+        ...entMeta,
         gate_outcome: { status: "refused", reason, served_anyway: false },
     });
 
@@ -597,7 +632,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
 
     if (ceilingClamped || tokensClamped || cloudBlocked || verifierBlocked) {
         ddLog("info", "prism_infer.tier_enforcement", {
-            plan: ent.plan,
+            ...entMeta,
             requested_ceiling: args.model_ceiling,
             effective_ceiling: effectiveCeiling,
             ceiling_clamped: ceilingClamped,
@@ -659,7 +694,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                         latency_ms: Date.now() - t0,
                         used_cloud: true,
                         attempts,
-                        plan: ent.plan,
+                        ...entMeta,
                         completion_tokens: Math.ceil(cloud.output.length / 4),
                         gate_outcome: { status: "success", served_anyway: false },
                     });
@@ -693,7 +728,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                         latency_ms: Date.now() - t0,
                         used_cloud: true,
                         attempts,
-                        plan: ent.plan,
+                        ...entMeta,
                         completion_tokens: Math.ceil(cloud.output.length / 4),
                         gate_outcome: { status: "success", served_anyway: false },
                     });
@@ -876,7 +911,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     latency_ms: Date.now() - t0,
                     used_cloud: false,
                     attempts,
-                    plan: ent.plan,
+                    ...entMeta,
                     prompt_tokens: result.promptTokens,
                     completion_tokens: result.completionTokens,
                     quality_gate_failed: gate.pass ? undefined : true,
@@ -906,7 +941,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 latency_ms: Date.now() - t0,
                 used_cloud: true,
                 attempts,
-                plan: ent.plan,
+                ...entMeta,
                 // T4: omit prompt_tokens — cloud doesn't return Ollama actual eval count.
                 // recordInference receives prompt_text and computes submittedEst via
                 // estimateTokens(), keeping promptTokensEvaluated=0 (correct for cloud).
@@ -929,7 +964,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             latency_ms: Date.now() - t0,
             used_cloud: false,
             attempts,
-            plan: ent.plan,
+            ...entMeta,
             prompt_tokens: localDraft.promptTokens,
             completion_tokens: localDraft.completionTokens,
             quality_gate_failed: true,
@@ -1052,6 +1087,9 @@ export async function prismInferHandler(args: unknown): Promise<{
             (result.quality_gate_failed ? ` quality_gate_failed=true` : "") +
             (result.gate_outcome && result.gate_outcome.status !== "success"
                 ? ` gate=${result.gate_outcome.status}${result.gate_outcome.reason ? `:${result.gate_outcome.reason}` : ""}`
+                : "") +
+            (result.entitlements_source && result.entitlements_source !== "portal"
+                ? ` ent_source=${result.entitlements_source}`
                 : "") +
             (result.verification ? ` verify=${result.verification.action}` : "") +
             (result.attempts.length ? ` attempts=${JSON.stringify(result.attempts)}` : "");
