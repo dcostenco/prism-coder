@@ -871,5 +871,5 @@ describe("prism connect", () => {
     expect(failed.status).toBe(1);
     expect(failed.stderr).toContain("could not parse config");
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(invalid);
-  });
+  }, 30_000); // Four process startups can exceed the 10s default on Windows CI.
 });
