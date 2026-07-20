@@ -42,7 +42,19 @@ const FALLBACK_SCENARIO = [
     "Answer concretely. If you cannot, READ THE FILE FIRST.",
 ].join("\n");
 
+/**
+ * MCP tool entrypoint. Every tool handler MUST return a CallToolResult
+ * object ({ content: [{ type: "text", text }] }) — returning a bare string
+ * makes the MCP SDK reject the result ("expected object, received string",
+ * -32602). See the dispatch contract in server.ts (result.content usage).
+ */
 export async function verifyBehaviorHandler(
+    args: VerifyBehaviorArgs,
+): Promise<{ content: { type: "text"; text: string }[] }> {
+    return { content: [{ type: "text", text: await buildScenarioText(args) }] };
+}
+
+async function buildScenarioText(
     args: VerifyBehaviorArgs,
 ): Promise<string> {
     if (!SYNALUX_CONFIGURED || !PRISM_SYNALUX_BASE_URL) {
