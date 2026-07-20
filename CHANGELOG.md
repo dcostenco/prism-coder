@@ -20,6 +20,8 @@ All notable changes to this project will be documented in this file.
 ### Tests
 - Added tier-matrix, entitlement-provenance, explicit-storage, forced-local,
   runtime-credential, and process-level `prism connect` regression coverage.
+- Made Codex host discovery and SQLite ledger cleanup portable across the
+  Linux, macOS, and Windows CI matrix.
 
 ## [20.2.0] - 2026-07-20 — Host Auto-Registration
 

@@ -1,9 +1,9 @@
 /**
  * Persistent inference-metrics ledger tests (plan v2 §5.6).
- * Writes to a TEMP DB via PRISM_CONFIG_DB_PATH — never the real config store.
+ * Writes to a TEMP DB via PRISM_INFER_LEDGER_DB_PATH — never the real config store.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -65,6 +65,15 @@ describe('infer metrics ledger', () => {
     expect(agg!.by_backend['ollama-4b']).toBe(1);
   });
 
+  it('releases the SQLite handle during reset so Windows can remove the DB directory', async () => {
+    appendInferMetric({ backend: 'ollama-4b', model: 'prism-coder:4b', used_cloud: false });
+    await flush(1);
+
+    _resetInferLedgerForTest();
+
+    expect(() => rmSync(dir, { recursive: true, force: true })).not.toThrow();
+  });
+
   it('records gate outcome for degraded serves (Phase-1 contract slot)', async () => {
     appendInferMetric({ backend: 'ollama-2b', model: 'prism-coder:2b', used_cloud: false, gate_outcome: 'gate_failed_served', latency_ms: 800 });
     await flush(1);
@@ -81,7 +90,12 @@ describe('infer metrics ledger', () => {
   });
 
   it('never throws when the DB path is unwritable (hot path protected)', async () => {
-    process.env.PRISM_INFER_LEDGER_DB_PATH = '/nonexistent-root-dir/nope/test.db';
+    // A regular file cannot also be a parent directory on any supported OS.
+    // This deterministically exercises initialization failure without relying
+    // on Unix root permissions or platform-specific absolute-path syntax.
+    const blockedParent = join(dir, 'not-a-directory');
+    writeFileSync(blockedParent, 'block directory creation');
+    process.env.PRISM_INFER_LEDGER_DB_PATH = join(blockedParent, 'test.db');
     _resetInferLedgerForTest();
     expect(() => appendInferMetric({ backend: 'ollama-9b', model: null, used_cloud: false })).not.toThrow();
     await new Promise((r) => setTimeout(r, 300));

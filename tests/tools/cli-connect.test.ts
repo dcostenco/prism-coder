@@ -114,8 +114,6 @@ describe("prism connect", () => {
           PRISM_STORAGE: "auto",
         },
       });
-    expect(statSync(configPath(homeDir, "codex")).mode & 0o777).toBe(0o600);
-
     const codexText = readFileSync(configPath(homeDir, "codex"), "utf8");
     const second = connectHosts({
       hosts: ["codex"],
@@ -128,6 +126,37 @@ describe("prism connect", () => {
     expect(second.results[0].status).toBe("existing");
     expect(readFileSync(configPath(homeDir, "codex"), "utf8")).toBe(codexText);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "uses owner-only permissions for new Codex configs and preserves existing POSIX modes",
+    () => {
+      const newHome = makeHome();
+      const newPath = configPath(newHome, "codex");
+      connectHosts({
+        hosts: ["codex"],
+        homeDir: newHome,
+        platform: "linux",
+        serverPath: "/pkg/dist/server.js",
+        nodePath: "/usr/bin/node",
+        env: {},
+      });
+      expect(statSync(newPath).mode & 0o777).toBe(0o600);
+
+      const existingHome = makeHome();
+      const existingPath = configPath(existingHome, "codex");
+      mkdirSync(dirname(existingPath), { recursive: true });
+      writeFileSync(existingPath, 'model = "gpt-5.6"\n', { mode: 0o640 });
+      connectHosts({
+        hosts: ["codex"],
+        homeDir: existingHome,
+        platform: "linux",
+        serverPath: "/pkg/dist/server.js",
+        nodePath: "/usr/bin/node",
+        env: {},
+      });
+      expect(statSync(existingPath).mode & 0o777).toBe(0o640);
+    },
+  );
 
   it("preserves every valid explicit storage backend independently of the Synalux key", () => {
     for (const storage of ["auto", "local", "synalux", "supabase"]) {
@@ -381,7 +410,9 @@ describe("prism connect", () => {
     });
     expect(registered.results[0].status).toBe("registered");
     expect(lstatSync(path).isSymbolicLink()).toBe(true);
-    expect(statSync(target).mode & 0o777).toBe(0o640);
+    if (process.platform !== "win32") {
+      expect(statSync(target).mode & 0o777).toBe(0o640);
+    }
 
     const before = readFileSync(target, "utf8");
     const competing = `${before}\n# changed by Codex\n`;
@@ -609,25 +640,61 @@ describe("prism connect", () => {
     expect(existsSync(configPath(homeDir, "claude-code"))).toBe(false);
   });
 
-  it("detects an executable Codex CLI on PATH but ignores a non-executable lookalike", () => {
-    const homeDir = makeHome();
-    const binDir = join(homeDir, "bin");
-    const executable = join(binDir, "codex");
-    mkdirSync(binDir, { recursive: true });
-    writeFileSync(executable, "#!/bin/sh\n", { mode: 0o644 });
+  it.skipIf(process.platform === "win32")(
+    "detects an executable Codex CLI on a POSIX PATH but ignores a non-executable lookalike",
+    () => {
+      const homeDir = makeHome();
+      const binDir = join(homeDir, "bin");
+      const executable = join(binDir, "codex");
+      mkdirSync(binDir, { recursive: true });
+      writeFileSync(executable, "#!/bin/sh\n", { mode: 0o644 });
 
-    const base = {
-      homeDir,
-      platform: "linux" as const,
-      serverPath: "/pkg/dist/server.js",
-      nodePath: "/usr/bin/node",
+      const base = {
+        homeDir,
+        platform: "linux" as const,
+        serverPath: "/pkg/dist/server.js",
+        nodePath: "/usr/bin/node",
+        env: {},
+        pathEnv: binDir,
+      };
+      expect(connectHosts(base).results).toEqual([]);
+
+      chmodSync(executable, 0o755);
+      expect(connectHosts(base).results.map((item) => item.host)).toEqual(["codex"]);
+    },
+  );
+
+  it("detects Windows Codex command shims on PATH without POSIX executable bits", () => {
+    for (const extension of [".exe", ".cmd", ".bat"]) {
+      const homeDir = makeHome();
+      const binDir = join(homeDir, "bin");
+      mkdirSync(binDir, { recursive: true });
+      writeFileSync(join(binDir, `codex${extension}`), "");
+
+      const result = connectHosts({
+        homeDir,
+        platform: "win32",
+        serverPath: "C:\\Prism\\dist\\server.js",
+        nodePath: "C:\\Program Files\\nodejs\\node.exe",
+        env: {},
+        pathEnv: binDir,
+      });
+
+      expect(result.results.map((item) => item.host)).toEqual(["codex"]);
+    }
+
+    const unsupportedHome = makeHome();
+    const unsupportedBin = join(unsupportedHome, "bin");
+    mkdirSync(unsupportedBin, { recursive: true });
+    writeFileSync(join(unsupportedBin, "codex.ps1"), "");
+    expect(connectHosts({
+      homeDir: unsupportedHome,
+      platform: "win32",
+      serverPath: "C:\\Prism\\dist\\server.js",
+      nodePath: "C:\\Program Files\\nodejs\\node.exe",
       env: {},
-      pathEnv: binDir,
-    };
-    expect(connectHosts(base).results).toEqual([]);
-
-    chmodSync(executable, 0o755);
-    expect(connectHosts(base).results.map((item) => item.host)).toEqual(["codex"]);
+      pathEnv: unsupportedBin,
+    }).results).toEqual([]);
   });
 
   it("detects fresh macOS GUI installs before their config directories exist", () => {

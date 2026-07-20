@@ -54,6 +54,17 @@ let disabled = false;
 let initFailures = 0;
 const MAX_INIT_FAILURES = 3;
 
+function closeClient(context: string): void {
+    const activeClient = client;
+    client = null;
+    if (!activeClient) return;
+    try {
+        activeClient.close();
+    } catch (e) {
+        debugLog(`[infer-ledger] ${context} close failed: ${e instanceof Error ? e.message : e}`);
+    }
+}
+
 function ensureTable(): Promise<void> {
     if (!ensured) {
         ensured = (async () => {
@@ -88,7 +99,7 @@ function ensureTable(): Promise<void> {
             // the next append; only repeated failure disables for the process.
             initFailures++;
             ensured = null;
-            client = null;
+            closeClient("init failure");
             if (initFailures >= MAX_INIT_FAILURES) disabled = true;
             debugLog(`[infer-ledger] init failed (${initFailures}/${MAX_INIT_FAILURES}${disabled ? ", ledger disabled" : ", will retry"}): ${e instanceof Error ? e.message : e}`);
         });
@@ -176,7 +187,9 @@ export async function queryInferMetrics(sinceTs?: number): Promise<InferMetricsA
 
 /** Test hook — reset module state so a fresh DB path/env can be exercised. */
 export function _resetInferLedgerForTest(): void {
-    client = null;
+    // libSQL keeps the SQLite file open until close() is called. Dropping the
+    // reference alone leaves Windows unable to remove the test directory.
+    closeClient("test reset");
     ensured = null;
     disabled = false;
     initFailures = 0;
