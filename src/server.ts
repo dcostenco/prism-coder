@@ -18,7 +18,7 @@
  *
  * HOW MCP WORKS (simplified):
  *   1. The AI client (e.g., Claude) connects via stdin/stdout
- *   2. On connect, the client receives our capabilities (tools + prompts + resources)
+ *   2. On connect, the client receives our capabilities (tools + prompts + resources + logging)
  *   3. The client can:
  *      - Call tools (brave_web_search, session_save_ledger, etc.)
  *      - List/get prompts (/resume_session slash command)
@@ -384,6 +384,9 @@ export function notifyResourceUpdate(project: string, server: Server) {
  *   - prompts:   /resume_session — inject previous context before LLM thinks
  *   - resources: memory://{project}/handoff — paperclip-attachable session state
  *                with subscribe support for live refresh
+ *   - logging:   Diagnostic notifications for auto-push, Telepathy, and watchdog
+ *                events. Clients may hide these; logging does not guarantee a
+ *                visible assistant greeting.
  */
 export function getAllPossibleTools(): Tool[] {
   return [
@@ -447,6 +450,7 @@ export function createServer() {
     {
       capabilities: {
         tools: {},
+        logging: {},
 
         // ─── v0.4.0: Prompt capability (Enhancement #1) ───
         ...(SESSION_MEMORY_ENABLED ? { prompts: {} } : {}),
@@ -1220,6 +1224,7 @@ export function createSandboxServer() {
     {
       capabilities: {
         tools: {},
+        logging: {},
 
         prompts: {},
         resources: { subscribe: true },

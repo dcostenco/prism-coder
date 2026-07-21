@@ -3,8 +3,16 @@
  * memory, handoff, drift, routing, or inference capabilities users already
  * rely on.
  */
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
-import { getAllPossibleTools, PRISM_SERVER_INSTRUCTIONS } from "../src/server.js";
+import {
+  createSandboxServer,
+  createServer,
+  getAllPossibleTools,
+  PRISM_SERVER_INSTRUCTIONS,
+} from "../src/server.js";
 
 function expectVerbatimStartupContract(instructions: string): void {
   const normalized = instructions.replace(/\s+/g, " ");
@@ -59,5 +67,57 @@ describe("Prism startup tool contract", () => {
     expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/Do not substitute session_load_context/i);
     expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/session_save_handoff to preserve state/i);
     expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/session_detect_drift/i);
+  });
+
+  it.each([
+    ["runtime", createServer],
+    ["sandbox", createSandboxServer],
+  ])("advertises diagnostic logging during the %s initialize handshake", async (_name, factory) => {
+    const server = factory();
+    const client = new Client(
+      { name: "prism-startup-contract-test", version: "1.0.0" },
+      { capabilities: {} },
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      expect(client.getServerCapabilities()?.logging).toEqual({});
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("emits SDK logging notifications after initialization", async () => {
+    const server = createServer();
+    const client = new Client(
+      { name: "prism-logging-notification-test", version: "1.0.0" },
+      { capabilities: {} },
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const notification = new Promise<{ level: string; data: unknown }>((resolve) => {
+      client.setNotificationHandler(LoggingMessageNotificationSchema, message => {
+        resolve(message.params);
+      });
+    });
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      await server.sendLoggingMessage({
+        level: "info",
+        data: "Prism diagnostic notification",
+      });
+
+      await expect(notification).resolves.toMatchObject({
+        level: "info",
+        data: "Prism diagnostic notification",
+      });
+    } finally {
+      await client.close();
+    }
   });
 });
