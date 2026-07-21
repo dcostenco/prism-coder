@@ -8,7 +8,8 @@ import { getAllPossibleTools } from "../src/server.js";
 
 describe("Prism startup tool contract", () => {
   it("adds session_bootstrap while preserving the established Prism surface", () => {
-    const names = getAllPossibleTools().map((tool) => tool.name);
+    const tools = getAllPossibleTools();
+    const names = tools.map((tool) => tool.name);
 
     expect(names).toEqual(expect.arrayContaining([
       "session_bootstrap",
@@ -23,5 +24,11 @@ describe("Prism startup tool contract", () => {
       "prism_infer",
     ]));
     expect(new Set(names).size).toBe(names.length);
+    expect(tools.find((tool) => tool.name === "session_bootstrap")?.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
   });
 });

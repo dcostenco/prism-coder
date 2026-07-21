@@ -177,6 +177,12 @@ export const SESSION_BOOTSTRAP_TOOL: Tool = {
     "Start a Prism-backed conversation without host hooks. Call this once before the first user-facing response. " +
     "Prism reads the dashboard's Auto-Load Projects, Context Depth (quick/standard/deep), developer name, and default role, " +
     "then returns the greeting and correctly scoped prior-session context. Do not guess or pass a project or depth.",
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
   inputSchema: {
     type: "object",
     properties: {
