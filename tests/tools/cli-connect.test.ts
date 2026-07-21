@@ -48,6 +48,19 @@ import { REQUIRED_NATIVE_SKILL_NAMES } from "../../src/tools/skillRouting.js";
 
 const tempHomes: string[] = [];
 
+function expectVerbatimStartupContract(instructions: string): void {
+  const normalized = instructions.replace(/\s+/g, " ");
+  expect(normalized).toContain(
+    "Print the complete tool result verbatim as the entire first-turn startup display, before any optional answer.",
+  );
+  expect(normalized).toContain(
+    "Do not summarize, paraphrase, rename headings, reformat, or omit any returned section.",
+  );
+  expect(normalized).toContain(
+    "For a greeting-only prompt, stop after the verbatim startup display.",
+  );
+}
+
 function makeHome(): string {
   const home = mkdtempSync(join(tmpdir(), "prism-connect-"));
   tempHomes.push(home);
@@ -271,6 +284,7 @@ describe("prism connect", () => {
     expect(configured).toContain("native tool discovery/ToolSearch");
     expect(configured).toContain("Do not use shell commands, file reads, subagents");
     expect(configured).toContain("`Prism startup failure` and stop");
+    expectVerbatimStartupContract(configured);
     expect(configureClaudeNativeStartup(homeDir)).toMatchObject({ status: "unchanged" });
     writeFileSync(canonicalPath, configured.replace("your first action must be", "your first action may be"));
     expect(configureClaudeNativeStartup(homeDir, true)).toMatchObject({ status: "would-refresh" });
@@ -357,6 +371,7 @@ describe("prism connect", () => {
     expect(configured).toContain("native tool discovery/ToolSearch");
     expect(configured).toContain("Do not use shell commands, file reads, subagents");
     expect(configured).toContain("`Prism startup failure` and stop");
+    expectVerbatimStartupContract(configured);
     expect(configured).not.toContain("# Startup — MANDATORY");
     expect(configured.slice(configured.indexOf("# Paths"))).toBe("# Paths\n\n- Keep this user rule.\n");
     expect(statSync(instructionPath).mode & 0o777).toBe(0o640);
@@ -1494,11 +1509,14 @@ describe("prism connect", () => {
       expect(canonicalClaudeInstructions).toContain("mcp__prism-mcp__session_bootstrap");
       expect(canonicalClaudeInstructions).toContain("native tool discovery/ToolSearch");
       expect(canonicalClaudeInstructions).toContain("`Prism startup failure` and stop");
+      expectVerbatimStartupContract(canonicalClaudeInstructions);
       expect(readFileSync(cursorHooks, "utf8")).toBe(cursorHookSentinel);
       expect(JSON.stringify(readConfig(geminiSettings).hooks)).toBe(geminiHooksBefore);
-      expect(readFileSync(geminiInstructions, "utf8")).toContain("`session_bootstrap({})`, exactly once");
-      expect(readFileSync(geminiInstructions, "utf8")).not.toContain("# Startup — MANDATORY");
-      expect(readFileSync(geminiInstructions, "utf8")).toContain("# Paths\n\n- Keep this user rule.\n");
+      const configuredGeminiInstructions = readFileSync(geminiInstructions, "utf8");
+      expect(configuredGeminiInstructions).toContain("`session_bootstrap({})`, exactly once");
+      expect(configuredGeminiInstructions).not.toContain("# Startup — MANDATORY");
+      expect(configuredGeminiInstructions).toContain("# Paths\n\n- Keep this user rule.\n");
+      expectVerbatimStartupContract(configuredGeminiInstructions);
       expect(readFileSync(geminiAgents, "utf8")).toBe(geminiAgentsSentinel);
       expect(JSON.stringify(readConfig(join(homeDir, ".claude.json")))).not.toMatch(/SessionStart|hooks/i);
       expect(JSON.stringify(readConfig(join(homeDir, ".cursor", "mcp.json")))).not.toMatch(/SessionStart|hooks/i);
