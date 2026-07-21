@@ -147,6 +147,18 @@ Set `PRISM_USER_ID` to isolate each user's memory:
 
 ## 3. Claude Code (CLI)
 
+The recommended setup is:
+
+```bash
+prism connect --host claude-code
+```
+
+After registration and native skill synchronization succeed, Prism installs
+its marked first-turn startup block in Claude Code's canonical global
+instruction file, `~/.claude/CLAUDE.md`. An older Prism-managed block in
+`~/CLAUDE.md` is then removed without changing any unrelated instructions.
+Prism leaves the old block in place if canonical installation fails.
+
 For a user-wide registration, add the server with Claude Code's CLI:
 
 ```bash

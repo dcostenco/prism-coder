@@ -310,9 +310,11 @@ export function migrateLegacyClaudeInstructions(
   let writePath = instructionPath;
   let symlinkPath: string | undefined;
   let originalText: string;
+  let instructionEntryExists = false;
 
   try {
     const pathInfo = lstatSync(instructionPath);
+    instructionEntryExists = true;
     if (pathInfo.isSymbolicLink()) {
       writePath = realpathSync(instructionPath);
       symlinkPath = instructionPath;
@@ -320,7 +322,9 @@ export function migrateLegacyClaudeInstructions(
     }
     originalText = readFileSync(writePath, "utf8");
   } catch (error) {
-    if (isErrno(error, "ENOENT")) return { path: instructionPath, status: "unchanged", removed: 0 };
+    if (!instructionEntryExists && isErrno(error, "ENOENT")) {
+      return { path: instructionPath, status: "unchanged", removed: 0 };
+    }
     throw new Error(`Could not inspect Claude instructions: ${error instanceof Error ? error.message : String(error)}`);
   }
 
@@ -352,6 +356,50 @@ export function migrateLegacyClaudeInstructions(
   return { path: instructionPath, status: "removed", removed: 2 };
 }
 
+/** Remove only Prism's marked startup block from the former ~/CLAUDE.md path. */
+export function migrateLegacyClaudeManagedStartup(
+  homeDir = homedir(),
+  dryRun = false,
+  beforeCommit?: (path: string) => void,
+): LegacyInstructionMigration {
+  const instructionPath = join(homeDir, "CLAUDE.md");
+  let writePath = instructionPath;
+  let symlinkPath: string | undefined;
+  let originalText: string;
+  let instructionEntryExists = false;
+
+  try {
+    const pathInfo = lstatSync(instructionPath);
+    instructionEntryExists = true;
+    if (pathInfo.isSymbolicLink()) {
+      writePath = realpathSync(instructionPath);
+      symlinkPath = instructionPath;
+      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
+    }
+    originalText = readFileSync(writePath, "utf8");
+  } catch (error) {
+    if (!instructionEntryExists && isErrno(error, "ENOENT")) {
+      return { path: instructionPath, status: "unchanged", removed: 0 };
+    }
+    throw new Error(`Could not inspect legacy Claude instructions: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const startRanges = findExactLineRanges(originalText, CLAUDE_STARTUP_MANAGED_START);
+  const endRanges = findExactLineRanges(originalText, CLAUDE_STARTUP_MANAGED_END);
+  if (startRanges.length !== endRanges.length || startRanges.length > 1) {
+    throw new Error(`Legacy Claude instructions contain ambiguous Prism startup ownership markers: ${instructionPath}`);
+  }
+  if (startRanges.length === 0) return { path: instructionPath, status: "unchanged", removed: 0 };
+  if (endRanges[0].start <= startRanges[0].start) {
+    throw new Error(`Legacy Claude instructions contain out-of-order Prism startup ownership markers: ${instructionPath}`);
+  }
+
+  const nextText = originalText.slice(0, startRanges[0].start) + originalText.slice(endRanges[0].end);
+  if (dryRun) return { path: instructionPath, status: "would-remove", removed: 1 };
+  writeTextAtomically(writePath, nextText, originalText, beforeCommit, symlinkPath);
+  return { path: instructionPath, status: "removed", removed: 1 };
+}
+
 function serializeClaudeStartupBlock(newline: string): string {
   return [
     CLAUDE_STARTUP_MANAGED_START,
@@ -375,7 +423,7 @@ export function configureClaudeNativeStartup(
   dryRun = false,
   beforeCommit?: (path: string) => void,
 ): NativeStartupConfiguration {
-  const instructionPath = join(homeDir, "CLAUDE.md");
+  const instructionPath = join(homeDir, ".claude", "CLAUDE.md");
   let writePath = instructionPath;
   let symlinkPath: string | undefined;
   let originalText: string | undefined;

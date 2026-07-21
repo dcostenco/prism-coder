@@ -35,6 +35,7 @@ import {
   connectHosts,
   migrateLegacyClaudeHooks,
   migrateLegacyClaudeInstructions,
+  migrateLegacyClaudeManagedStartup,
   normalizeHostName,
   resolveInstalledServerPath,
   type ConnectHostName,
@@ -120,6 +121,16 @@ function legacyClaudeInstructions(tail = "KEEP USER INSTRUCTIONS\n"): string {
     tail.trimEnd(),
     "",
   ].join("\n");
+}
+
+function legacyClaudeManagedBlock(newline = "\n"): string {
+  return [
+    "<!-- >>> prism connect managed: native startup -->",
+    "## Prism session startup",
+    "old managed startup content",
+    "<!-- <<< prism connect managed: native startup -->",
+    "",
+  ].join(newline);
 }
 
 function legacyGeminiInstructions(tail = "# Paths\n\n- Keep this user rule.\n", newline = "\n"): string {
@@ -250,20 +261,21 @@ describe("prism connect", () => {
     expect(readFileSync(instructionPath, "utf8")).toBe(preservedInstructions);
     expect(migrateLegacyClaudeInstructions(homeDir)).toMatchObject({ status: "unchanged", removed: 0 });
 
+    const canonicalPath = join(homeDir, ".claude", "CLAUDE.md");
     expect(configureClaudeNativeStartup(homeDir, true)).toMatchObject({ status: "would-install" });
     expect(readFileSync(instructionPath, "utf8")).toBe(preservedInstructions);
     expect(configureClaudeNativeStartup(homeDir)).toMatchObject({ status: "installed" });
-    const configured = readFileSync(instructionPath, "utf8");
-    expect(configured.startsWith(`${preservedInstructions}\n<!-- >>> prism connect managed: native startup -->\n`)).toBe(true);
+    const configured = readFileSync(canonicalPath, "utf8");
+    expect(configured.startsWith("<!-- >>> prism connect managed: native startup -->\n")).toBe(true);
     expect(configured).toContain("`mcp__prism-mcp__session_bootstrap` exactly once");
     expect(configured).toContain("native tool discovery/ToolSearch");
     expect(configured).toContain("Do not use shell commands, file reads, subagents");
     expect(configured).toContain("`Prism startup failure` and stop");
     expect(configureClaudeNativeStartup(homeDir)).toMatchObject({ status: "unchanged" });
-    writeFileSync(instructionPath, configured.replace("your first action must be", "your first action may be"));
+    writeFileSync(canonicalPath, configured.replace("your first action must be", "your first action may be"));
     expect(configureClaudeNativeStartup(homeDir, true)).toMatchObject({ status: "would-refresh" });
     expect(configureClaudeNativeStartup(homeDir)).toMatchObject({ status: "refreshed" });
-    expect(readFileSync(instructionPath, "utf8")).toBe(configured);
+    expect(readFileSync(canonicalPath, "utf8")).toBe(configured);
 
     const nearMatchHome = makeHome();
     const nearMatchPath = join(nearMatchHome, "CLAUDE.md");
@@ -274,7 +286,56 @@ describe("prism connect", () => {
 
     const emptyHome = makeHome();
     expect(configureClaudeNativeStartup(emptyHome)).toMatchObject({ status: "installed" });
-    expect(readFileSync(join(emptyHome, "CLAUDE.md"), "utf8")).toContain("session_bootstrap");
+    expect(readFileSync(join(emptyHome, ".claude", "CLAUDE.md"), "utf8")).toContain("session_bootstrap");
+  });
+
+  it("moves only the marked Claude startup block out of legacy root instructions", () => {
+    const homeDir = makeHome();
+    const instructionPath = join(homeDir, "CLAUDE.md");
+    const target = join(homeDir, "shared-root-instructions.md");
+    const prefix = "USER PREFIX\r\n\r\n";
+    const block = legacyClaudeManagedBlock("\r\n");
+    const suffix = "USER SUFFIX\r\n";
+    const original = prefix + block + suffix;
+    writeFileSync(target, original, { mode: 0o640 });
+    symlinkSync(target, instructionPath);
+    const originalDigest = createHash("sha256").update(original).digest("hex");
+
+    expect(migrateLegacyClaudeManagedStartup(homeDir, true)).toMatchObject({ status: "would-remove", removed: 1 });
+    expect(createHash("sha256").update(readFileSync(target)).digest("hex")).toBe(originalDigest);
+    expect(migrateLegacyClaudeManagedStartup(homeDir)).toMatchObject({ status: "removed", removed: 1 });
+    expect(readFileSync(target, "utf8")).toBe(prefix + suffix);
+    expect(lstatSync(instructionPath).isSymbolicLink()).toBe(true);
+    expect(realpathSync(instructionPath)).toBe(realpathSync(target));
+    expect(statSync(target).mode & 0o777).toBe(0o640);
+    expect(migrateLegacyClaudeManagedStartup(homeDir)).toMatchObject({ status: "unchanged", removed: 0 });
+
+    const racedHome = makeHome();
+    const racedPath = join(racedHome, "CLAUDE.md");
+    writeFileSync(racedPath, block);
+    expect(() => migrateLegacyClaudeManagedStartup(racedHome, false, (writePath) => {
+      writeFileSync(writePath, "concurrent root edit\n");
+    })).toThrow(/changed while Prism was preparing/);
+    expect(readFileSync(racedPath, "utf8")).toBe("concurrent root edit\n");
+
+    for (const malformed of [
+      "<!-- >>> prism connect managed: native startup -->\n",
+      `${block}${block}`,
+      "<!-- <<< prism connect managed: native startup -->\n<!-- >>> prism connect managed: native startup -->\n",
+    ]) {
+      const malformedHome = makeHome();
+      const malformedPath = join(malformedHome, "CLAUDE.md");
+      writeFileSync(malformedPath, malformed);
+      expect(() => migrateLegacyClaudeManagedStartup(malformedHome)).toThrow(/Legacy Claude instructions contain/);
+      expect(readFileSync(malformedPath, "utf8")).toBe(malformed);
+    }
+
+    const nearHome = makeHome();
+    const nearPath = join(nearHome, "CLAUDE.md");
+    const near = block.replaceAll("native startup -->", "native startup user -->");
+    writeFileSync(nearPath, near);
+    expect(migrateLegacyClaudeManagedStartup(nearHome)).toMatchObject({ status: "unchanged", removed: 0 });
+    expect(readFileSync(nearPath, "utf8")).toBe(near);
   });
 
   it("migrates only the exact legacy Gemini startup section and preserves unrelated files", () => {
@@ -1226,7 +1287,7 @@ describe("prism connect", () => {
     }, null, 2)}\n`;
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, original);
-    const originalInstructions = legacyClaudeInstructions();
+    const originalInstructions = legacyClaudeInstructions() + legacyClaudeManagedBlock();
     writeFileSync(instructionPath, originalInstructions);
 
     const failed = spawnSync(
@@ -1250,6 +1311,7 @@ describe("prism connect", () => {
     expect(failed.stderr).toMatch(/Synalux skill synchronization failed/);
     expect(readFileSync(settingsPath, "utf8")).toBe(original);
     expect(readFileSync(instructionPath, "utf8")).toBe(originalInstructions);
+    expect(existsSync(join(homeDir, ".claude", "CLAUDE.md"))).toBe(false);
   });
 
   it("does not configure Gemini startup when registration or native skill sync fails", () => {
@@ -1358,7 +1420,10 @@ describe("prism connect", () => {
     mkdirSync(dirname(cursorHooks), { recursive: true });
     mkdirSync(dirname(geminiSettings), { recursive: true });
     writeFileSync(claudeSettings, `${JSON.stringify(claudeConfig, null, 2)}\n`);
-    writeFileSync(claudeInstructions, legacyClaudeInstructions("PRESERVE THIS CLAUDE RULE\n"));
+    writeFileSync(
+      claudeInstructions,
+      legacyClaudeInstructions("PRESERVE THIS CLAUDE RULE\n") + legacyClaudeManagedBlock(),
+    );
     writeFileSync(cursorHooks, cursorHookSentinel);
     writeFileSync(geminiSettings, `${JSON.stringify(geminiConfig, null, 2)}\n`);
     writeFileSync(geminiInstructions, legacyGeminiInstructions());
@@ -1400,6 +1465,7 @@ describe("prism connect", () => {
       expect(result.stdout).toContain("Codex: registered");
       expect(result.stdout).toContain("removed 1 legacy Prism hook action");
       expect(result.stdout).toContain("removed 2 legacy Prism startup section");
+      expect(result.stdout).toContain("removed legacy managed startup block from ~/CLAUDE.md");
       expect(result.stdout).toContain("Claude Code: installed hook-free native startup instructions");
       expect(result.stdout).toContain("Gemini CLI: installed hook-free native startup instructions");
 
@@ -1422,8 +1488,12 @@ describe("prism connect", () => {
       expect(readConfig(claudeSettings).hooks).toEqual({ SessionStart: ["user-owned-claude-hook"] });
       expect(readFileSync(claudeInstructions, "utf8")).toContain("PRESERVE THIS CLAUDE RULE");
       expect(readFileSync(claudeInstructions, "utf8")).not.toContain('session_load_context(project="prism-mcp")');
-      expect(readFileSync(claudeInstructions, "utf8")).toContain("prism connect managed: native startup");
-      expect(readFileSync(claudeInstructions, "utf8")).toContain("mcp__prism-mcp__session_bootstrap");
+      expect(readFileSync(claudeInstructions, "utf8")).not.toContain("prism connect managed: native startup");
+      const canonicalClaudeInstructions = readFileSync(join(homeDir, ".claude", "CLAUDE.md"), "utf8");
+      expect(canonicalClaudeInstructions).toContain("prism connect managed: native startup");
+      expect(canonicalClaudeInstructions).toContain("mcp__prism-mcp__session_bootstrap");
+      expect(canonicalClaudeInstructions).toContain("native tool discovery/ToolSearch");
+      expect(canonicalClaudeInstructions).toContain("`Prism startup failure` and stop");
       expect(readFileSync(cursorHooks, "utf8")).toBe(cursorHookSentinel);
       expect(JSON.stringify(readConfig(geminiSettings).hooks)).toBe(geminiHooksBefore);
       expect(readFileSync(geminiInstructions, "utf8")).toContain("`session_bootstrap({})`, exactly once");
@@ -1449,7 +1519,7 @@ describe("prism connect", () => {
     }, null, 2)}\n`;
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, original);
-    const originalInstructions = legacyClaudeInstructions();
+    const originalInstructions = legacyClaudeInstructions() + legacyClaudeManagedBlock();
     writeFileSync(instructionPath, originalInstructions);
 
     const result = await runBuiltCli(["connect", "--host", "claude-code"], {
@@ -1464,6 +1534,7 @@ describe("prism connect", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(settingsPath, "utf8")).toBe(original);
     expect(readFileSync(instructionPath, "utf8")).toBe(originalInstructions);
+    expect(existsSync(join(homeDir, ".claude", "CLAUDE.md"))).toBe(false);
     expect(result.stdout).not.toContain("legacy Prism hook");
   });
 

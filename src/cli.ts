@@ -15,6 +15,7 @@ import {
   connectHosts,
   migrateLegacyClaudeHooks,
   migrateLegacyClaudeInstructions,
+  migrateLegacyClaudeManagedStartup,
   normalizeHostName,
 } from './connect.js';
 
@@ -81,12 +82,16 @@ program
         if (connectedClaude) {
           const hookMigration = migrateLegacyClaudeHooks(undefined, true);
           const instructionMigration = migrateLegacyClaudeInstructions(undefined, true);
+          const managedMigration = migrateLegacyClaudeManagedStartup(undefined, true);
           const nativeStartup = configureClaudeNativeStartup(undefined, true);
           if (hookMigration.status === 'would-remove') {
             console.log(`• Claude Code: would remove ${hookMigration.removed} legacy Prism hook action(s) (${hookMigration.path})`);
           }
           if (instructionMigration.status === 'would-remove') {
             console.log(`• Claude Code: would remove ${instructionMigration.removed} legacy Prism startup section(s) (${instructionMigration.path})`);
+          }
+          if (managedMigration.status === 'would-remove') {
+            console.log(`• Claude Code: would remove legacy managed startup block (${managedMigration.path})`);
           }
           if (nativeStartup.status === 'would-install' || nativeStartup.status === 'would-refresh') {
             console.log(`• Claude Code: would ${nativeStartup.status === 'would-install' ? 'install' : 'refresh'} native startup instructions (${nativeStartup.path})`);
@@ -117,19 +122,25 @@ program
             console.error(`⚠ Preserved locally modified skill conflicts: ${skillSync.conflicts.join(', ')}`);
           }
           if (connectedClaude) {
-            // Validate both legacy surfaces before mutating either file. A
-            // malformed settings file must never leave a half-migrated host.
+            // Validate every affected surface before mutating any file.
             migrateLegacyClaudeHooks(undefined, true);
             migrateLegacyClaudeInstructions(undefined, true);
+            migrateLegacyClaudeManagedStartup(undefined, true);
             configureClaudeNativeStartup(undefined, true);
+            // Install the canonical block first. Never remove the legacy block
+            // unless the canonical path is already current or commits safely.
+            const nativeStartup = configureClaudeNativeStartup();
             const hookMigration = migrateLegacyClaudeHooks();
             const instructionMigration = migrateLegacyClaudeInstructions();
-            const nativeStartup = configureClaudeNativeStartup();
+            const managedMigration = migrateLegacyClaudeManagedStartup();
             if (hookMigration.status === 'removed') {
               console.log(`✓ Claude Code: removed ${hookMigration.removed} legacy Prism hook action(s); native skills now own startup and sync`);
             }
             if (instructionMigration.status === 'removed') {
               console.log(`✓ Claude Code: removed ${instructionMigration.removed} legacy Prism startup section(s); MCP bootstrap now owns first-turn context`);
+            }
+            if (managedMigration.status === 'removed') {
+              console.log('✓ Claude Code: removed legacy managed startup block from ~/CLAUDE.md');
             }
             if (nativeStartup.status === 'installed' || nativeStartup.status === 'refreshed') {
               console.log(`✓ Claude Code: ${nativeStartup.status} hook-free native startup instructions`);
