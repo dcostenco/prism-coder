@@ -11,6 +11,7 @@ import { getCurrentGitState } from './utils/git.js';
 import { sessionLoadContextHandler, sessionSaveLedgerHandler, sessionSaveHandoffHandler } from './tools/ledgerHandlers.js';
 import {
   configureClaudeNativeStartup,
+  configureGeminiNativeStartup,
   connectHosts,
   migrateLegacyClaudeHooks,
   migrateLegacyClaudeInstructions,
@@ -73,6 +74,8 @@ program
       }
       const connectedClaude = summary.results.some((result) =>
         result.host === 'claude-code' && result.status !== 'error');
+      const connectedGemini = summary.results.some((result) =>
+        result.host === 'gemini' && result.status !== 'error');
 
       if (options.dryRun) {
         if (connectedClaude) {
@@ -87,6 +90,12 @@ program
           }
           if (nativeStartup.status === 'would-install' || nativeStartup.status === 'would-refresh') {
             console.log(`• Claude Code: would ${nativeStartup.status === 'would-install' ? 'install' : 'refresh'} native startup instructions (${nativeStartup.path})`);
+          }
+        }
+        if (connectedGemini) {
+          const nativeStartup = configureGeminiNativeStartup(undefined, true);
+          if (nativeStartup.status === 'would-install' || nativeStartup.status === 'would-refresh') {
+            console.log(`• Gemini CLI: would ${nativeStartup.status === 'would-install' ? 'install' : 'refresh'} native startup instructions (${nativeStartup.path})`);
           }
         }
         console.log('\nDry run complete — no files changed.');
@@ -124,6 +133,13 @@ program
             }
             if (nativeStartup.status === 'installed' || nativeStartup.status === 'refreshed') {
               console.log(`✓ Claude Code: ${nativeStartup.status} hook-free native startup instructions`);
+            }
+          }
+          if (connectedGemini) {
+            configureGeminiNativeStartup(undefined, true);
+            const nativeStartup = configureGeminiNativeStartup();
+            if (nativeStartup.status === 'installed' || nativeStartup.status === 'refreshed') {
+              console.log(`✓ Gemini CLI: ${nativeStartup.status} hook-free native startup instructions`);
             }
           }
         }

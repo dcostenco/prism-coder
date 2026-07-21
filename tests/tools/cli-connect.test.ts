@@ -31,6 +31,7 @@ import { parse as parseToml } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   configureClaudeNativeStartup,
+  configureGeminiNativeStartup,
   connectHosts,
   migrateLegacyClaudeHooks,
   migrateLegacyClaudeInstructions,
@@ -119,6 +120,24 @@ function legacyClaudeInstructions(tail = "KEEP USER INSTRUCTIONS\n"): string {
     tail.trimEnd(),
     "",
   ].join("\n");
+}
+
+function legacyGeminiInstructions(tail = "# Paths\n\n- Keep this user rule.\n", newline = "\n"): string {
+  return [
+    "# Startup — MANDATORY",
+    "",
+    "Your first action in every conversation is loading Prism session context. Zero text before the tool call.",
+    "",
+    "**Dual-path detection:** Check your available toolset.",
+    "- **If `mcp_prism-mcp_session_load_context` exists:** Call it with `project: \"prism-mcp\"`, `level: \"deep\"`.",
+    "- **If no MCP tools are available (Antigravity):** Run `bash ~/.gemini/antigravity/scratch/prism_session_loader.sh prism-mcp` via `run_command`. This uses the `prism load` CLI under the hood, sharing the same storage layer (SQLite or Supabase) as the MCP tool.",
+    "",
+    "After success: echo agent identity, last summary, open TODOs, session version.",
+    "If any call fails: say \"Prism load failed — retrying\" and retry ONE more time.",
+    "",
+    tail.replaceAll("\n", newline).replace(/(?:\r?\n)$/, ""),
+    "",
+  ].join(newline);
 }
 
 function runBuiltCli(args: string[], env: NodeJS.ProcessEnv): Promise<{ status: number | null; stdout: string; stderr: string }> {
@@ -237,6 +256,9 @@ describe("prism connect", () => {
     const configured = readFileSync(instructionPath, "utf8");
     expect(configured.startsWith(`${preservedInstructions}\n<!-- >>> prism connect managed: native startup -->\n`)).toBe(true);
     expect(configured).toContain("`mcp__prism-mcp__session_bootstrap` exactly once");
+    expect(configured).toContain("native tool discovery/ToolSearch");
+    expect(configured).toContain("Do not use shell commands, file reads, subagents");
+    expect(configured).toContain("`Prism startup failure` and stop");
     expect(configureClaudeNativeStartup(homeDir)).toMatchObject({ status: "unchanged" });
     writeFileSync(instructionPath, configured.replace("your first action must be", "your first action may be"));
     expect(configureClaudeNativeStartup(homeDir, true)).toMatchObject({ status: "would-refresh" });
@@ -253,6 +275,83 @@ describe("prism connect", () => {
     const emptyHome = makeHome();
     expect(configureClaudeNativeStartup(emptyHome)).toMatchObject({ status: "installed" });
     expect(readFileSync(join(emptyHome, "CLAUDE.md"), "utf8")).toContain("session_bootstrap");
+  });
+
+  it("migrates only the exact legacy Gemini startup section and preserves unrelated files", () => {
+    const homeDir = makeHome();
+    const instructionPath = join(homeDir, ".gemini", "GEMINI.md");
+    const agentsPath = join(homeDir, ".gemini", "AGENTS.md");
+    const original = legacyGeminiInstructions();
+    const agents = "# User-owned cross-tool rules\n";
+    mkdirSync(dirname(instructionPath), { recursive: true });
+    writeFileSync(instructionPath, original, { mode: 0o640 });
+    writeFileSync(agentsPath, agents);
+
+    expect(configureGeminiNativeStartup(homeDir, true)).toMatchObject({ status: "would-install" });
+    expect(readFileSync(instructionPath, "utf8")).toBe(original);
+    expect(configureGeminiNativeStartup(homeDir)).toMatchObject({ status: "installed" });
+    const configured = readFileSync(instructionPath, "utf8");
+    expect(configured).toContain("<!-- >>> prism connect managed: native startup -->");
+    expect(configured).toContain("`session_bootstrap({})`, exactly once");
+    expect(configured).toContain("native tool discovery/ToolSearch");
+    expect(configured).toContain("Do not use shell commands, file reads, subagents");
+    expect(configured).toContain("`Prism startup failure` and stop");
+    expect(configured).not.toContain("# Startup — MANDATORY");
+    expect(configured.slice(configured.indexOf("# Paths"))).toBe("# Paths\n\n- Keep this user rule.\n");
+    expect(statSync(instructionPath).mode & 0o777).toBe(0o640);
+    expect(readFileSync(agentsPath, "utf8")).toBe(agents);
+    expect(configureGeminiNativeStartup(homeDir)).toMatchObject({ status: "unchanged" });
+
+    writeFileSync(instructionPath, configured.replace("your first action must be", "your first action may be"));
+    expect(configureGeminiNativeStartup(homeDir, true)).toMatchObject({ status: "would-refresh" });
+    expect(configureGeminiNativeStartup(homeDir)).toMatchObject({ status: "refreshed" });
+    expect(readFileSync(instructionPath, "utf8")).toBe(configured);
+
+    const nearMatchHome = makeHome();
+    const nearMatchPath = join(nearMatchHome, ".gemini", "GEMINI.md");
+    const nearMatch = original.replace('level: "deep"', 'level: "standard"');
+    mkdirSync(dirname(nearMatchPath), { recursive: true });
+    writeFileSync(nearMatchPath, nearMatch);
+    expect(configureGeminiNativeStartup(nearMatchHome)).toMatchObject({ status: "installed" });
+    expect(readFileSync(nearMatchPath, "utf8").startsWith(`${nearMatch}\n`)).toBe(true);
+  });
+
+  it("preserves Gemini newline style and symlinks, and fails loud on races or bad markers", () => {
+    const homeDir = makeHome();
+    const instructionPath = join(homeDir, ".gemini", "GEMINI.md");
+    const target = join(homeDir, "shared-GEMINI.md");
+    mkdirSync(dirname(instructionPath), { recursive: true });
+    writeFileSync(target, "USER RULE\r\n", { mode: 0o640 });
+    symlinkSync(target, instructionPath);
+
+    expect(configureGeminiNativeStartup(homeDir)).toMatchObject({ status: "installed" });
+    const configured = readFileSync(target, "utf8");
+    expect(lstatSync(instructionPath).isSymbolicLink()).toBe(true);
+    expect(realpathSync(instructionPath)).toBe(realpathSync(target));
+    expect(configured.replaceAll("\r\n", "")).not.toContain("\n");
+    expect(statSync(target).mode & 0o777).toBe(0o640);
+
+    const racedHome = makeHome();
+    const racedPath = join(racedHome, ".gemini", "GEMINI.md");
+    mkdirSync(dirname(racedPath), { recursive: true });
+    writeFileSync(racedPath, "before\n");
+    expect(() => configureGeminiNativeStartup(racedHome, false, (writePath) => {
+      writeFileSync(writePath, "concurrent edit\n");
+    })).toThrow(/changed while Prism was preparing/);
+    expect(readFileSync(racedPath, "utf8")).toBe("concurrent edit\n");
+
+    for (const malformed of [
+      "before\n<!-- >>> prism connect managed: native startup -->\n",
+      "<!-- >>> prism connect managed: native startup -->\n<!-- <<< prism connect managed: native startup -->\n<!-- >>> prism connect managed: native startup -->\n<!-- <<< prism connect managed: native startup -->\n",
+      "<!-- <<< prism connect managed: native startup -->\n<!-- >>> prism connect managed: native startup -->\n",
+    ]) {
+      const malformedHome = makeHome();
+      const malformedPath = join(malformedHome, ".gemini", "GEMINI.md");
+      mkdirSync(dirname(malformedPath), { recursive: true });
+      writeFileSync(malformedPath, malformed);
+      expect(() => configureGeminiNativeStartup(malformedHome)).toThrow(/Gemini instructions contain/);
+      expect(readFileSync(malformedPath, "utf8")).toBe(malformed);
+    }
   });
 
   it("registers all five supported hosts with the installed server path", () => {
@@ -1060,6 +1159,35 @@ describe("prism connect", () => {
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(invalid);
   }, 30_000); // Four process startups can exceed the 10s default on Windows CI.
 
+  it("previews Gemini native startup without writing during a CLI dry run", () => {
+    const homeDir = makeHome();
+    const instructionPath = join(homeDir, ".gemini", "GEMINI.md");
+    const original = legacyGeminiInstructions();
+    mkdirSync(dirname(instructionPath), { recursive: true });
+    writeFileSync(instructionPath, original);
+
+    const preview = spawnSync(
+      process.execPath,
+      [resolve("dist/cli.js"), "connect", "--host", "gemini", "--dry-run"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          USERPROFILE: homeDir,
+          PRISM_CONFIG_PATH: join(homeDir, "prism-config.db"),
+          PRISM_SKILL_SYNC_DISABLED: "true",
+          PRISM_SYNALUX_API_KEY: "",
+        },
+      },
+    );
+
+    expect(preview.status, preview.stderr).toBe(0);
+    expect(preview.stdout).toContain("Gemini CLI: would install native startup instructions");
+    expect(readFileSync(instructionPath, "utf8")).toBe(original);
+    expect(existsSync(join(homeDir, ".gemini", "settings.json"))).toBe(false);
+  });
+
   it("exits nonzero after registration when the install-time skill snapshot is unavailable", () => {
     const homeDir = makeHome();
     const codexHome = join(homeDir, "codex-home");
@@ -1124,6 +1252,45 @@ describe("prism connect", () => {
     expect(readFileSync(instructionPath, "utf8")).toBe(originalInstructions);
   });
 
+  it("does not configure Gemini startup when registration or native skill sync fails", () => {
+    for (const registrationFails of [true, false]) {
+      const homeDir = makeHome();
+      const settingsPath = join(homeDir, ".gemini", "settings.json");
+      const instructionPath = join(homeDir, ".gemini", "GEMINI.md");
+      const agentsPath = join(homeDir, ".gemini", "AGENTS.md");
+      const originalInstructions = legacyGeminiInstructions();
+      const agents = "# Preserve Gemini agents\n";
+      mkdirSync(dirname(settingsPath), { recursive: true });
+      if (registrationFails) writeFileSync(settingsPath, "{ invalid json\n");
+      writeFileSync(instructionPath, originalInstructions);
+      writeFileSync(agentsPath, agents);
+
+      const failed = spawnSync(
+        process.execPath,
+        [resolve("dist/cli.js"), "connect", "--host", "gemini"],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            HOME: homeDir,
+            USERPROFILE: homeDir,
+            PRISM_CONFIG_PATH: join(homeDir, "prism-config.db"),
+            PRISM_SKILL_SYNC_DISABLED: "false",
+            PRISM_SYNALUX_BASE_URL: "http://127.0.0.1:1",
+            PRISM_SYNALUX_API_KEY: "",
+          },
+        },
+      );
+
+      expect(failed.status).toBe(1);
+      expect(failed.stderr).toMatch(registrationFails
+        ? /could not parse config/
+        : /Synalux skill synchronization failed/);
+      expect(readFileSync(instructionPath, "utf8")).toBe(originalInstructions);
+      expect(readFileSync(agentsPath, "utf8")).toBe(agents);
+    }
+  });
+
   it("materializes entitled native skills before prism connect exits", async () => {
     const homeDir = makeHome();
     const codexHome = join(homeDir, "codex-home");
@@ -1173,6 +1340,8 @@ describe("prism connect", () => {
     const claudeInstructions = join(homeDir, "CLAUDE.md");
     const cursorHooks = join(homeDir, ".cursor", "hooks.json");
     const geminiSettings = join(homeDir, ".gemini", "settings.json");
+    const geminiInstructions = join(homeDir, ".gemini", "GEMINI.md");
+    const geminiAgents = join(homeDir, ".gemini", "AGENTS.md");
     const legacySyncHook = `${join(homeDir, "prism", "scripts", "sync-skills.sh")} > /dev/null 2>&1`;
     const claudeConfig = {
       hooks: {
@@ -1192,6 +1361,9 @@ describe("prism connect", () => {
     writeFileSync(claudeInstructions, legacyClaudeInstructions("PRESERVE THIS CLAUDE RULE\n"));
     writeFileSync(cursorHooks, cursorHookSentinel);
     writeFileSync(geminiSettings, `${JSON.stringify(geminiConfig, null, 2)}\n`);
+    writeFileSync(geminiInstructions, legacyGeminiInstructions());
+    const geminiAgentsSentinel = "# User-owned Gemini agent rules\n";
+    writeFileSync(geminiAgents, geminiAgentsSentinel);
     const geminiHooksBefore = JSON.stringify(geminiConfig.hooks);
 
     const manifest = freeManifest();
@@ -1228,7 +1400,8 @@ describe("prism connect", () => {
       expect(result.stdout).toContain("Codex: registered");
       expect(result.stdout).toContain("removed 1 legacy Prism hook action");
       expect(result.stdout).toContain("removed 2 legacy Prism startup section");
-      expect(result.stdout).toContain("installed hook-free native startup instructions");
+      expect(result.stdout).toContain("Claude Code: installed hook-free native startup instructions");
+      expect(result.stdout).toContain("Gemini CLI: installed hook-free native startup instructions");
 
       // Codex, Gemini CLI, and Cursor share the Agent Skills standard root.
       expect(readFileSync(join(
@@ -1253,6 +1426,10 @@ describe("prism connect", () => {
       expect(readFileSync(claudeInstructions, "utf8")).toContain("mcp__prism-mcp__session_bootstrap");
       expect(readFileSync(cursorHooks, "utf8")).toBe(cursorHookSentinel);
       expect(JSON.stringify(readConfig(geminiSettings).hooks)).toBe(geminiHooksBefore);
+      expect(readFileSync(geminiInstructions, "utf8")).toContain("`session_bootstrap({})`, exactly once");
+      expect(readFileSync(geminiInstructions, "utf8")).not.toContain("# Startup — MANDATORY");
+      expect(readFileSync(geminiInstructions, "utf8")).toContain("# Paths\n\n- Keep this user rule.\n");
+      expect(readFileSync(geminiAgents, "utf8")).toBe(geminiAgentsSentinel);
       expect(JSON.stringify(readConfig(join(homeDir, ".claude.json")))).not.toMatch(/SessionStart|hooks/i);
       expect(JSON.stringify(readConfig(join(homeDir, ".cursor", "mcp.json")))).not.toMatch(/SessionStart|hooks/i);
       expect(readFileSync(join(codexHome, "config.toml"), "utf8")).not.toMatch(/SessionStart|hooks/i);
@@ -1288,5 +1465,30 @@ describe("prism connect", () => {
     expect(readFileSync(settingsPath, "utf8")).toBe(original);
     expect(readFileSync(instructionPath, "utf8")).toBe(originalInstructions);
     expect(result.stdout).not.toContain("legacy Prism hook");
+  });
+
+  it("does not configure Gemini startup when native skill synchronization is disabled", async () => {
+    const homeDir = makeHome();
+    const instructionPath = join(homeDir, ".gemini", "GEMINI.md");
+    const agentsPath = join(homeDir, ".gemini", "AGENTS.md");
+    const original = legacyGeminiInstructions();
+    const agents = "# Preserve Gemini agents\n";
+    mkdirSync(dirname(instructionPath), { recursive: true });
+    writeFileSync(instructionPath, original);
+    writeFileSync(agentsPath, agents);
+
+    const result = await runBuiltCli(["connect", "--host", "gemini"], {
+      ...process.env,
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      PRISM_CONFIG_PATH: join(homeDir, "prism-config.db"),
+      PRISM_SKILL_SYNC_DISABLED: "true",
+      PRISM_SYNALUX_API_KEY: "",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(instructionPath, "utf8")).toBe(original);
+    expect(readFileSync(agentsPath, "utf8")).toBe(agents);
+    expect(result.stdout).not.toContain("native startup instructions");
   });
 });

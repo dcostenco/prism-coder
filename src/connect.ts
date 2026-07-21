@@ -109,6 +109,8 @@ const CODEX_MANAGED_START = "# >>> prism connect managed: prism-mcp";
 const CODEX_MANAGED_END = "# <<< prism connect managed: prism-mcp";
 const CLAUDE_STARTUP_MANAGED_START = "<!-- >>> prism connect managed: native startup -->";
 const CLAUDE_STARTUP_MANAGED_END = "<!-- <<< prism connect managed: native startup -->";
+const GEMINI_STARTUP_MANAGED_START = "<!-- >>> prism connect managed: native startup -->";
+const GEMINI_STARTUP_MANAGED_END = "<!-- <<< prism connect managed: native startup -->";
 const CONNECT_STORAGE_BACKENDS = ["auto", "local", "synalux", "supabase"] as const;
 
 export function normalizeHostName(value: string): ConnectHostName {
@@ -358,9 +360,10 @@ function serializeClaudeStartupBlock(newline: string): string {
     "`mcp__prism-mcp__session_bootstrap` exactly once with an empty object (`{}`). Before answering, display",
     "the returned developer greeting plus every returned Last Summary, Open TODOs, Recent Sessions, or Session",
     "History field for the configured quick, standard, or deep depth; a greeting-only prompt does not permit",
-    "omitting those fields. Do not substitute",
-    "`session_load_context` while `session_bootstrap` is available. If it is unavailable, follow the installed",
-    "`prism-startup` skill fallback. This block is managed by `prism connect`; do not edit it manually.",
+    "omitting those fields. If `session_bootstrap` is deferred, use native tool discovery/ToolSearch to load that",
+    "exact tool, then invoke it. Do not use shell commands, file reads, subagents, or unrelated tool inspection",
+    "as a substitute. Do not call `session_load_context`. If discovery or invocation fails, report",
+    "`Prism startup failure` and stop. This block is managed by `prism connect`; do not edit it manually.",
     CLAUDE_STARTUP_MANAGED_END,
     "",
   ].join(newline);
@@ -421,6 +424,111 @@ export function configureClaudeNativeStartup(
         ? newline
         : `${newline}${newline}`;
     nextText = currentText + separator + managedBlock;
+    action = "install";
+  }
+
+  if (dryRun) {
+    return { path: instructionPath, status: action === "install" ? "would-install" : "would-refresh" };
+  }
+  writeTextAtomically(writePath, nextText, originalText, beforeCommit, symlinkPath);
+  return { path: instructionPath, status: action === "install" ? "installed" : "refreshed" };
+}
+
+function serializeGeminiStartupBlock(newline: string): string {
+  return [
+    GEMINI_STARTUP_MANAGED_START,
+    "## Prism session startup",
+    "On the first user turn of every conversation, including a greeting, your first action must be",
+    "`session_bootstrap({})`, exactly once. Before answering, display the returned developer greeting plus every",
+    "returned Last Summary, Open TODOs, Recent Sessions, or Session History field for the configured quick,",
+    "standard, or deep depth; a greeting-only prompt does not permit omitting those fields. If `session_bootstrap`",
+    "is deferred, use native tool discovery/ToolSearch to load that exact tool, then invoke it.",
+    "Do not use shell commands, file reads, subagents, or unrelated tool inspection as a substitute. Do not call",
+    "`session_load_context`. If discovery or invocation fails, report `Prism startup failure` and stop. This block",
+    "is managed by `prism connect`; do not edit it manually.",
+    GEMINI_STARTUP_MANAGED_END,
+    "",
+  ].join(newline);
+}
+
+/** The exact Gemini startup section provisioned before native bootstrap support. */
+function legacyGeminiStartupBlock(newline: string): string {
+  return [
+    "# Startup — MANDATORY",
+    "",
+    "Your first action in every conversation is loading Prism session context. Zero text before the tool call.",
+    "",
+    "**Dual-path detection:** Check your available toolset.",
+    "- **If `mcp_prism-mcp_session_load_context` exists:** Call it with `project: \"prism-mcp\"`, `level: \"deep\"`.",
+    "- **If no MCP tools are available (Antigravity):** Run `bash ~/.gemini/antigravity/scratch/prism_session_loader.sh prism-mcp` via `run_command`. This uses the `prism load` CLI under the hood, sharing the same storage layer (SQLite or Supabase) as the MCP tool.",
+    "",
+    "After success: echo agent identity, last summary, open TODOs, session version.",
+    "If any call fails: say \"Prism load failed — retrying\" and retry ONE more time.",
+    "",
+    "",
+  ].join(newline);
+}
+
+/** Install or refresh Gemini CLI's native, hook-free first-turn instruction. */
+export function configureGeminiNativeStartup(
+  homeDir = homedir(),
+  dryRun = false,
+  beforeCommit?: (path: string) => void,
+): NativeStartupConfiguration {
+  const instructionPath = join(homeDir, ".gemini", "GEMINI.md");
+  let writePath = instructionPath;
+  let symlinkPath: string | undefined;
+  let originalText: string | undefined;
+  let instructionEntryExists = false;
+
+  try {
+    const pathInfo = lstatSync(instructionPath);
+    instructionEntryExists = true;
+    if (pathInfo.isSymbolicLink()) {
+      writePath = realpathSync(instructionPath);
+      symlinkPath = instructionPath;
+      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
+    }
+    originalText = readFileSync(writePath, "utf8");
+  } catch (error) {
+    if (instructionEntryExists || !isErrno(error, "ENOENT")) {
+      throw new Error(`Could not inspect Gemini instructions: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const currentText = originalText ?? "";
+  const newline = currentText.includes("\r\n") ? "\r\n" : "\n";
+  const startRanges = findExactLineRanges(currentText, GEMINI_STARTUP_MANAGED_START);
+  const endRanges = findExactLineRanges(currentText, GEMINI_STARTUP_MANAGED_END);
+  if (startRanges.length !== endRanges.length || startRanges.length > 1) {
+    throw new Error(`Gemini instructions contain ambiguous Prism startup ownership markers: ${instructionPath}`);
+  }
+
+  const managedBlock = serializeGeminiStartupBlock(newline);
+  let nextText: string;
+  let action: "install" | "refresh";
+  if (startRanges.length === 1) {
+    if (endRanges[0].start <= startRanges[0].start) {
+      throw new Error(`Gemini instructions contain out-of-order Prism startup ownership markers: ${instructionPath}`);
+    }
+    const managedEnd = endRanges[0].end;
+    if (currentText.slice(startRanges[0].start, managedEnd) === managedBlock) {
+      return { path: instructionPath, status: "unchanged" };
+    }
+    nextText = currentText.slice(0, startRanges[0].start) + managedBlock + currentText.slice(managedEnd);
+    action = "refresh";
+  } else {
+    const legacyBlock = legacyGeminiStartupBlock(newline);
+    if (currentText.startsWith(legacyBlock)) {
+      nextText = managedBlock + newline + currentText.slice(legacyBlock.length);
+    } else {
+      const separator = currentText.length === 0
+        ? ""
+        : currentText.endsWith("\n") || currentText.endsWith("\r")
+          ? newline
+          : `${newline}${newline}`;
+      nextText = currentText + separator + managedBlock;
+    }
     action = "install";
   }
 
