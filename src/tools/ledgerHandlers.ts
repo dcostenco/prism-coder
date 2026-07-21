@@ -160,7 +160,7 @@ const NATIVE_CONTEXT_LIMITS = {
     summary: 1_000,
     todos: [12, 280],
     recent: [5, 500],
-    history: [30, 350],
+    history: [50, 100],
     branch: 160,
     keyContext: 800,
     decisions: [8, 280],
@@ -181,6 +181,20 @@ function capNativeStartupText(
   const marker = `\n\n… Additional ${level} context omitted to keep native startup within its display budget.`;
   const keepChars = Math.max(0, maxChars - marker.length - suffix.length);
   return text.slice(0, keepChars).trimEnd() + marker + suffix;
+}
+
+function compactWithOmissionCount(value: unknown, maxChars: number): string {
+  const text = typeof value === "string" ? value.trim() : String(value ?? "").trim();
+  if (text.length <= maxChars) return text;
+
+  let keepChars = maxChars;
+  let marker = "";
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    marker = `… [${text.length - keepChars} characters omitted]`;
+    keepChars = Math.max(0, maxChars - marker.length);
+  }
+  marker = `… [${text.length - keepChars} characters omitted]`;
+  return text.slice(0, keepChars) + marker;
 }
 
 // ─── Save Ledger Handler ──────────────────────────────────────
@@ -1053,7 +1067,7 @@ export async function sessionLoadContextHandler(
   const now = Date.now();
   const lastGenerated = meta?.briefing_generated_at as number || 0;
 
-  if (now - lastGenerated > FOUR_HOURS_MS) {
+  if (includeSkillContent && now - lastGenerated > FOUR_HOURS_MS) {
     try {
       // Only import when needed — keeps cold start fast when not generating
       const { generateMorningBriefing } = await import("../utils/briefing.js");
@@ -1110,7 +1124,7 @@ export async function sessionLoadContextHandler(
     } catch (err) {
       console.error(`[session_load_context] Morning Briefing failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
     }
-  } else if (meta?.morning_briefing) {
+  } else if (includeSkillContent && meta?.morning_briefing) {
     // Show the cached briefing (generated within last 4 hours)
     briefingBlock = `\n\n[🌅 MORNING BRIEFING]\n${meta.morning_briefing}`;
     debugLog(`[session_load_context] Showing cached Morning Briefing for "${project}"`);
@@ -1119,7 +1133,7 @@ export async function sessionLoadContextHandler(
   // ─── Visual Memory Index (v2.0 Step 9) ───
   // Show lightweight index of saved images — never loads actual image data
   let visualMemoryBlock = "";
-  const visuals = (data as any)?.metadata?.visual_memory || [];
+  const visuals = includeSkillContent ? ((data as any)?.metadata?.visual_memory || []) : [];
   if (visuals.length > 0) {
     visualMemoryBlock = `\n\n[🖼️ VISUAL MEMORY]\nThe following reference images are available. Use session_view_image(id) to view them if needed:\n`;
     visuals.forEach((v: any) => {
@@ -1130,9 +1144,11 @@ export async function sessionLoadContextHandler(
   const d = data as Record<string, any>;
   if (!includeSkillContent) {
     const limits = NATIVE_CONTEXT_LIMITS[level];
-    const compact = (value: unknown, maxChars: number): string => {
-      const text = typeof value === "string" ? value.trim() : String(value ?? "").trim();
-      return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+    const compact = compactWithOmissionCount;
+    const compactArrayDetail = (value: unknown, maxItems: number, itemChars: number): string => {
+      if (!Array.isArray(value) || value.length === 0) return "";
+      const shown = value.slice(0, maxItems).map((item) => compact(item, itemChars)).join("; ");
+      return shown + (value.length > maxItems ? `; … ${value.length - maxItems} more omitted` : "");
     };
     const omitted = (total: number, shown: number, label: string): string =>
       total > shown ? `\n- … ${total - shown} more ${label} omitted at ${level} depth` : "";
@@ -1162,7 +1178,9 @@ export async function sessionLoadContextHandler(
       const recentSessions = d.recent_sessions.slice(0, limits.recent[0]);
       nativeContext += `\n**Recent Sessions:**\n` + recentSessions
         .map((session: any) => {
-          const date = compact(session?.session_date || session?.created_at || session?.date || "unknown", 10);
+          const date = String(session?.session_date || session?.created_at || session?.date || "unknown")
+            .split("T")[0]
+            .slice(0, 10);
           return `- [${date}] ${compact(session?.summary, limits.recent[1])}`;
         })
         .join("\n") + omitted(d.recent_sessions.length, recentSessions.length, "recent sessions") + `\n`;
@@ -1171,8 +1189,16 @@ export async function sessionLoadContextHandler(
       const sessionHistory = d.session_history.slice(0, limits.history[0]);
       nativeContext += `\n**Session History:**\n` + sessionHistory
         .map((session: any) => {
-          const date = compact(session?.session_date || session?.created_at || session?.date || "unknown", 10);
-          return `- [${date}] ${compact(session?.summary, limits.history[1])}`;
+          const date = String(session?.session_date || session?.created_at || session?.date || "unknown")
+            .split("T")[0]
+            .slice(0, 10);
+          const details = [
+            ["Decisions", compactArrayDetail(session?.decisions, 1, 32)],
+            ["TODOs", compactArrayDetail(session?.todos, 1, 32)],
+            ["Files changed", compactArrayDetail(session?.files_changed, 1, 48)],
+          ].filter(([, detail]) => detail);
+          return `- [${date}] ${compact(session?.summary, limits.history[1])}` +
+            details.map(([label, detail]) => `\n  ${label}: ${detail}`).join("");
         })
         .join("\n") + omitted(d.session_history.length, sessionHistory.length, "history entries") + `\n`;
     }
@@ -1512,14 +1538,18 @@ export async function sessionBootstrapHandler(args: unknown = {}) {
     ? configuredDepth as NativeContextDepth
     : "standard";
   const projects = [...new Set(configuredProjects.split(",").map((project) => project.trim()).filter(Boolean))];
-  const greetingName = agentName.trim() || "developer";
+  const configuredGreetingName = agentName.trim();
+  const greetingName = configuredGreetingName
+    ? compactWithOmissionCount(configuredGreetingName, 80)
+    : "developer";
   const greeting = `👋 Welcome back, ${greetingName}. Prism is loading ${depth} context.`;
 
   if (projects.length === 0) {
+    const noProjectsText = `${greeting}\n\n⚠️ No Auto-Load Projects are configured in the Prism dashboard.`;
     return {
       content: [{
         type: "text",
-        text: `${greeting}\n\n⚠️ No Auto-Load Projects are configured in the Prism dashboard.`,
+        text: capNativeStartupText(noProjectsText, depth),
       }],
       isError: false,
     };

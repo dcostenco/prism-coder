@@ -1034,6 +1034,56 @@ describe("ledgerHandlers", () => {
       expect(storage.loadContext.mock.calls.length).toBeLessThan(projects.length);
     });
 
+    it("renders all fifty deep history entries with bounded decision, TODO, and file detail", async () => {
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "prism-mcp",
+        default_context_depth: "deep",
+        agent_name: "Dmitri",
+      }[key] ?? fallback));
+      storage.loadContext.mockResolvedValue({
+        session_history: Array.from({ length: 50 }, (_, index) => ({
+          summary: `Deep session ${index}`,
+          decisions: [`Decision ${index}`, `Hidden decision ${index}`],
+          todos: [`TODO ${index}`, `Hidden TODO ${index}`],
+          files_changed: [`src/file-${index}.ts`, `src/hidden-${index}.ts`],
+          created_at: `2026-06-${String((index % 28) + 1).padStart(2, "0")}T12:00:00Z`,
+        })),
+        version: 2,
+      });
+
+      const result = await sessionBootstrapHandler({});
+      const text = result.content[0].text as string;
+
+      expect(text.length).toBeLessThanOrEqual(30_000);
+      expect(text).toContain("Deep session 0");
+      expect(text).toContain("Deep session 49");
+      expect(text.match(/^- \[2026-06-/gm)).toHaveLength(50);
+      expect(text).toContain("Decisions: Decision 49; … 1 more omitted");
+      expect(text).toContain("TODOs: TODO 49; … 1 more omitted");
+      expect(text).toContain("Files changed: src/file-49.ts; … 1 more omitted");
+      expect(storage.getLedgerEntries).not.toHaveBeenCalled();
+      expect(storage.saveHandoff).not.toHaveBeenCalled();
+    });
+
+    it.each(["quick", "standard", "deep"] as const)(
+      "bounds an oversized developer name in the %s greeting, including the no-project path",
+      async (depth) => {
+        mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+          autoload_projects: "",
+          default_context_depth: depth,
+          agent_name: "D".repeat(50_000),
+        }[key] ?? fallback));
+
+        const result = await sessionBootstrapHandler({});
+        const text = result.content[0].text as string;
+
+        expect(text.length).toBeLessThanOrEqual({ quick: 4_000, standard: 8_000, deep: 30_000 }[depth]);
+        expect(text).toContain("characters omitted");
+        expect(text).toContain("No Auto-Load Projects");
+        expect(storage.loadContext).not.toHaveBeenCalled();
+      },
+    );
+
     it("uses dashboard projects, identity, role, and depth for the hook-free greeting", async () => {
       const nativeSkillBody = `NATIVE_SKILL_BODY_MUST_NOT_BE_INLINED${"x".repeat(120_000)}`;
       mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
