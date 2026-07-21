@@ -566,16 +566,19 @@ Product capabilities and plans change frequently. The comparison below is
 intentionally limited to publicly documented differences; it is not a claim
 that another product lacks an unlisted feature.
 
+Legend: ✅ documented, ◐ conditional or plan-dependent, — not compared, ? verify
+with the provider.
+
 | Capability | Prism Coder | GitHub Copilot | Cursor | Amazon Q Developer |
-|---|---|---|---|---|
-| Local/open-weight inference | Built-in Ollama cascade (2B–27B) | Available through Copilot CLI offline/BYOK mode | Model/provider options vary by plan | AWS-managed models and IDE/CLI service |
-| Offline workflow | Local memory and inference available without an account | CLI offline mode with a configured provider; GitHub-hosted features are unavailable | Verify against the selected plan/provider | Verify against the selected AWS interface |
-| Cross-session memory | Persistent Prism sessions, handoff, and drift context | Optional CLI memory; disabled by default ([docs](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)) | Product-specific context and background-agent features | Product-specific context and agent features |
-| MCP integration | Native MCP server with memory and inference tools | MCP supported in Copilot CLI ([docs](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)) | MCPs, skills, and hooks included on current plans ([pricing](https://cursor.com/en-US/pricing)) | Supports MCP-based tool workflows; verify current plan limits |
-| Local-first model routing | RAM-, context-, entitlement-, and model-aware | Provider-controlled | Provider/plan-controlled | AWS service-controlled |
-| Session drift and grounding checks | Prism drift detection and grounding verifier | Not compared here | Not compared here | Not compared here |
-| Setup surface | MCP server plus `prism connect` for five hosts | CLI, IDE, and GitHub surfaces | Desktop editor and agents | IDE plugins and CLI ([overview](https://aws.amazon.com/q/developer/build/)) |
-| Pricing model | Synalux free and paid tiers | Current plans vary by product and usage | Current plans include usage/model allowances ([pricing](https://cursor.com/en-US/pricing)) | Free tier and $19/user/month Pro ([pricing](https://aws.amazon.com/q/developer/pricing/)) |
+|---|:---:|:---:|:---:|:---:|
+| Local/open-weight inference | ✅ | ◐ | ◐ | ◐ |
+| Offline workflow | ✅ | ◐ | ? | ? |
+| Cross-session memory | ✅ | ◐ ([docs](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)) | ◐ | ◐ |
+| MCP integration | ✅ | ✅ ([docs](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)) | ✅ ([pricing](https://cursor.com/en-US/pricing)) | ◐ |
+| Local-first model routing | ✅ | ◐ | ◐ | ◐ |
+| Session drift and grounding checks | ✅ | — | — | — |
+| Setup surface | ✅ five hosts | ✅ CLI/IDE | ✅ editor/agents | ✅ IDE/CLI ([overview](https://aws.amazon.com/q/developer/build/)) |
+| Pricing model | ✅ Synalux tiers | ◐ | ◐ ([pricing](https://cursor.com/en-US/pricing)) | ✅ free + $19 Pro ([pricing](https://aws.amazon.com/q/developer/pricing/)) |
 
 Prism-specific compliance, contractual, and pricing terms are documented in
 the Synalux service agreement. Do not infer a competitor's HIPAA, BAA, or data
@@ -585,11 +588,11 @@ handling status from this table.
 
 | Feature | Prism Coder | Ollama | LM Studio | Mem0 | Zep |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Local inference cascade | Built-in | Runtime | Desktop app | Not its primary surface | Not its primary surface |
-| Cloud fallback | Optional Synalux feature | Not a core Ollama feature | Product/provider dependent | Product/provider dependent | Product/provider dependent |
-| Persistent memory | Sessions, handoff, ledger, drift | Model runtime, not session memory | App/project context | Memory platform | Memory platform |
-| Knowledge/tool integration | MCP tools plus ingestion paths | API/runtime integrations | App integrations | SDK/API | SDK/API |
-| MCP server | Native Prism MCP server | Not the same product surface | Client integration varies | Client integration varies | Client integration varies |
+| Local inference cascade | ✅ | ✅ runtime | ✅ app | — | — |
+| Cloud fallback | ✅ optional | — | ◐ provider-dependent | ◐ | ◐ |
+| Persistent memory | ✅ | — | ◐ project context | ✅ | ✅ |
+| Knowledge/tool integration | ✅ MCP + ingestion | ◐ APIs | ◐ integrations | ✅ SDK/API | ✅ SDK/API |
+| MCP server | ✅ native | — | ◐ client integration | ◐ client integration | ◐ client integration |
 
 ### Pricing
 
