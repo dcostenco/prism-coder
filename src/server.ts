@@ -425,7 +425,8 @@ export function getAvailableTools(): Tool[] {
 export const PRISM_SERVER_INSTRUCTIONS =
   `Prism MCP — The Mind Palace for AI Agents. On the first user turn of every conversation, ` +
   `including greetings, call session_bootstrap exactly once with {} before any user-facing response. ` +
-  `Echo its configured developer greeting and returned quick, standard, or deep context. ` +
+  `Display its developer greeting and every returned Last Summary, Open TODOs, Recent Sessions, or Session History ` +
+  `field for the configured quick, standard, or deep depth, even when the user only sends a greeting. ` +
   `Do not substitute session_load_context while session_bootstrap is available; use session_load_context ` +
   `only for an explicit project reload or as an older-server fallback. ` +
   `Use session_save_ledger to log completed work and session_save_handoff to preserve state for the next session.\n\n` +

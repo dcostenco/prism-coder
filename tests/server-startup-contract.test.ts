@@ -36,11 +36,13 @@ describe("Prism startup tool contract", () => {
     const loadDescription = tools.find((tool) => tool.name === "session_load_context")?.description || "";
     expect(bootstrapDescription).toMatch(/first user turn of every conversation/i);
     expect(bootstrapDescription).toMatch(/empty object/i);
+    expect(bootstrapDescription).toMatch(/Display every returned Last Summary, Open TODOs/i);
     expect(bootstrapDescription).toMatch(/Do not guess or pass a project or depth/i);
     expect(loadDescription).toMatch(/explicit project reload/i);
     expect(loadDescription).toMatch(/fallback only when session_bootstrap is unavailable/i);
     expect(loadDescription).not.toMatch(/at the start of every conversation/i);
     expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/call session_bootstrap exactly once with \{\}/i);
     expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/Do not substitute session_load_context/i);
+    expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/every returned Last Summary, Open TODOs/i);
   });
 });
