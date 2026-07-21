@@ -29,7 +29,7 @@ import { getStorage, activeStorageBackend } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
 import { getCurrentGitState, getGitDrift } from "../utils/git.js";
-import { getSetting, getAllSettings } from "../storage/configStorage.js";
+import { getSetting, getAllSettings, refreshConfigStorageCache } from "../storage/configStorage.js";
 import { mergeHandoff, dbToHandoffSchema, sanitizeForMerge } from "../utils/crdtMerge.js";
 import { resolveProject } from "../utils/projectResolver.js";
 
@@ -743,7 +743,15 @@ export async function sessionLoadContextHandler(args: unknown) {
     resetInferenceMetrics();
   }
 
-  const { project, level = "standard", role, conversation_id: convId, prompt } = args;
+  const { project, level: requestedLevel, role, conversation_id: convId, prompt } = args;
+  const validLevels = ["quick", "standard", "deep"] as const;
+  const configuredLevel = requestedLevel ?? await getSetting("default_context_depth", "standard");
+  // Dashboard state is persisted independently and can outlive an older build
+  // that accepted arbitrary values. Explicit arguments have already passed the
+  // schema guard; an invalid stored value safely falls back to standard.
+  const level = validLevels.includes(configuredLevel as typeof validLevels[number])
+    ? configuredLevel as typeof validLevels[number]
+    : "standard";
   // T6 fix: explicit Number() coercion prevents string "2000" from later concatenating instead of adding
   const _maxTokensArg = Number(args.max_tokens);
   const _maxTokensSetting = parseInt(await getSetting("max_tokens", "0"), 10);
@@ -751,21 +759,56 @@ export async function sessionLoadContextHandler(args: unknown) {
     (_maxTokensArg > 0 ? _maxTokensArg : undefined) ?? (_maxTokensSetting > 0 ? _maxTokensSetting : undefined);
   const agentName = await getSetting("agent_name", "");
 
-  const validLevels = ["quick", "standard", "deep"];
-  if (!validLevels.includes(level)) {
-    return {
-      content: [{
-        type: "text",
-        text: `Invalid level "${level}". Must be one of: ${validLevels.join(", ")}`,
-      }],
-      isError: true,
-    };
-  }
-
   debugLog(`[session_load_context] Loading ${level} context for project="${project}"`);
+
+  // Reuse the non-blocking startup refresh. This await happens on the tool
+  // call, never during the MCP initialize handshake, so the current session
+  // observes one coherent manifest generation.
+  const { awaitSkillManifestSync } = await import("../skillManifestSync.js");
+  const skillSyncResult = await awaitSkillManifestSync();
+  // Another Prism process may have committed a newer generation while this
+  // process's startup result is still inside its TTL.
+  await refreshConfigStorageCache();
+  const { OFFLINE_FALLBACK } = await import("./skillRouting.js");
+  const protectedFallbackEntries = OFFLINE_FALLBACK.universal.filter(
+    (entry): entry is import("./skillRouting.js").SkillEntry => typeof entry !== "string" && entry.protected === true,
+  );
+  const protectedFallbackNames = new Set(protectedFallbackEntries.map((entry) => entry.name));
+  let entitledSkillNames = new Set<string>();
+  const partialManifestNames = skillSyncResult.status === "partial" && Array.isArray(skillSyncResult.entitledNames)
+    ? skillSyncResult.entitledNames.filter((name): name is string => typeof name === "string" && name.length > 0)
+    : [];
+  if (partialManifestNames.length > 0) {
+    // The portal response was valid but the config DB or native apply was
+    // incomplete. Its allowlist is newer than stale DB activation metadata.
+    entitledSkillNames = new Set(partialManifestNames);
+  } else {
+    try {
+      const storedNames = JSON.parse(await getSetting("skill_manifest:names", "[]"));
+      if (Array.isArray(storedNames)) {
+        entitledSkillNames = new Set(storedNames.filter((name): name is string => typeof name === "string"));
+      }
+    } catch {
+      // Invalid/missing activation metadata fails closed. Skill content remains
+      // in last-good storage but is not activated without a validated manifest.
+    }
+  }
+  if (entitledSkillNames.size === 0) {
+    entitledSkillNames = new Set(protectedFallbackNames);
+  }
 
   const storage = await getStorage();
   const effectiveRole = role || await getSetting("default_role", "") || undefined;
+  const loadEntitledRoleSkill = async (): Promise<string> => {
+    if (!effectiveRole) return "";
+    // An entitled platform skill cannot be shadowed by a same-name user role;
+    // otherwise user_skill:aba-precision-protocol could replace a mandatory
+    // guardrail with arbitrary local text.
+    if (entitledSkillNames.has(effectiveRole)) {
+      return await getSetting(`skill:${effectiveRole}`, "");
+    }
+    return await getSetting(`user_skill:${effectiveRole}`, "");
+  };
   const data = await storage.loadContext(project, level, PRISM_USER_ID, effectiveRole);  // v3.0: role with dashboard fallback
 
   // F4 fix: inject protected skills even for fresh projects.
@@ -773,24 +816,31 @@ export async function sessionLoadContextHandler(args: unknown) {
   // behavioral guardrails for the entire session. Now protected skills always load.
   if (!data) {
     let freshSkillBlock = "";
+    const freshLoadedSkills = new Set<string>();
     try {
+      const roleSkillContent = await loadEntitledRoleSkill();
+      if (effectiveRole && roleSkillContent?.trim()) {
+        freshSkillBlock += `\n\n[📜 SKILL: ${effectiveRole}]\n${roleSkillContent.trim()}`;
+        freshLoadedSkills.add(effectiveRole);
+      }
       const { resolveSkills: resolveForFresh } = await import("./skillRouting.js");
       const freshResolution = await resolveForFresh(project);
       // Client-renders-content: load from local DB by resolved names
       for (const name of freshResolution.names || []) {
+        if (!entitledSkillNames.has(name) || freshLoadedSkills.has(name)) continue;
         const content = await getSetting(`skill:${name}`, "");
         if (content?.trim()) {
           freshSkillBlock += `\n\n[📜 SKILL: ${name}]\n${content.trim()}`;
+          freshLoadedSkills.add(name);
         }
       }
-      // Offline fallback: load protected skills from local DB
       if (freshResolution.isOffline) {
-        const protectedNames = ['prime-directive', 'evidence-first-protocol', 'behavioral-verifier', 'occam-razor-protocol', 'session-drift-detection', 'pre-commit-protocol', 'pre-push-audit', 'implementation-integrity-audit', 'bcba_ai_assistant'];
-        for (const name of protectedNames) {
-          if (freshResolution.names?.includes(name)) continue;
+        for (const name of protectedFallbackNames) {
+          if (!entitledSkillNames.has(name) || freshLoadedSkills.has(name)) continue;
           const content = await getSetting(`skill:${name}`, "");
           if (content?.trim()) {
             freshSkillBlock += `\n\n[📜 SKILL: ${name}]\n${content.trim()}`;
+            freshLoadedSkills.add(name);
           }
         }
       }
@@ -1060,7 +1110,7 @@ export async function sessionLoadContextHandler(args: unknown) {
   const skillEntries: import("../utils/skillBudget.js").SkillEntryForBudget[] = [];
 
   if (effectiveRole) {
-    const skillContent = await getSetting(`skill:${effectiveRole}`, "");
+    const skillContent = await loadEntitledRoleSkill();
     if (skillContent && skillContent.trim()) {
       // protected: the role skill is deliberate per-agent configuration and
       // was unconditionally injected before budgeting existed.
@@ -1083,11 +1133,11 @@ export async function sessionLoadContextHandler(args: unknown) {
   );
   // Legacy last-good caches carry names without metadata; OFFLINE_FALLBACK
   // membership is the floor of last resort so core rules stay inlined.
-  const { OFFLINE_FALLBACK } = await import("./skillRouting.js");
   const fallbackFloor = new Set(
     OFFLINE_FALLBACK.universal.map((e) => (typeof e === "string" ? e : e.name)),
   );
   for (const name of skillResolution.names || []) {
+    if (!entitledSkillNames.has(name)) continue;
     if (skillEntries.some((e) => e.name === name)) continue;
     const content = await getSetting(`skill:${name}`, "");
     if (content?.trim()) {
@@ -1101,21 +1151,17 @@ export async function sessionLoadContextHandler(args: unknown) {
     }
   }
 
-  // Offline fallback: load ALL local skill: content (no tier gating).
-  // Deliberate: offline = degraded = best-effort. A repo-holder with
-  // sync-skills.sh has the full library locally regardless of tier.
-  // Tier gating is portal-side (name resolution); offline bypasses it.
+  // Offline activation remains the last-good routing result intersected with
+  // the last complete tier manifest above. Never elevate by scanning every
+  // local skill:* row: those rows may belong to an earlier paid tier.
   if (skillResolution.isOffline) {
-    const allSettings = await storage.getAllSettings?.() || {};
-    for (const [k, v] of Object.entries(allSettings)) {
-      if (!k.startsWith("skill:") || !v) continue;
-      const name = k.replace("skill:", "");
-      if (skillEntries.some((e) => e.name === name)) continue;
-      const content = (v as string).trim();
-      if (content) {
-        // Offline can't know protected flags; OFFLINE_FALLBACK names are the
-        // best available floor — mark those protected so they always inline.
-        skillEntries.push({ name, content, protected: fallbackFloor.has(name), category: "offline", priority: 999 });
+    for (const entry of protectedFallbackEntries) {
+      if (!entitledSkillNames.has(entry.name) || skillEntries.some((skill) => skill.name === entry.name)) continue;
+      const content = await getSetting(`skill:${entry.name}`, "");
+      if (content?.trim()) {
+        skillEntries.push({
+          name: entry.name, content, protected: true, category: "offline", priority: entry.priority,
+        });
       }
     }
   }
@@ -1279,6 +1325,66 @@ export async function sessionLoadContextHandler(args: unknown) {
   return {
     content: [{ type: "text", text: responseText + MEMORY_BOUNDARY_SUFFIX }],
     isError: false,
+  };
+}
+
+/**
+ * Hook-free first-turn entrypoint used by the native prism-startup skill.
+ * Configuration, rather than the host model, owns project and depth selection.
+ */
+export async function sessionBootstrapHandler(args: unknown = {}) {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    throw new Error("Invalid arguments for session_bootstrap");
+  }
+  const input = args as Record<string, unknown>;
+  if (input.conversation_id !== undefined && typeof input.conversation_id !== "string") {
+    throw new Error("Invalid arguments for session_bootstrap");
+  }
+  if (input.prompt !== undefined && typeof input.prompt !== "string") {
+    throw new Error("Invalid arguments for session_bootstrap");
+  }
+
+  const [configuredProjects, configuredDepth, agentName, defaultRole] = await Promise.all([
+    getSetting("autoload_projects", ""),
+    getSetting("default_context_depth", "standard"),
+    getSetting("agent_name", ""),
+    getSetting("default_role", ""),
+  ]);
+  const depth = ["quick", "standard", "deep"].includes(configuredDepth)
+    ? configuredDepth
+    : "standard";
+  const projects = [...new Set(configuredProjects.split(",").map((project) => project.trim()).filter(Boolean))];
+  const greetingName = agentName.trim() || "developer";
+  const greeting = `👋 Welcome back, ${greetingName}. Prism is loading ${depth} context.`;
+
+  if (projects.length === 0) {
+    return {
+      content: [{
+        type: "text",
+        text: `${greeting}\n\n⚠️ No Auto-Load Projects are configured in the Prism dashboard.`,
+      }],
+      isError: false,
+    };
+  }
+
+  const loaded: string[] = [];
+  let hadError = false;
+  for (const project of projects) {
+    const result = await sessionLoadContextHandler({
+      project,
+      role: defaultRole || undefined,
+      conversation_id: input.conversation_id as string | undefined,
+      prompt: input.prompt as string | undefined,
+    });
+    const text = result.content?.map((part: any) => part?.text).filter(Boolean).join("\n") ||
+      `No session context found for project "${project}".`;
+    loaded.push(text);
+    hadError ||= result.isError === true;
+  }
+
+  return {
+    content: [{ type: "text", text: `${greeting}\n\n${loaded.join("\n\n")}` }],
+    isError: hadError,
   };
 }
 

@@ -52,7 +52,8 @@ let inFlight: Promise<string | null> | null = null;
 export async function getSynaluxJwt(): Promise<string | null> {
     // Re-read process.env because storage/dashboard configuration can inject
     // credentials after config.ts captured its module-load constants.
-    const baseUrl = process.env.PRISM_SYNALUX_BASE_URL?.trim() || PRISM_SYNALUX_BASE_URL;
+    const baseUrl = process.env.PRISM_SYNALUX_BASE_URL?.trim() ||
+        process.env.SYNALUX_BASE_URL?.trim() || PRISM_SYNALUX_BASE_URL;
     const apiKey = process.env.PRISM_SYNALUX_API_KEY?.trim() || PRISM_SYNALUX_API_KEY;
     if (!baseUrl || !apiKey) {
         return null;

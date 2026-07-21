@@ -17,7 +17,9 @@ const PROTO_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 //   PRISM_STORAGE, PRISM_ENABLE_HIVEMIND) are read only at startup.
 //   Changing them at runtime requires a server restart to take effect.
 //   Runtime-only settings (e.g. dashboard_theme) take effect immediately.
-const CONFIG_PATH = resolve(homedir(), ".prism-mcp", "prism-config.db");
+const CONFIG_PATH = process.env.PRISM_CONFIG_PATH
+  ? resolve(process.env.PRISM_CONFIG_PATH)
+  : resolve(homedir(), ".prism-mcp", "prism-config.db");
 
 let configClient: ReturnType<typeof createClient> | null = null;
 let initialized = false;
@@ -57,6 +59,15 @@ export async function initConfigStorage() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS prism_managed_skills (
+        name TEXT PRIMARY KEY,
+        digest TEXT NOT NULL,
+        generation TEXT NOT NULL,
+        owner TEXT NOT NULL DEFAULT 'prism',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
     // Preload all rows into the cache so subsequent reads are zero-cost.
     const rs = await client.execute("SELECT key, value FROM system_settings");
@@ -76,6 +87,123 @@ export async function initConfigStorage() {
   }
 
   initialized = true;
+}
+
+export interface ManagedPlatformSkill {
+  name: string;
+  content: string;
+  digest: string;
+}
+
+export interface ManagedSkillManifestState {
+  generation: string;
+  tier: string;
+  routingVersion: number;
+  skills: ManagedPlatformSkill[];
+}
+
+/**
+ * Atomically applies a complete platform-skill snapshot.
+ *
+ * Ownership is recorded separately from the existing `skill:*` namespace so
+ * a tier downgrade can remove only rows previously written by Prism. Role and
+ * user-local skill rows are never inferred to be managed and are never pruned.
+ */
+export async function applyManagedSkillManifest(state: ManagedSkillManifestState): Promise<void> {
+  await initConfigStorage();
+  if (state.skills.length === 0) throw new Error("Refusing to apply an empty skill manifest");
+
+  const client = getClient();
+  const names = state.skills.map((skill) => skill.name);
+  const placeholders = names.map(() => "?").join(", ");
+  const statements: Array<{ sql: string; args: Array<string | number> }> = [];
+
+  for (const skill of state.skills) {
+    statements.push({
+      sql: `
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+      `,
+      args: [`skill:${skill.name}`, skill.content],
+    });
+  }
+
+  // Delete content only when the ownership table proves Prism wrote it and
+  // the complete replacement snapshot no longer contains it.
+  statements.push({
+    sql: `
+      DELETE FROM system_settings
+      WHERE key IN (
+        SELECT 'skill:' || name FROM prism_managed_skills
+        WHERE name NOT IN (${placeholders})
+      )
+    `,
+    args: names,
+  });
+  statements.push({
+    sql: `DELETE FROM prism_managed_skills WHERE name NOT IN (${placeholders})`,
+    args: names,
+  });
+
+  for (const skill of state.skills) {
+    statements.push({
+      sql: `
+        INSERT INTO prism_managed_skills (name, digest, generation, owner, updated_at)
+        VALUES (?, ?, ?, 'prism', CURRENT_TIMESTAMP)
+        ON CONFLICT(name) DO UPDATE SET
+          digest = excluded.digest,
+          generation = excluded.generation,
+          owner = 'prism',
+          updated_at = CURRENT_TIMESTAMP
+      `,
+      args: [skill.name, skill.digest, state.generation],
+    });
+  }
+
+  for (const [key, value] of [
+    ["skill_manifest:generation", state.generation],
+    ["skill_manifest:tier", state.tier],
+    ["skill_manifest:routing_version", String(state.routingVersion)],
+    ["skill_manifest:owner", "prism"],
+    ["skill_manifest:names", JSON.stringify(names)],
+  ] as const) {
+    statements.push({
+      sql: `
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+      `,
+      args: [key, value],
+    });
+  }
+
+  // libSQL batch("write") is one transaction: a failed statement rolls back
+  // content, ownership, digests, and generation together.
+  await client.batch(statements, "write");
+
+  // Refresh only after commit so synchronous readers never observe a future
+  // generation paired with stale skill content. A cache read failure must not
+  // make callers mistake an already-committed downgrade for a rolled-back DB
+  // write and skip native entitlement cleanup. Session loading refreshes again
+  // before activation and therefore fails closed until the DB is readable.
+  try {
+    await refreshConfigStorageCache();
+  } catch (error) {
+    console.error(`[configStorage] Managed skill manifest committed but cache refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/** Reload settings written by another Prism process into this process's cache. */
+export async function refreshConfigStorageCache(): Promise<void> {
+  await initConfigStorage();
+  const rs = await getClient().execute("SELECT key, value FROM system_settings");
+  const refreshed = Object.create(null) as Record<string, string>;
+  for (const row of rs.rows) {
+    const key = row.key as string;
+    if (!PROTO_KEYS.has(key)) refreshed[key] = row.value as string;
+  }
+  settingsCache = refreshed;
 }
 
 /**

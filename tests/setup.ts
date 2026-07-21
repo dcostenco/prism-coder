@@ -44,12 +44,17 @@ process.env.PRISM_STORAGE = "local";
 
 // Use a test-specific data directory so real user data is never touched
 process.env.PRISM_DATA_DIR = TEMP_DIR;
+process.env.PRISM_CONFIG_PATH = join(TEMP_DIR, `prism-config-${process.pid}.db`);
 
 // Disable the dashboard server during tests to avoid port conflicts
 process.env.PRISM_DASHBOARD_PORT = "0";
 
 // Disable Hivemind by default — individual test suites enable it as needed
 process.env.PRISM_ENABLE_HIVEMIND = "false";
+
+// Unit tests opt into skill synchronization explicitly with injected fetch and
+// filesystem dependencies. Never let unrelated handler tests call production.
+process.env.PRISM_SKILL_SYNC_DISABLED = "true";
 
 // ─── Directory Setup ─────────────────────────────────────────────
 // Ensure the temp directory exists before any test uses it

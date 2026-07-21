@@ -30,7 +30,7 @@ program
   .option('--all', 'Target all supported hosts instead of auto-detecting installed hosts')
   .option('--dry-run', 'Preview configuration changes without writing files')
   .option('--refresh', 'Refresh only entries previously created by Prism; custom entries stay untouched')
-  .action((options: { host?: string; all?: boolean; dryRun?: boolean; refresh?: boolean }) => {
+  .action(async (options: { host?: string; all?: boolean; dryRun?: boolean; refresh?: boolean }) => {
     try {
       if (!options.dryRun) {
         console.log('Close target MCP hosts before registration so they cannot edit configuration concurrently.');
@@ -68,6 +68,24 @@ program
 
       if (options.dryRun) {
         console.log('\nDry run complete — no files changed.');
+      } else if (summary.results.some((result) =>
+        result.status === 'registered' || result.status === 'refreshed' || result.status === 'existing')) {
+        // Codex discovers native skills before it starts MCP servers. Syncing
+        // only from server startup therefore makes a fresh install require a
+        // second host restart. Materialize the entitlement snapshot before
+        // this registration command exits so the first launch sees it.
+        const { triggerSkillManifestSync } = await import('./skillManifestSync.js');
+        const skillSync = await triggerSkillManifestSync();
+        if (skillSync.status === 'failed' || skillSync.status === 'partial') {
+          throw new Error(`Synalux skill synchronization failed: ${skillSync.error || skillSync.status}`);
+        }
+        if (skillSync.status !== 'disabled') {
+          const changed = skillSync.installed.length + skillSync.updated.length + skillSync.pruned.length;
+          console.log(`✓ Synalux skills: ${skillSync.tier || 'free'} tier (${changed} changed)`);
+          if (skillSync.conflicts.length > 0) {
+            console.error(`⚠ Preserved locally modified skill conflicts: ${skillSync.conflicts.join(', ')}`);
+          }
+        }
       }
       if (!summary.usedApiKey) {
         console.log('PRISM_SYNALUX_API_KEY is not set; no Synalux subscription key was copied into new registrations.');
@@ -105,13 +123,13 @@ program
 program
   .command('load <project>')
   .description('Load session context for a project (same output as session_load_context MCP tool)')
-  .option('-l, --level <level>', 'Context depth: quick, standard, deep', 'standard')
+  .option('-l, --level <level>', 'Context depth: quick, standard, deep (defaults to dashboard setting)')
   .option('-r, --role <role>', 'Role scope for context loading')
   .option('-s, --storage <backend>', 'Storage backend: auto (default, prefers cloud), local (SQLite), or supabase. Overrides PRISM_STORAGE env var.')
   .option('--json', 'Emit machine-readable JSON instead of formatted text')
-  .action(async (project: string, options: { level: string; role?: string; storage?: string; json?: boolean }) => {
+  .action(async (project: string, options: { level?: string; role?: string; storage?: string; json?: boolean }) => {
     try {
-      const { level, role, storage, json: jsonOutput } = options;
+      const { level: requestedLevel, role, storage, json: jsonOutput } = options;
 
       // v9.2.2: --storage flag overrides PRISM_STORAGE env var to prevent
       // split-brain when CLI environment differs from MCP server config.
@@ -125,10 +143,12 @@ program
       }
 
       const validLevels = ['quick', 'standard', 'deep'];
-      if (!validLevels.includes(level)) {
-        console.error(`Error: Invalid level "${level}". Must be one of: ${validLevels.join(', ')}`);
+      if (requestedLevel && !validLevels.includes(requestedLevel)) {
+        console.error(`Error: Invalid level "${requestedLevel}". Must be one of: ${validLevels.join(', ')}`);
         process.exit(1);
       }
+      const configuredLevel = requestedLevel ?? await getSetting('default_context_depth', 'standard');
+      const level = validLevels.includes(configuredLevel) ? configuredLevel : 'standard';
 
       if (jsonOutput) {
         // ── JSON mode: structured output for programmatic consumption ──
@@ -176,7 +196,7 @@ program
         // Delegates to the real handler so all enrichments (morning briefing,
         // reality drift, SDM recall, visual memory, skill injection,
         // behavioral warnings, etc.) are included automatically.
-        const result = await sessionLoadContextHandler({ project, level, role });
+        const result = await sessionLoadContextHandler({ project, ...(requestedLevel ? { level: requestedLevel } : {}), role });
 
         // Surface handler-level errors (e.g. invalid args, storage failures)
         if (result.isError) {
@@ -707,4 +727,4 @@ program
     if (fail > 0) process.exit(1);
   });
 
-program.parse(process.argv);
+await program.parseAsync(process.argv);

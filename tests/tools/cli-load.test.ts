@@ -44,6 +44,7 @@ vi.mock("../../src/storage/configStorage.js", () => ({
     return mockSettings[key] ?? defaultValue;
   }),
   initConfigStorage: vi.fn(async () => {}),
+  refreshConfigStorageCache: vi.fn(async () => {}),
 }));
 
 // ─── Mock git state ─────────────────────────────────────────────

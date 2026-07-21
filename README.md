@@ -18,6 +18,23 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
+## What's New in v20.2.2
+
+### Subscription-Tier Skills Arrive Before the First Host Launch
+`prism connect` now downloads the authoritative Synalux skill manifest and
+materializes entitled packages in the native `~/.agents/skills` directory
+before the command exits. Codex therefore sees the current skillset on its
+first launch instead of requiring a second restart. Prism rechecks the same
+snapshot at MCP startup, session load, and every five minutes—without host
+lifecycle hooks.
+
+Free accounts receive the protected 12-skill foundation. Paid accounts receive
+the current subscribed routing set. Upgrades install newly entitled packages;
+downgrades remove only Prism-owned packages while preserving local skills and
+locally modified conflicts.
+
+---
+
 ## What's New in v20.2.1
 
 ### Subscription-Aware Memory Storage

@@ -43,6 +43,7 @@ vi.mock("../../../src/storage/configStorage.js", () => ({
   getAllSettings: vi.fn(() => Promise.resolve({})),
   getSettingSync: vi.fn(() => ""),
   initConfigStorage: vi.fn(),
+  refreshConfigStorageCache: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../../../src/config.js", () => ({
@@ -491,6 +492,36 @@ describe("ledgerHandlers", () => {
         "test-user-id",
         undefined
       );
+    });
+
+    it.each(["quick", "standard", "deep"] as const)(
+      "uses dashboard context depth %s when the caller omits level",
+      async (configuredLevel) => {
+        mockGetSetting.mockImplementation(async (key: string, fallback = "") =>
+          key === "default_context_depth" ? configuredLevel : fallback,
+        );
+
+        await sessionLoadContextHandler(validArgs);
+
+        expect(storage.loadContext).toHaveBeenCalledWith(
+          "test-project",
+          configuredLevel,
+          "test-user-id",
+          undefined,
+        );
+      },
+    );
+
+    it("lets an explicit level override the dashboard and safely ignores stale invalid dashboard state", async () => {
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") =>
+        key === "default_context_depth" ? "obsolete-depth" : fallback,
+      );
+
+      await sessionLoadContextHandler({ ...validArgs, level: "deep" });
+      expect(storage.loadContext).toHaveBeenLastCalledWith("test-project", "deep", "test-user-id", undefined);
+
+      await sessionLoadContextHandler(validArgs);
+      expect(storage.loadContext).toHaveBeenLastCalledWith("test-project", "standard", "test-user-id", undefined);
     });
 
     it("loads context at 'quick' level", async () => {

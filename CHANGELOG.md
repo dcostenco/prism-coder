@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [20.2.2] - 2026-07-21 — Automatic Tier Skill Sync
+
+### Added
+- Complete Synalux skill-manifest synchronization at `prism connect`, MCP
+  startup, `session_load_context`, and a five-minute refresh interval.
+- Native package materialization under `~/.agents/skills`, including complete
+  multi-file packages, atomic replacement, ownership markers, recovery, and
+  bounded cross-process locking.
+
+### Changed
+- Platform skill activation now intersects the current manifest entitlement;
+  dashboard writes cannot shadow the managed platform namespace.
+- Free clients receive exactly the protected 12-skill foundation. Paid tiers
+  receive the portal's current subscribed routing set.
+
+### Fixed
+- Codex no longer needs a second restart after `prism connect`: the command
+  waits until entitled native skills exist before returning.
+- Downgrades prune only Prism-managed native and database entries; custom or
+  locally modified skills are preserved and reported as conflicts.
+- Failed, partial, invalid, or unauthenticated paid snapshots retain last-good
+  state and fail loudly instead of silently changing entitlement.
+
+### Tests
+- Added tier-matrix, first-launch CLI, upgrade/downgrade, atomic rollback,
+  ownership-conflict, lock-recovery, auth-refresh, dashboard-policy, and
+  package-content regression coverage.
+
 ## [20.2.1] - 2026-07-20 — Subscription-Aware Memory
 
 ### Changed

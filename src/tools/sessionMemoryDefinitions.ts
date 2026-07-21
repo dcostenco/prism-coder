@@ -137,7 +137,7 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
       level: {
         type: "string",
         enum: ["quick", "standard", "deep"],
-        description: "How much context to load: 'quick' (just TODOs), 'standard' (recommended — includes recent summaries), or 'deep' (full history). Default: standard.",
+        description: "How much context to load: 'quick' (just TODOs), 'standard' (recommended — includes recent summaries), or 'deep' (full history). Omit to use the Prism dashboard's Context Depth setting (safe fallback: standard).",
       },
       role: {
         type: "string",
@@ -166,6 +166,30 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
       },
     },
     required: ["project", "toolAction", "toolSummary"],
+  },
+};
+
+// ─── Hook-free Session Bootstrap ──────────────────────────────
+
+export const SESSION_BOOTSTRAP_TOOL: Tool = {
+  name: "session_bootstrap",
+  description:
+    "Start a Prism-backed conversation without host hooks. Call this once before the first user-facing response. " +
+    "Prism reads the dashboard's Auto-Load Projects, Context Depth (quick/standard/deep), developer name, and default role, " +
+    "then returns the greeting and correctly scoped prior-session context. Do not guess or pass a project or depth.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      conversation_id: {
+        type: "string",
+        description: "Optional stable key for this conversation; forwarded to every configured project load.",
+      },
+      prompt: {
+        type: "string",
+        description: "Optional initial user prompt for prompt-routed skill selection.",
+      },
+    },
+    required: [],
   },
 };
 

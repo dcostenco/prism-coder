@@ -143,7 +143,11 @@ export const SUPABASE_CONFIGURED =
 // becomes a thin HTTP client of the synalux portal. This is the paid-tier
 // default. Synalux portal owns project validation, tier gating, audit logs,
 // and hivemind agent coordination.
-export const PRISM_SYNALUX_BASE_URL = sanitizeEnv(process.env.PRISM_SYNALUX_BASE_URL);
+// PRISM_SYNALUX_BASE_URL is canonical. SYNALUX_BASE_URL remains a legacy
+// compatibility alias so every portal client resolves the same origin.
+export const PRISM_SYNALUX_BASE_URL = sanitizeEnv(
+  process.env.PRISM_SYNALUX_BASE_URL || process.env.SYNALUX_BASE_URL,
+);
 export const PRISM_SYNALUX_API_KEY = sanitizeEnv(process.env.PRISM_SYNALUX_API_KEY);
 export const SYNALUX_CONFIGURED =
   !!PRISM_SYNALUX_BASE_URL &&

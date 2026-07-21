@@ -19,10 +19,14 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
 import { parse as parseToml } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -31,6 +35,11 @@ import {
   resolveInstalledServerPath,
   type ConnectHostName,
 } from "../../src/connect.js";
+import {
+  computeSkillManifestGeneration,
+  type SkillManifest,
+} from "../../src/skillManifestSync.js";
+import { REQUIRED_NATIVE_SKILL_NAMES } from "../../src/tools/skillRouting.js";
 
 const tempHomes: string[] = [];
 
@@ -61,6 +70,45 @@ function readConfig(path: string): Record<string, any> {
 
 function readTomlConfig(path: string): Record<string, any> {
   return parseToml(readFileSync(path, "utf8")) as Record<string, any>;
+}
+
+function freeManifest(): SkillManifest {
+  const skills = REQUIRED_NATIVE_SKILL_NAMES.map((name, priority) => {
+    const content = `---\nname: ${name}\n---\n# ${name}\n`;
+    const digest = createHash("sha256").update(content).digest("hex");
+    return {
+      name,
+      content,
+      digest,
+      version: 1,
+      source: "filesystem" as const,
+      metadata: { protected: true, priority, categories: ["universal" as const] },
+      files: { "SKILL.md": { content, digest, encoding: "utf8" as const } },
+    };
+  });
+  const manifest: SkillManifest = {
+    schema_version: 1,
+    generation_algorithm: "sha256-json-v1",
+    complete: true,
+    generation: "",
+    tier: "free",
+    routing_version: 42,
+    skills,
+  };
+  manifest.generation = computeSkillManifestGeneration(manifest);
+  return manifest;
+}
+
+function runBuiltCli(args: string[], env: NodeJS.ProcessEnv): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolveChild, rejectChild) => {
+    const child = spawn(process.execPath, [resolve("dist/cli.js"), ...args], { env });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.once("error", rejectChild);
+    child.once("close", (status) => resolveChild({ status, stdout, stderr }));
+  });
 }
 
 afterEach(() => {
@@ -829,6 +877,8 @@ describe("prism connect", () => {
     const env = {
       ...process.env,
       CODEX_HOME: codexHome,
+      PRISM_CONFIG_PATH: join(codexHome, "prism-config.db"),
+      PRISM_SKILL_SYNC_DISABLED: "true",
       PRISM_SYNALUX_API_KEY: "",
     };
 
@@ -872,4 +922,155 @@ describe("prism connect", () => {
     expect(failed.stderr).toContain("could not parse config");
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(invalid);
   }, 30_000); // Four process startups can exceed the 10s default on Windows CI.
+
+  it("exits nonzero after registration when the install-time skill snapshot is unavailable", () => {
+    const homeDir = makeHome();
+    const codexHome = join(homeDir, "codex-home");
+    mkdirSync(codexHome, { recursive: true });
+
+    const failed = spawnSync(
+      process.execPath,
+      [resolve("dist/cli.js"), "connect", "--host", "codex"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          CODEX_HOME: codexHome,
+          PRISM_CONFIG_PATH: join(homeDir, "prism-config.db"),
+          PRISM_SKILL_SYNC_DISABLED: "false",
+          PRISM_SYNALUX_BASE_URL: "http://127.0.0.1:1",
+          PRISM_SYNALUX_API_KEY: "",
+        },
+      },
+    );
+
+    expect(failed.status).toBe(1);
+    expect(failed.stderr).toMatch(/Synalux skill synchronization failed/);
+    expect(readTomlConfig(join(codexHome, "config.toml")).mcp_servers)
+      .toHaveProperty("prism-mcp");
+  });
+
+  it("materializes entitled native skills before prism connect exits", async () => {
+    const homeDir = makeHome();
+    const codexHome = join(homeDir, "codex-home");
+    mkdirSync(codexHome, { recursive: true });
+    const manifest = freeManifest();
+    const server = createServer((request, response) => {
+      if (request.url !== "/api/v1/prism/skill-manifest") {
+        response.writeHead(404).end();
+        return;
+      }
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify(manifest));
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+
+    try {
+      const result = await runBuiltCli(["connect", "--host", "codex"], {
+        ...process.env,
+        HOME: homeDir,
+        CODEX_HOME: codexHome,
+        PRISM_CONFIG_PATH: join(homeDir, "prism-config.db"),
+        PRISM_SKILL_SYNC_DISABLED: "false",
+        PRISM_SYNALUX_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+        PRISM_SYNALUX_API_KEY: "",
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("Synalux skills: free tier");
+      expect(readFileSync(join(
+        homeDir, ".agents", "skills", "aba-precision-protocol", "SKILL.md",
+      ), "utf8")).toContain("name: aba-precision-protocol");
+    } finally {
+      server.close();
+      await once(server, "close");
+    }
+  });
+
+  it("delivers native skills to supported discovery roots without creating or changing host hooks", async () => {
+    const homeDir = makeHome();
+    const codexHome = join(homeDir, ".codex");
+    const appData = join(homeDir, "appdata");
+    const xdgConfigHome = join(homeDir, "xdg-config");
+    mkdirSync(codexHome, { recursive: true });
+
+    const claudeSettings = join(homeDir, ".claude", "settings.json");
+    const cursorHooks = join(homeDir, ".cursor", "hooks.json");
+    const geminiSettings = join(homeDir, ".gemini", "settings.json");
+    const claudeHookSentinel = '{\n  "hooks": { "SessionStart": ["user-owned-claude-hook"] }\n}\n';
+    const cursorHookSentinel = '{\n  "version": 1, "hooks": { "sessionStart": ["user-owned-cursor-hook"] }\n}\n';
+    const geminiConfig = {
+      theme: "user-theme",
+      hooks: { SessionStart: [{ command: "user-owned-gemini-hook" }] },
+    };
+    mkdirSync(dirname(claudeSettings), { recursive: true });
+    mkdirSync(dirname(cursorHooks), { recursive: true });
+    mkdirSync(dirname(geminiSettings), { recursive: true });
+    writeFileSync(claudeSettings, claudeHookSentinel);
+    writeFileSync(cursorHooks, cursorHookSentinel);
+    writeFileSync(geminiSettings, `${JSON.stringify(geminiConfig, null, 2)}\n`);
+    const geminiHooksBefore = JSON.stringify(geminiConfig.hooks);
+
+    const manifest = freeManifest();
+    const server = createServer((request, response) => {
+      if (request.url !== "/api/v1/prism/skill-manifest") {
+        response.writeHead(404).end();
+        return;
+      }
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify(manifest));
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+
+    try {
+      const result = await runBuiltCli(["connect", "--all"], {
+        ...process.env,
+        HOME: homeDir,
+        USERPROFILE: homeDir,
+        APPDATA: appData,
+        XDG_CONFIG_HOME: xdgConfigHome,
+        CODEX_HOME: codexHome,
+        PRISM_CONFIG_PATH: join(homeDir, "prism-config.db"),
+        PRISM_SKILL_SYNC_DISABLED: "false",
+        PRISM_SYNALUX_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+        PRISM_SYNALUX_API_KEY: "",
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("Claude Code: registered");
+      expect(result.stdout).toContain("Claude Desktop: registered");
+      expect(result.stdout).toContain("Cursor: registered");
+      expect(result.stdout).toContain("Gemini CLI: registered");
+      expect(result.stdout).toContain("Codex: registered");
+
+      // Codex, Gemini CLI, and Cursor share the Agent Skills standard root.
+      expect(readFileSync(join(
+        homeDir, ".agents", "skills", "aba-precision-protocol", "SKILL.md",
+      ), "utf8")).toContain("name: aba-precision-protocol");
+      // Claude Code has a separate native discovery root and gets a fully
+      // Prism-managed copy. Claude Desktop has no local filesystem target.
+      expect(readFileSync(join(
+        homeDir, ".claude", "skills", "aba-precision-protocol", "SKILL.md",
+      ), "utf8")).toContain("name: aba-precision-protocol");
+      const claudeDesktopSkillsDir = process.platform === "darwin"
+        ? join(homeDir, "Library", "Application Support", "Claude", "skills")
+        : process.platform === "win32"
+          ? join(appData, "Claude", "skills")
+          : join(xdgConfigHome, "Claude", "skills");
+      expect(existsSync(claudeDesktopSkillsDir)).toBe(false);
+
+      expect(readFileSync(claudeSettings, "utf8")).toBe(claudeHookSentinel);
+      expect(readFileSync(cursorHooks, "utf8")).toBe(cursorHookSentinel);
+      expect(JSON.stringify(readConfig(geminiSettings).hooks)).toBe(geminiHooksBefore);
+      expect(JSON.stringify(readConfig(join(homeDir, ".claude.json")))).not.toMatch(/SessionStart|hooks/i);
+      expect(JSON.stringify(readConfig(join(homeDir, ".cursor", "mcp.json")))).not.toMatch(/SessionStart|hooks/i);
+      expect(readFileSync(join(codexHome, "config.toml"), "utf8")).not.toMatch(/SessionStart|hooks/i);
+    } finally {
+      server.close();
+      await once(server, "close");
+    }
+  });
 });

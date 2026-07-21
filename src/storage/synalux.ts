@@ -273,7 +273,22 @@ export class SynaluxStorage extends SupabaseStorage {
       user_id: userId,
       role,
     });
-    return (result.context ?? result) as ContextResult;
+    // Current portals return the canonical flat `context`. Older deployed
+    // portals returned `{ handoff, recent_sessions }`; normalize that envelope
+    // here so the formatter can still see last_summary, TODOs, version, and
+    // session history during a rolling portal/client upgrade.
+    if (result.context === null) return null;
+    if (result.context && typeof result.context === "object" && !Array.isArray(result.context)) {
+      return result.context as Record<string, unknown>;
+    }
+    if (result.handoff === null) return null;
+    if (result.handoff && typeof result.handoff === "object" && !Array.isArray(result.handoff)) {
+      return {
+        ...(result.handoff as Record<string, unknown>),
+        recent_sessions: Array.isArray(result.recent_sessions) ? result.recent_sessions : [],
+      };
+    }
+    return result as ContextResult;
   }
 
   // ─── Forget memory (GDPR surgical deletion) ──────────────────

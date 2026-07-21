@@ -6,6 +6,7 @@
  */
 
 import { getSynaluxJwt, invalidateSynaluxJwt } from '../utils/synaluxJwt.js';
+import { PRISM_SYNALUX_API_KEY, PRISM_SYNALUX_BASE_URL } from '../config.js';
 
 // -- Type exports (backward compat) ------------------------------------------
 
@@ -35,18 +36,41 @@ export interface ResolvedSkills {
 
 // -- Constants ----------------------------------------------------------------
 
-const SYNALUX_BASE = process.env.SYNALUX_BASE_URL || 'https://synalux.ai';
 const LIVE_TTL = 5 * 60 * 1000;
 const FAIL_TTL = 30_000;
 const DEFAULT_UL: UserLocalPolicy = { enabled: false, key_prefix: 'user_skill:' };
 
+export const REQUIRED_PROTECTED_SKILL_NAMES = [
+  'prime-directive',
+  'aba-precision-protocol',
+  'evidence-first-protocol',
+  'behavioral-verifier',
+  'occam-razor-protocol',
+  'absence-of-evidence-protocol',
+  'never-fabricate-data',
+  'session-drift-detection',
+  'pre-commit-protocol',
+  'pre-push-audit',
+  'implementation-integrity-audit',
+  'local-inference-first',
+] as const;
+
+/**
+ * Native skills that every subscription tier receives through `prism connect`.
+ *
+ * `prism-startup` is deliberately not part of OFFLINE_FALLBACK: it tells the
+ * host to call session_load_context, so injecting it back into that tool's
+ * response would be circular. It still belongs in every native manifest so a
+ * newly connected host can discover the hook-free first-turn procedure.
+ */
+export const REQUIRED_NATIVE_SKILL_NAMES = [
+  ...REQUIRED_PROTECTED_SKILL_NAMES,
+  'prism-startup',
+] as const;
+
 export const OFFLINE_FALLBACK: SkillRoutingTable = {
   version: 1,
-  universal: [
-    { name: 'prime-directive', priority: 0, protected: true },
-    { name: 'evidence-first-protocol', priority: 1, protected: true },
-    { name: 'bcba_ai_assistant', priority: 20 },
-  ],
+  universal: REQUIRED_PROTECTED_SKILL_NAMES.map((name, priority) => ({ name, priority, protected: true })),
   projects: {},
   user_local: DEFAULT_UL,
 };
@@ -99,6 +123,9 @@ export function _setStorage(persist: typeof persistFn, read: typeof readFn): voi
 
 async function callPortal(project: string, prompt?: string, role?: string): Promise<PortalResp | null> {
   try {
+    const synaluxBase = (process.env.PRISM_SYNALUX_BASE_URL?.trim() ||
+      process.env.SYNALUX_BASE_URL?.trim() || PRISM_SYNALUX_BASE_URL ||
+      'https://synalux.ai').replace(/\/+$/, '');
     const body: Record<string, string> = { project };
     if (prompt) body.prompt = prompt;
     if (role) body.role = role;
@@ -112,6 +139,7 @@ async function callPortal(project: string, prompt?: string, role?: string): Prom
     // it, machines with only PRISM_SYNALUX_API_KEY silently resolve tier=free
     // and never receive unprotected/prompt-routed skills.
     const staticToken = process.env.PRISM_SKILLS_TOKEN || '';
+    const configuredApiKey = process.env.PRISM_SYNALUX_API_KEY?.trim() || PRISM_SYNALUX_API_KEY;
     let usedJwt = false;
     if (staticToken) {
       headers['Authorization'] = `Bearer ${staticToken}`;
@@ -125,9 +153,15 @@ async function callPortal(project: string, prompt?: string, role?: string): Prom
         new Promise<null>((r) => setTimeout(r, 4_000, null)),
       ]);
       if (jwt) { headers['Authorization'] = `Bearer ${jwt}`; usedJwt = true; }
+      else if (configuredApiKey) {
+        // A configured paid identity that cannot authenticate must retain its
+        // last-good result. Sending the request anonymously would silently
+        // turn an auth outage into a free-tier downgrade.
+        return null;
+      }
     }
 
-    const doFetch = () => fetch(`${SYNALUX_BASE}/api/v1/prism/resolve`, {
+    const doFetch = () => fetch(`${synaluxBase}/api/v1/prism/resolve`, {
       method: 'POST', headers, body: JSON.stringify(body),
       signal: AbortSignal.timeout(5_000),
       redirect: 'error', // never follow a redirect with a credential attached
