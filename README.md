@@ -54,6 +54,9 @@ features.
 
 ---
 
+<details>
+<summary>Release history (optional)</summary>
+
 ## What's New in v20.2.2
 
 ### One Local-First Workflow Across Every Agent
@@ -221,6 +224,8 @@ Session drift detection (GATE 5) no longer requires Claude Code hooks. The timer
 External contributions now require signing the [Individual CLA](./CLA.md). The CLA check is merge-blocking on the `main` branch.
 
 ---
+
+</details>
 
 ## Quickstart
 
