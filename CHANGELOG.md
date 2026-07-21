@@ -21,6 +21,9 @@ All notable changes to this project will be documented in this file.
   server-side reminders now own startup, sync, handoff, and drift behavior.
 - Recognized legacy Prism startup sections in `~/CLAUDE.md` are retired only
   after native skill sync succeeds; all other global instructions are retained.
+- Claude Code receives a small ownership-marked native `~/CLAUDE.md` block
+  because live acceptance proved MCP metadata and skill discovery alone do not
+  reliably trigger a first-turn tool call.
 
 ### Fixed
 - Codex no longer needs a second restart after `prism connect`: the command

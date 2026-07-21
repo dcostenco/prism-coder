@@ -30,6 +30,7 @@ import type { AddressInfo } from "node:net";
 import { parse as parseToml } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  configureClaudeNativeStartup,
   connectHosts,
   migrateLegacyClaudeHooks,
   migrateLegacyClaudeInstructions,
@@ -223,12 +224,24 @@ describe("prism connect", () => {
     expect(readFileSync(instructionPath, "utf8")).toBe(original);
 
     expect(migrateLegacyClaudeInstructions(homeDir)).toMatchObject({ status: "removed", removed: 2 });
-    expect(readFileSync(instructionPath, "utf8")).toBe(
+    const preservedInstructions =
       "# CLAUDE.md - Core Operational Protocols\n\n" +
       "## HARD BEHAVIORAL GATES — SUPERSEDE ALL OTHER INSTRUCTIONS\n\n" +
-      "KEEP USER INSTRUCTIONS\n",
-    );
+      "KEEP USER INSTRUCTIONS\n";
+    expect(readFileSync(instructionPath, "utf8")).toBe(preservedInstructions);
     expect(migrateLegacyClaudeInstructions(homeDir)).toMatchObject({ status: "unchanged", removed: 0 });
+
+    expect(configureClaudeNativeStartup(homeDir, true)).toMatchObject({ status: "would-install" });
+    expect(readFileSync(instructionPath, "utf8")).toBe(preservedInstructions);
+    expect(configureClaudeNativeStartup(homeDir)).toMatchObject({ status: "installed" });
+    const configured = readFileSync(instructionPath, "utf8");
+    expect(configured.startsWith(`${preservedInstructions}\n<!-- >>> prism connect managed: native startup -->\n`)).toBe(true);
+    expect(configured).toContain("`mcp__prism-mcp__session_bootstrap` exactly once");
+    expect(configureClaudeNativeStartup(homeDir)).toMatchObject({ status: "unchanged" });
+    writeFileSync(instructionPath, configured.replace("your first action must be", "your first action may be"));
+    expect(configureClaudeNativeStartup(homeDir, true)).toMatchObject({ status: "would-refresh" });
+    expect(configureClaudeNativeStartup(homeDir)).toMatchObject({ status: "refreshed" });
+    expect(readFileSync(instructionPath, "utf8")).toBe(configured);
 
     const nearMatchHome = makeHome();
     const nearMatchPath = join(nearMatchHome, "CLAUDE.md");
@@ -236,6 +249,10 @@ describe("prism connect", () => {
     writeFileSync(nearMatchPath, nearMatch);
     expect(migrateLegacyClaudeInstructions(nearMatchHome)).toMatchObject({ status: "unchanged", removed: 0 });
     expect(readFileSync(nearMatchPath, "utf8")).toBe(nearMatch);
+
+    const emptyHome = makeHome();
+    expect(configureClaudeNativeStartup(emptyHome)).toMatchObject({ status: "installed" });
+    expect(readFileSync(join(emptyHome, "CLAUDE.md"), "utf8")).toContain("session_bootstrap");
   });
 
   it("registers all five supported hosts with the installed server path", () => {
@@ -1211,6 +1228,7 @@ describe("prism connect", () => {
       expect(result.stdout).toContain("Codex: registered");
       expect(result.stdout).toContain("removed 1 legacy Prism hook action");
       expect(result.stdout).toContain("removed 2 legacy Prism startup section");
+      expect(result.stdout).toContain("installed hook-free native startup instructions");
 
       // Codex, Gemini CLI, and Cursor share the Agent Skills standard root.
       expect(readFileSync(join(
@@ -1230,7 +1248,9 @@ describe("prism connect", () => {
 
       expect(readConfig(claudeSettings).hooks).toEqual({ SessionStart: ["user-owned-claude-hook"] });
       expect(readFileSync(claudeInstructions, "utf8")).toContain("PRESERVE THIS CLAUDE RULE");
-      expect(readFileSync(claudeInstructions, "utf8")).not.toContain("session_load_context");
+      expect(readFileSync(claudeInstructions, "utf8")).not.toContain('session_load_context(project="prism-mcp")');
+      expect(readFileSync(claudeInstructions, "utf8")).toContain("prism connect managed: native startup");
+      expect(readFileSync(claudeInstructions, "utf8")).toContain("mcp__prism-mcp__session_bootstrap");
       expect(readFileSync(cursorHooks, "utf8")).toBe(cursorHookSentinel);
       expect(JSON.stringify(readConfig(geminiSettings).hooks)).toBe(geminiHooksBefore);
       expect(JSON.stringify(readConfig(join(homeDir, ".claude.json")))).not.toMatch(/SessionStart|hooks/i);

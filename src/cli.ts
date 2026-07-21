@@ -10,6 +10,7 @@ import { PRISM_USER_ID, SERVER_CONFIG } from './config.js';
 import { getCurrentGitState } from './utils/git.js';
 import { sessionLoadContextHandler, sessionSaveLedgerHandler, sessionSaveHandoffHandler } from './tools/ledgerHandlers.js';
 import {
+  configureClaudeNativeStartup,
   connectHosts,
   migrateLegacyClaudeHooks,
   migrateLegacyClaudeInstructions,
@@ -77,11 +78,15 @@ program
         if (connectedClaude) {
           const hookMigration = migrateLegacyClaudeHooks(undefined, true);
           const instructionMigration = migrateLegacyClaudeInstructions(undefined, true);
+          const nativeStartup = configureClaudeNativeStartup(undefined, true);
           if (hookMigration.status === 'would-remove') {
             console.log(`• Claude Code: would remove ${hookMigration.removed} legacy Prism hook action(s) (${hookMigration.path})`);
           }
           if (instructionMigration.status === 'would-remove') {
             console.log(`• Claude Code: would remove ${instructionMigration.removed} legacy Prism startup section(s) (${instructionMigration.path})`);
+          }
+          if (nativeStartup.status === 'would-install' || nativeStartup.status === 'would-refresh') {
+            console.log(`• Claude Code: would ${nativeStartup.status === 'would-install' ? 'install' : 'refresh'} native startup instructions (${nativeStartup.path})`);
           }
         }
         console.log('\nDry run complete — no files changed.');
@@ -107,13 +112,18 @@ program
             // malformed settings file must never leave a half-migrated host.
             migrateLegacyClaudeHooks(undefined, true);
             migrateLegacyClaudeInstructions(undefined, true);
+            configureClaudeNativeStartup(undefined, true);
             const hookMigration = migrateLegacyClaudeHooks();
             const instructionMigration = migrateLegacyClaudeInstructions();
+            const nativeStartup = configureClaudeNativeStartup();
             if (hookMigration.status === 'removed') {
               console.log(`✓ Claude Code: removed ${hookMigration.removed} legacy Prism hook action(s); native skills now own startup and sync`);
             }
             if (instructionMigration.status === 'removed') {
               console.log(`✓ Claude Code: removed ${instructionMigration.removed} legacy Prism startup section(s); MCP bootstrap now owns first-turn context`);
+            }
+            if (nativeStartup.status === 'installed' || nativeStartup.status === 'refreshed') {
+              console.log(`✓ Claude Code: ${nativeStartup.status} hook-free native startup instructions`);
             }
           }
         }

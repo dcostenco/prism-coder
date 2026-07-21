@@ -60,6 +60,11 @@ export interface LegacyInstructionMigration {
   removed: number;
 }
 
+export interface NativeStartupConfiguration {
+  path: string;
+  status: "unchanged" | "would-install" | "would-refresh" | "installed" | "refreshed";
+}
+
 export interface ConnectOptions {
   all?: boolean;
   dryRun?: boolean;
@@ -102,6 +107,8 @@ const HOST_ALIASES: Record<string, ConnectHostName> = {
 
 const CODEX_MANAGED_START = "# >>> prism connect managed: prism-mcp";
 const CODEX_MANAGED_END = "# <<< prism connect managed: prism-mcp";
+const CLAUDE_STARTUP_MANAGED_START = "<!-- >>> prism connect managed: native startup -->";
+const CLAUDE_STARTUP_MANAGED_END = "<!-- <<< prism connect managed: native startup -->";
 const CONNECT_STORAGE_BACKENDS = ["auto", "local", "synalux", "supabase"] as const;
 
 export function normalizeHostName(value: string): ConnectHostName {
@@ -341,6 +348,85 @@ export function migrateLegacyClaudeInstructions(
   if (dryRun) return { path: instructionPath, status: "would-remove", removed: 2 };
   writeTextAtomically(writePath, nextText, originalText, beforeCommit, symlinkPath);
   return { path: instructionPath, status: "removed", removed: 2 };
+}
+
+function serializeClaudeStartupBlock(newline: string): string {
+  return [
+    CLAUDE_STARTUP_MANAGED_START,
+    "## Prism session startup",
+    "On the first user turn of every conversation, including a greeting, your first action must be to call",
+    "`mcp__prism-mcp__session_bootstrap` exactly once with an empty object (`{}`). Echo the returned",
+    "developer greeting and configured quick, standard, or deep context before answering. Do not substitute",
+    "`session_load_context` while `session_bootstrap` is available. If it is unavailable, follow the installed",
+    "`prism-startup` skill fallback. This block is managed by `prism connect`; do not edit it manually.",
+    CLAUDE_STARTUP_MANAGED_END,
+    "",
+  ].join(newline);
+}
+
+/** Install or refresh Claude Code's native, hook-free first-turn instruction. */
+export function configureClaudeNativeStartup(
+  homeDir = homedir(),
+  dryRun = false,
+  beforeCommit?: (path: string) => void,
+): NativeStartupConfiguration {
+  const instructionPath = join(homeDir, "CLAUDE.md");
+  let writePath = instructionPath;
+  let symlinkPath: string | undefined;
+  let originalText: string | undefined;
+  let instructionEntryExists = false;
+
+  try {
+    const pathInfo = lstatSync(instructionPath);
+    instructionEntryExists = true;
+    if (pathInfo.isSymbolicLink()) {
+      writePath = realpathSync(instructionPath);
+      symlinkPath = instructionPath;
+      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
+    }
+    originalText = readFileSync(writePath, "utf8");
+  } catch (error) {
+    if (instructionEntryExists || !isErrno(error, "ENOENT")) {
+      throw new Error(`Could not inspect Claude instructions: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const currentText = originalText ?? "";
+  const newline = currentText.includes("\r\n") ? "\r\n" : "\n";
+  const startRanges = findExactLineRanges(currentText, CLAUDE_STARTUP_MANAGED_START);
+  const endRanges = findExactLineRanges(currentText, CLAUDE_STARTUP_MANAGED_END);
+  if (startRanges.length !== endRanges.length || startRanges.length > 1) {
+    throw new Error(`Claude instructions contain ambiguous Prism startup ownership markers: ${instructionPath}`);
+  }
+
+  const managedBlock = serializeClaudeStartupBlock(newline);
+  let nextText: string;
+  let action: "install" | "refresh";
+  if (startRanges.length === 1) {
+    if (endRanges[0].start <= startRanges[0].start) {
+      throw new Error(`Claude instructions contain out-of-order Prism startup ownership markers: ${instructionPath}`);
+    }
+    const managedEnd = endRanges[0].end;
+    if (currentText.slice(startRanges[0].start, managedEnd) === managedBlock) {
+      return { path: instructionPath, status: "unchanged" };
+    }
+    nextText = currentText.slice(0, startRanges[0].start) + managedBlock + currentText.slice(managedEnd);
+    action = "refresh";
+  } else {
+    const separator = currentText.length === 0
+      ? ""
+      : currentText.endsWith("\n") || currentText.endsWith("\r")
+        ? newline
+        : `${newline}${newline}`;
+    nextText = currentText + separator + managedBlock;
+    action = "install";
+  }
+
+  if (dryRun) {
+    return { path: instructionPath, status: action === "install" ? "would-install" : "would-refresh" };
+  }
+  writeTextAtomically(writePath, nextText, originalText, beforeCommit, symlinkPath);
+  return { path: instructionPath, status: action === "install" ? "installed" : "refreshed" };
 }
 
 function getHostDefinitions(
