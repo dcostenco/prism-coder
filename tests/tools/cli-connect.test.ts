@@ -31,6 +31,7 @@ import { parse as parseToml } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   connectHosts,
+  migrateLegacyClaudeHooks,
   normalizeHostName,
   resolveInstalledServerPath,
   type ConnectHostName,
@@ -118,6 +119,77 @@ afterEach(() => {
 });
 
 describe("prism connect", () => {
+  it("removes only exact legacy Prism Claude hook tuples and is dry-run safe and idempotent", () => {
+    const homeDir = makeHome();
+    const settingsPath = join(homeDir, ".claude", "settings.json");
+    const hooksDir = join(homeDir, ".claude", "hooks");
+    const syncSkills = `${join(homeDir, "prism", "scripts", "sync-skills.sh")} > /dev/null 2>&1`;
+    const loadMatcher = "session_load_context|mcp__prism-mcp__session_load_context";
+    const driftMatcher = "session_detect_drift|mcp__prism-mcp__session_detect_drift|session_save_ledger|mcp__prism-mcp__session_save_ledger";
+    const stop = "python3 -c \"import json; print(json.dumps({'continue': True, 'suppressOutput': True, 'systemMessage': 'MANDATORY END WORKFLOW: 1) Call mcp__prism-mcp__session_save_ledger with project and summary. 2) Call mcp__prism-mcp__session_save_handoff with expected_version set to the loaded version.'}))\"";
+    const hook = (command: string) => ({ type: "command", command, timeout: 10 });
+    const config = {
+      theme: "keep-me",
+      hooks: {
+        SessionStart: [{ matcher: "*", hooks: [
+          hook(`python3 ${join(hooksDir, "prism-startup", "init.py")}`),
+          hook(syncSkills),
+          hook("user-owned-startup"),
+        ] }, {
+          // Exact command with a different matcher is a near match and must stay.
+          matcher: "Bash",
+          hooks: [hook(`python3 ${join(hooksDir, "prism-startup", "init.py")}`)],
+        }],
+        UserPromptSubmit: [{ matcher: "*", hooks: [
+          hook(`python3 ${join(hooksDir, "prism-startup", "guard_on_submit.py")}`),
+          hook(join(hooksDir, "prism-startup", "maybe_sync_skills.sh")),
+        ] }],
+        PostToolUse: [
+          { matcher: loadMatcher, hooks: [hook(`python3 ${join(hooksDir, "prism-startup", "mark_loaded.py")}`)] },
+          { matcher: driftMatcher, hooks: [hook(`python3 ${join(hooksDir, "drift-detection", "reset_timer.py")}`)] },
+          { matcher: "Bash", hooks: [hook("user-owned-post-tool")] },
+        ],
+        PostToolUseFailure: [{ matcher: loadMatcher, hooks: [
+          hook(`python3 ${join(hooksDir, "prism-startup", "record_retry.py")}`),
+        ] }],
+        SessionEnd: [{ matcher: "*", hooks: [
+          hook(`python3 ${join(hooksDir, "prism-startup", "cleanup.py")}`),
+          hook(syncSkills),
+        ] }],
+        Stop: [{ matcher: "*", hooks: [hook(stop), hook("user-owned-stop")] }],
+      },
+    };
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    const original = `${JSON.stringify(config, null, 2)}\n`;
+    writeFileSync(settingsPath, original);
+
+    expect(migrateLegacyClaudeHooks(homeDir, true)).toMatchObject({ status: "would-remove", removed: 10 });
+    expect(readFileSync(settingsPath, "utf8")).toBe(original);
+
+    expect(migrateLegacyClaudeHooks(homeDir)).toMatchObject({ status: "removed", removed: 10 });
+    const migrated = readConfig(settingsPath);
+    expect(migrated.theme).toBe("keep-me");
+    expect(JSON.stringify(migrated)).not.toContain("guard_on_submit.py");
+    expect(JSON.stringify(migrated)).not.toContain("reset_timer.py");
+    expect(JSON.stringify(migrated)).not.toContain("MANDATORY END WORKFLOW");
+    expect(migrated.hooks.SessionStart).toEqual([
+      { matcher: "*", hooks: [hook("user-owned-startup")] },
+      { matcher: "Bash", hooks: [hook(`python3 ${join(hooksDir, "prism-startup", "init.py")}`)] },
+    ]);
+    expect(migrated.hooks.PostToolUse).toEqual([{ matcher: "Bash", hooks: [hook("user-owned-post-tool")] }]);
+    expect(migrated.hooks.Stop).toEqual([{ matcher: "*", hooks: [hook("user-owned-stop")] }]);
+    expect(migrateLegacyClaudeHooks(homeDir)).toMatchObject({ status: "unchanged", removed: 0 });
+  });
+
+  it("fails loud without changing malformed Claude hook settings", () => {
+    const homeDir = makeHome();
+    const settingsPath = join(homeDir, ".claude", "settings.json");
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, "{ malformed\n");
+    expect(() => migrateLegacyClaudeHooks(homeDir)).toThrow(/Could not parse Claude hook settings/);
+    expect(readFileSync(settingsPath, "utf8")).toBe("{ malformed\n");
+  });
+
   it("registers all five supported hosts with the installed server path", () => {
     const homeDir = makeHome();
     const serverPath = "/opt/prism-mcp-server/dist/server.js";
@@ -951,6 +1023,38 @@ describe("prism connect", () => {
       .toHaveProperty("prism-mcp");
   });
 
+  it("keeps legacy Claude hooks when the install-time skill snapshot fails", () => {
+    const homeDir = makeHome();
+    const settingsPath = join(homeDir, ".claude", "settings.json");
+    const command = `${join(homeDir, "prism", "scripts", "sync-skills.sh")} > /dev/null 2>&1`;
+    const original = `${JSON.stringify({
+      hooks: { SessionStart: [{ matcher: "*", hooks: [{ type: "command", command }] }] },
+    }, null, 2)}\n`;
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, original);
+
+    const failed = spawnSync(
+      process.execPath,
+      [resolve("dist/cli.js"), "connect", "--host", "claude-code"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          USERPROFILE: homeDir,
+          PRISM_CONFIG_PATH: join(homeDir, "prism-config.db"),
+          PRISM_SKILL_SYNC_DISABLED: "false",
+          PRISM_SYNALUX_BASE_URL: "http://127.0.0.1:1",
+          PRISM_SYNALUX_API_KEY: "",
+        },
+      },
+    );
+
+    expect(failed.status).toBe(1);
+    expect(failed.stderr).toMatch(/Synalux skill synchronization failed/);
+    expect(readFileSync(settingsPath, "utf8")).toBe(original);
+  });
+
   it("materializes entitled native skills before prism connect exits", async () => {
     const homeDir = makeHome();
     const codexHome = join(homeDir, "codex-home");
@@ -989,7 +1093,7 @@ describe("prism connect", () => {
     }
   });
 
-  it("delivers native skills to supported discovery roots without creating or changing host hooks", async () => {
+  it("delivers native skills and migrates only legacy Claude hooks after a successful snapshot", async () => {
     const homeDir = makeHome();
     const codexHome = join(homeDir, ".codex");
     const appData = join(homeDir, "appdata");
@@ -999,7 +1103,13 @@ describe("prism connect", () => {
     const claudeSettings = join(homeDir, ".claude", "settings.json");
     const cursorHooks = join(homeDir, ".cursor", "hooks.json");
     const geminiSettings = join(homeDir, ".gemini", "settings.json");
-    const claudeHookSentinel = '{\n  "hooks": { "SessionStart": ["user-owned-claude-hook"] }\n}\n';
+    const legacySyncHook = `${join(homeDir, "prism", "scripts", "sync-skills.sh")} > /dev/null 2>&1`;
+    const claudeConfig = {
+      hooks: {
+        SessionStart: ["user-owned-claude-hook"],
+        SessionEnd: [{ matcher: "*", hooks: [{ type: "command", command: legacySyncHook, timeout: 10 }] }],
+      },
+    };
     const cursorHookSentinel = '{\n  "version": 1, "hooks": { "sessionStart": ["user-owned-cursor-hook"] }\n}\n';
     const geminiConfig = {
       theme: "user-theme",
@@ -1008,7 +1118,7 @@ describe("prism connect", () => {
     mkdirSync(dirname(claudeSettings), { recursive: true });
     mkdirSync(dirname(cursorHooks), { recursive: true });
     mkdirSync(dirname(geminiSettings), { recursive: true });
-    writeFileSync(claudeSettings, claudeHookSentinel);
+    writeFileSync(claudeSettings, `${JSON.stringify(claudeConfig, null, 2)}\n`);
     writeFileSync(cursorHooks, cursorHookSentinel);
     writeFileSync(geminiSettings, `${JSON.stringify(geminiConfig, null, 2)}\n`);
     const geminiHooksBefore = JSON.stringify(geminiConfig.hooks);
@@ -1045,6 +1155,7 @@ describe("prism connect", () => {
       expect(result.stdout).toContain("Cursor: registered");
       expect(result.stdout).toContain("Gemini CLI: registered");
       expect(result.stdout).toContain("Codex: registered");
+      expect(result.stdout).toContain("removed 1 legacy Prism hook action");
 
       // Codex, Gemini CLI, and Cursor share the Agent Skills standard root.
       expect(readFileSync(join(
@@ -1062,7 +1173,7 @@ describe("prism connect", () => {
           : join(xdgConfigHome, "Claude", "skills");
       expect(existsSync(claudeDesktopSkillsDir)).toBe(false);
 
-      expect(readFileSync(claudeSettings, "utf8")).toBe(claudeHookSentinel);
+      expect(readConfig(claudeSettings).hooks).toEqual({ SessionStart: ["user-owned-claude-hook"] });
       expect(readFileSync(cursorHooks, "utf8")).toBe(cursorHookSentinel);
       expect(JSON.stringify(readConfig(geminiSettings).hooks)).toBe(geminiHooksBefore);
       expect(JSON.stringify(readConfig(join(homeDir, ".claude.json")))).not.toMatch(/SessionStart|hooks/i);
@@ -1072,5 +1183,29 @@ describe("prism connect", () => {
       server.close();
       await once(server, "close");
     }
+  });
+
+  it("keeps legacy Claude hooks when native skill synchronization is disabled", async () => {
+    const homeDir = makeHome();
+    const settingsPath = join(homeDir, ".claude", "settings.json");
+    const command = `${join(homeDir, "prism", "scripts", "sync-skills.sh")} > /dev/null 2>&1`;
+    const original = `${JSON.stringify({
+      hooks: { SessionStart: [{ matcher: "*", hooks: [{ type: "command", command }] }] },
+    }, null, 2)}\n`;
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, original);
+
+    const result = await runBuiltCli(["connect", "--host", "claude-code"], {
+      ...process.env,
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      PRISM_CONFIG_PATH: join(homeDir, "prism-config.db"),
+      PRISM_SKILL_SYNC_DISABLED: "true",
+      PRISM_SYNALUX_API_KEY: "",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(settingsPath, "utf8")).toBe(original);
+    expect(result.stdout).not.toContain("legacy Prism hook");
   });
 });

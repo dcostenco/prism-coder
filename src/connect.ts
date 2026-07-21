@@ -48,6 +48,12 @@ export interface ConnectSummary {
   serverPath: string;
 }
 
+export interface LegacyHookMigration {
+  path: string;
+  status: "unchanged" | "would-remove" | "removed";
+  removed: number;
+}
+
 export interface ConnectOptions {
   all?: boolean;
   dryRun?: boolean;
@@ -162,12 +168,117 @@ export function connectHosts(options: ConnectOptions = {}): ConnectSummary {
     !!options.refresh,
     options.beforeCommit,
   ));
-
   return {
     results,
     usedApiKey: typeof env.PRISM_SYNALUX_API_KEY === "string" && env.PRISM_SYNALUX_API_KEY.length > 0,
     serverPath,
   };
+}
+
+function legacyClaudeHookTuples(homeDir: string): Set<string> {
+  const hooksDir = join(homeDir, ".claude", "hooks");
+  const syncSkills = `${join(homeDir, "prism", "scripts", "sync-skills.sh")} > /dev/null 2>&1`;
+  const loadMatcher = "session_load_context|mcp__prism-mcp__session_load_context";
+  const driftMatcher = "session_detect_drift|mcp__prism-mcp__session_detect_drift|session_save_ledger|mcp__prism-mcp__session_save_ledger";
+  const stop = "python3 -c \"import json; print(json.dumps({'continue': True, 'suppressOutput': True, 'systemMessage': 'MANDATORY END WORKFLOW: 1) Call mcp__prism-mcp__session_save_ledger with project and summary. 2) Call mcp__prism-mcp__session_save_handoff with expected_version set to the loaded version.'}))\"";
+  const tuple = (event: string, matcher: string, command: string) =>
+    JSON.stringify([event, matcher, "command", command]);
+  return new Set([
+    tuple("SessionStart", "*", `python3 ${join(hooksDir, "prism-startup", "init.py")}`),
+    tuple("SessionStart", "*", syncSkills),
+    tuple("UserPromptSubmit", "*", `python3 ${join(hooksDir, "prism-startup", "guard_on_submit.py")}`),
+    tuple("UserPromptSubmit", "*", join(hooksDir, "prism-startup", "maybe_sync_skills.sh")),
+    tuple("PostToolUse", loadMatcher, `python3 ${join(hooksDir, "prism-startup", "mark_loaded.py")}`),
+    tuple("PostToolUse", driftMatcher, `python3 ${join(hooksDir, "drift-detection", "reset_timer.py")}`),
+    tuple("PostToolUseFailure", loadMatcher, `python3 ${join(hooksDir, "prism-startup", "record_retry.py")}`),
+    tuple("SessionEnd", "*", `python3 ${join(hooksDir, "prism-startup", "cleanup.py")}`),
+    tuple("SessionEnd", "*", syncSkills),
+    tuple("Stop", "*", stop),
+  ]);
+}
+
+/**
+ * Remove only the exact Claude lifecycle hooks installed by Prism's legacy
+ * bootstrap script. Native skills and server-side drift reminders now own the
+ * same behavior; unrelated and near-match user hooks must remain untouched.
+ */
+export function migrateLegacyClaudeHooks(
+  homeDir = homedir(),
+  dryRun = false,
+  beforeCommit?: (path: string) => void,
+): LegacyHookMigration {
+  const configPath = join(homeDir, ".claude", "settings.json");
+  let writePath = configPath;
+  let symlinkPath: string | undefined;
+  let originalText: string;
+
+  try {
+    const pathInfo = lstatSync(configPath);
+    if (pathInfo.isSymbolicLink()) {
+      writePath = realpathSync(configPath);
+      symlinkPath = configPath;
+      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
+    }
+    originalText = readFileSync(writePath, "utf8");
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return { path: configPath, status: "unchanged", removed: 0 };
+    throw new Error(`Could not inspect Claude hook settings: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  let config: JsonObject;
+  try {
+    const parsed: unknown = JSON.parse(originalText);
+    if (!isJsonObject(parsed)) throw new Error("top-level JSON value must be an object");
+    config = parsed;
+  } catch (error) {
+    throw new Error(`Could not parse Claude hook settings: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (!isJsonObject(config.hooks)) return { path: configPath, status: "unchanged", removed: 0 };
+  const legacyTuples = legacyClaudeHookTuples(homeDir);
+  const nextEvents: JsonObject = {};
+  let removed = 0;
+
+  for (const [event, groups] of Object.entries(config.hooks)) {
+    if (!Array.isArray(groups)) {
+      nextEvents[event] = groups;
+      continue;
+    }
+    const nextGroups: unknown[] = [];
+    for (const group of groups) {
+      if (!isJsonObject(group) || !Array.isArray(group.hooks)) {
+        nextGroups.push(group);
+        continue;
+      }
+      let removedFromGroup = 0;
+      const nextHooks = group.hooks.filter((hook) => {
+        const owned = isJsonObject(hook)
+          && hook.type === "command"
+          && typeof hook.command === "string"
+          && legacyTuples.has(JSON.stringify([event, group.matcher, hook.type, hook.command]));
+        if (owned) removedFromGroup += 1;
+        return !owned;
+      });
+      removed += removedFromGroup;
+      if (removedFromGroup === 0) nextGroups.push(group);
+      else if (nextHooks.length > 0) nextGroups.push({ ...group, hooks: nextHooks });
+    }
+    if (nextGroups.length > 0) nextEvents[event] = nextGroups;
+  }
+
+  if (removed === 0) return { path: configPath, status: "unchanged", removed: 0 };
+  if (Object.keys(nextEvents).length > 0) config.hooks = nextEvents;
+  else delete config.hooks;
+  if (dryRun) return { path: configPath, status: "would-remove", removed };
+
+  writeTextAtomically(
+    writePath,
+    `${JSON.stringify(config, null, 2)}\n`,
+    originalText,
+    beforeCommit,
+    symlinkPath,
+  );
+  return { path: configPath, status: "removed", removed };
 }
 
 function getHostDefinitions(

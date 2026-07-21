@@ -16,6 +16,9 @@ All notable changes to this project will be documented in this file.
   dashboard writes cannot shadow the managed platform namespace.
 - Free clients receive exactly the protected 12-skill foundation. Paid tiers
   receive the portal's current subscribed routing set.
+- `prism connect` performs a one-time exact-match removal of legacy Prism-owned
+  Claude lifecycle hooks. User hooks remain untouched; native skills and
+  server-side reminders now own startup, sync, handoff, and drift behavior.
 
 ### Fixed
 - Codex no longer needs a second restart after `prism connect`: the command
@@ -29,6 +32,8 @@ All notable changes to this project will be documented in this file.
 - Added tier-matrix, first-launch CLI, upgrade/downgrade, atomic rollback,
   ownership-conflict, lock-recovery, auth-refresh, dashboard-policy, and
   package-content regression coverage.
+- Added exact legacy-hook migration coverage for success, sync failure,
+  disabled sync, dry-run, idempotence, malformed settings, and near matches.
 
 ## [20.2.1] - 2026-07-20 — Subscription-Aware Memory
 

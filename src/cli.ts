@@ -9,7 +9,7 @@ import { getSetting } from './storage/configStorage.js';
 import { PRISM_USER_ID, SERVER_CONFIG } from './config.js';
 import { getCurrentGitState } from './utils/git.js';
 import { sessionLoadContextHandler, sessionSaveLedgerHandler, sessionSaveHandoffHandler } from './tools/ledgerHandlers.js';
-import { connectHosts, normalizeHostName } from './connect.js';
+import { connectHosts, migrateLegacyClaudeHooks, normalizeHostName } from './connect.js';
 
 const program = new Command();
 
@@ -65,8 +65,16 @@ program
           process.exitCode = 1;
         }
       }
+      const connectedClaude = summary.results.some((result) =>
+        result.host === 'claude-code' && result.status !== 'error');
 
       if (options.dryRun) {
+        if (connectedClaude) {
+          const migration = migrateLegacyClaudeHooks(undefined, true);
+          if (migration.status === 'would-remove') {
+            console.log(`• Claude Code: would remove ${migration.removed} legacy Prism hook action(s) (${migration.path})`);
+          }
+        }
         console.log('\nDry run complete — no files changed.');
       } else if (summary.results.some((result) =>
         result.status === 'registered' || result.status === 'refreshed' || result.status === 'existing')) {
@@ -84,6 +92,12 @@ program
           console.log(`✓ Synalux skills: ${skillSync.tier || 'free'} tier (${changed} changed)`);
           if (skillSync.conflicts.length > 0) {
             console.error(`⚠ Preserved locally modified skill conflicts: ${skillSync.conflicts.join(', ')}`);
+          }
+          if (connectedClaude) {
+            const migration = migrateLegacyClaudeHooks();
+            if (migration.status === 'removed') {
+              console.log(`✓ Claude Code: removed ${migration.removed} legacy Prism hook action(s); native skills now own startup and sync`);
+            }
           }
         }
       }
