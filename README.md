@@ -18,6 +18,42 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
+## What Prism gives you
+
+- **Session memory that survives restarts** — resume projects with handoff notes,
+  recent work, open TODOs, and configurable quick, standard, or deep context.
+- **Local-first inference** — bounded work is routed through local Ollama models
+  first, with automatic 2B/4B/9B/27B selection based on installed models,
+  available RAM, context fit, and subscription entitlements.
+- **One setup for every agent** — `prism connect` configures Claude Code,
+  Claude Desktop, Cursor, Gemini CLI, and Codex while preserving unrelated
+  settings.
+- **Subscription-aware skills** — entitled skills are synchronized before the
+  host launches, with safe upgrades, downgrades, conflict preservation, and
+  offline last-good recovery.
+- **Hook-free startup** — MCP metadata and native instructions request Prism's
+  startup context without requiring lifecycle hooks or a Prism-owned launcher.
+- **Safe escalation and observability** — inference outcomes are explicit,
+  reserved content remains fail-closed, and local/cloud usage is recorded for
+  review.
+
+## Get started
+
+```bash
+npm install -g prism-mcp-server
+prism connect
+```
+
+Use `prism connect --dry-run` to preview changes, `prism connect --all` to
+configure every detected host, or `prism connect --refresh` to reconcile
+Prism-managed entries after an upgrade. Restart the host after connecting.
+
+Prism works locally without an account, API key, or cloud subscription. Add a
+Synalux subscription when you want cloud memory, paid-tier skills, or team
+features.
+
+---
+
 ## What's New in v20.2.2
 
 ### One Local-First Workflow Across Every Agent
