@@ -35,6 +35,7 @@ function dbPath(): string {
 }
 
 export interface InferMetricRow {
+    ts?: number;
     backend: string;
     model: string | null;
     used_cloud: boolean;
@@ -46,6 +47,8 @@ export interface InferMetricRow {
     completion_tokens?: number;
     latency_ms?: number;
     ram_free_mb?: number;
+    /** Stable ID supplied by external spools. Null for native MCP rows. */
+    source_event_id?: string;
 }
 
 let client: ReturnType<typeof createClient> | null = null;
@@ -53,6 +56,12 @@ let ensured: Promise<void> | null = null;
 let disabled = false;
 let initFailures = 0;
 const MAX_INIT_FAILURES = 3;
+const LEDGER_UNAVAILABLE_ERROR = "Inference metrics ledger is unavailable";
+const INSERT_METRIC_SQL = `INSERT OR IGNORE INTO infer_metrics
+    (ts, caller, mode, backend, model, used_cloud, gate_outcome,
+     refusal_reason, prompt_tokens, completion_tokens, latency_ms, ram_free_mb,
+     source_event_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 function closeClient(context: string): void {
     const activeClient = client;
@@ -90,10 +99,22 @@ function ensureTable(): Promise<void> {
                     prompt_tokens INTEGER,
                     completion_tokens INTEGER,
                     latency_ms INTEGER,
-                    ram_free_mb INTEGER
+                    ram_free_mb INTEGER,
+                    source_event_id TEXT
                 )`);
+            // Existing ledgers predate external panel-spool ingestion. SQLite has
+            // no ADD COLUMN IF NOT EXISTS, so use the repository's established
+            // idempotent migration pattern and reject only unexpected failures.
+            try {
+                await client.execute(`ALTER TABLE infer_metrics ADD COLUMN source_event_id TEXT`);
+            } catch (e) {
+                if (!(e instanceof Error) || !e.message.includes("duplicate column name")) throw e;
+            }
             await client.execute(
                 `CREATE INDEX IF NOT EXISTS idx_infer_metrics_ts ON infer_metrics (ts)`);
+            await client.execute(
+                `CREATE UNIQUE INDEX IF NOT EXISTS idx_infer_metrics_source_event
+                 ON infer_metrics (source_event_id) WHERE source_event_id IS NOT NULL`);
         })().catch((e) => {
             // Transient failures (missing dir on first run, SQLITE_BUSY) retry on
             // the next append; only repeated failure disables for the process.
@@ -113,22 +134,46 @@ export function appendInferMetric(row: InferMetricRow): void {
     void (async () => {
         await ensureTable();
         if (disabled || !client) return;
-        await client.execute({
-            sql: `INSERT INTO infer_metrics
-                  (ts, caller, mode, backend, model, used_cloud, gate_outcome,
-                   refusal_reason, prompt_tokens, completion_tokens, latency_ms, ram_free_mb)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            args: [
-                Date.now(), row.caller ?? "mcp", row.mode ?? null, row.backend,
-                row.model, row.used_cloud ? 1 : 0, row.gate_outcome ?? null,
-                row.refusal_reason ?? null, row.prompt_tokens ?? null,
-                row.completion_tokens ?? null, row.latency_ms ?? null,
-                row.ram_free_mb ?? null,
-            ],
-        });
+        await client.execute({ sql: INSERT_METRIC_SQL, args: metricArgs(row) });
     })().catch((e) => {
         debugLog(`[infer-ledger] append failed: ${e instanceof Error ? e.message : e}`);
     });
+}
+
+export interface InferMetricBatchResult {
+    inserted: number;
+    duplicates: number;
+}
+
+/**
+ * Transactionally append externally-spooled rows and report deduplication.
+ * Unlike appendInferMetric(), this is awaited so the spool owner knows when it
+ * is safe to delete a claimed file.
+ */
+export async function appendInferMetricBatch(rows: InferMetricRow[]): Promise<InferMetricBatchResult> {
+    if (rows.length === 0) return { inserted: 0, duplicates: 0 };
+    await ensureTable();
+    if (disabled || !client) throw new Error(LEDGER_UNAVAILABLE_ERROR);
+
+    const results = await client.batch(
+        rows.map(row => ({ sql: INSERT_METRIC_SQL, args: metricArgs(row) })),
+        "write",
+    );
+    const inserted = results.reduce((total, result) => total + result.rowsAffected, 0);
+    return { inserted, duplicates: rows.length - inserted };
+}
+
+function metricArgs(row: InferMetricRow): Array<string | number | null> {
+    const timestamp = Number.isFinite(row.ts) && (row.ts ?? 0) > 0
+        ? Math.floor(row.ts as number)
+        : Date.now();
+    return [
+        timestamp, row.caller ?? "mcp", row.mode ?? null, row.backend,
+        row.model, row.used_cloud ? 1 : 0, row.gate_outcome ?? null,
+        row.refusal_reason ?? null, row.prompt_tokens ?? null,
+        row.completion_tokens ?? null, row.latency_ms ?? null,
+        row.ram_free_mb ?? null, row.source_event_id ?? null,
+    ];
 }
 
 export interface InferMetricsAggregate {
@@ -141,6 +186,16 @@ export interface InferMetricsAggregate {
     first_ts: number | null;
     last_ts: number | null;
     by_backend: Record<string, number>;
+    by_caller: Record<string, InferMetricsCallerAggregate>;
+}
+
+export interface InferMetricsCallerAggregate {
+    total: number;
+    local: number;
+    cloud: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    avg_latency_ms: number;
 }
 
 /** Aggregate all persisted rows (optionally since a timestamp). */
@@ -163,10 +218,32 @@ export async function queryInferMetrics(sinceTs?: number): Promise<InferMetricsA
         const byB = await client.execute({
             sql: `SELECT backend, COUNT(*) AS n FROM infer_metrics ${where} GROUP BY backend`,
             args: whereArgs });
+        const byC = await client.execute({
+            sql: `SELECT COALESCE(caller, 'mcp') AS caller,
+                         COUNT(*) AS total,
+                         SUM(CASE WHEN used_cloud = 0 THEN 1 ELSE 0 END) AS local,
+                         SUM(CASE WHEN used_cloud = 1 THEN 1 ELSE 0 END) AS cloud,
+                         COALESCE(SUM(prompt_tokens), 0) AS pt,
+                         COALESCE(SUM(completion_tokens), 0) AS ct,
+                         COALESCE(AVG(latency_ms), 0) AS avg_lat
+                  FROM infer_metrics ${where}
+                  GROUP BY COALESCE(caller, 'mcp')`,
+            args: whereArgs });
         const r = agg.rows[0] as Record<string, unknown>;
         const by_backend: Record<string, number> = {};
         for (const row of byB.rows as Array<Record<string, unknown>>) {
             by_backend[String(row.backend)] = Number(row.n);
+        }
+        const by_caller: Record<string, InferMetricsCallerAggregate> = {};
+        for (const row of byC.rows as Array<Record<string, unknown>>) {
+            by_caller[String(row.caller)] = {
+                total: Number(row.total ?? 0),
+                local: Number(row.local ?? 0),
+                cloud: Number(row.cloud ?? 0),
+                prompt_tokens: Number(row.pt ?? 0),
+                completion_tokens: Number(row.ct ?? 0),
+                avg_latency_ms: Math.round(Number(row.avg_lat ?? 0)),
+            };
         }
         return {
             total: Number(r.total ?? 0),
@@ -178,6 +255,7 @@ export async function queryInferMetrics(sinceTs?: number): Promise<InferMetricsA
             first_ts: r.first_ts == null ? null : Number(r.first_ts),
             last_ts: r.last_ts == null ? null : Number(r.last_ts),
             by_backend,
+            by_caller,
         };
     } catch (e) {
         debugLog(`[infer-ledger] query failed: ${e instanceof Error ? e.message : e}`);

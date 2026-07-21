@@ -2102,17 +2102,18 @@ export const INFERENCE_METRICS_TOOL: Tool = {
   name: "inference_metrics",
   description:
     "Returns local-model inference metrics — call count, local vs cloud split, " +
-    "token totals, per-model breakdown, and average latency. Reflects prism_infer " +
-    "delegation usage only, not the host model's (Claude's) own token spend " +
-    "(use /cost for that). period: 'session' (default, in-memory since server " +
-    "start) or 'all' (persisted ledger across restarts).",
+    "token totals, per-model breakdown, and average latency. period: 'session' " +
+    "(default) reports this MCP process's prism_infer delegation only. period: " +
+    "'all' imports the Synalux VS Code panel spool and reports persisted MCP + " +
+    "panel usage across restarts, including the panel local-serve rate. This does " +
+    "not include the host model's (Claude's) own token spend (use /cost for that).",
   inputSchema: {
     type: "object",
     properties: {
       period: {
         type: "string",
         enum: ["session", "all"],
-        description: "Metrics window: 'session' (this server process) or 'all' (durable ledger).",
+        description: "Metrics window: 'session' (this MCP process) or 'all' (durable MCP + VS Code panel ledger).",
       },
     },
   },

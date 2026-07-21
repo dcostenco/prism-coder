@@ -14,6 +14,9 @@
 
 import { debugLog } from "./logger.js";
 import { appendInferMetric, queryInferMetrics } from "../storage/inferMetricsLedger.js";
+import { ingestPanelMetrics } from "../storage/panelMetricsSpool.js";
+
+const PANEL_CALLER = "panel";
 
 export interface ModelStats {
     calls: number;
@@ -233,9 +236,13 @@ export async function inferenceMetricsHandler(args?: { period?: string }): Promi
     isError?: boolean;
 }> {
     if (args?.period === "all") {
+        const ingest = await ingestPanelMetrics();
         const agg = await queryInferMetrics();
         if (!agg || agg.total === 0) {
-            return { content: [{ type: "text", text: "No persisted prism_infer calls yet (ledger empty)." }] };
+            const warning = ingest.failed_files > 0
+                ? ` Panel spool ingestion failed for ${ingest.failed_files} file(s); retained for retry.`
+                : "";
+            return { content: [{ type: "text", text: `No persisted inference calls yet (ledger empty).${warning}` }] };
         }
         const localPct = agg.total ? Math.round((agg.local / agg.total) * 100) : 0;
         const cloudPct = agg.total ? Math.round((agg.cloud / agg.total) * 100) : 0;
@@ -245,13 +252,25 @@ export async function inferenceMetricsHandler(args?: { period?: string }): Promi
         const byB = Object.entries(agg.by_backend)
             .sort((a, b) => b[1] - a[1])
             .map(([k, v]) => `  ${k}: ${v}`).join("\n");
+        const panel = agg.by_caller[PANEL_CALLER];
+        const panelPct = panel?.total ? Math.round((panel.local / panel.total) * 100) : 0;
+        const panelLine = panel
+            ? `Panel local serve rate: ${panelPct}% (${panel.local}/${panel.total}; cloud ${panel.cloud})`
+            : "Panel local serve rate: no panel calls recorded";
+        let ingestNote = "";
+        if (ingest.invalid > 0) ingestNote = `discarded ${ingest.invalid} invalid panel row(s)`;
+        if (ingest.failed_files > 0) {
+            ingestNote += `${ingestNote ? "; " : ""}retained ${ingest.failed_files} panel file(s) for retry`;
+        }
+        const ingestLine = ingestNote ? `\nPanel spool: ${ingestNote}` : "";
         return {
             content: [{
                 type: "text",
-                text: `📊 Delegation Metrics — ALL TIME (persisted ledger, ${span})\n` +
+                text: `📊 Inference Metrics — ALL TIME (persisted ledger, ${span})\n` +
                     `Total calls: ${agg.total} — Local: ${agg.local} (${localPct}%) | Cloud: ${agg.cloud} (${cloudPct}%)\n` +
+                    `${panelLine}\n` +
                     `Prompt tokens: ${agg.prompt_tokens} | Completion tokens: ${agg.completion_tokens}\n` +
-                    `Avg latency: ${agg.avg_latency_ms}ms\nBy backend:\n${byB}`,
+                    `Avg latency: ${agg.avg_latency_ms}ms\nBy backend:\n${byB}${ingestLine}`,
             }],
         };
     }

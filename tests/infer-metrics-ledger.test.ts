@@ -8,6 +8,7 @@ import { rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
+  appendInferMetricBatch,
   appendInferMetric,
   queryInferMetrics,
   _resetInferLedgerForTest,
@@ -96,6 +97,23 @@ describe('infer metrics ledger', () => {
     await flush(1);
     const agg = await queryInferMetrics();
     expect(agg!.total).toBe(1);
+  });
+
+  it('deduplicates external source event IDs and aggregates by caller', async () => {
+    const row = {
+      ts: Date.now() - 1_000,
+      caller: 'panel',
+      backend: 'local',
+      model: 'prism-coder:test',
+      used_cloud: false,
+      source_event_id: '00000000-0000-4000-8000-000000000001',
+    };
+    expect(await appendInferMetricBatch([row])).toEqual({ inserted: 1, duplicates: 0 });
+    expect(await appendInferMetricBatch([row])).toEqual({ inserted: 0, duplicates: 1 });
+
+    const agg = await queryInferMetrics();
+    expect(agg?.total).toBe(1);
+    expect(agg?.by_caller.panel).toMatchObject({ total: 1, local: 1, cloud: 0 });
   });
 
   it('sinceTs filters the window', async () => {

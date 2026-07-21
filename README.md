@@ -550,7 +550,7 @@ Prism exposes 40+ MCP tools. The core memory loop:
 | `verify_behavior` | Pre-edit scenario challenge — catch bad changes before they happen |
 | `knowledge_ingest` | Teach Prism a codebase or document |
 | `prism_infer` | Local-first inference (route/chat/code modes, thinking, cloud escalation) |
-| `inference_metrics` | Session delegation stats on demand (call count, tokens, local/cloud split) |
+| `inference_metrics` | Session delegation or persisted MCP + VS Code panel local/cloud stats |
 
 ### `prism_infer` — local-first inference with cloud escalation
 
@@ -575,7 +575,7 @@ Full TypeScript signatures live in [`src/tools/`](src/tools/); architecture in [
 
 ### `inference_metrics` — see your local-model usage on demand
 
-Call `inference_metrics` anytime mid-session to see how many `prism_infer` calls ran locally vs cloud, with actual token counts:
+Call `inference_metrics` anytime mid-session to see how many `prism_infer` calls ran locally vs cloud. Use `period: "all"` to atomically import the Synalux VS Code panel spool and include its local-serve rate in the persisted totals:
 
 ```
 📊 Inference Metrics — local-model delegation (this session):
@@ -589,7 +589,7 @@ Call `inference_metrics` anytime mid-session to see how many `prism_infer` calls
 
 The same block also appears automatically in `session_save_ledger` and `session_save_handoff` responses at session end.
 
-**Note:** This tracks `prism_infer` delegation only — not your host model's (Claude's) own token spend. For that, use Claude Code's `/cost` command.
+**Note:** The default session view tracks this MCP process's `prism_infer` delegation. The all-time view combines persisted MCP calls with Synalux VS Code panel inference. Neither view includes your host model's (Claude's) own token spend; use Claude Code's `/cost` command for that.
 
 ### Local-model delegation (opt-in)
 
