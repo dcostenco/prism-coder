@@ -1064,6 +1064,73 @@ export async function sessionLoadContextHandler(
   }
 
   const d = data as Record<string, any>;
+  if (!includeSkillContent) {
+    const compact = (value: unknown, maxChars: number): string => {
+      const text = typeof value === "string" ? value.trim() : String(value ?? "").trim();
+      return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+    };
+    let nativeContext = `${MEMORY_BOUNDARY_PREFIX}📋 Session context for "${project}" (${level}):\n`;
+    const behavioralWarnings = Array.isArray(d.behavioral_warnings)
+      ? d.behavioral_warnings.slice(0, 5)
+      : [];
+    if (behavioralWarnings.length > 0) {
+      nativeContext += `\n⚠️ Behavioral warnings:\n` + behavioralWarnings
+        .map((warning: any) => `- ${compact(warning?.summary, 600)}`)
+        .join("\n") + `\n`;
+    }
+    if (level !== "quick" && d.last_summary) {
+      nativeContext += `\n**Last Summary:** ${compact(d.last_summary, 2_000)}\n`;
+    }
+    if (d.active_branch) nativeContext += `\n**Active Branch:** ${compact(d.active_branch, 300)}\n`;
+    if (d.key_context) nativeContext += `\n**Key Context:** ${compact(d.key_context, 1_500)}\n`;
+    if (Array.isArray(d.pending_todo) && d.pending_todo.length > 0) {
+      nativeContext += `\n**Open TODOs:**\n` + d.pending_todo.slice(0, 20)
+        .map((todo: unknown) => `- ${compact(todo, 500)}`)
+        .join("\n") + `\n`;
+    }
+    if (Array.isArray(d.active_decisions) && d.active_decisions.length > 0) {
+      nativeContext += `\n**Active Decisions:**\n` + d.active_decisions.slice(0, 20)
+        .map((decision: unknown) => `- ${compact(decision, 500)}`)
+        .join("\n") + `\n`;
+    }
+    if (Array.isArray(d.keywords) && d.keywords.length > 0) {
+      nativeContext += `\n**Keywords:** ${d.keywords.slice(0, 30).map((keyword: unknown) => compact(keyword, 100)).join(", ")}\n`;
+    }
+    if (level !== "quick" && Array.isArray(d.recent_sessions) && d.recent_sessions.length > 0) {
+      nativeContext += `\n**Recent Sessions:**\n` + d.recent_sessions.slice(0, 5)
+        .map((session: any) => {
+          const date = (session?.session_date || session?.created_at || session?.date || "unknown").split("T")[0];
+          return `- [${date}] ${compact(session?.summary, 1_200)}`;
+        })
+        .join("\n") + `\n`;
+    }
+    if (level === "deep" && Array.isArray(d.session_history) && d.session_history.length > 0) {
+      nativeContext += `\n**Session History:**\n` + d.session_history.slice(0, 50)
+        .map((session: any) => {
+          const date = (session?.session_date || session?.created_at || session?.date || "unknown").split("T")[0];
+          return `- [${date}] ${compact(session?.summary, 1_200)}`;
+        })
+        .join("\n") + `\n`;
+    }
+    if (version) nativeContext += `\n**Session Version:** ${version}\n`;
+    if (agentName || effectiveRole) {
+      nativeContext += `\n**Agent:** ${agentName || "Agent"}` +
+        (effectiveRole ? ` · Role: ${effectiveRole}` : "") +
+        ` · Native skills provisioned by prism connect\n`;
+    }
+    nativeContext += splitBrainWarning + driftReport;
+    if (convId) {
+      const { markContextLoaded, noteDriftSessionStart } = await import("../session/sessionContext.js");
+      const { BOUNDARIES_VERSION } = await import("../boundaries/boundaries.js");
+      markContextLoaded(convId, project, BOUNDARIES_VERSION);
+      noteDriftSessionStart(convId);
+    }
+    return {
+      content: [{ type: "text", text: nativeContext + MEMORY_BOUNDARY_SUFFIX }],
+      isError: false,
+    };
+  }
+
   let formattedContext = ``;
   if (d.last_summary) formattedContext += `📝 Last Summary: ${d.last_summary}\n`;
   if (d.active_branch) formattedContext += `🌿 Active Branch: ${d.active_branch}\n`;
@@ -1195,23 +1262,13 @@ export async function sessionLoadContextHandler(
   if (budgeted.overflow.length > 0) {
     debugLog(`[session_load_context] skill budget: inlined ${budgeted.inlined.length}, overflow ${budgeted.overflow.length} (${skillBudgetChars} chars)`);
   }
-  if (!includeSkillContent) {
-    // prism connect has already materialized the authoritative tier snapshot
-    // in native host roots. Re-inlining it here duplicates more than 100 KB on
-    // paid tiers and can divert the first-turn tool result into a file.
-    skillBlock = "";
-    loadedSkills.length = 0;
-  }
-
   // ─── Agent Greeting Block ────────────────────────────────────
   // Shows agent identity (name + role) and skill status after briefing.
   let greetingBlock = "";
   if (agentName || effectiveRole) {
     const namePart = agentName ? `👋 **${agentName}**` : `👋 **Agent**`;
     const rolePart = effectiveRole ? ` · Role: \`${effectiveRole}\`` : "";
-    const skillPart = !includeSkillContent
-      ? " · 📜 Native skills provisioned by prism connect"
-      : loadedSkills.length > 0
+    const skillPart = loadedSkills.length > 0
       ? ` · 📜 Skills: ${loadedSkills.map(s => `\`${s}\``).join(", ")}`
       : (effectiveRole ? " · 📜 No skill configured" : "");
     greetingBlock = `\n\n[👤 AGENT IDENTITY]\n${namePart}${rolePart}${skillPart}`;

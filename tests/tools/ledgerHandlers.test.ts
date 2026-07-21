@@ -901,6 +901,37 @@ describe("ledgerHandlers", () => {
   });
 
   describe("sessionBootstrapHandler", () => {
+    it.each([
+      ["quick", false, false],
+      ["standard", true, true],
+    ] as const)(
+      "renders only the %s startup depth fields",
+      async (depth, expectsSummary, expectsRecent) => {
+        mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+          autoload_projects: "prism-mcp",
+          default_context_depth: depth,
+          agent_name: "Dmitri",
+        }[key] ?? fallback));
+        storage.loadContext.mockResolvedValue({
+          last_summary: "Previous implementation summary",
+          pending_todo: ["Continue implementation"],
+          recent_sessions: [{ summary: "Recent implementation session", created_at: "2026-07-20T12:00:00Z" }],
+          session_history: [{ summary: "Deep-only history", created_at: "2026-07-19T12:00:00Z" }],
+          version: 5,
+        });
+
+        const result = await sessionBootstrapHandler({});
+        const text = result.content[0].text as string;
+
+        expect(text).toContain("Welcome back, Dmitri");
+        expect(text).toContain("Open TODOs");
+        expect(text).toContain("Continue implementation");
+        expect(text.includes("Previous implementation summary")).toBe(expectsSummary);
+        expect(text.includes("Recent implementation session")).toBe(expectsRecent);
+        expect(text).not.toContain("Deep-only history");
+      },
+    );
+
     it("uses dashboard projects, identity, role, and depth for the hook-free greeting", async () => {
       const nativeSkillBody = `NATIVE_SKILL_BODY_MUST_NOT_BE_INLINED${"x".repeat(120_000)}`;
       mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
