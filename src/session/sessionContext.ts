@@ -143,7 +143,7 @@ export function requireContextLoaded(conversationId: string | undefined): GateRe
       blocked: true,
       error:
         "context_not_loaded: session expired (6 h TTL). Call " +
-        "session_load_context(project, conversation_id) again to reload context. " +
+        "session_bootstrap(conversation_id) or session_load_context(project, conversation_id) again. " +
         "(Enforced server-side — applies to every host.)",
     };
   }
@@ -152,7 +152,8 @@ export function requireContextLoaded(conversationId: string | undefined): GateRe
     return {
       blocked: true,
       error:
-        "context_not_loaded: call session_load_context(project, conversation_id) " +
+        "context_not_loaded: call session_bootstrap(conversation_id) or " +
+        "session_load_context(project, conversation_id) " +
         "before this action. This project-scoped tool needs confirmed working context " +
         "to act correctly. (Enforced server-side — applies to every host.)",
     };
@@ -183,7 +184,8 @@ export function noteInferenceForSession(
   info: { backend: string; usedCloud: boolean },
 ): void {
   // Only update sessions that already exist — don't create ghost stubs for
-  // conversations that never called session_load_context. Ghost stubs would
+  // conversations that never called session_bootstrap or session_load_context.
+  // Ghost stubs would
   // accumulate in the LRU and crowd out legitimate registered sessions.
   const s = sessions.get(conversationId);
   if (!s) return;

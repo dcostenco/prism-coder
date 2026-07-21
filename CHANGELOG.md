@@ -23,6 +23,10 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Codex no longer needs a second restart after `prism connect`: the command
   waits until entitled native skills exist before returning.
+- MCP metadata now selects `session_bootstrap({})` on the first turn instead of
+  overriding native startup with a hardcoded `session_load_context` depth.
+- Native bootstrap responses no longer re-inline the tier snapshot already
+  installed by `prism connect`, avoiding 100 KB+ duplicate first-turn payloads.
 - Downgrades prune only Prism-managed native and database entries; custom or
   locally modified skills are preserved and reported as conflicts.
 - Failed, partial, invalid, or unauthenticated paid snapshots retain last-good

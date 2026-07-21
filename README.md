@@ -28,6 +28,11 @@ first launch instead of requiring a second restart. Prism rechecks the same
 snapshot at MCP startup, session load, and every five minutes—without host
 lifecycle hooks.
 
+On the first user turn, native hosts call `session_bootstrap({})`; Prism then
+uses the dashboard's developer name, Auto-Load Projects, and quick, standard,
+or deep setting. The response stays focused on greeting and session state
+because tier skills are already present in the host's native skill directory.
+
 Free accounts receive the protected 12-skill foundation. Paid accounts receive
 the current subscribed routing set. Upgrades install newly entitled packages;
 downgrades remove only Prism-owned packages while preserving local skills and
@@ -523,7 +528,8 @@ Prism exposes 40+ MCP tools. The core memory loop:
 
 | Tool | What it does |
 |---|---|
-| `session_load_context` | Recover the prior session's state on boot |
+| `session_bootstrap` | Hook-free first-turn greeting and dashboard-configured context |
+| `session_load_context` | Explicit project reload or older-server startup fallback |
 | `session_save_ledger` | Append an immutable session log entry |
 | `session_save_handoff` | Save live state for the next session |
 | `knowledge_search` | Semantic + keyword search over all memories |
@@ -592,7 +598,7 @@ When enabled, the agent's task router may delegate qualifying work — bulk clas
 <details>
 <summary>How Prism survives context compaction</summary>
 
-The LLM context window is treated as ephemeral scratch space; durable state lives in the persistent store (SQLite locally, the portal in the cloud). Every session begins with a mandatory `session_load_context` call, so the agent is oriented before it writes a response. When a project exceeds a threshold (default 50 entries), `session_compact_ledger` summarizes old entries into a rollup, soft-archives the originals, and links them in the graph. See [`docs/COMPACTION.md`](docs/COMPACTION.md)
+The LLM context window is treated as ephemeral scratch space; durable state lives in the persistent store (SQLite locally, the portal in the cloud). Every session begins with a mandatory no-argument `session_bootstrap` call, so Prism applies the dashboard's project and quick/standard/deep setting before the agent writes a response. When a project exceeds a threshold (default 50 entries), `session_compact_ledger` summarizes old entries into a rollup, soft-archives the originals, and links them in the graph. See [`docs/COMPACTION.md`](docs/COMPACTION.md)
 </details>
 
 ---

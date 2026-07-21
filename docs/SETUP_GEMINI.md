@@ -41,7 +41,7 @@ Create `~/.gemini/AGENTS.md`:
 
 ```markdown
 # Session Memory
-Every conversation starts with: mcp_prism-mcp_session_load_context(project="my-project", level="deep")
+Every conversation starts with: mcp_prism-mcp_session_bootstrap({})
 Echo result: agent identity, TODOs, session version.
 ```
 
@@ -113,4 +113,3 @@ prism load my-project --role dev --json
 The CLI uses the **exact same storage layer** as the MCP `session_load_context` tool — including Supabase support, dashboard settings, and role-scoped context. This is the recommended approach for non-MCP environments.
 
 If installed globally (`npm install -g prism-mcp-server`), use `prism load`. For local dev builds, use `node /path/to/prism/dist/cli.js load`.
-

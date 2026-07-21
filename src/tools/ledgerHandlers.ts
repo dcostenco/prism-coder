@@ -731,7 +731,15 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   };
 }
 
-export async function sessionLoadContextHandler(args: unknown) {
+interface SessionLoadContextOptions {
+  /** Native hosts already receive tier-entitled packages from prism connect. */
+  includeSkillContent?: boolean;
+}
+
+export async function sessionLoadContextHandler(
+  args: unknown,
+  options: SessionLoadContextOptions = {},
+) {
   if (!isSessionLoadContextArgs(args)) {
     throw new Error("Invalid arguments for session_load_context");
   }
@@ -744,6 +752,7 @@ export async function sessionLoadContextHandler(args: unknown) {
   }
 
   const { project, level: requestedLevel, role, conversation_id: convId, prompt } = args;
+  const includeSkillContent = options.includeSkillContent !== false;
   const validLevels = ["quick", "standard", "deep"] as const;
   const configuredLevel = requestedLevel ?? await getSetting("default_context_depth", "standard");
   // Dashboard state is persisted independently and can outlive an older build
@@ -817,25 +826,17 @@ export async function sessionLoadContextHandler(args: unknown) {
   if (!data) {
     let freshSkillBlock = "";
     const freshLoadedSkills = new Set<string>();
-    try {
-      const roleSkillContent = await loadEntitledRoleSkill();
-      if (effectiveRole && roleSkillContent?.trim()) {
-        freshSkillBlock += `\n\n[📜 SKILL: ${effectiveRole}]\n${roleSkillContent.trim()}`;
-        freshLoadedSkills.add(effectiveRole);
-      }
-      const { resolveSkills: resolveForFresh } = await import("./skillRouting.js");
-      const freshResolution = await resolveForFresh(project);
-      // Client-renders-content: load from local DB by resolved names
-      for (const name of freshResolution.names || []) {
-        if (!entitledSkillNames.has(name) || freshLoadedSkills.has(name)) continue;
-        const content = await getSetting(`skill:${name}`, "");
-        if (content?.trim()) {
-          freshSkillBlock += `\n\n[📜 SKILL: ${name}]\n${content.trim()}`;
-          freshLoadedSkills.add(name);
+    if (includeSkillContent) {
+      try {
+        const roleSkillContent = await loadEntitledRoleSkill();
+        if (effectiveRole && roleSkillContent?.trim()) {
+          freshSkillBlock += `\n\n[📜 SKILL: ${effectiveRole}]\n${roleSkillContent.trim()}`;
+          freshLoadedSkills.add(effectiveRole);
         }
-      }
-      if (freshResolution.isOffline) {
-        for (const name of protectedFallbackNames) {
+        const { resolveSkills: resolveForFresh } = await import("./skillRouting.js");
+        const freshResolution = await resolveForFresh(project);
+        // Client-renders-content: load from local DB by resolved names
+        for (const name of freshResolution.names || []) {
           if (!entitledSkillNames.has(name) || freshLoadedSkills.has(name)) continue;
           const content = await getSetting(`skill:${name}`, "");
           if (content?.trim()) {
@@ -843,9 +844,19 @@ export async function sessionLoadContextHandler(args: unknown) {
             freshLoadedSkills.add(name);
           }
         }
+        if (freshResolution.isOffline) {
+          for (const name of protectedFallbackNames) {
+            if (!entitledSkillNames.has(name) || freshLoadedSkills.has(name)) continue;
+            const content = await getSetting(`skill:${name}`, "");
+            if (content?.trim()) {
+              freshSkillBlock += `\n\n[📜 SKILL: ${name}]\n${content.trim()}`;
+              freshLoadedSkills.add(name);
+            }
+          }
+        }
+      } catch {
+        debugLog(`[session_load_context] Fresh project skill injection failed — continuing without`);
       }
-    } catch {
-      debugLog(`[session_load_context] Fresh project skill injection failed — continuing without`);
     }
     if (convId) {
       const { markContextLoaded, noteDriftSessionStart } = await import("../session/sessionContext.js");
@@ -1184,6 +1195,13 @@ export async function sessionLoadContextHandler(args: unknown) {
   if (budgeted.overflow.length > 0) {
     debugLog(`[session_load_context] skill budget: inlined ${budgeted.inlined.length}, overflow ${budgeted.overflow.length} (${skillBudgetChars} chars)`);
   }
+  if (!includeSkillContent) {
+    // prism connect has already materialized the authoritative tier snapshot
+    // in native host roots. Re-inlining it here duplicates more than 100 KB on
+    // paid tiers and can divert the first-turn tool result into a file.
+    skillBlock = "";
+    loadedSkills.length = 0;
+  }
 
   // ─── Agent Greeting Block ────────────────────────────────────
   // Shows agent identity (name + role) and skill status after briefing.
@@ -1191,7 +1209,9 @@ export async function sessionLoadContextHandler(args: unknown) {
   if (agentName || effectiveRole) {
     const namePart = agentName ? `👋 **${agentName}**` : `👋 **Agent**`;
     const rolePart = effectiveRole ? ` · Role: \`${effectiveRole}\`` : "";
-    const skillPart = loadedSkills.length > 0
+    const skillPart = !includeSkillContent
+      ? " · 📜 Native skills provisioned by prism connect"
+      : loadedSkills.length > 0
       ? ` · 📜 Skills: ${loadedSkills.map(s => `\`${s}\``).join(", ")}`
       : (effectiveRole ? " · 📜 No skill configured" : "");
     greetingBlock = `\n\n[👤 AGENT IDENTITY]\n${namePart}${rolePart}${skillPart}`;
@@ -1375,7 +1395,7 @@ export async function sessionBootstrapHandler(args: unknown = {}) {
       role: defaultRole || undefined,
       conversation_id: input.conversation_id as string | undefined,
       prompt: input.prompt as string | undefined,
-    });
+    }, { includeSkillContent: false });
     const text = result.content?.map((part: any) => part?.text).filter(Boolean).join("\n") ||
       `No session context found for project "${project}".`;
     loaded.push(text);

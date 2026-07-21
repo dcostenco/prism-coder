@@ -4,7 +4,7 @@
  * rely on.
  */
 import { describe, expect, it } from "vitest";
-import { getAllPossibleTools } from "../src/server.js";
+import { getAllPossibleTools, PRISM_SERVER_INSTRUCTIONS } from "../src/server.js";
 
 describe("Prism startup tool contract", () => {
   it("adds session_bootstrap while preserving the established Prism surface", () => {
@@ -30,5 +30,17 @@ describe("Prism startup tool contract", () => {
       idempotentHint: true,
       openWorldHint: false,
     });
+
+    expect(names.indexOf("session_bootstrap")).toBeLessThan(names.indexOf("session_load_context"));
+    const bootstrapDescription = tools.find((tool) => tool.name === "session_bootstrap")?.description || "";
+    const loadDescription = tools.find((tool) => tool.name === "session_load_context")?.description || "";
+    expect(bootstrapDescription).toMatch(/first user turn of every conversation/i);
+    expect(bootstrapDescription).toMatch(/empty object/i);
+    expect(bootstrapDescription).toMatch(/Do not guess or pass a project or depth/i);
+    expect(loadDescription).toMatch(/explicit project reload/i);
+    expect(loadDescription).toMatch(/fallback only when session_bootstrap is unavailable/i);
+    expect(loadDescription).not.toMatch(/at the start of every conversation/i);
+    expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/call session_bootstrap exactly once with \{\}/i);
+    expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/Do not substitute session_load_context/i);
   });
 });

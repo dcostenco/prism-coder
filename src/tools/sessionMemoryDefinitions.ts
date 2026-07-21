@@ -122,7 +122,8 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
   name: "session_load_context",
   description:
     "Load session context for a project using progressive context loading. " +
-    "Use this at the START of a new session to recover previous work state. " +
+    "Use this for an explicit project reload, or as a startup fallback only when session_bootstrap is unavailable. " +
+    "When session_bootstrap is available, do not substitute this tool for the first-turn bootstrap. " +
     "Three levels available:\n" +
     "- **quick**: Just the latest project state — keywords and open TODOs (~50 tokens)\n" +
     "- **standard**: Project state plus recent session summaries and decisions (~200 tokens, recommended)\n" +
@@ -174,7 +175,9 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
 export const SESSION_BOOTSTRAP_TOOL: Tool = {
   name: "session_bootstrap",
   description:
-    "Start a Prism-backed conversation without host hooks. Call this once before the first user-facing response. " +
+    "IMPORTANT: On the first user turn of every conversation, including a greeting, call this tool exactly once " +
+    "with an empty object before any user-facing response. Do not substitute session_load_context when this tool is available. " +
+    "This starts a Prism-backed conversation without host hooks. " +
     "Prism reads the dashboard's Auto-Load Projects, Context Depth (quick/standard/deep), developer name, and default role, " +
     "then returns the greeting and correctly scoped prior-session context. Do not guess or pass a project or depth.",
   annotations: {

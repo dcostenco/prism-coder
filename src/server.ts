@@ -274,43 +274,16 @@ const BASE_TOOLS: Tool[] = [
   PRISM_INFER_TOOL,                   // prism_infer — local-first inference (token-saving cascade)
 ];
 
-// ─── v4.1 FIX: Build Session Memory Tools dynamically ────────
-// The session_load_context tool description is dynamically modified
-// to include auto-load project instructions. Tool descriptions are
-// the ONLY mechanism guaranteed by ALL MCP clients (Antigravity,
-// Claude Code, Claude CLI). The `instructions` field and
-// sendLoggingMessage are NOT reliably surfaced by any client.
-//
-// buildSessionMemoryTools() is called inside createServer() AFTER
-// initConfigStorage() has run, so getSettingSync() returns real
-// dashboard config values.
-function buildSessionMemoryTools(autoloadList: string[]): Tool[] {
-  // Dynamically inject auto-load instruction into session_load_context description.
-  // CRITICAL: The instruction is PREPENDED so it appears FIRST in the tool description.
-  // LLMs read top-to-bottom — appending the instruction at the end caused it to be
-  // deprioritized and skipped by both Antigravity and Claude CLI.
-  let loadContextTool = SESSION_LOAD_CONTEXT_TOOL;
-  if (autoloadList.length > 0) {
-    const projectList = autoloadList.join(", ");
-    // Read the preferred context depth from dashboard config (defaults to "standard")
-    const defaultLevel = getSettingSync("default_context_depth", "standard");
-    const autoLoadPrefix =
-      `IMPORTANT: At the start of every conversation, you MUST call this tool ` +
-      `for each of these projects: ${projectList}. Do this before any other work. ` +
-      `Load level should be "${defaultLevel}" unless the user specifies otherwise. ` +
-      `Do NOT skip this. Do NOT claim the tool is unavailable. The tool IS available — just call it.\n` +
-      `Then display the agent identity from the response: \`🤖 Agent: <role> — <name>\`\n\n`;
-    loadContextTool = {
-      ...SESSION_LOAD_CONTEXT_TOOL,
-      description: autoLoadPrefix + SESSION_LOAD_CONTEXT_TOOL.description,
-    };
-  }
-
+// Hook-free first-turn startup is owned by session_bootstrap. Its static tool
+// description is surfaced by native MCP hosts before any tool call and keeps
+// project, depth, identity, and role selection inside dashboard configuration.
+// session_load_context remains available for explicit reloads and legacy hosts.
+function buildSessionMemoryTools(): Tool[] {
   return [
+    SESSION_BOOTSTRAP_TOOL,      // session_bootstrap — hook-free configured first-turn greeting + context
     SESSION_SAVE_LEDGER_TOOL,    // session_save_ledger — append immutable session log
     SESSION_SAVE_HANDOFF_TOOL,   // session_save_handoff — upsert latest project state (now with OCC)
-    SESSION_BOOTSTRAP_TOOL,      // session_bootstrap — hook-free configured first-turn greeting + context
-    loadContextTool,             // session_load_context — progressive context loading (+ auto-load instruction)
+    SESSION_LOAD_CONTEXT_TOOL,   // session_load_context — explicit project reload / legacy fallback
     KNOWLEDGE_SEARCH_TOOL,       // knowledge_search — search accumulated knowledge
     KNOWLEDGE_FORGET_TOOL,       // knowledge_forget — prune bad/old memories
     SESSION_COMPACT_LEDGER_TOOL, // session_compact_ledger — auto-compact old ledger entries (v0.4.0)
@@ -378,11 +351,9 @@ let storageReady: Promise<void> | null = null;
 let storageIsReady = false;
 
 // ─── v5.2.1: Deferred Auto-Push Tracking ─────────────────────
-// Tracks whether any client has already called session_load_context.
-// Used by the deferred auto-push to skip redundant context injection.
-// This ensures Claude CLI (which calls the tool via its hook within
-// seconds) is never affected, while Antigravity gets a fallback push
-// when the model fails to comply with auto-load instructions.
+// Tracks whether any client has already called session_bootstrap or
+// session_load_context. Used by deferred auto-push to avoid duplicates when a
+// native host complies with the hook-free first-turn instruction.
 let contextLoadedByClient = false;
 
 /**
@@ -417,7 +388,7 @@ export function notifyResourceUpdate(project: string, server: Server) {
 export function getAllPossibleTools(): Tool[] {
   return [
     ...BASE_TOOLS,
-    ...buildSessionMemoryTools([]),
+    ...buildSessionMemoryTools(),
     ...AGENT_REGISTRY_TOOLS,
     SESSION_TASK_ROUTE_TOOL,
     SESSION_START_PIPELINE_TOOL,
@@ -427,15 +398,8 @@ export function getAllPossibleTools(): Tool[] {
 }
 
 export function getAvailableTools(): Tool[] {
-  // ─── v4.1 FIX: Auto-Load via Dynamic Tool Descriptions ────────
-  // Read auto-load projects EXCLUSIVELY from dashboard config
-  // (available after initConfigStorage() in startServer).
-  //
-  // ARCHITECTURE DECISION: We inject the auto-load instruction into
-  // the session_load_context TOOL DESCRIPTION, not into `instructions`
-  // or `sendLoggingMessage`. Tool descriptions are the ONLY mechanism
-  // guaranteed by ALL MCP clients (Antigravity, Claude Code, Claude CLI).
-  //
+  // Read auto-load projects exclusively from dashboard config so startup
+  // diagnostics and session_bootstrap share one source of truth.
   // The PRISM_AUTOLOAD_PROJECTS env var has been removed — the dashboard
   // is the single source of truth. This prevents mismatches between
   // env var and dashboard settings causing duplicate project loads.
@@ -447,7 +411,7 @@ export function getAvailableTools(): Tool[] {
     console.error(`[Prism] Auto-load projects (dashboard): ${autoloadList.join(', ')}`);
   }
 
-  const SESSION_MEMORY_TOOLS = buildSessionMemoryTools(autoloadList);
+  const SESSION_MEMORY_TOOLS = buildSessionMemoryTools();
 
   return [
     ...BASE_TOOLS,
@@ -457,6 +421,17 @@ export function getAvailableTools(): Tool[] {
     ...(PRISM_DARK_FACTORY_ENABLED ? [SESSION_START_PIPELINE_TOOL, SESSION_CHECK_PIPELINE_STATUS_TOOL, SESSION_ABORT_PIPELINE_TOOL] : []),
   ];
 }
+
+export const PRISM_SERVER_INSTRUCTIONS =
+  `Prism MCP — The Mind Palace for AI Agents. On the first user turn of every conversation, ` +
+  `including greetings, call session_bootstrap exactly once with {} before any user-facing response. ` +
+  `Echo its configured developer greeting and returned quick, standard, or deep context. ` +
+  `Do not substitute session_load_context while session_bootstrap is available; use session_load_context ` +
+  `only for an explicit project reload or as an older-server fallback. ` +
+  `Use session_save_ledger to log completed work and session_save_handoff to preserve state for the next session.\n\n` +
+  `Architecture: session_save_ledger and session_save_handoff require context loaded by session_bootstrap ` +
+  `or session_load_context when a conversation_id is supplied. ${BOUNDARIES_TEXT} ` +
+  `All cloud inference routes through the Synalux portal for billing, tier-gating, and audit.`;
 
 export function createServer() {
   const ALL_TOOLS = getAvailableTools();
@@ -475,9 +450,9 @@ export function createServer() {
         // ─── v0.4.0: Resource capability (Enhancement #3) ───
         ...(SESSION_MEMORY_ENABLED ? { resources: { subscribe: true } } : {}),
       },
-      // Supplementary signal — not all clients support this field.
-      // Primary mechanism is the dynamic tool description above.
-      instructions: `Prism MCP — The Mind Palace for AI Agents. This server provides persistent session memory, knowledge search, and context management tools. Use session_load_context to recover previous work state, session_save_ledger to log completed work, and session_save_handoff to preserve state for the next session.\n\nArchitecture: session_save_ledger and session_save_handoff require a loaded project context (conversation_id that called session_load_context). ${BOUNDARIES_TEXT} All cloud inference routes through the Synalux portal for billing, tier-gating, and audit.`,
+      // Supplementary signal for clients that surface MCP server instructions.
+      // The matching session_bootstrap tool description is the primary path.
+      instructions: PRISM_SERVER_INSTRUCTIONS,
     }
   );
 
@@ -1246,12 +1221,13 @@ export function createSandboxServer() {
         prompts: {},
         resources: { subscribe: true },
       },
+      instructions: PRISM_SERVER_INSTRUCTIONS,
     }
   );
 
   // Register all tool listings unconditionally
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...BASE_TOOLS, ...buildSessionMemoryTools([]), ...AGENT_REGISTRY_TOOLS, SESSION_TASK_ROUTE_TOOL, SESSION_START_PIPELINE_TOOL, SESSION_CHECK_PIPELINE_STATUS_TOOL, SESSION_ABORT_PIPELINE_TOOL],
+    tools: [...BASE_TOOLS, ...buildSessionMemoryTools(), ...AGENT_REGISTRY_TOOLS, SESSION_TASK_ROUTE_TOOL, SESSION_START_PIPELINE_TOOL, SESSION_CHECK_PIPELINE_STATUS_TOOL, SESSION_ABORT_PIPELINE_TOOL],
   }));
 
   // Register prompts listing so scanners see resume_session
@@ -1439,21 +1415,18 @@ export async function startServer() {
       console.error(`[Prism] Storage pre-warm failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
     });
 
-    // ─── v4.1: Auto-Load via dynamic tool descriptions ──────────
-    // The session_load_context tool description is dynamically modified
-    // in createServer() → buildSessionMemoryTools() to include the
-    // auto-load projects list. Tool descriptions are surfaced by ALL
-    // MCP clients — this is the primary mechanism.
+    // ─── Hook-free auto-load via session_bootstrap ─────────────
+    // Static tool and MCP server instructions make the first-turn call
+    // explicit while dashboard settings remain server-owned.
     //
     // ─── v5.2.1: Deferred Auto-Push (fallback for non-compliant models) ──
     // After storage warms up, wait AUTOLOAD_PUSH_DELAY_MS. If the client
-    // (model) hasn't called session_load_context by then, push context via
+    // (model) hasn't loaded context through either tool by then, push via
     // sendLoggingMessage as a last resort. This is a FALLBACK — it's not
     // guaranteed to be surfaced by all clients, but it's better than nothing.
     //
-    // Why 10 seconds? Claude CLI always calls the tool within 2-3 seconds
-    // via its SessionStart hook. Antigravity models that comply also call it
-    // within 5 seconds. 10s gives ample time for well-behaved clients.
+    // Ten seconds gives native hosts time to honor the bootstrap instruction
+    // while preserving the fallback for clients that do not.
     const AUTOLOAD_PUSH_DELAY_MS = 10_000;
 
     // Read autoload projects from dashboard config (same source as createServer)
@@ -1466,13 +1439,13 @@ export async function startServer() {
         // Wait for the delay period to give the model a chance to call the tool
         await new Promise(r => setTimeout(r, AUTOLOAD_PUSH_DELAY_MS));
 
-        // If the client already called session_load_context, skip the push
+        // If the client already loaded context through either tool, skip it.
         if (contextLoadedByClient) {
           console.error(`[Prism] Auto-push skipped — client already loaded context`);
           return;
         }
 
-        console.error(`[Prism] Auto-push triggered — model did not call session_load_context within ${AUTOLOAD_PUSH_DELAY_MS / 1000}s`);
+        console.error(`[Prism] Auto-push triggered — model did not call session_bootstrap within ${AUTOLOAD_PUSH_DELAY_MS / 1000}s`);
 
         // Load and push context for each autoload project
         try {

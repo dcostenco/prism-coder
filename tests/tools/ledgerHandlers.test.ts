@@ -902,11 +902,13 @@ describe("ledgerHandlers", () => {
 
   describe("sessionBootstrapHandler", () => {
     it("uses dashboard projects, identity, role, and depth for the hook-free greeting", async () => {
+      const nativeSkillBody = `NATIVE_SKILL_BODY_MUST_NOT_BE_INLINED${"x".repeat(120_000)}`;
       mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
         autoload_projects: "prism-mcp, portal,prism-mcp",
         default_context_depth: "deep",
         agent_name: "Dmitri",
         default_role: "dev",
+        "user_skill:dev": nativeSkillBody,
       }[key] ?? fallback));
       storage.loadContext.mockImplementation(async (project: string) => ({
         last_summary: `Last work on ${project}`,
@@ -924,6 +926,9 @@ describe("ledgerHandlers", () => {
       expect(text).toContain("Last work on prism-mcp");
       expect(text).toContain("Last work on portal");
       expect(text).toContain("Earlier prism-mcp session");
+      expect(text).toContain("Native skills provisioned by prism connect");
+      expect(text).not.toContain("NATIVE_SKILL_BODY_MUST_NOT_BE_INLINED");
+      expect(text.length).toBeLessThan(10_000);
       expect(storage.loadContext).toHaveBeenCalledTimes(2);
       expect(storage.loadContext).toHaveBeenNthCalledWith(1, "prism-mcp", "deep", "test-user-id", "dev");
       expect(storage.loadContext).toHaveBeenNthCalledWith(2, "portal", "deep", "test-user-id", "dev");

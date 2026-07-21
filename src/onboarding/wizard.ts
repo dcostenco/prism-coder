@@ -196,14 +196,11 @@ function getFirstSearchContent(): WizardStepContent {
         instructions: [
             "Start a fresh conversation with your AI agent",
             'Ask: "What did we set up in our last session?"',
-            "The agent will call knowledge_search or session_load_context",
+            "The agent will call session_bootstrap before answering",
             "You should see your saved memory returned!",
         ],
-        codeSnippet: `// The agent calls:
-session_load_context({
-  project: "my-first-project",
-  level: "standard"
-})
+        codeSnippet: `// The agent calls once with no project or depth override:
+session_bootstrap({})
 // → Returns your saved summary + any open TODOs`,
         nextStep: "advanced_tour",
         progress: 71,
