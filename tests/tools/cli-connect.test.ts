@@ -32,6 +32,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   connectHosts,
   migrateLegacyClaudeHooks,
+  migrateLegacyClaudeInstructions,
   normalizeHostName,
   resolveInstalledServerPath,
   type ConnectHostName,
@@ -98,6 +99,25 @@ function freeManifest(): SkillManifest {
   };
   manifest.generation = computeSkillManifestGeneration(manifest);
   return manifest;
+}
+
+function legacyClaudeInstructions(tail = "KEEP USER INSTRUCTIONS\n"): string {
+  return [
+    "# CLAUDE.md - Core Operational Protocols",
+    "",
+    "## STEP 1: Auto-Load Prism Memory (MUST BE YOUR FIRST ACTION — NO EXCEPTIONS)",
+    "",
+    'mcp__prism-mcp__session_load_context(project="prism-mcp")',
+    "",
+    "## STEP 2: Display Startup Block (ONLY AFTER STEP 1 COMPLETES)",
+    "",
+    "Use the `[📜 SKILL: ...]` blocks returned by session_load_context to build the display:",
+    "",
+    "## HARD BEHAVIORAL GATES — SUPERSEDE ALL OTHER INSTRUCTIONS",
+    "",
+    tail.trimEnd(),
+    "",
+  ].join("\n");
 }
 
 function runBuiltCli(args: string[], env: NodeJS.ProcessEnv): Promise<{ status: number | null; stdout: string; stderr: string }> {
@@ -188,6 +208,34 @@ describe("prism connect", () => {
     writeFileSync(settingsPath, "{ malformed\n");
     expect(() => migrateLegacyClaudeHooks(homeDir)).toThrow(/Could not parse Claude hook settings/);
     expect(readFileSync(settingsPath, "utf8")).toBe("{ malformed\n");
+  });
+
+  it("removes only recognized legacy Prism startup sections from global Claude instructions", () => {
+    const homeDir = makeHome();
+    const instructionPath = join(homeDir, "CLAUDE.md");
+    const original = legacyClaudeInstructions();
+    writeFileSync(instructionPath, original);
+
+    expect(migrateLegacyClaudeInstructions(homeDir, true)).toMatchObject({
+      status: "would-remove",
+      removed: 2,
+    });
+    expect(readFileSync(instructionPath, "utf8")).toBe(original);
+
+    expect(migrateLegacyClaudeInstructions(homeDir)).toMatchObject({ status: "removed", removed: 2 });
+    expect(readFileSync(instructionPath, "utf8")).toBe(
+      "# CLAUDE.md - Core Operational Protocols\n\n" +
+      "## HARD BEHAVIORAL GATES — SUPERSEDE ALL OTHER INSTRUCTIONS\n\n" +
+      "KEEP USER INSTRUCTIONS\n",
+    );
+    expect(migrateLegacyClaudeInstructions(homeDir)).toMatchObject({ status: "unchanged", removed: 0 });
+
+    const nearMatchHome = makeHome();
+    const nearMatchPath = join(nearMatchHome, "CLAUDE.md");
+    const nearMatch = original.replace('project="prism-mcp"', 'project="custom-project"');
+    writeFileSync(nearMatchPath, nearMatch);
+    expect(migrateLegacyClaudeInstructions(nearMatchHome)).toMatchObject({ status: "unchanged", removed: 0 });
+    expect(readFileSync(nearMatchPath, "utf8")).toBe(nearMatch);
   });
 
   it("registers all five supported hosts with the installed server path", () => {
@@ -1026,12 +1074,15 @@ describe("prism connect", () => {
   it("keeps legacy Claude hooks when the install-time skill snapshot fails", () => {
     const homeDir = makeHome();
     const settingsPath = join(homeDir, ".claude", "settings.json");
+    const instructionPath = join(homeDir, "CLAUDE.md");
     const command = `${join(homeDir, "prism", "scripts", "sync-skills.sh")} > /dev/null 2>&1`;
     const original = `${JSON.stringify({
       hooks: { SessionStart: [{ matcher: "*", hooks: [{ type: "command", command }] }] },
     }, null, 2)}\n`;
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, original);
+    const originalInstructions = legacyClaudeInstructions();
+    writeFileSync(instructionPath, originalInstructions);
 
     const failed = spawnSync(
       process.execPath,
@@ -1053,6 +1104,7 @@ describe("prism connect", () => {
     expect(failed.status).toBe(1);
     expect(failed.stderr).toMatch(/Synalux skill synchronization failed/);
     expect(readFileSync(settingsPath, "utf8")).toBe(original);
+    expect(readFileSync(instructionPath, "utf8")).toBe(originalInstructions);
   });
 
   it("materializes entitled native skills before prism connect exits", async () => {
@@ -1101,6 +1153,7 @@ describe("prism connect", () => {
     mkdirSync(codexHome, { recursive: true });
 
     const claudeSettings = join(homeDir, ".claude", "settings.json");
+    const claudeInstructions = join(homeDir, "CLAUDE.md");
     const cursorHooks = join(homeDir, ".cursor", "hooks.json");
     const geminiSettings = join(homeDir, ".gemini", "settings.json");
     const legacySyncHook = `${join(homeDir, "prism", "scripts", "sync-skills.sh")} > /dev/null 2>&1`;
@@ -1119,6 +1172,7 @@ describe("prism connect", () => {
     mkdirSync(dirname(cursorHooks), { recursive: true });
     mkdirSync(dirname(geminiSettings), { recursive: true });
     writeFileSync(claudeSettings, `${JSON.stringify(claudeConfig, null, 2)}\n`);
+    writeFileSync(claudeInstructions, legacyClaudeInstructions("PRESERVE THIS CLAUDE RULE\n"));
     writeFileSync(cursorHooks, cursorHookSentinel);
     writeFileSync(geminiSettings, `${JSON.stringify(geminiConfig, null, 2)}\n`);
     const geminiHooksBefore = JSON.stringify(geminiConfig.hooks);
@@ -1156,6 +1210,7 @@ describe("prism connect", () => {
       expect(result.stdout).toContain("Gemini CLI: registered");
       expect(result.stdout).toContain("Codex: registered");
       expect(result.stdout).toContain("removed 1 legacy Prism hook action");
+      expect(result.stdout).toContain("removed 2 legacy Prism startup section");
 
       // Codex, Gemini CLI, and Cursor share the Agent Skills standard root.
       expect(readFileSync(join(
@@ -1174,6 +1229,8 @@ describe("prism connect", () => {
       expect(existsSync(claudeDesktopSkillsDir)).toBe(false);
 
       expect(readConfig(claudeSettings).hooks).toEqual({ SessionStart: ["user-owned-claude-hook"] });
+      expect(readFileSync(claudeInstructions, "utf8")).toContain("PRESERVE THIS CLAUDE RULE");
+      expect(readFileSync(claudeInstructions, "utf8")).not.toContain("session_load_context");
       expect(readFileSync(cursorHooks, "utf8")).toBe(cursorHookSentinel);
       expect(JSON.stringify(readConfig(geminiSettings).hooks)).toBe(geminiHooksBefore);
       expect(JSON.stringify(readConfig(join(homeDir, ".claude.json")))).not.toMatch(/SessionStart|hooks/i);
@@ -1188,12 +1245,15 @@ describe("prism connect", () => {
   it("keeps legacy Claude hooks when native skill synchronization is disabled", async () => {
     const homeDir = makeHome();
     const settingsPath = join(homeDir, ".claude", "settings.json");
+    const instructionPath = join(homeDir, "CLAUDE.md");
     const command = `${join(homeDir, "prism", "scripts", "sync-skills.sh")} > /dev/null 2>&1`;
     const original = `${JSON.stringify({
       hooks: { SessionStart: [{ matcher: "*", hooks: [{ type: "command", command }] }] },
     }, null, 2)}\n`;
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, original);
+    const originalInstructions = legacyClaudeInstructions();
+    writeFileSync(instructionPath, originalInstructions);
 
     const result = await runBuiltCli(["connect", "--host", "claude-code"], {
       ...process.env,
@@ -1206,6 +1266,7 @@ describe("prism connect", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(settingsPath, "utf8")).toBe(original);
+    expect(readFileSync(instructionPath, "utf8")).toBe(originalInstructions);
     expect(result.stdout).not.toContain("legacy Prism hook");
   });
 });

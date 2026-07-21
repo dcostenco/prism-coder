@@ -9,7 +9,12 @@ import { getSetting } from './storage/configStorage.js';
 import { PRISM_USER_ID, SERVER_CONFIG } from './config.js';
 import { getCurrentGitState } from './utils/git.js';
 import { sessionLoadContextHandler, sessionSaveLedgerHandler, sessionSaveHandoffHandler } from './tools/ledgerHandlers.js';
-import { connectHosts, migrateLegacyClaudeHooks, normalizeHostName } from './connect.js';
+import {
+  connectHosts,
+  migrateLegacyClaudeHooks,
+  migrateLegacyClaudeInstructions,
+  normalizeHostName,
+} from './connect.js';
 
 const program = new Command();
 
@@ -70,9 +75,13 @@ program
 
       if (options.dryRun) {
         if (connectedClaude) {
-          const migration = migrateLegacyClaudeHooks(undefined, true);
-          if (migration.status === 'would-remove') {
-            console.log(`• Claude Code: would remove ${migration.removed} legacy Prism hook action(s) (${migration.path})`);
+          const hookMigration = migrateLegacyClaudeHooks(undefined, true);
+          const instructionMigration = migrateLegacyClaudeInstructions(undefined, true);
+          if (hookMigration.status === 'would-remove') {
+            console.log(`• Claude Code: would remove ${hookMigration.removed} legacy Prism hook action(s) (${hookMigration.path})`);
+          }
+          if (instructionMigration.status === 'would-remove') {
+            console.log(`• Claude Code: would remove ${instructionMigration.removed} legacy Prism startup section(s) (${instructionMigration.path})`);
           }
         }
         console.log('\nDry run complete — no files changed.');
@@ -94,9 +103,17 @@ program
             console.error(`⚠ Preserved locally modified skill conflicts: ${skillSync.conflicts.join(', ')}`);
           }
           if (connectedClaude) {
-            const migration = migrateLegacyClaudeHooks();
-            if (migration.status === 'removed') {
-              console.log(`✓ Claude Code: removed ${migration.removed} legacy Prism hook action(s); native skills now own startup and sync`);
+            // Validate both legacy surfaces before mutating either file. A
+            // malformed settings file must never leave a half-migrated host.
+            migrateLegacyClaudeHooks(undefined, true);
+            migrateLegacyClaudeInstructions(undefined, true);
+            const hookMigration = migrateLegacyClaudeHooks();
+            const instructionMigration = migrateLegacyClaudeInstructions();
+            if (hookMigration.status === 'removed') {
+              console.log(`✓ Claude Code: removed ${hookMigration.removed} legacy Prism hook action(s); native skills now own startup and sync`);
+            }
+            if (instructionMigration.status === 'removed') {
+              console.log(`✓ Claude Code: removed ${instructionMigration.removed} legacy Prism startup section(s); MCP bootstrap now owns first-turn context`);
             }
           }
         }

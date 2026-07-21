@@ -54,6 +54,12 @@ export interface LegacyHookMigration {
   removed: number;
 }
 
+export interface LegacyInstructionMigration {
+  path: string;
+  status: "unchanged" | "would-remove" | "removed";
+  removed: number;
+}
+
 export interface ConnectOptions {
   all?: boolean;
   dryRun?: boolean;
@@ -279,6 +285,62 @@ export function migrateLegacyClaudeHooks(
     symlinkPath,
   );
   return { path: configPath, status: "removed", removed };
+}
+
+/**
+ * Remove the legacy Prism-only startup sections from ~/CLAUDE.md. The rest of
+ * the developer's global instructions remain byte-for-byte unchanged. Native
+ * skill and MCP metadata now own first-turn bootstrap selection.
+ */
+export function migrateLegacyClaudeInstructions(
+  homeDir = homedir(),
+  dryRun = false,
+  beforeCommit?: (path: string) => void,
+): LegacyInstructionMigration {
+  const instructionPath = join(homeDir, "CLAUDE.md");
+  let writePath = instructionPath;
+  let symlinkPath: string | undefined;
+  let originalText: string;
+
+  try {
+    const pathInfo = lstatSync(instructionPath);
+    if (pathInfo.isSymbolicLink()) {
+      writePath = realpathSync(instructionPath);
+      symlinkPath = instructionPath;
+      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
+    }
+    originalText = readFileSync(writePath, "utf8");
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return { path: instructionPath, status: "unchanged", removed: 0 };
+    throw new Error(`Could not inspect Claude instructions: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const stepOne = findExactLineRanges(
+    originalText,
+    "## STEP 1: Auto-Load Prism Memory (MUST BE YOUR FIRST ACTION — NO EXCEPTIONS)",
+  );
+  const hardGates = findExactLineRanges(
+    originalText,
+    "## HARD BEHAVIORAL GATES — SUPERSEDE ALL OTHER INSTRUCTIONS",
+  );
+  if (stepOne.length !== 1 || hardGates.length !== 1 || hardGates[0].start <= stepOne[0].start) {
+    return { path: instructionPath, status: "unchanged", removed: 0 };
+  }
+
+  const legacyBlock = originalText.slice(stepOne[0].start, hardGates[0].start);
+  const signatures = [
+    'mcp__prism-mcp__session_load_context(project="prism-mcp")',
+    "## STEP 2: Display Startup Block (ONLY AFTER STEP 1 COMPLETES)",
+    "Use the `[📜 SKILL: ...]` blocks returned by session_load_context to build the display:",
+  ];
+  if (!signatures.every((signature) => legacyBlock.includes(signature))) {
+    return { path: instructionPath, status: "unchanged", removed: 0 };
+  }
+
+  const nextText = originalText.slice(0, stepOne[0].start) + originalText.slice(hardGates[0].start);
+  if (dryRun) return { path: instructionPath, status: "would-remove", removed: 2 };
+  writeTextAtomically(writePath, nextText, originalText, beforeCommit, symlinkPath);
+  return { path: instructionPath, status: "removed", removed: 2 };
 }
 
 function getHostDefinitions(

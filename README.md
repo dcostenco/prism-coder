@@ -40,7 +40,9 @@ locally modified conflicts.
 
 When upgrading an older Claude Code installation, `prism connect` removes only
 the exact Prism-owned startup, skill-sync, handoff, and drift hook actions from
-the legacy bootstrap. User hooks and near matches remain untouched; native
+the legacy bootstrap. It also removes the recognized legacy Prism startup
+sections from `~/CLAUDE.md` while preserving every other instruction. User
+hooks, custom instruction sections, and near matches remain untouched; native
 skills and server-side reminders preserve those Prism features without host
 lifecycle hooks. Because hosts expose no native session-end callback, handoff
 at shutdown is instruction-driven rather than a guaranteed lifecycle event.

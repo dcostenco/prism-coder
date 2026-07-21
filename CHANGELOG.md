@@ -19,6 +19,8 @@ All notable changes to this project will be documented in this file.
 - `prism connect` performs a one-time exact-match removal of legacy Prism-owned
   Claude lifecycle hooks. User hooks remain untouched; native skills and
   server-side reminders now own startup, sync, handoff, and drift behavior.
+- Recognized legacy Prism startup sections in `~/CLAUDE.md` are retired only
+  after native skill sync succeeds; all other global instructions are retained.
 
 ### Fixed
 - Codex no longer needs a second restart after `prism connect`: the command
