@@ -12,10 +12,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 as win32Path } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
+import { LOCAL_FIRST_POLICY_ID, LOCAL_FIRST_POLICY_LINES } from "./localFirstPolicy.js";
 
 export const CONNECT_HOSTS = [
   "claude-code",
@@ -39,6 +40,8 @@ export interface ConnectResult {
   label: string;
   path: string;
   status: ConnectStatus;
+  /** True only when this registration can honor the current bootstrap contract. */
+  startupCompatible: boolean;
   message?: string;
 }
 
@@ -46,6 +49,16 @@ export interface ConnectSummary {
   results: ConnectResult[];
   usedApiKey: boolean;
   serverPath: string;
+  installationReceiptPath?: string;
+}
+
+export interface InstallationReceipt {
+  schema_version: 1;
+  owner: "prism-connect";
+  node_path: string;
+  cli_path: string;
+  server_path: string;
+  package_version: string;
 }
 
 export interface LegacyHookMigration {
@@ -60,10 +73,18 @@ export interface LegacyInstructionMigration {
   removed: number;
 }
 
+export interface LegacyProjectMcpMigration {
+  path: string;
+  status: "unchanged" | "would-remove" | "removed";
+  removed: number;
+}
+
 export interface NativeStartupConfiguration {
   path: string;
   status: "unchanged" | "would-install" | "would-refresh" | "installed" | "refreshed";
 }
+
+export type NativeAgentPolicyConfiguration = NativeStartupConfiguration;
 
 export interface ConnectOptions {
   all?: boolean;
@@ -76,8 +97,12 @@ export interface ConnectOptions {
   pathEnv?: string;
   serverPath?: string;
   nodePath?: string;
+  cliPath?: string;
+  packageVersion?: string;
   /** Test seam for simulating a host write immediately before commit. */
   beforeCommit?: (path: string) => void;
+  /** Test seam for simulating a receipt write race. */
+  beforeReceiptCommit?: (path: string) => void;
 }
 
 interface HostDefinition {
@@ -111,7 +136,45 @@ const CLAUDE_STARTUP_MANAGED_START = "<!-- >>> prism connect managed: native sta
 const CLAUDE_STARTUP_MANAGED_END = "<!-- <<< prism connect managed: native startup -->";
 const GEMINI_STARTUP_MANAGED_START = "<!-- >>> prism connect managed: native startup -->";
 const GEMINI_STARTUP_MANAGED_END = "<!-- <<< prism connect managed: native startup -->";
+const CODEX_STARTUP_MANAGED_START = "<!-- >>> prism connect managed: codex native startup -->";
+const CODEX_STARTUP_MANAGED_END = "<!-- <<< prism connect managed: codex native startup -->";
+const CODEX_STARTUP_BODY = [
+  "## Prism session startup",
+  "On the first user turn of every conversation, including a greeting, your first action must be",
+  "`session_bootstrap({})`, exactly once. Emit no preamble. Print the complete tool result verbatim as the",
+  "entire first-turn startup display, before any optional answer. Do not summarize, paraphrase, rename headings,",
+  "reformat, or omit any returned section. Preserve its order and line content. For a greeting-only prompt, stop",
+  "after the verbatim startup display. If `session_bootstrap` is deferred, use native tool discovery to load that",
+  "exact tool, then invoke it. Do not use shell commands, file reads, subagents, or unrelated tool inspection as",
+  "a substitute. Do not call `session_load_context`. If discovery or invocation fails, report",
+  "`Prism startup failure` and stop. Reuse the `conversation_id` returned in structuredContent for every",
+  "session_save_ledger, session_save_handoff, and session_detect_drift call in this conversation. This hook-free",
+  "block is managed by `prism connect`; do not edit it manually.",
+  "",
+  ...LOCAL_FIRST_POLICY_LINES,
+] as const;
 const CONNECT_STORAGE_BACKENDS = ["auto", "local", "synalux", "supabase"] as const;
+const LEGACY_CLAUDE_PROJECT_PRISM_ENTRY = {
+  command: "npx",
+  args: ["-y", "prism-mcp-server"],
+};
+const INSTALLATION_RECEIPT_SCHEMA_VERSION = 1;
+const INSTALLATION_RECEIPT_OWNER = "prism-connect";
+const CLAUDE_FALLBACK_SUBAGENT_MODEL = "sonnet";
+const CODEX_LOCAL_FIRST_POLICY = {
+  features: {
+    multi_agent: false,
+  },
+  agents: {
+    max_threads: 2,
+    max_depth: 1,
+    default_subagent_model: "gpt-5.6-terra",
+    default_subagent_reasoning_effort: "low",
+    job_max_runtime_seconds: 900,
+  },
+} as const;
+const CODEX_POLICY_MARKER_PREFIX = "# >>> prism connect managed: local-first";
+const CODEX_POLICY_MARKER_SUFFIX = "# <<< prism connect managed: local-first";
 
 export function normalizeHostName(value: string): ConnectHostName {
   const normalized = value.trim().toLowerCase();
@@ -144,6 +207,19 @@ export function resolveInstalledServerPath(moduleUrl = import.meta.url): string 
     throw new Error(`Prism server entrypoint was not found: ${serverPath}. Run npm run build first.`);
   }
   return realpathSync(serverPath);
+}
+
+function resolveInstalledPackageVersion(moduleUrl = import.meta.url): string {
+  const manifestPath = fileURLToPath(new URL("../package.json", moduleUrl));
+  try {
+    const manifest: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (isJsonObject(manifest) && typeof manifest.version === "string" && manifest.version.trim()) {
+      return manifest.version;
+    }
+  } catch (error) {
+    throw new Error(`Cannot read Prism package version at ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  throw new Error(`Prism package manifest has no valid "version" entry: ${manifestPath}`);
 }
 
 export function connectHosts(options: ConnectOptions = {}): ConnectSummary {
@@ -183,11 +259,172 @@ export function connectHosts(options: ConnectOptions = {}): ConnectSummary {
     !!options.refresh,
     options.beforeCommit,
   ));
+  let installationReceiptPath: string | undefined;
+  if (!options.dryRun && results.some((item) => item.status !== "error" && item.startupCompatible)) {
+    const pathApi = platform === "win32" ? win32Path : { dirname, join, isAbsolute, resolve };
+    const absoluteNodePath = pathApi.isAbsolute(nodePath) ? nodePath : pathApi.resolve(nodePath);
+    const absoluteServerPath = pathApi.isAbsolute(serverPath) ? serverPath : pathApi.resolve(serverPath);
+    const rawCliPath = options.cliPath ?? pathApi.join(pathApi.dirname(absoluteServerPath), "cli.js");
+    const absoluteCliPath = pathApi.isAbsolute(rawCliPath) ? rawCliPath : pathApi.resolve(rawCliPath);
+    installationReceiptPath = writeInstallationReceipt(homeDir, {
+      schema_version: INSTALLATION_RECEIPT_SCHEMA_VERSION,
+      owner: INSTALLATION_RECEIPT_OWNER,
+      node_path: absoluteNodePath,
+      cli_path: absoluteCliPath,
+      server_path: absoluteServerPath,
+      package_version: options.packageVersion ?? resolveInstalledPackageVersion(),
+    }, options.beforeReceiptCommit);
+  }
   return {
     results,
     usedApiKey: typeof env.PRISM_SYNALUX_API_KEY === "string" && env.PRISM_SYNALUX_API_KEY.length > 0,
     serverPath,
+    installationReceiptPath,
   };
+}
+
+/** Write the Prism-owned GUI discovery receipt without following symlinks. */
+export function writeInstallationReceipt(
+  homeDir: string,
+  receipt: InstallationReceipt,
+  beforeCommit?: (path: string) => void,
+): string {
+  if (!isAbsolute(resolve(homeDir))) throw new Error("Prism installation receipt home must resolve absolutely");
+  for (const [key, value] of Object.entries(receipt)) {
+    if (key.endsWith("_path") && (typeof value !== "string" || (!isAbsolute(value) && !win32Path.isAbsolute(value)))) {
+      throw new Error(`Prism installation receipt ${key} must be absolute`);
+    }
+  }
+  const directory = join(resolve(homeDir), ".prism-mcp");
+  const receiptPath = join(directory, "installation.json");
+  try {
+    const directoryInfo = lstatSync(directory);
+    if (directoryInfo.isSymbolicLink() || !directoryInfo.isDirectory()) {
+      throw new Error("receipt directory must be a real directory");
+    }
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) {
+      throw new Error(`Could not secure Prism installation receipt directory: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const directoryInfo = lstatSync(directory);
+    if (directoryInfo.isSymbolicLink() || !directoryInfo.isDirectory()) {
+      throw new Error("Could not secure Prism installation receipt directory");
+    }
+  }
+
+  let originalText: string | undefined;
+  try {
+    const receiptInfo = lstatSync(receiptPath);
+    if (receiptInfo.isSymbolicLink() || !receiptInfo.isFile()) {
+      throw new Error("receipt must be a regular Prism-owned file");
+    }
+    originalText = readFileSync(receiptPath, "utf8");
+    const current: unknown = JSON.parse(originalText);
+    if (!isJsonObject(current)
+      || current.schema_version !== INSTALLATION_RECEIPT_SCHEMA_VERSION
+      || current.owner !== INSTALLATION_RECEIPT_OWNER) {
+      throw new Error("existing receipt is not owned by prism-connect");
+    }
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) {
+      throw new Error(`Could not inspect Prism installation receipt: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  writeTextAtomically(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, originalText, beforeCommit);
+  return receiptPath;
+}
+
+/**
+ * Remove the exact project-scoped registration written by Prism's former
+ * `npx -y prism-mcp-server` setup. Claude Code resolves the nearest ancestor
+ * `.mcp.json`, so a stale entry there can shadow the native user registration.
+ * Custom Prism commands, arguments, environment, and unrelated servers remain
+ * untouched.
+ */
+export function migrateLegacyClaudeProjectMcp(
+  homeDir = homedir(),
+  cwd = process.cwd(),
+  dryRun = false,
+  beforeCommit?: (path: string) => void,
+): LegacyProjectMcpMigration {
+  let resolvedHome: string;
+  let resolvedCwd: string;
+  try {
+    resolvedHome = realpathSync(resolve(homeDir));
+    resolvedCwd = realpathSync(resolve(cwd));
+  } catch (error) {
+    throw new Error(`Could not resolve Claude project MCP search path: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const fallbackPath = join(resolvedHome, ".mcp.json");
+  if (!isPathWithin(resolvedCwd, resolvedHome)) {
+    return { path: fallbackPath, status: "unchanged", removed: 0 };
+  }
+
+  let configPath: string | undefined;
+  for (let directory = resolvedCwd; ; directory = dirname(directory)) {
+    const candidate = join(directory, ".mcp.json");
+    try {
+      lstatSync(candidate);
+      configPath = candidate;
+      break;
+    } catch (error) {
+      if (!isErrno(error, "ENOENT")) {
+        throw new Error(`Could not inspect Claude project MCP config: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (directory === resolvedHome) break;
+  }
+
+  if (!configPath) return { path: fallbackPath, status: "unchanged", removed: 0 };
+
+  let writePath = configPath;
+  let symlinkPath: string | undefined;
+  let originalText: string;
+  try {
+    const pathInfo = lstatSync(configPath);
+    if (pathInfo.isSymbolicLink()) {
+      writePath = realpathSync(configPath);
+      symlinkPath = configPath;
+    }
+    if (!statSync(writePath).isFile()) throw new Error("config is not a regular file");
+    originalText = readFileSync(writePath, "utf8");
+  } catch (error) {
+    throw new Error(`Could not inspect Claude project MCP config: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  let config: JsonObject;
+  try {
+    const parsed: unknown = JSON.parse(originalText);
+    if (!isJsonObject(parsed)) throw new Error("top-level JSON value must be an object");
+    config = parsed;
+  } catch (error) {
+    throw new Error(`Could not parse Claude project MCP config: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const currentServers = config.mcpServers;
+  if (currentServers === undefined) {
+    return { path: configPath, status: "unchanged", removed: 0 };
+  }
+  if (!isJsonObject(currentServers)) {
+    throw new Error('Could not inspect Claude project MCP config: "mcpServers" must be a JSON object');
+  }
+  if (!Object.prototype.hasOwnProperty.call(currentServers, "prism-mcp")
+    || !isDeepStrictEqual(currentServers["prism-mcp"], LEGACY_CLAUDE_PROJECT_PRISM_ENTRY)) {
+    return { path: configPath, status: "unchanged", removed: 0 };
+  }
+
+  delete currentServers["prism-mcp"];
+  if (dryRun) return { path: configPath, status: "would-remove", removed: 1 };
+
+  writeTextAtomically(
+    writePath,
+    `${JSON.stringify(config, null, 2)}\n`,
+    originalText,
+    beforeCommit,
+    symlinkPath,
+  );
+  return { path: configPath, status: "removed", removed: 1 };
 }
 
 function legacyClaudeHookTuples(homeDir: string): Set<string> {
@@ -412,7 +649,11 @@ function serializeClaudeStartupBlock(newline: string): string {
     "deferred, use native tool discovery/ToolSearch to load that",
     "exact tool, then invoke it. Do not use shell commands, file reads, subagents, or unrelated tool inspection",
     "as a substitute. Do not call `session_load_context`. If discovery or invocation fails, report",
-    "`Prism startup failure` and stop. This block is managed by `prism connect`; do not edit it manually.",
+    "`Prism startup failure` and stop. Reuse the `conversation_id` returned in structuredContent for every",
+    "session_save_ledger, session_save_handoff, and session_detect_drift call in this conversation. This block is",
+    "managed by `prism connect`; do not edit it manually.",
+    "",
+    ...LOCAL_FIRST_POLICY_LINES,
     CLAUDE_STARTUP_MANAGED_END,
     "",
   ].join(newline);
@@ -494,8 +735,11 @@ function serializeGeminiStartupBlock(newline: string): string {
     "after the verbatim startup display. If `session_bootstrap` is deferred, use native tool discovery/ToolSearch",
     "to load that exact tool, then invoke it.",
     "Do not use shell commands, file reads, subagents, or unrelated tool inspection as a substitute. Do not call",
-    "`session_load_context`. If discovery or invocation fails, report `Prism startup failure` and stop. This block",
-    "is managed by `prism connect`; do not edit it manually.",
+    "`session_load_context`. If discovery or invocation fails, report `Prism startup failure` and stop. Reuse the",
+    "`conversation_id` returned in structuredContent for session_save_ledger, session_save_handoff, and",
+    "session_detect_drift calls. This block is managed by `prism connect`; do not edit it manually.",
+    "",
+    ...LOCAL_FIRST_POLICY_LINES,
     GEMINI_STARTUP_MANAGED_END,
     "",
   ].join(newline);
@@ -587,6 +831,298 @@ export function configureGeminiNativeStartup(
   }
   writeTextAtomically(writePath, nextText, originalText, beforeCommit, symlinkPath);
   return { path: instructionPath, status: action === "install" ? "installed" : "refreshed" };
+}
+
+function serializeCodexStartupBlock(newline: string): string {
+  return [
+    CODEX_STARTUP_MANAGED_START,
+    ...CODEX_STARTUP_BODY,
+    CODEX_STARTUP_MANAGED_END,
+    "",
+  ].join(newline);
+}
+
+/** Install or refresh Codex's official global, hook-free first-turn instruction. */
+export function configureCodexNativeStartup(
+  homeDir?: string,
+  dryRun = false,
+  beforeCommit?: (path: string) => void,
+  env: NodeJS.ProcessEnv = homeDir === undefined ? process.env : {},
+): NativeStartupConfiguration {
+  const userHome = homeDir ?? homedir();
+  const configuredCodexHome = env.CODEX_HOME?.trim();
+  const codexHome = configuredCodexHome ? resolve(configuredCodexHome) : join(userHome, ".codex");
+  const instructionPath = join(codexHome, "AGENTS.md");
+  let writePath = instructionPath;
+  let symlinkPath: string | undefined;
+  let originalText: string | undefined;
+  let instructionEntryExists = false;
+
+  try {
+    const pathInfo = lstatSync(instructionPath);
+    instructionEntryExists = true;
+    if (pathInfo.isSymbolicLink()) {
+      writePath = realpathSync(instructionPath);
+      symlinkPath = instructionPath;
+      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
+    }
+    originalText = readFileSync(writePath, "utf8");
+  } catch (error) {
+    if (instructionEntryExists || !isErrno(error, "ENOENT")) {
+      throw new Error(`Could not inspect Codex instructions: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const currentText = originalText ?? "";
+  const newline = currentText.includes("\r\n") ? "\r\n" : "\n";
+  const startRanges = findExactLineRanges(currentText, CODEX_STARTUP_MANAGED_START);
+  const endRanges = findExactLineRanges(currentText, CODEX_STARTUP_MANAGED_END);
+  if (startRanges.length !== endRanges.length || startRanges.length > 1) {
+    throw new Error(`Codex instructions contain ambiguous Prism startup ownership markers: ${instructionPath}`);
+  }
+
+  const managedBlock = serializeCodexStartupBlock(newline);
+  let nextText: string;
+  let action: "install" | "refresh";
+  if (startRanges.length === 1) {
+    if (endRanges[0].start <= startRanges[0].start) {
+      throw new Error(`Codex instructions contain out-of-order Prism startup ownership markers: ${instructionPath}`);
+    }
+    const managedEnd = endRanges[0].end;
+    if (currentText.slice(startRanges[0].start, managedEnd) === managedBlock) {
+      return { path: instructionPath, status: "unchanged" };
+    }
+    nextText = currentText.slice(0, startRanges[0].start) + managedBlock + currentText.slice(managedEnd);
+    action = "refresh";
+  } else {
+    const separator = currentText.length === 0
+      ? ""
+      : currentText.endsWith("\n") || currentText.endsWith("\r")
+        ? newline
+        : `${newline}${newline}`;
+    nextText = currentText + separator + managedBlock;
+    action = "install";
+  }
+
+  if (dryRun) {
+    return { path: instructionPath, status: action === "install" ? "would-install" : "would-refresh" };
+  }
+  writeTextAtomically(writePath, nextText, originalText, beforeCommit, symlinkPath);
+  return { path: instructionPath, status: action === "install" ? "installed" : "refreshed" };
+}
+
+type JsonPolicyMutator = (config: JsonObject) => boolean;
+
+function configureJsonAgentPolicy(
+  configPath: string,
+  label: string,
+  mutate: JsonPolicyMutator,
+  dryRun: boolean,
+  beforeCommit?: (path: string) => void,
+): NativeAgentPolicyConfiguration {
+  let writePath = configPath;
+  let symlinkPath: string | undefined;
+  let originalText: string | undefined;
+  let config: JsonObject = {};
+
+  try {
+    const pathInfo = lstatSync(configPath);
+    if (pathInfo.isSymbolicLink()) {
+      writePath = realpathSync(configPath);
+      symlinkPath = configPath;
+      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
+    }
+    originalText = readFileSync(writePath, "utf8");
+    const parsed: unknown = JSON.parse(originalText);
+    if (!isJsonObject(parsed)) throw new Error("top-level JSON value must be an object");
+    config = parsed;
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) {
+      throw new Error(`Could not inspect ${label}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const changed = mutate(config);
+  if (!changed) return { path: configPath, status: "unchanged" };
+  const action = originalText === undefined ? "install" : "refresh";
+  if (dryRun) {
+    return { path: configPath, status: action === "install" ? "would-install" : "would-refresh" };
+  }
+  writeTextAtomically(
+    writePath,
+    `${JSON.stringify(config, null, 2)}\n`,
+    originalText,
+    beforeCommit,
+    symlinkPath,
+  );
+  return { path: configPath, status: action === "install" ? "installed" : "refreshed" };
+}
+
+/** Configure Claude Code's economy fallback model; policy text prevents routine fan-out. */
+export function configureClaudeAgentPolicy(
+  homeDir = homedir(),
+  dryRun = false,
+  beforeCommit?: (path: string) => void,
+): NativeAgentPolicyConfiguration {
+  const configPath = join(homeDir, ".claude", "settings.json");
+  return configureJsonAgentPolicy(configPath, "Claude agent settings", (config) => {
+    const currentEnv = config.env;
+    if (currentEnv !== undefined && !isJsonObject(currentEnv)) {
+      throw new Error('"env" must be a JSON object');
+    }
+    const env = (currentEnv ?? {}) as JsonObject;
+    if (env.CLAUDE_CODE_SUBAGENT_MODEL === CLAUDE_FALLBACK_SUBAGENT_MODEL) return false;
+    env.CLAUDE_CODE_SUBAGENT_MODEL = CLAUDE_FALLBACK_SUBAGENT_MODEL;
+    config.env = env;
+    return true;
+  }, dryRun, beforeCommit);
+}
+
+/** Disable Gemini's native/remote subagents; Prism local workers remain available over MCP. */
+export function configureGeminiAgentPolicy(
+  homeDir = homedir(),
+  dryRun = false,
+  beforeCommit?: (path: string) => void,
+): NativeAgentPolicyConfiguration {
+  const configPath = join(homeDir, ".gemini", "settings.json");
+  return configureJsonAgentPolicy(configPath, "Gemini agent settings", (config) => {
+    const currentExperimental = config.experimental;
+    if (currentExperimental !== undefined && !isJsonObject(currentExperimental)) {
+      throw new Error('"experimental" must be a JSON object');
+    }
+    const experimental = (currentExperimental ?? {}) as JsonObject;
+    if (experimental.enableAgents === false) return false;
+    experimental.enableAgents = false;
+    config.experimental = experimental;
+    return true;
+  }, dryRun, beforeCommit);
+}
+
+function tomlValue(value: string | number | boolean): string {
+  return typeof value === "string" ? JSON.stringify(value) : String(value);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function applyTomlTablePolicy(
+  source: string,
+  table: string,
+  desired: Readonly<Record<string, string | number | boolean>>,
+): string {
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const hadFinalNewline = source.endsWith("\n");
+  const lines = source.length === 0 ? [] : source.split(/\r?\n/);
+  if (hadFinalNewline) lines.pop();
+  const tablePattern = new RegExp(`^\\s*\\[${escapeRegExp(table)}\\]\\s*(?:#.*)?$`);
+  const tableIndexes = lines
+    .map((line, index) => tablePattern.test(line) ? index : -1)
+    .filter((index) => index >= 0);
+  if (tableIndexes.length > 1) throw new Error(`duplicate [${table}] tables`);
+
+  let tableStart = tableIndexes[0];
+  if (tableStart === undefined) {
+    if (lines.length > 0 && lines[lines.length - 1] !== "") lines.push("");
+    lines.push(`[${table}]`);
+    tableStart = lines.length - 1;
+  }
+  let tableEnd = lines.findIndex((line, index) =>
+    index > tableStart && /^\s*\[{1,2}[^\]]+\]{1,2}\s*(?:#.*)?$/.test(line));
+  if (tableEnd < 0) tableEnd = lines.length;
+
+  const missing: Array<[string, string | number | boolean]> = [];
+  for (const [key, value] of Object.entries(desired)) {
+    const keyPattern = new RegExp(`^(\\s*${escapeRegExp(key)}\\s*=\\s*)(.*?)(\\s+#.*)?$`);
+    const matches: number[] = [];
+    for (let index = tableStart + 1; index < tableEnd; index++) {
+      if (keyPattern.test(lines[index])) matches.push(index);
+    }
+    if (matches.length > 1) throw new Error(`duplicate ${table}.${key} assignments`);
+    if (matches.length === 0) {
+      missing.push([key, value]);
+      continue;
+    }
+    lines[matches[0]] = lines[matches[0]].replace(
+      keyPattern,
+      (_match, prefix: string, _oldValue: string, comment: string | undefined) =>
+        `${prefix}${tomlValue(value)}${comment ?? ""}`,
+    );
+  }
+
+  if (missing.length > 0) {
+    const marker = `${CODEX_POLICY_MARKER_PREFIX} ${table}`;
+    const markerEnd = `${CODEX_POLICY_MARKER_SUFFIX} ${table}`;
+    lines.splice(
+      tableEnd,
+      0,
+      marker,
+      ...missing.map(([key, value]) => `${key} = ${tomlValue(value)}`),
+      markerEnd,
+    );
+  }
+  return `${lines.join(newline)}${hadFinalNewline || lines.length > 0 ? newline : ""}`;
+}
+
+/** Hard-disable Codex fan-out while retaining a bounded economy fallback profile. */
+export function configureCodexAgentPolicy(
+  homeDir?: string,
+  dryRun = false,
+  beforeCommit?: (path: string) => void,
+  env: NodeJS.ProcessEnv = homeDir === undefined ? process.env : {},
+): NativeAgentPolicyConfiguration {
+  const userHome = homeDir ?? homedir();
+  const configuredCodexHome = env.CODEX_HOME?.trim();
+  const codexHome = configuredCodexHome ? resolve(configuredCodexHome) : join(userHome, ".codex");
+  const configPath = join(codexHome, "config.toml");
+  let writePath = configPath;
+  let symlinkPath: string | undefined;
+  let originalText: string | undefined;
+
+  try {
+    const pathInfo = lstatSync(configPath);
+    if (pathInfo.isSymbolicLink()) {
+      writePath = realpathSync(configPath);
+      symlinkPath = configPath;
+      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
+    }
+    originalText = readFileSync(writePath, "utf8");
+    parseToml(originalText);
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) {
+      throw new Error(`Could not inspect Codex agent settings: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  let nextText = originalText ?? "";
+  nextText = applyTomlTablePolicy(nextText, "features", CODEX_LOCAL_FIRST_POLICY.features);
+  nextText = applyTomlTablePolicy(nextText, "agents", CODEX_LOCAL_FIRST_POLICY.agents);
+  let parsed: unknown;
+  try {
+    parsed = parseToml(nextText);
+  } catch (error) {
+    throw new Error(`Could not build valid Codex local-first policy: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const parsedFeatures = isJsonObject(parsed) && isJsonObject(parsed.features)
+    ? parsed.features
+    : undefined;
+  const parsedAgents = isJsonObject(parsed) && isJsonObject(parsed.agents)
+    ? parsed.agents
+    : undefined;
+  if (!parsedFeatures
+    || !parsedAgents
+    || !isDeepStrictEqual(parsedFeatures.multi_agent, false)
+    || !Object.entries(CODEX_LOCAL_FIRST_POLICY.agents)
+      .every(([key, value]) => isDeepStrictEqual(parsedAgents[key], value))) {
+    throw new Error("Generated Codex local-first policy failed validation");
+  }
+  if (nextText === originalText) return { path: configPath, status: "unchanged" };
+  const action = originalText === undefined ? "install" : "refresh";
+  if (dryRun) {
+    return { path: configPath, status: action === "install" ? "would-install" : "would-refresh" };
+  }
+  writeTextAtomically(writePath, nextText, originalText, beforeCommit, symlinkPath);
+  return { path: configPath, status: action === "install" ? "installed" : "refreshed" };
 }
 
 function getHostDefinitions(
@@ -748,6 +1284,7 @@ function buildMcpEntry(nodePath: string, serverPath: string, env: NodeJS.Process
 
   const serverEnv: Record<string, string> = {
     PRISM_INSTANCE: "prism-mcp",
+    PRISM_AGENT_POLICY: LOCAL_FIRST_POLICY_ID,
     PRISM_SYNALUX_BASE_URL: env.PRISM_SYNALUX_BASE_URL || "https://synalux.ai",
     PRISM_STORAGE: storage,
   };
@@ -832,16 +1369,19 @@ function registerJsonHost(
 
   if (existingKey) {
     const existingEntry = mcpServers[existingKey];
+    const startupCompatible = existingKey === "prism-mcp"
+      && isManagedPrismEntry(existingEntry)
+      && isDeepStrictEqual(refreshManagedEntry(existingEntry, entry), existingEntry);
     if (!refresh || existingKey !== "prism-mcp" || !isManagedPrismEntry(existingEntry)) {
-      return result(definition, "existing", "Prism is already registered; existing entry left untouched");
+      return result(definition, "existing", "Prism is already registered; existing entry left untouched", startupCompatible);
     }
 
     const refreshedEntry = refreshManagedEntry(existingEntry, entry);
     if (JSON.stringify(refreshedEntry) === JSON.stringify(existingEntry)) {
-      return result(definition, "existing", "Prism-managed entry is already current");
+      return result(definition, "existing", "Prism-managed entry is already current", true);
     }
     if (dryRun) {
-      return result(definition, "would-refresh");
+      return result(definition, "would-refresh", undefined, true);
     }
 
     mcpServers[existingKey] = refreshedEntry;
@@ -854,14 +1394,14 @@ function registerJsonHost(
         beforeCommit,
         symlinkPath,
       );
-      return result(definition, "refreshed");
+      return result(definition, "refreshed", undefined, true);
     } catch (error) {
       return result(definition, "error", error instanceof Error ? error.message : String(error));
     }
   }
 
   if (dryRun) {
-    return result(definition, "would-register");
+    return result(definition, "would-register", undefined, true);
   }
 
   mcpServers["prism-mcp"] = entry;
@@ -875,7 +1415,7 @@ function registerJsonHost(
       beforeCommit,
       symlinkPath,
     );
-    return result(definition, "registered");
+    return result(definition, "registered", undefined, true);
   } catch (error) {
     return result(definition, "error", error instanceof Error ? error.message : String(error));
   }
@@ -946,11 +1486,15 @@ function registerCodexTomlHost(
   if (hasCanonical || hasLegacy) {
     const existingKey = hasCanonical ? "prism-mcp" : "prism";
     const existingEntry = mcpServers[existingKey];
+    const startupCompatible = existingKey === "prism-mcp"
+      && managedBlock !== undefined
+      && isManagedPrismEntry(existingEntry)
+      && isDeepStrictEqual(refreshManagedEntry(existingEntry, entry), existingEntry);
     if (!refresh || existingKey !== "prism-mcp") {
-      return result(definition, "existing", "Prism is already registered; existing entry left untouched");
+      return result(definition, "existing", "Prism is already registered; existing entry left untouched", startupCompatible);
     }
     if (!managedBlock) {
-      return result(definition, "existing", "Prism is already registered; existing entry left untouched");
+      return result(definition, "existing", "Prism is already registered; existing entry left untouched", false);
     }
     if (!isManagedPrismEntry(existingEntry)) {
       return result(definition, "error", "Prism-managed Codex block has an invalid ownership marker");
@@ -958,7 +1502,7 @@ function registerCodexTomlHost(
 
     const refreshedEntry = refreshManagedEntry(existingEntry, entry);
     if (isDeepStrictEqual(refreshedEntry, existingEntry)) {
-      return result(definition, "existing", "Prism-managed entry is already current");
+      return result(definition, "existing", "Prism-managed entry is already current", true);
     }
 
     let nextText: string;
@@ -969,12 +1513,12 @@ function registerCodexTomlHost(
       return result(definition, "error", `could not build valid Codex config: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (dryRun) {
-      return result(definition, "would-refresh");
+      return result(definition, "would-refresh", undefined, true);
     }
 
     try {
       writeTextAtomically(writePath, nextText, originalText, beforeCommit, symlinkPath);
-      return result(definition, "refreshed");
+      return result(definition, "refreshed", undefined, true);
     } catch (error) {
       return result(definition, "error", error instanceof Error ? error.message : String(error));
     }
@@ -1003,12 +1547,12 @@ function registerCodexTomlHost(
     );
   }
   if (dryRun) {
-    return result(definition, "would-register");
+    return result(definition, "would-register", undefined, true);
   }
 
   try {
     writeTextAtomically(writePath, nextText, originalText, beforeCommit, symlinkPath);
-    return result(definition, "registered");
+    return result(definition, "registered", undefined, true);
   } catch (error) {
     return result(definition, "error", error instanceof Error ? error.message : String(error));
   }
@@ -1124,18 +1668,26 @@ function result(
   definition: HostDefinition,
   status: ConnectStatus,
   message?: string,
+  startupCompatible = false,
 ): ConnectResult {
   return {
     host: definition.name,
     label: definition.label,
     path: definition.configPath,
     status,
+    startupCompatible,
     message,
   };
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPathWithin(candidate: string, parent: string): boolean {
+  const relativePath = relative(parent, candidate);
+  return relativePath === ""
+    || (!isAbsolute(relativePath) && relativePath !== ".." && !relativePath.startsWith(`..${sep}`));
 }
 
 function isManagedPrismEntry(value: unknown): value is JsonObject {

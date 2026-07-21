@@ -24,6 +24,11 @@ Gemini must load it with native tool discovery and then invoke it; shell, file,
 and subagent inspection are not substitutes. Discovery or invocation failure is
 reported as a Prism startup failure and stops the turn.
 
+The same command sets `experimental.enableAgents=false` in
+`~/.gemini/settings.json`. Bounded delegation runs through Prism's
+memory-aware local worker instead of Gemini native or remote subagents. The
+main Gemini thread remains responsible for host-tool work and verification.
+
 Gemini's model still owns the final assistant message. MCP and native
 instructions can request the complete startup display, but cannot force a
 third-party host to relay it verbatim without a lifecycle hook or a
@@ -45,7 +50,7 @@ and global instructions.
 
 | File | Managed content |
 |------|-----------------|
-| `~/.gemini/settings.json` | The `mcpServers.prism-mcp` registration |
+| `~/.gemini/settings.json` | The `mcpServers.prism-mcp` registration and `experimental.enableAgents=false` local-first limit |
 | `~/.gemini/GEMINI.md` | Only the marked native-startup block |
 | `~/.agents/skills/` | Entitled native skills synchronized by Prism |
 

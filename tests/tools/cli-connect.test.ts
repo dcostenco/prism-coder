@@ -30,9 +30,14 @@ import type { AddressInfo } from "node:net";
 import { parse as parseToml } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  configureClaudeAgentPolicy,
   configureClaudeNativeStartup,
+  configureCodexAgentPolicy,
+  configureCodexNativeStartup,
+  configureGeminiAgentPolicy,
   configureGeminiNativeStartup,
   connectHosts,
+  migrateLegacyClaudeProjectMcp,
   migrateLegacyClaudeHooks,
   migrateLegacyClaudeInstructions,
   migrateLegacyClaudeManagedStartup,
@@ -59,6 +64,13 @@ function expectVerbatimStartupContract(instructions: string): void {
   expect(normalized).toContain(
     "For a greeting-only prompt, stop after the verbatim startup display.",
   );
+}
+
+function expectLocalFirstPolicy(instructions: string): void {
+  expect(instructions).toContain("## Prism local-first orchestration");
+  expect(instructions).toContain("use Prism's local worker before any host-native or background subagent");
+  expect(instructions).toContain("Never create host-native or background subagents for routine work");
+  expect(instructions).toContain("A host-native subagent is a last resort: at most one, no nesting");
 }
 
 function makeHome(): string {
@@ -164,9 +176,13 @@ function legacyGeminiInstructions(tail = "# Paths\n\n- Keep this user rule.\n", 
   ].join(newline);
 }
 
-function runBuiltCli(args: string[], env: NodeJS.ProcessEnv): Promise<{ status: number | null; stdout: string; stderr: string }> {
+function runBuiltCli(
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  cwd = process.cwd(),
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolveChild, rejectChild) => {
-    const child = spawn(process.execPath, [resolve("dist/cli.js"), ...args], { env });
+    const child = spawn(process.execPath, [resolve("dist/cli.js"), ...args], { env, cwd });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += String(chunk); });
@@ -183,6 +199,105 @@ afterEach(() => {
 });
 
 describe("prism connect", () => {
+  it("removes only the exact legacy Prism project registration from the effective ancestor", () => {
+    const homeDir = makeHome();
+    const cwd = join(homeDir, "work", "project", "src");
+    const projectConfigPath = join(homeDir, ".mcp.json");
+    mkdirSync(cwd, { recursive: true });
+    const originalConfig = {
+      projectSetting: { keep: true },
+      mcpServers: {
+        "prism-mcp": { command: "npx", args: ["-y", "prism-mcp-server"] },
+        prism: { command: "custom-prism", args: ["--keep-me"] },
+        other: { command: "other-server", custom: { keep: true } },
+      },
+    };
+    const original = `${JSON.stringify(originalConfig, null, 4)}\n`;
+    writeFileSync(projectConfigPath, original, { mode: 0o640 });
+
+    expect(migrateLegacyClaudeProjectMcp(homeDir, cwd, true)).toMatchObject({
+      path: realpathSync(projectConfigPath),
+      status: "would-remove",
+      removed: 1,
+    });
+    expect(readFileSync(projectConfigPath, "utf8")).toBe(original);
+
+    expect(migrateLegacyClaudeProjectMcp(homeDir, cwd)).toMatchObject({
+      path: realpathSync(projectConfigPath),
+      status: "removed",
+      removed: 1,
+    });
+    const migrated = readConfig(projectConfigPath);
+    expect(migrated.projectSetting).toEqual({ keep: true });
+    expect(migrated.mcpServers).toEqual({
+      prism: { command: "custom-prism", args: ["--keep-me"] },
+      other: { command: "other-server", custom: { keep: true } },
+    });
+    expect(statSync(projectConfigPath).mode & 0o777).toBe(0o640);
+    expect(migrateLegacyClaudeProjectMcp(homeDir, cwd)).toMatchObject({
+      status: "unchanged",
+      removed: 0,
+    });
+  });
+
+  it("preserves custom near matches in the nearest ancestor instead of changing a higher config", () => {
+    const homeDir = makeHome();
+    const projectRoot = join(homeDir, "work", "project");
+    const cwd = join(projectRoot, "src");
+    const homeConfigPath = join(homeDir, ".mcp.json");
+    const projectConfigPath = join(projectRoot, ".mcp.json");
+    mkdirSync(cwd, { recursive: true });
+    const homeOriginal = `${JSON.stringify({
+      mcpServers: { "prism-mcp": { command: "npx", args: ["-y", "prism-mcp-server"] } },
+    }, null, 2)}\n`;
+    const projectOriginal = `${JSON.stringify({
+      mcpServers: {
+        "prism-mcp": {
+          command: "npx",
+          args: ["-y", "prism-mcp-server"],
+          env: { USER_CUSTOMIZED: "true" },
+        },
+      },
+    }, null, 2)}\n`;
+    writeFileSync(homeConfigPath, homeOriginal);
+    writeFileSync(projectConfigPath, projectOriginal);
+
+    expect(migrateLegacyClaudeProjectMcp(homeDir, cwd)).toMatchObject({
+      path: realpathSync(projectConfigPath),
+      status: "unchanged",
+      removed: 0,
+    });
+    expect(readFileSync(projectConfigPath, "utf8")).toBe(projectOriginal);
+    expect(readFileSync(homeConfigPath, "utf8")).toBe(homeOriginal);
+  });
+
+  it("fails loud on malformed project MCP config and preserves concurrent edits", () => {
+    const malformedHome = makeHome();
+    const malformedCwd = join(malformedHome, "project");
+    const malformedPath = join(malformedHome, ".mcp.json");
+    mkdirSync(malformedCwd, { recursive: true });
+    writeFileSync(malformedPath, "{ malformed\n");
+    expect(() => migrateLegacyClaudeProjectMcp(malformedHome, malformedCwd))
+      .toThrow(/Could not parse Claude project MCP config/);
+    expect(readFileSync(malformedPath, "utf8")).toBe("{ malformed\n");
+
+    const racedHome = makeHome();
+    const racedCwd = join(racedHome, "project");
+    const racedPath = join(racedHome, ".mcp.json");
+    mkdirSync(racedCwd, { recursive: true });
+    writeFileSync(racedPath, `${JSON.stringify({
+      mcpServers: { "prism-mcp": { command: "npx", args: ["-y", "prism-mcp-server"] } },
+    }, null, 2)}\n`);
+    const competing = `${JSON.stringify({
+      mcpServers: { other: { command: "written-by-running-host" } },
+    }, null, 2)}\n`;
+
+    expect(() => migrateLegacyClaudeProjectMcp(racedHome, racedCwd, false, (writePath) => {
+      writeFileSync(writePath, competing);
+    })).toThrow(/changed while Prism was preparing/);
+    expect(readFileSync(racedPath, "utf8")).toBe(competing);
+  });
+
   it("removes only exact legacy Prism Claude hook tuples and is dry-run safe and idempotent", () => {
     const homeDir = makeHome();
     const settingsPath = join(homeDir, ".claude", "settings.json");
@@ -285,6 +400,7 @@ describe("prism connect", () => {
     expect(configured).toContain("Do not use shell commands, file reads, subagents");
     expect(configured).toContain("`Prism startup failure` and stop");
     expectVerbatimStartupContract(configured);
+    expectLocalFirstPolicy(configured);
     expect(configureClaudeNativeStartup(homeDir)).toMatchObject({ status: "unchanged" });
     writeFileSync(canonicalPath, configured.replace("your first action must be", "your first action may be"));
     expect(configureClaudeNativeStartup(homeDir, true)).toMatchObject({ status: "would-refresh" });
@@ -372,6 +488,7 @@ describe("prism connect", () => {
     expect(configured).toContain("Do not use shell commands, file reads, subagents");
     expect(configured).toContain("`Prism startup failure` and stop");
     expectVerbatimStartupContract(configured);
+    expectLocalFirstPolicy(configured);
     expect(configured).not.toContain("# Startup — MANDATORY");
     expect(configured.slice(configured.indexOf("# Paths"))).toBe("# Paths\n\n- Keep this user rule.\n");
     expect(statSync(instructionPath).mode & 0o777).toBe(0o640);
@@ -430,6 +547,153 @@ describe("prism connect", () => {
     }
   });
 
+  it("installs and refreshes Codex global startup instructions without rewriting user content", () => {
+    const homeDir = makeHome();
+    const codexHome = join(homeDir, "custom-codex-home");
+    const instructionPath = join(codexHome, "AGENTS.md");
+    const env = { CODEX_HOME: codexHome };
+    const original = "# User Codex rules\r\n\r\nKeep this line.\r\n";
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(instructionPath, original, { mode: 0o640 });
+
+    expect(configureCodexNativeStartup(homeDir, true, undefined, env)).toMatchObject({
+      path: instructionPath,
+      status: "would-install",
+    });
+    expect(readFileSync(instructionPath, "utf8")).toBe(original);
+    expect(configureCodexNativeStartup(homeDir, false, undefined, env)).toMatchObject({
+      path: instructionPath,
+      status: "installed",
+    });
+
+    const configured = readFileSync(instructionPath, "utf8");
+    expect(configured.startsWith(`${original}\r\n`)).toBe(true);
+    expect(configured).toContain("<!-- >>> prism connect managed: codex native startup -->");
+    expect(configured).toContain("`session_bootstrap({})`, exactly once");
+    expect(configured).toContain("Do not call `session_load_context`");
+    expect(configured.replaceAll("\r\n", "")).not.toContain("\n");
+    expect(statSync(instructionPath).mode & 0o777).toBe(0o640);
+    expectVerbatimStartupContract(configured);
+    expectLocalFirstPolicy(configured);
+
+    expect(configureCodexNativeStartup(homeDir, false, undefined, env))
+      .toMatchObject({ status: "unchanged" });
+    const userSuffix = "# User suffix after Prism\r\n";
+    writeFileSync(
+      instructionPath,
+      configured.replace("your first action must be", "your first action may be") + userSuffix,
+    );
+    expect(configureCodexNativeStartup(homeDir, true, undefined, env))
+      .toMatchObject({ status: "would-refresh" });
+    expect(configureCodexNativeStartup(homeDir, false, undefined, env))
+      .toMatchObject({ status: "refreshed" });
+    expect(readFileSync(instructionPath, "utf8")).toBe(configured + userSuffix);
+
+    const fallbackHome = makeHome();
+    expect(configureCodexNativeStartup(fallbackHome, false, undefined, {}))
+      .toMatchObject({ path: join(fallbackHome, ".codex", "AGENTS.md"), status: "installed" });
+  });
+
+  it("installs bounded native agent policies without discarding unrelated host settings", () => {
+    const homeDir = makeHome();
+    const claudePath = join(homeDir, ".claude", "settings.json");
+    const geminiPath = join(homeDir, ".gemini", "settings.json");
+    const codexPath = join(homeDir, ".codex", "config.toml");
+    mkdirSync(dirname(claudePath), { recursive: true });
+    mkdirSync(dirname(geminiPath), { recursive: true });
+    mkdirSync(dirname(codexPath), { recursive: true });
+    writeFileSync(claudePath, `${JSON.stringify({ env: { KEEP: "yes" }, theme: "dark" }, null, 2)}\n`);
+    writeFileSync(geminiPath, `${JSON.stringify({ experimental: { worktrees: true }, theme: "dark" }, null, 2)}\n`);
+    const codexOriginal = [
+      'model = "gpt-5.6-sol"',
+      '# preserve this comment',
+      '',
+      '[features]',
+      'memories = true',
+      'multi_agent = true # user had fan-out enabled',
+      '',
+      '[agents]',
+      'max_threads = 12',
+      '',
+      '[mcp_servers.keep]',
+      'command = "keep"',
+      '',
+    ].join("\n");
+    writeFileSync(codexPath, codexOriginal);
+
+    expect(configureClaudeAgentPolicy(homeDir, true)).toMatchObject({ status: "would-refresh" });
+    expect(configureGeminiAgentPolicy(homeDir, true)).toMatchObject({ status: "would-refresh" });
+    expect(configureCodexAgentPolicy(homeDir, true)).toMatchObject({ status: "would-refresh" });
+    expect(readFileSync(codexPath, "utf8")).toBe(codexOriginal);
+
+    expect(configureClaudeAgentPolicy(homeDir)).toMatchObject({ status: "refreshed" });
+    expect(configureGeminiAgentPolicy(homeDir)).toMatchObject({ status: "refreshed" });
+    expect(configureCodexAgentPolicy(homeDir)).toMatchObject({ status: "refreshed" });
+
+    const claude = readConfig(claudePath);
+    expect(claude.env).toMatchObject({ KEEP: "yes", CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" });
+    expect(claude.theme).toBe("dark");
+    const gemini = readConfig(geminiPath);
+    expect(gemini.experimental).toMatchObject({ worktrees: true, enableAgents: false });
+    expect(gemini.theme).toBe("dark");
+    const codex = readTomlConfig(codexPath);
+    expect(codex.features).toMatchObject({ memories: true, multi_agent: false });
+    expect(codex.agents).toMatchObject({
+      max_threads: 2,
+      max_depth: 1,
+      default_subagent_model: "gpt-5.6-terra",
+      default_subagent_reasoning_effort: "low",
+      job_max_runtime_seconds: 900,
+    });
+    expect(codex.mcp_servers.keep.command).toBe("keep");
+    expect(readFileSync(codexPath, "utf8")).toContain("# preserve this comment");
+
+    expect(configureClaudeAgentPolicy(homeDir)).toMatchObject({ status: "unchanged" });
+    expect(configureGeminiAgentPolicy(homeDir)).toMatchObject({ status: "unchanged" });
+    expect(configureCodexAgentPolicy(homeDir)).toMatchObject({ status: "unchanged" });
+  });
+
+  it("preserves a symlinked Codex AGENTS.md and fails loud on races or malformed ownership markers", () => {
+    const homeDir = makeHome();
+    const codexHome = join(homeDir, ".codex");
+    const instructionPath = join(codexHome, "AGENTS.md");
+    const target = join(homeDir, "shared-codex-agents.md");
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(target, "USER RULE\n", { mode: 0o640 });
+    symlinkSync(target, instructionPath);
+
+    expect(configureCodexNativeStartup(homeDir)).toMatchObject({ status: "installed" });
+    expect(lstatSync(instructionPath).isSymbolicLink()).toBe(true);
+    expect(realpathSync(instructionPath)).toBe(realpathSync(target));
+    expect(readFileSync(target, "utf8")).toContain("USER RULE\n");
+    expect(readFileSync(target, "utf8")).toContain("prism connect managed: codex native startup");
+    expect(statSync(target).mode & 0o777).toBe(0o640);
+
+    const racedHome = makeHome();
+    const racedPath = join(racedHome, ".codex", "AGENTS.md");
+    mkdirSync(dirname(racedPath), { recursive: true });
+    writeFileSync(racedPath, "before\n");
+    expect(() => configureCodexNativeStartup(racedHome, false, (writePath) => {
+      writeFileSync(writePath, "concurrent edit\n");
+    })).toThrow(/changed while Prism was preparing/);
+    expect(readFileSync(racedPath, "utf8")).toBe("concurrent edit\n");
+
+    const start = "<!-- >>> prism connect managed: codex native startup -->";
+    const end = "<!-- <<< prism connect managed: codex native startup -->";
+    for (const malformed of [
+      `before\n${start}\n`,
+      `${start}\n${end}\n${start}\n${end}\n`,
+      `${end}\n${start}\n`,
+    ]) {
+      const malformedHome = makeHome();
+      const malformedPath = join(malformedHome, ".codex", "AGENTS.md");
+      mkdirSync(dirname(malformedPath), { recursive: true });
+      writeFileSync(malformedPath, malformed);
+      expect(() => configureCodexNativeStartup(malformedHome)).toThrow(/Codex instructions contain/);
+      expect(readFileSync(malformedPath, "utf8")).toBe(malformed);
+    }
+  });
+
   it("registers all five supported hosts with the installed server path", () => {
     const homeDir = makeHome();
     const serverPath = "/opt/prism-mcp-server/dist/server.js";
@@ -458,6 +722,7 @@ describe("prism connect", () => {
         args: [serverPath],
         env: {
           PRISM_INSTANCE: "prism-mcp",
+          PRISM_AGENT_POLICY: "local-first",
           PRISM_SYNALUX_BASE_URL: "https://synalux.ai",
           PRISM_STORAGE: "auto",
         },
@@ -470,6 +735,7 @@ describe("prism connect", () => {
         args: [serverPath],
         env: {
           PRISM_INSTANCE: "prism-mcp",
+          PRISM_AGENT_POLICY: "local-first",
           PRISM_SYNALUX_BASE_URL: "https://synalux.ai",
           PRISM_STORAGE: "auto",
         },
@@ -1202,6 +1468,7 @@ describe("prism connect", () => {
     expect(connected.stdout).toContain("Codex: registered");
     expect(readTomlConfig(join(codexHome, "config.toml")).mcp_servers)
       .toHaveProperty("prism-mcp");
+    expect(existsSync(join(codexHome, "AGENTS.md"))).toBe(false);
 
     const conflicting = spawnSync(
       process.execPath,
@@ -1264,6 +1531,47 @@ describe("prism connect", () => {
     expect(existsSync(join(homeDir, ".gemini", "settings.json"))).toBe(false);
   });
 
+  it("reports the Claude project migration on default and refresh dry runs only after registration can succeed", () => {
+    const homeDir = makeHome();
+    const cwd = join(homeDir, "work", "project");
+    const projectConfigPath = join(homeDir, ".mcp.json");
+    mkdirSync(cwd, { recursive: true });
+    const original = `${JSON.stringify({
+      mcpServers: { "prism-mcp": { command: "npx", args: ["-y", "prism-mcp-server"] } },
+    }, null, 2)}\n`;
+    writeFileSync(projectConfigPath, original);
+    const env = {
+      ...process.env,
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      PRISM_CONFIG_PATH: join(homeDir, "prism-config.db"),
+      PRISM_SKILL_SYNC_DISABLED: "true",
+      PRISM_SYNALUX_API_KEY: "",
+    };
+
+    for (const extraArgs of [[], ["--refresh"]]) {
+      const preview = spawnSync(
+        process.execPath,
+        [resolve("dist/cli.js"), "connect", "--host", "claude-code", "--dry-run", ...extraArgs],
+        { encoding: "utf8", env, cwd },
+      );
+      expect(preview.status, preview.stderr).toBe(0);
+      expect(preview.stdout).toContain("would remove exact legacy project Prism registration");
+      expect(readFileSync(projectConfigPath, "utf8")).toBe(original);
+    }
+
+    writeFileSync(join(homeDir, ".claude.json"), "{ malformed\n");
+    const registrationFailed = spawnSync(
+      process.execPath,
+      [resolve("dist/cli.js"), "connect", "--host", "claude-code", "--dry-run"],
+      { encoding: "utf8", env, cwd },
+    );
+    expect(registrationFailed.status).toBe(1);
+    expect(registrationFailed.stderr).toContain("could not parse config");
+    expect(registrationFailed.stdout).not.toContain("legacy project Prism registration");
+    expect(readFileSync(projectConfigPath, "utf8")).toBe(original);
+  });
+
   it("exits nonzero after registration when the install-time skill snapshot is unavailable", () => {
     const homeDir = makeHome();
     const codexHome = join(homeDir, "codex-home");
@@ -1290,6 +1598,7 @@ describe("prism connect", () => {
     expect(failed.stderr).toMatch(/Synalux skill synchronization failed/);
     expect(readTomlConfig(join(codexHome, "config.toml")).mcp_servers)
       .toHaveProperty("prism-mcp");
+    expect(existsSync(join(codexHome, "AGENTS.md"))).toBe(false);
   });
 
   it("keeps legacy Claude hooks when the install-time skill snapshot fails", () => {
@@ -1406,12 +1715,14 @@ describe("prism connect", () => {
     }
   });
 
-  it("delivers native skills and migrates only legacy Claude hooks after a successful snapshot", async () => {
+  it("delivers native skills and migrates only recognized legacy Claude configuration after a successful snapshot", async () => {
     const homeDir = makeHome();
+    const cwd = join(homeDir, "work", "project");
     const codexHome = join(homeDir, ".codex");
     const appData = join(homeDir, "appdata");
     const xdgConfigHome = join(homeDir, "xdg-config");
     mkdirSync(codexHome, { recursive: true });
+    mkdirSync(cwd, { recursive: true });
 
     const claudeSettings = join(homeDir, ".claude", "settings.json");
     const claudeInstructions = join(homeDir, "CLAUDE.md");
@@ -1419,6 +1730,8 @@ describe("prism connect", () => {
     const geminiSettings = join(homeDir, ".gemini", "settings.json");
     const geminiInstructions = join(homeDir, ".gemini", "GEMINI.md");
     const geminiAgents = join(homeDir, ".gemini", "AGENTS.md");
+    const codexInstructions = join(codexHome, "AGENTS.md");
+    const claudeProjectMcp = join(homeDir, ".mcp.json");
     const legacySyncHook = `${join(homeDir, "prism", "scripts", "sync-skills.sh")} > /dev/null 2>&1`;
     const claudeConfig = {
       hooks: {
@@ -1444,6 +1757,15 @@ describe("prism connect", () => {
     writeFileSync(geminiInstructions, legacyGeminiInstructions());
     const geminiAgentsSentinel = "# User-owned Gemini agent rules\n";
     writeFileSync(geminiAgents, geminiAgentsSentinel);
+    const codexInstructionsSentinel = "# User-owned Codex rules\n";
+    writeFileSync(codexInstructions, codexInstructionsSentinel);
+    writeFileSync(claudeProjectMcp, `${JSON.stringify({
+      projectSetting: "keep-me",
+      mcpServers: {
+        "prism-mcp": { command: "npx", args: ["-y", "prism-mcp-server"] },
+        other: { command: "other-server" },
+      },
+    }, null, 2)}\n`);
     const geminiHooksBefore = JSON.stringify(geminiConfig.hooks);
 
     const manifest = freeManifest();
@@ -1470,7 +1792,7 @@ describe("prism connect", () => {
         PRISM_SKILL_SYNC_DISABLED: "false",
         PRISM_SYNALUX_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
         PRISM_SYNALUX_API_KEY: "",
-      });
+      }, cwd);
 
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout).toContain("Claude Code: registered");
@@ -1479,14 +1801,23 @@ describe("prism connect", () => {
       expect(result.stdout).toContain("Gemini CLI: registered");
       expect(result.stdout).toContain("Codex: registered");
       expect(result.stdout).toContain("removed 1 legacy Prism hook action");
+      expect(result.stdout).toContain("removed exact legacy project Prism registration");
       expect(result.stdout).toContain("removed 2 legacy Prism startup section");
       expect(result.stdout).toContain("removed legacy managed startup block from ~/CLAUDE.md");
       expect(result.stdout).toContain("Claude Code: installed hook-free native startup instructions");
       expect(result.stdout).toContain("Gemini CLI: installed hook-free native startup instructions");
+      expect(result.stdout).toContain("Codex: installed hook-free native startup instructions");
+      expect(result.stdout).toContain("Claude Code: refreshed local-first policy with Sonnet fallback");
+      expect(result.stdout).toContain("Gemini CLI: refreshed local-first policy; native agents disabled");
+      expect(result.stdout).toContain("Codex: refreshed hard local-first agent limits");
 
-      // Codex, Gemini CLI, and Cursor share the Agent Skills standard root.
+      // Codex and Gemini CLI share the Agent Skills standard root. Cursor also
+      // receives its native user-level mirror so startup is discoverable.
       expect(readFileSync(join(
         homeDir, ".agents", "skills", "aba-precision-protocol", "SKILL.md",
+      ), "utf8")).toContain("name: aba-precision-protocol");
+      expect(readFileSync(join(
+        homeDir, ".cursor", "skills", "aba-precision-protocol", "SKILL.md",
       ), "utf8")).toContain("name: aba-precision-protocol");
       // Claude Code has a separate native discovery root and gets a fully
       // Prism-managed copy. Claude Desktop has no local filesystem target.
@@ -1501,6 +1832,11 @@ describe("prism connect", () => {
       expect(existsSync(claudeDesktopSkillsDir)).toBe(false);
 
       expect(readConfig(claudeSettings).hooks).toEqual({ SessionStart: ["user-owned-claude-hook"] });
+      expect(readConfig(claudeSettings).env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("sonnet");
+      expect(readConfig(claudeProjectMcp)).toEqual({
+        projectSetting: "keep-me",
+        mcpServers: { other: { command: "other-server" } },
+      });
       expect(readFileSync(claudeInstructions, "utf8")).toContain("PRESERVE THIS CLAUDE RULE");
       expect(readFileSync(claudeInstructions, "utf8")).not.toContain('session_load_context(project="prism-mcp")');
       expect(readFileSync(claudeInstructions, "utf8")).not.toContain("prism connect managed: native startup");
@@ -1510,35 +1846,63 @@ describe("prism connect", () => {
       expect(canonicalClaudeInstructions).toContain("native tool discovery/ToolSearch");
       expect(canonicalClaudeInstructions).toContain("`Prism startup failure` and stop");
       expectVerbatimStartupContract(canonicalClaudeInstructions);
+      expectLocalFirstPolicy(canonicalClaudeInstructions);
       expect(readFileSync(cursorHooks, "utf8")).toBe(cursorHookSentinel);
       expect(JSON.stringify(readConfig(geminiSettings).hooks)).toBe(geminiHooksBefore);
+      expect(readConfig(geminiSettings).experimental.enableAgents).toBe(false);
       const configuredGeminiInstructions = readFileSync(geminiInstructions, "utf8");
       expect(configuredGeminiInstructions).toContain("`session_bootstrap({})`, exactly once");
       expect(configuredGeminiInstructions).not.toContain("# Startup — MANDATORY");
       expect(configuredGeminiInstructions).toContain("# Paths\n\n- Keep this user rule.\n");
       expectVerbatimStartupContract(configuredGeminiInstructions);
+      expectLocalFirstPolicy(configuredGeminiInstructions);
       expect(readFileSync(geminiAgents, "utf8")).toBe(geminiAgentsSentinel);
+      const configuredCodexInstructions = readFileSync(codexInstructions, "utf8");
+      expect(configuredCodexInstructions.startsWith(`${codexInstructionsSentinel}\n`)).toBe(true);
+      expect(configuredCodexInstructions).toContain("prism connect managed: codex native startup");
+      expect(configuredCodexInstructions).toContain("`session_bootstrap({})`, exactly once");
+      expectVerbatimStartupContract(configuredCodexInstructions);
+      expectLocalFirstPolicy(configuredCodexInstructions);
+      expect(readTomlConfig(join(codexHome, "config.toml"))).toMatchObject({
+        features: { multi_agent: false },
+        agents: {
+          max_threads: 2,
+          max_depth: 1,
+          default_subagent_model: "gpt-5.6-terra",
+          default_subagent_reasoning_effort: "low",
+        },
+      });
       expect(JSON.stringify(readConfig(join(homeDir, ".claude.json")))).not.toMatch(/SessionStart|hooks/i);
       expect(JSON.stringify(readConfig(join(homeDir, ".cursor", "mcp.json")))).not.toMatch(/SessionStart|hooks/i);
       expect(readFileSync(join(codexHome, "config.toml"), "utf8")).not.toMatch(/SessionStart|hooks/i);
+      expect(configuredCodexInstructions).not.toMatch(/SessionStart|UserPromptSubmit|SessionEnd/);
     } finally {
       server.close();
       await once(server, "close");
     }
   });
 
-  it("keeps legacy Claude hooks when native skill synchronization is disabled", async () => {
+  it("migrates the duplicate project registration while keeping legacy hooks when skill sync is disabled", async () => {
     const homeDir = makeHome();
+    const cwd = join(homeDir, "work", "project");
     const settingsPath = join(homeDir, ".claude", "settings.json");
     const instructionPath = join(homeDir, "CLAUDE.md");
+    const projectMcpPath = join(homeDir, ".mcp.json");
     const command = `${join(homeDir, "prism", "scripts", "sync-skills.sh")} > /dev/null 2>&1`;
     const original = `${JSON.stringify({
       hooks: { SessionStart: [{ matcher: "*", hooks: [{ type: "command", command }] }] },
     }, null, 2)}\n`;
     mkdirSync(dirname(settingsPath), { recursive: true });
+    mkdirSync(cwd, { recursive: true });
     writeFileSync(settingsPath, original);
     const originalInstructions = legacyClaudeInstructions() + legacyClaudeManagedBlock();
     writeFileSync(instructionPath, originalInstructions);
+    writeFileSync(projectMcpPath, `${JSON.stringify({
+      mcpServers: {
+        "prism-mcp": { command: "npx", args: ["-y", "prism-mcp-server"] },
+        other: { command: "other-server" },
+      },
+    }, null, 2)}\n`);
 
     const result = await runBuiltCli(["connect", "--host", "claude-code"], {
       ...process.env,
@@ -1547,13 +1911,15 @@ describe("prism connect", () => {
       PRISM_CONFIG_PATH: join(homeDir, "prism-config.db"),
       PRISM_SKILL_SYNC_DISABLED: "true",
       PRISM_SYNALUX_API_KEY: "",
-    });
+    }, cwd);
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(settingsPath, "utf8")).toBe(original);
     expect(readFileSync(instructionPath, "utf8")).toBe(originalInstructions);
     expect(existsSync(join(homeDir, ".claude", "CLAUDE.md"))).toBe(false);
     expect(result.stdout).not.toContain("legacy Prism hook");
+    expect(result.stdout).toContain("removed exact legacy project Prism registration");
+    expect(readConfig(projectMcpPath).mcpServers).toEqual({ other: { command: "other-server" } });
   });
 
   it("does not configure Gemini startup when native skill synchronization is disabled", async () => {

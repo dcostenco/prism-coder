@@ -8,23 +8,113 @@ import { getStorage, closeStorage } from './storage/index.js';
 import { getSetting } from './storage/configStorage.js';
 import { PRISM_USER_ID, SERVER_CONFIG } from './config.js';
 import { getCurrentGitState } from './utils/git.js';
-import { sessionLoadContextHandler, sessionSaveLedgerHandler, sessionSaveHandoffHandler } from './tools/ledgerHandlers.js';
 import {
+  sessionBootstrapHandler,
+  sessionLoadContextHandler,
+  sessionSaveLedgerHandler,
+  sessionSaveHandoffHandler,
+} from './tools/ledgerHandlers.js';
+import {
+  configureClaudeAgentPolicy,
   configureClaudeNativeStartup,
+  configureCodexAgentPolicy,
+  configureCodexNativeStartup,
+  configureGeminiAgentPolicy,
   configureGeminiNativeStartup,
   connectHosts,
   migrateLegacyClaudeHooks,
   migrateLegacyClaudeInstructions,
   migrateLegacyClaudeManagedStartup,
+  migrateLegacyClaudeProjectMcp,
   normalizeHostName,
 } from './connect.js';
 
 const program = new Command();
 
+interface LoadJsonOutputMetadata {
+  agentName?: string;
+  effectiveRole?: string;
+  gitHash: string | null;
+  gitBranch: string | null;
+  packageVersion: string;
+}
+
+/** Build the stable `prism load --json` envelope from depth-specific context. */
+export function buildLoadJsonOutput(
+  project: string,
+  data: Record<string, any>,
+  level: string,
+  metadata: LoadJsonOutputMetadata,
+) {
+  let history: any[] = [];
+  let historyLimit = 0;
+  if (level === 'standard') {
+    history = Array.isArray(data.recent_sessions) ? data.recent_sessions : [];
+    historyLimit = 5;
+  } else if (level === 'deep') {
+    // Canonical deep context uses session_history. Fall back only when that
+    // field is absent so older portal responses remain consumable.
+    history = Array.isArray(data.session_history)
+      ? data.session_history
+      : Array.isArray(data.recent_sessions)
+        ? data.recent_sessions
+        : [];
+    historyLimit = 50;
+  }
+
+  return {
+    agent_name: metadata.agentName || null,
+    handoff: [{
+      project,
+      role: metadata.effectiveRole || data.role || 'global',
+      last_summary: data.last_summary || null,
+      pending_todo: data.pending_todo || null,
+      active_decisions: data.active_decisions || null,
+      keywords: data.keywords || null,
+      key_context: data.key_context || null,
+      active_branch: data.active_branch || null,
+      version: data.version ?? null,
+      updated_at: data.updated_at || null,
+    }],
+    // Keep the established key for callers while sourcing the canonical field
+    // for the requested depth.
+    recent_ledger: history.slice(0, historyLimit).map((entry: any) => ({
+      summary: entry?.summary || null,
+      decisions: entry?.decisions || null,
+      keywords: entry?.keywords || null,
+      created_at: entry?.session_date || entry?.created_at || null,
+    })),
+    git_hash: metadata.gitHash,
+    git_branch: metadata.gitBranch,
+    pkg_version: metadata.packageVersion,
+  };
+}
+
 program
   .name('prism')
   .description('Prism — The Mind Palace for AI Agents')
   .version(SERVER_CONFIG.version);
+
+/** Print the canonical hook-free first-turn display used by the MCP tool. */
+export async function runBootstrapCommand(): Promise<void> {
+  try {
+    const result = await sessionBootstrapHandler({});
+    const output = result.content?.map((part: any) => part?.text).filter(Boolean).join('\n') || '';
+    if (!output) throw new Error('session_bootstrap returned no display content');
+    console.log(output);
+    if (result.isError) process.exitCode = 1;
+  } catch (err) {
+    console.error(`Bootstrap failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+  } finally {
+    await closeStorage().catch(() => { });
+  }
+}
+
+program
+  .command('bootstrap')
+  .description('Print the canonical dashboard-configured first-turn Prism greeting')
+  .action(runBootstrapCommand);
 
 // ─── prism connect ────────────────────────────────────────────
 // Registers this installed package with supported MCP hosts. The
@@ -74,16 +164,23 @@ program
         }
       }
       const connectedClaude = summary.results.some((result) =>
-        result.host === 'claude-code' && result.status !== 'error');
+        result.host === 'claude-code' && result.status !== 'error' && result.startupCompatible);
       const connectedGemini = summary.results.some((result) =>
-        result.host === 'gemini' && result.status !== 'error');
+        result.host === 'gemini' && result.status !== 'error' && result.startupCompatible);
+      const connectedCodex = summary.results.some((result) =>
+        result.host === 'codex' && result.status !== 'error' && result.startupCompatible);
 
       if (options.dryRun) {
         if (connectedClaude) {
+          const projectMcpMigration = migrateLegacyClaudeProjectMcp(undefined, undefined, true);
           const hookMigration = migrateLegacyClaudeHooks(undefined, true);
           const instructionMigration = migrateLegacyClaudeInstructions(undefined, true);
           const managedMigration = migrateLegacyClaudeManagedStartup(undefined, true);
           const nativeStartup = configureClaudeNativeStartup(undefined, true);
+          const agentPolicy = configureClaudeAgentPolicy(undefined, true);
+          if (projectMcpMigration.status === 'would-remove') {
+            console.log(`• Claude Code: would remove exact legacy project Prism registration (${projectMcpMigration.path})`);
+          }
           if (hookMigration.status === 'would-remove') {
             console.log(`• Claude Code: would remove ${hookMigration.removed} legacy Prism hook action(s) (${hookMigration.path})`);
           }
@@ -96,16 +193,33 @@ program
           if (nativeStartup.status === 'would-install' || nativeStartup.status === 'would-refresh') {
             console.log(`• Claude Code: would ${nativeStartup.status === 'would-install' ? 'install' : 'refresh'} native startup instructions (${nativeStartup.path})`);
           }
+          if (agentPolicy.status === 'would-install' || agentPolicy.status === 'would-refresh') {
+            console.log(`• Claude Code: would ${agentPolicy.status === 'would-install' ? 'install' : 'refresh'} local-first fallback policy (${agentPolicy.path})`);
+          }
         }
         if (connectedGemini) {
           const nativeStartup = configureGeminiNativeStartup(undefined, true);
+          const agentPolicy = configureGeminiAgentPolicy(undefined, true);
           if (nativeStartup.status === 'would-install' || nativeStartup.status === 'would-refresh') {
             console.log(`• Gemini CLI: would ${nativeStartup.status === 'would-install' ? 'install' : 'refresh'} native startup instructions (${nativeStartup.path})`);
+          }
+          if (agentPolicy.status === 'would-install' || agentPolicy.status === 'would-refresh') {
+            console.log(`• Gemini CLI: would ${agentPolicy.status === 'would-install' ? 'disable native agents for' : 'refresh'} local-first policy (${agentPolicy.path})`);
+          }
+        }
+        if (connectedCodex) {
+          const nativeStartup = configureCodexNativeStartup(undefined, true);
+          const agentPolicy = configureCodexAgentPolicy(undefined, true);
+          if (nativeStartup.status === 'would-install' || nativeStartup.status === 'would-refresh') {
+            console.log(`• Codex: would ${nativeStartup.status === 'would-install' ? 'install' : 'refresh'} native startup instructions (${nativeStartup.path})`);
+          }
+          if (agentPolicy.status === 'would-install' || agentPolicy.status === 'would-refresh') {
+            console.log(`• Codex: would ${agentPolicy.status === 'would-install' ? 'install' : 'refresh'} hard local-first agent limits (${agentPolicy.path})`);
           }
         }
         console.log('\nDry run complete — no files changed.');
       } else if (summary.results.some((result) =>
-        result.status === 'registered' || result.status === 'refreshed' || result.status === 'existing')) {
+        result.status !== 'error' && result.startupCompatible)) {
         // Codex discovers native skills before it starts MCP servers. Syncing
         // only from server startup therefore makes a fresh install require a
         // second host restart. Materialize the entitlement snapshot before
@@ -127,12 +241,18 @@ program
             migrateLegacyClaudeInstructions(undefined, true);
             migrateLegacyClaudeManagedStartup(undefined, true);
             configureClaudeNativeStartup(undefined, true);
+            configureClaudeAgentPolicy(undefined, true);
             // Install the canonical block first. Never remove the legacy block
             // unless the canonical path is already current or commits safely.
             const nativeStartup = configureClaudeNativeStartup();
+            const agentPolicy = configureClaudeAgentPolicy();
+            const projectMcpMigration = migrateLegacyClaudeProjectMcp();
             const hookMigration = migrateLegacyClaudeHooks();
             const instructionMigration = migrateLegacyClaudeInstructions();
             const managedMigration = migrateLegacyClaudeManagedStartup();
+            if (projectMcpMigration.status === 'removed') {
+              console.log(`✓ Claude Code: removed exact legacy project Prism registration (${projectMcpMigration.path}); user-scope registration now owns Prism`);
+            }
             if (hookMigration.status === 'removed') {
               console.log(`✓ Claude Code: removed ${hookMigration.removed} legacy Prism hook action(s); native skills now own startup and sync`);
             }
@@ -145,13 +265,42 @@ program
             if (nativeStartup.status === 'installed' || nativeStartup.status === 'refreshed') {
               console.log(`✓ Claude Code: ${nativeStartup.status} hook-free native startup instructions`);
             }
+            if (agentPolicy.status === 'installed' || agentPolicy.status === 'refreshed') {
+              console.log(`✓ Claude Code: ${agentPolicy.status} local-first policy with Sonnet fallback`);
+            }
           }
           if (connectedGemini) {
             configureGeminiNativeStartup(undefined, true);
+            configureGeminiAgentPolicy(undefined, true);
             const nativeStartup = configureGeminiNativeStartup();
+            const agentPolicy = configureGeminiAgentPolicy();
             if (nativeStartup.status === 'installed' || nativeStartup.status === 'refreshed') {
               console.log(`✓ Gemini CLI: ${nativeStartup.status} hook-free native startup instructions`);
             }
+            if (agentPolicy.status === 'installed' || agentPolicy.status === 'refreshed') {
+              console.log(`✓ Gemini CLI: ${agentPolicy.status} local-first policy; native agents disabled`);
+            }
+          }
+          if (connectedCodex) {
+            configureCodexNativeStartup(undefined, true);
+            configureCodexAgentPolicy(undefined, true);
+            const nativeStartup = configureCodexNativeStartup();
+            const agentPolicy = configureCodexAgentPolicy();
+            if (nativeStartup.status === 'installed' || nativeStartup.status === 'refreshed') {
+              console.log(`✓ Codex: ${nativeStartup.status} hook-free native startup instructions`);
+            }
+            if (agentPolicy.status === 'installed' || agentPolicy.status === 'refreshed') {
+              console.log(`✓ Codex: ${agentPolicy.status} hard local-first agent limits`);
+            }
+          }
+        } else if (connectedClaude) {
+          // The project-level npx registration is redundant once the
+          // user-level installed-server entry succeeds. Removing that exact
+          // legacy tuple is independent of native skill delivery; leave hooks
+          // and startup instructions untouched while synchronization is off.
+          const projectMcpMigration = migrateLegacyClaudeProjectMcp();
+          if (projectMcpMigration.status === 'removed') {
+            console.log(`✓ Claude Code: removed exact legacy project Prism registration (${projectMcpMigration.path}); user-scope registration now owns Prism`);
           }
         }
       }
@@ -234,30 +383,13 @@ program
         const d = data as Record<string, any>;
         const gitState = getCurrentGitState();
 
-        const output = {
-          agent_name: agentName || null,
-          handoff: [{
-            project,
-            role: effectiveRole || d.role || 'global',
-            last_summary: d.last_summary || null,
-            pending_todo: d.pending_todo || null,
-            active_decisions: d.active_decisions || null,
-            keywords: d.keywords || null,
-            key_context: d.key_context || null,
-            active_branch: d.active_branch || null,
-            version: d.version ?? null,
-            updated_at: d.updated_at || null,
-          }],
-          recent_ledger: (d.recent_sessions || []).map((s: any) => ({
-            summary: s.summary || null,
-            decisions: s.decisions || null,
-            keywords: s.keywords || null,
-            created_at: s.session_date || s.created_at || null,
-          })),
-          git_hash: gitState.commitSha ? gitState.commitSha.substring(0, 7) : null,
-          git_branch: gitState.branch || null,
-          pkg_version: SERVER_CONFIG.version,
-        };
+        const output = buildLoadJsonOutput(project, d, level, {
+          agentName,
+          effectiveRole,
+          gitHash: gitState.commitSha ? gitState.commitSha.substring(0, 7) : null,
+          gitBranch: gitState.branch || null,
+          packageVersion: SERVER_CONFIG.version,
+        });
         console.log(JSON.stringify(output, null, 2));
       } else {
         // ── Text mode: full parity with MCP session_load_context ──

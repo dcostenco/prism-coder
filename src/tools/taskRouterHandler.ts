@@ -42,12 +42,23 @@ export interface TaskRouteResult {
   complexity_score: number;
   rationale: string;
   recommended_tool: string | null;
+  recommended_args?: {
+    prompt: string;
+    project?: string;
+    mode: "code";
+    task_complexity: number;
+    cloud_fallback: false;
+    escalation: "report";
+  };
   experience?: {
     bias: number;
     sample_count: number;
     rationale: string;
   };
   _rawComposite?: number;
+  _hardHostBoundary?: boolean;
+  _boundedHighComplexity?: boolean;
+  _minimumComplexity?: number;
 }
 
 // ─── Keyword Lists ───────────────────────────────────────────
@@ -67,8 +78,8 @@ const CLAW_KEYWORDS = [
   "remove unused", "delete unused", "clean up",
 ];
 
-/** Keywords that suggest the task requires the host model's reasoning. */
-const HOST_KEYWORDS = [
+/** Reserved judgment or host-tool boundaries that local inference cannot own. */
+const HOST_BOUNDARY_KEYWORDS = [
   "architect", "architecture", "redesign", "design system",
   "debug complex", "investigate", "root cause", "diagnose",
   "security audit", "vulnerability", "penetration",
@@ -78,10 +89,60 @@ const HOST_KEYWORDS = [
   "migration strategy", "data migration",
   "api design", "schema design", "database design",
   "code review", "review the", "analyze the",
-  "explain how", "explain why", "understand",
-  "complex logic", "algorithm", "concurrent", "race condition",
+  "concurrent", "race condition",
   "integrate multiple", "cross-cutting",
-  "plan", "strategy", "roadmap",
+  "implementation plan", "create a plan", "strategy", "roadmap",
+];
+
+/** Explicit workflows that require host-side tools or external state. */
+const HOST_TOOL_WORKFLOW_KEYWORDS = [
+  "inspect the repository", "search the repository", "read files",
+  "run command", "execute command", "run the tests", "run tests",
+  "apply the patch", "edit the file", "modify the file",
+  "commit", "push", "deploy", "publish",
+  "use the browser", "query the database", "database query",
+];
+
+/**
+ * Natural-language action groups that reveal a repository workflow even when
+ * the prompt does not use one of the exact phrases above. Local inference can
+ * draft a bounded artifact, but it cannot own a read -> mutate -> verify tool
+ * sequence. Requiring two distinct groups avoids treating a single request
+ * such as "update version" as a host-only workflow.
+ */
+const HOST_TOOL_ACTION_GROUPS = [
+  {
+    label: "repository inspection",
+    patterns: [
+      /\b(?:read|inspect|search|open)\b[^.!?\n]{0,100}\b(?:repository|repo|codebase|source|files?|test harness)\b/i,
+    ],
+  },
+  {
+    label: "workspace mutation",
+    patterns: [
+      /\b(?:persist|save|update|edit|modify|apply)\b[^.!?\n]{0,100}\b(?:regression tests?|tests?|files?|code|source|workflow|harness|patch|repository|repo)\b/i,
+    ],
+  },
+  {
+    label: "execution or verification",
+    patterns: [
+      /\b(?:run|execute)\b[^.!?\n]{0,100}\b(?:tests?|test suite|verification|build|type-?check|lint|commands?)\b/i,
+      /\b(?:verify|validate)\b[^.!?\n]{0,100}\b(?:tests?|build|behavior|workflow)\b/i,
+    ],
+  },
+] as const;
+
+/** Complexity signals that should select 27B when the task is bounded. */
+const HIGH_COMPLEXITY_KEYWORDS = [
+  "complex logic", "algorithm", "dynamic programming", "constraint solver",
+  "parser", "compiler", "state machine", "graph traversal", "backtracking",
+  "multiple edge cases", "complete specification",
+];
+
+/** Evidence that a difficult request is still a self-contained inference job. */
+const BOUNDED_TASK_MARKERS = [
+  "self-contained", "standalone", "bounded", "single function", "one function",
+  "single file", "one file", "pure function", "complete specification",
 ];
 
 /** Conjunctions and sequential markers that indicate multi-step tasks. */
@@ -94,6 +155,16 @@ const MULTI_STEP_MARKERS = [
   // Note: removed bare "1.", "2.", "3." — too many false positives
   // on version numbers (v1.2.3), decimals, and IP addresses.
 ];
+
+const MAX_BOUNDED_FILES = 2;
+const MAX_HOST_ROUTABLE_FILES = 5;
+const MULTI_STEP_HOST_THRESHOLD = 2;
+const HOST_TOOL_ACTION_GROUP_THRESHOLD = 2;
+const HIGH_COMPLEXITY_MIN_SCORE = 7;
+const VERY_HIGH_COMPLEXITY_MIN_SCORE = 8;
+const VERY_HIGH_COMPLEXITY_SIGNAL_COUNT = 2;
+const BOUNDED_HIGH_COMPLEXITY_CONFIDENCE = 0.85;
+const HARD_HOST_BOUNDARY_CONFIDENCE = 0.95;
 
 // ─── Heuristic Engine ────────────────────────────────────────
 
@@ -110,17 +181,72 @@ function countKeywordHits(text: string, keywords: readonly string[]): number {
   return hits;
 }
 
+function findHostToolActionGroups(description: string): string[] {
+  return HOST_TOOL_ACTION_GROUPS
+    .filter(({ patterns }) => patterns.some((pattern) => pattern.test(description)))
+    .map(({ label }) => label);
+}
+
 /**
  * Compute a claw-affinity score from keyword analysis.
  * Returns a value between -1.0 (strongly host) and +1.0 (strongly claw).
  */
 function keywordSignal(description: string): number {
   const clawHits = countKeywordHits(description, CLAW_KEYWORDS);
-  const hostHits = countKeywordHits(description, HOST_KEYWORDS);
+  const hostHits = countKeywordHits(description, HOST_BOUNDARY_KEYWORDS);
   const total = clawHits + hostHits;
   if (total === 0) return 0; // No signal — neutral
   // Normalized difference: positive = claw, negative = host
   return (clawHits - hostHits) / total;
+}
+
+interface DelegabilityAssessment {
+  hardHostBoundary: boolean;
+  boundedHighComplexity: boolean;
+  highComplexityHits: number;
+  minimumComplexity: number;
+  reasons: string[];
+}
+
+/**
+ * Decide whether the task is eligible for local inference independently from
+ * how much model capacity it needs. A hard host boundary always wins.
+ */
+function assessDelegability(args: SessionTaskRouteArgs): DelegabilityAssessment {
+  const description = args.task_description;
+  const files = args.files_involved;
+  const boundaryKeywordHits = countKeywordHits(description, HOST_BOUNDARY_KEYWORDS);
+  const toolWorkflowHits = countKeywordHits(description, HOST_TOOL_WORKFLOW_KEYWORDS);
+  const toolActionGroups = findHostToolActionGroups(description);
+  const multiStepHits = countKeywordHits(description, MULTI_STEP_MARKERS);
+  const highComplexityHits = countKeywordHits(description, HIGH_COMPLEXITY_KEYWORDS);
+  const boundedByFiles = Boolean(files && files.length > 0 && files.length <= MAX_BOUNDED_FILES);
+  const boundedByDescription = countKeywordHits(description, BOUNDED_TASK_MARKERS) > 0;
+
+  const reasons: string[] = [];
+  if (boundaryKeywordHits > 0) reasons.push("reserved host judgment");
+  if (toolWorkflowHits > 0) reasons.push("host tools or external state required");
+  if (toolActionGroups.length >= HOST_TOOL_ACTION_GROUP_THRESHOLD) {
+    reasons.push(`host workflow actions: ${toolActionGroups.join(", ")}`);
+  }
+  if (multiStepHits >= MULTI_STEP_HOST_THRESHOLD) reasons.push("multi-step workflow");
+  if ((files?.length ?? 0) > MAX_HOST_ROUTABLE_FILES) reasons.push("cross-file scope");
+  if (args.estimated_scope === "refactor") reasons.push("refactor scope");
+
+  const minimumComplexity = highComplexityHits >= VERY_HIGH_COMPLEXITY_SIGNAL_COUNT
+    ? VERY_HIGH_COMPLEXITY_MIN_SCORE
+    : highComplexityHits > 0
+      ? HIGH_COMPLEXITY_MIN_SCORE
+      : 1;
+
+  return {
+    hardHostBoundary: reasons.length > 0,
+    boundedHighComplexity:
+      highComplexityHits > 0 && (boundedByFiles || boundedByDescription),
+    highComplexityHits,
+    minimumComplexity,
+    reasons,
+  };
 }
 
 /**
@@ -219,6 +345,26 @@ const WEIGHTS = {
   multiStep: 0.10,
 } as const;
 
+/**
+ * Forward the deterministic complexity signal without choosing a model.
+ * prism_infer owns tier/thinking selection because it also sees the loaded
+ * memory size, installed models, live RAM, entitlements, and explicit caller
+ * overrides.
+ */
+function buildRecommendedArgs(
+  args: SessionTaskRouteArgs,
+  complexityScore: number,
+): NonNullable<TaskRouteResult["recommended_args"]> {
+  return {
+    prompt: args.task_description,
+    ...(args.project ? { project: args.project } : {}),
+    mode: "code",
+    task_complexity: complexityScore,
+    cloud_fallback: false,
+    escalation: "report",
+  };
+}
+
 // ─── Router Core ─────────────────────────────────────────────
 
 /**
@@ -245,6 +391,7 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
   const sc = scopeSignal(estimated_scope);
   const ln = lengthSignal(task_description);
   const ms = multiStepSignal(task_description);
+  const delegability = assessDelegability(args);
 
   // ── Weighted composite score: [-1.0, +1.0] ──
   // Positive = claw-favoring, Negative = host-favoring
@@ -260,14 +407,26 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
   // composite +1.0 → complexity 1 (trivial)
   // composite -1.0 → complexity 10 (very complex)
   const complexityRaw = Math.round(5.5 - composite * 4.5);
-  const complexity_score = Math.max(1, Math.min(10, complexityRaw));
+  const complexity_score = Math.max(
+    delegability.minimumComplexity,
+    Math.max(1, Math.min(10, complexityRaw)),
+  );
 
   // ── Determine target ──
-  const isClaw = composite > 0 && complexity_score <= PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY;
+  const locallyEligible = composite > 0 || delegability.boundedHighComplexity;
+  const isClaw =
+    !delegability.hardHostBoundary &&
+    locallyEligible &&
+    complexity_score <= PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY;
 
   // ── Confidence: distance from the decision boundary ──
   // Higher absolute composite → higher confidence
-  const confidence = Math.min(0.99, Math.round((0.5 + Math.abs(composite) * 0.5) * 100) / 100);
+  const rawConfidence = Math.min(0.99, Math.round((0.5 + Math.abs(composite) * 0.5) * 100) / 100);
+  const confidence = delegability.hardHostBoundary
+    ? Math.max(rawConfidence, HARD_HOST_BOUNDARY_CONFIDENCE)
+    : delegability.boundedHighComplexity
+      ? Math.max(rawConfidence, BOUNDED_HIGH_COMPLEXITY_CONFIDENCE)
+      : rawConfidence;
 
   // ── Apply confidence threshold ──
   // If confidence is too low, default to host (safer)
@@ -282,6 +441,12 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
   if (sc !== 0) signals.push(`scope "${estimated_scope}" signal: ${sc.toFixed(1)}`);
   if (ms !== 0) signals.push(`multi-step detected (${ms.toFixed(1)})`);
   if (ln !== 0) signals.push(`length signal: ${ln.toFixed(1)}`);
+  if (delegability.boundedHighComplexity) {
+    signals.push(`bounded high-complexity workload (${delegability.highComplexityHits} signal${delegability.highComplexityHits === 1 ? "" : "s"})`);
+  }
+  if (delegability.hardHostBoundary) {
+    signals.push(`host boundary: ${delegability.reasons.join(", ")}`);
+  }
 
   const rationale = target === "claw"
     ? `Task is delegable to the local agent. Signals: ${signals.join("; ") || "neutral"}.`
@@ -292,8 +457,14 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
     confidence,
     complexity_score,
     rationale,
-    recommended_tool: target === "claw" ? "claw_run_task" : null,
+    recommended_tool: target === "claw" ? "prism_infer" : null,
+    ...(target === "claw" ? {
+      recommended_args: buildRecommendedArgs(args, complexity_score),
+    } : {}),
     _rawComposite: composite,
+    _hardHostBoundary: delegability.hardHostBoundary,
+    _boundedHighComplexity: delegability.boundedHighComplexity,
+    _minimumComplexity: delegability.minimumComplexity,
   };
 }
 
@@ -320,9 +491,9 @@ export async function sessionTaskRouteHandler(
     };
   }
 
-  // Delegation opt-in gate: if delegation_enabled is not "true", always route to host.
-  // This enforces the prism-infer-delegation skill's "off by default" rule in code.
-  const delegationEnabled = await getSetting("delegation_enabled", "false");
+  // Local-first is the product default. An explicit dashboard/config value of
+  // "false" remains an operator-owned opt-out and always routes to the host.
+  const delegationEnabled = await getSetting("delegation_enabled", "true");
   if (delegationEnabled !== "true") {
     return {
       content: [{
@@ -331,7 +502,7 @@ export async function sessionTaskRouteHandler(
           target: "host",
           confidence: 1.0,
           complexity_score: 5,
-          rationale: "Delegation is off (default). Enable with: configure_notifications({setting: 'delegation_enabled', value: 'true'}) or via the Prism dashboard.",
+          rationale: "Local delegation was explicitly disabled in Prism settings.",
           recommended_tool: null,
           delegation_enabled: false,
         }),
@@ -355,15 +526,30 @@ export async function sessionTaskRouteHandler(
         
         // Recalculate target and complexity if bias flipped the composite sign
         const complexityRaw = Math.round(5.5 - adjustedComposite * 4.5);
-        const complexity_score = Math.max(1, Math.min(10, complexityRaw));
-        const isClaw = adjustedComposite > 0 && complexity_score <= PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY;
-        const confidence = Math.min(0.99, Math.round((0.5 + Math.abs(adjustedComposite) * 0.5) * 100) / 100);
+        const complexity_score = Math.max(
+          result._minimumComplexity ?? 1,
+          Math.max(1, Math.min(10, complexityRaw)),
+        );
+        const locallyEligible = adjustedComposite > 0 || result._boundedHighComplexity === true;
+        const isClaw =
+          result._hardHostBoundary !== true &&
+          locallyEligible &&
+          complexity_score <= PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY;
+        const rawConfidence = Math.min(0.99, Math.round((0.5 + Math.abs(adjustedComposite) * 0.5) * 100) / 100);
+        const confidence = result._hardHostBoundary
+          ? Math.max(rawConfidence, HARD_HOST_BOUNDARY_CONFIDENCE)
+          : result._boundedHighComplexity
+            ? Math.max(rawConfidence, BOUNDED_HIGH_COMPLEXITY_CONFIDENCE)
+            : rawConfidence;
         const target = isClaw && confidence >= PRISM_TASK_ROUTER_CONFIDENCE_THRESHOLD ? "claw" : "host";
 
         result.target = target;
         result.confidence = confidence;
         result.complexity_score = complexity_score;
-        result.recommended_tool = target === "claw" ? "claw_run_task" : null;
+        result.recommended_tool = target === "claw" ? "prism_infer" : null;
+        result.recommended_args = target === "claw"
+          ? buildRecommendedArgs(args, complexity_score)
+          : undefined;
         
         result.experience = {
           bias: exp.bias,
@@ -377,9 +563,6 @@ export async function sessionTaskRouteHandler(
     }
   }
 
-  // Remove the private field from the final output
-  delete result._rawComposite;
-
   // ── v9.x: Local LLM second-opinion for low-confidence cases ──────────────
   // When confidence is below the threshold AND local LLM is enabled,
   // ask prism-coder:9b to break the tie. This is purely additive — if the
@@ -392,19 +575,29 @@ export async function sessionTaskRouteHandler(
       const llmTarget = await askLocalLlmForRoute(args.task_description);
       if (llmTarget) {
         const prev = result.target;
-        result.target = llmTarget;
-        // Re-derive complexity_score to stay consistent with the new target
-        // so downstream consumers see a coherent { target, complexity_score } pair.
-        if (llmTarget === "claw" && result.complexity_score > PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY) {
-          result.complexity_score = PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY;
-        }
+        const llmCanDelegate =
+          llmTarget === "claw" &&
+          result._hardHostBoundary !== true &&
+          result.complexity_score <= PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY;
+        const target = llmCanDelegate ? "claw" : "host";
+        result.target = target;
+        result.recommended_tool = target === "claw" ? "prism_infer" : null;
+        result.recommended_args = target === "claw"
+          ? buildRecommendedArgs(args, result.complexity_score)
+          : undefined;
         result.rationale +=
-          ` [prism-coder override: heuristic confidence ${result.confidence.toFixed(2)} < threshold → LLM voted "${llmTarget}" (was "${prev}")]`;
+          ` [prism-coder review: heuristic confidence ${result.confidence.toFixed(2)} < threshold → LLM voted "${llmTarget}"; resolved "${target}" (was "${prev}")]`;
       }
     } catch {
       // Non-fatal: LLM second-opinion failure never blocks routing
     }
   }
+
+  // Remove internal decision evidence from the public tool response.
+  delete result._rawComposite;
+  delete result._hardHostBoundary;
+  delete result._boundedHighComplexity;
+  delete result._minimumComplexity;
 
   return {
     content: [
@@ -435,8 +628,8 @@ async function askLocalLlmForRoute(
   const prompt =
     `You are a task routing classifier for an AI coding assistant.\n` +
     `Decision logic:\n` +
-    `  - "claw": simple, isolated, well-defined tasks (rename file, fix typo, add test)\n` +
-    `  - "host": complex, multi-step, architectural, or ambiguous tasks (audit, redesign, plan)\n\n` +
+    `  - "claw": bounded, self-contained, well-defined inference work. It may be difficult if it needs no host tools or reserved judgment.\n` +
+    `  - "host": architecture, security, investigation, review, multi-step/tool-required workflows, or ambiguous work.\n\n` +
     `CRITICAL: You MUST use the following structural tags:\n` +
     `<|synalux_think|>\n[Internal reasoning about complexity]\n</|synalux_think|>\n\n` +
     `<|tool_call|>\nclaw\n</|tool_call|>\n\n` +

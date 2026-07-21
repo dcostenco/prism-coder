@@ -44,12 +44,69 @@ configuration.
 Close the target MCP hosts before a non-dry-run registration so they cannot
 edit their configuration concurrently.
 
+### One local-first agent workflow
+
+Every managed registration carries the same server-owned policy: route bounded,
+verifiable delegation through `session_task_route` and `prism_infer` before
+using host-native/background agents. `prism_infer` can load project memory at
+the dashboard's quick, standard, or deep depth. The router forwards a
+complexity hint but never chooses a model; `prism_infer` centrally selects
+2B/4B/9B/27B using context fit, installed models, live RAM, entitlements, and
+explicit overrides. A failed, refused, or degraded local result returns
+control to the current host thread; routine fan-out and nested agents are
+forbidden.
+
+Codex receives a hard `multi_agent=false` setting plus bounded Terra/low
+fallback values. Gemini CLI receives `experimental.enableAgents=false`.
+Claude Code's last-resort subagent model is set to Sonnet. Cursor and Claude
+Desktop do not expose a supported global subagent-policy file, so their policy
+is delivered through MCP initialize instructions. This is one workflow
+contract with the strongest enforcement each host supports.
+
+### Configure the real first-turn greeting
+
+Open the Prism dashboard and set these values before reconnecting hosts:
+
+1. **Settings → Agent Identity → Agent Name** — the developer display name.
+2. **Settings → Agent Identity → Default Role** — the role shown with the name;
+   it falls back to `global` when unset.
+3. **Settings → Context Depth** — `quick`, `standard`, or `deep`.
+4. **Settings → Boot Settings → Auto-Load Projects** — the projects whose
+   handoff and ledger state belong in the greeting.
+
+Then close the hosts and run:
+
+```bash
+prism connect --all --refresh
+```
+
+`prism connect` synchronizes the authoritative Synalux subscription-tier skill
+manifest before it updates the native host instructions. On the first user turn
+(including `hi`), the host calls `session_bootstrap({})` exactly once. The tool
+returns one ready-to-display block with Agent Identity, depth-scoped project
+state, Session Version, and a Prism System Ready status built from the actual
+provisioned manifest. It does not use host lifecycle hooks.
+
+Claude, Gemini, Cursor, Codex, and other third-party models still control their
+final chat rendering, so verbatim relay is best-effort there. A Prism-owned
+surface can render the block deterministically. To inspect the exact canonical
+output independently of a host, run:
+
+```bash
+prism bootstrap
+```
+
 ### Codex
 
 Run `prism connect --host codex` to add Prism to Codex's shared
 `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`). Prism preserves the
 existing TOML byte-for-byte and appends only a marked block that it can safely
 refresh later. If `CODEX_HOME` is set, that directory must already exist.
+After registration and skill synchronization succeed, Prism also installs or
+refreshes its ownership-marked, hook-free startup block in
+`$CODEX_HOME/AGENTS.md` (falling back to `~/.codex/AGENTS.md`). User content,
+symlink targets, permissions, and newline style are preserved; ambiguous
+ownership markers or concurrent edits fail loud.
 Codex CLI, the IDE extension, and the ChatGPT desktop app share
 this configuration. Restart the active client after connecting, then run
 `codex mcp list` to verify the registration. See the
@@ -80,6 +137,12 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS),
 ```
 
 Restart Claude Desktop. You should see the Prism tools in the tool picker (hammer icon).
+
+Claude Desktop does not expose a supported global filesystem instruction file.
+Its unattended hook-free startup request therefore comes from the Prism MCP
+server instructions and `session_bootstrap` tool metadata. Context loading is
+deterministic, but the visible verbatim relay remains controlled by Claude
+Desktop.
 
 ### With environment variables
 
@@ -196,7 +259,7 @@ claude mcp add prism -- npx -y prism-mcp-server
 ```
 
 Claude Code will detect and use Prism tools automatically. Use `ToolSearch` to find
-specific tools by name (e.g., `select:mcp__prism__session_load_context`).
+specific tools by name (e.g., `select:mcp__prism__session_bootstrap`).
 
 ---
 
@@ -219,6 +282,12 @@ Open **Settings → MCP Servers** (or edit `~/.cursor/mcp.json`):
 ```
 
 Restart Cursor. Prism tools appear in the Composer tool list.
+
+During `prism connect`, the synchronized manifest is materialized in the shared
+`~/.agents/skills` root and mirrored into Cursor's native `~/.cursor/skills`
+root. An exact symlink between those roots is supported. Prism preserves
+user-owned or locally modified conflicts and fails loud instead of overwriting
+them.
 
 ---
 
@@ -350,6 +419,7 @@ const proc = spawn('npx', ['-y', 'prism-mcp-server'], {
 ### CLI (no MCP client needed)
 
 ```bash
+prism bootstrap               # canonical first-turn greeting and context
 prism load <project>          # load session context
 prism load <project> --json   # machine-readable output
 prism verify                  # behavioral verification status
@@ -370,6 +440,11 @@ The Mind Palace dashboard launches automatically alongside the MCP server.
 | Auth | Disabled | See below for auth options |
 
 Open `http://localhost:3000` (or your configured port) in a browser.
+
+The startup display reads Agent Name, Default Role, Context Depth, and Auto-Load
+Projects from this dashboard. Do not hardcode a project or depth in host rules;
+use `session_bootstrap({})` (or `prism bootstrap`) so dashboard changes apply to
+every connected agent on its next conversation.
 
 ### Securing the dashboard
 

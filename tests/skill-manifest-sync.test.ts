@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -103,13 +103,38 @@ describe("subscription-tier skill manifest sync", () => {
     })).toBe("2f7e621172e8e7952c289beaa6143f24667a0796c75ac4fa707019baaab07bc7");
   });
 
+  it("accepts portal native metadata and includes minimum_plan in generation parity", () => {
+    const snapshot = manifest("standard", ["marketing-super-skill"]);
+    const native = snapshot.skills.find((item) => item.name === "marketing-super-skill")!;
+    native.metadata = {
+      protected: false,
+      priority: 300,
+      categories: ["native"],
+      minimum_plan: "standard",
+    };
+    const generationWithoutNativeMetadata = snapshot.generation;
+    snapshot.generation = computeSkillManifestGeneration(snapshot);
+
+    expect(snapshot.generation).not.toBe(generationWithoutNativeMetadata);
+    expect(validateSkillManifest(snapshot)).toEqual(snapshot);
+
+    for (const minimumPlan of ["free", "pro", null] as const) {
+      const invalid = structuredClone(snapshot) as any;
+      const invalidNative = invalid.skills.find((item: { name: string }) => item.name === "marketing-super-skill");
+      if (minimumPlan === null) delete invalidNative.metadata.minimum_plan;
+      else invalidNative.metadata.minimum_plan = minimumPlan;
+      expect(() => validateSkillManifest(invalid)).toThrow(/minimum_plan|native skill/);
+    }
+  });
+
   it.each(["free", "standard", "advanced", "enterprise"] as const)("applies a complete %s manifest and installs guardrails plus hook-free startup", async (tier) => {
     const agentsSkillsDir = await root();
     const claudeCodeSkillsDir = join(dirname(agentsSkillsDir), ".claude", "skills");
+    const cursorSkillsDir = join(dirname(agentsSkillsDir), ".cursor", "skills");
     const applyManifest = vi.fn(async () => undefined);
     const snapshot = manifest(tier, tier === "free" ? [] : [`${tier}-skill`]);
     const result = await synchronizeSkillManifest({
-      agentsSkillsDir, claudeCodeSkillsDir, applyManifest,
+      agentsSkillsDir, claudeCodeSkillsDir, cursorSkillsDir, applyManifest,
       fetchImpl: vi.fn(() => jsonResponse(snapshot)) as unknown as typeof fetch,
       configuredCredential: tier !== "free",
       getJwt: async () => tier === "free" ? null : "valid-paid-jwt",
@@ -124,7 +149,9 @@ describe("subscription-tier skill manifest sync", () => {
       .toBe(snapshot.skills.find((item) => item.name === "aba-precision-protocol")!.content);
     expect(await readFile(join(claudeCodeSkillsDir, "aba-precision-protocol", "references", "rules.md"), "utf8"))
       .toBe("observable rules\n");
-    for (const nativeRoot of [agentsSkillsDir, claudeCodeSkillsDir]) {
+    expect(await readFile(join(cursorSkillsDir, "aba-precision-protocol", "references", "rules.md"), "utf8"))
+      .toBe("observable rules\n");
+    for (const nativeRoot of [agentsSkillsDir, claudeCodeSkillsDir, cursorSkillsDir]) {
       expect(await readFile(join(nativeRoot, "prism-startup", "SKILL.md"), "utf8"))
         .toContain("name: prism-startup");
     }
@@ -159,10 +186,11 @@ describe("subscription-tier skill manifest sync", () => {
     }
   });
 
-  it("auto-detects Claude Code but never treats Claude Desktop as a filesystem skill host", async () => {
+  it("auto-detects Claude Code and Cursor but never treats Claude Desktop as a filesystem skill host", async () => {
     const fixture = await mkdtemp(join(tmpdir(), "prism-skill-hosts-"));
     roots.push(fixture);
     await writeFile(join(fixture, ".claude.json"), "{}\n");
+    await mkdir(join(fixture, ".cursor"));
     await mkdir(join(fixture, "Library", "Application Support", "Claude"), { recursive: true });
     const snapshot = manifest("free", []);
 
@@ -174,7 +202,11 @@ describe("subscription-tier skill manifest sync", () => {
     });
 
     expect(result.status).toBe("applied");
-    for (const nativeRoot of [join(fixture, ".agents", "skills"), join(fixture, ".claude", "skills")]) {
+    for (const nativeRoot of [
+      join(fixture, ".agents", "skills"),
+      join(fixture, ".claude", "skills"),
+      join(fixture, ".cursor", "skills"),
+    ]) {
       expect(await readFile(join(nativeRoot, "aba-precision-protocol", "SKILL.md"), "utf8"))
         .toContain("name: aba-precision-protocol");
     }
@@ -209,43 +241,113 @@ describe("subscription-tier skill manifest sync", () => {
     ))).rejects.toThrow();
   });
 
-  it("downgrades every managed discovery root while preserving unowned and locally modified Claude content", async () => {
+  it("deduplicates Cursor's documented symlink to the canonical Agent Skills root", async () => {
+    const fixture = await mkdtemp(join(tmpdir(), "prism-cursor-skills-link-"));
+    roots.push(fixture);
+    const agentsSkillsDir = join(fixture, ".agents", "skills");
+    const cursorHome = join(fixture, ".cursor");
+    const cursorSkillsDir = join(cursorHome, "skills");
+    await mkdir(agentsSkillsDir, { recursive: true });
+    await mkdir(cursorHome);
+    await symlink(join("..", ".agents", "skills"), cursorSkillsDir);
+    const snapshot = manifest("free", []);
+
+    const result = await synchronizeSkillManifest({
+      homeDir: fixture,
+      applyManifest: vi.fn(async () => undefined),
+      configuredCredential: false,
+      fetchImpl: vi.fn(() => jsonResponse(snapshot)) as unknown as typeof fetch,
+    });
+
+    expect(result.status).toBe("applied");
+    expect((await lstat(cursorSkillsDir)).isSymbolicLink()).toBe(true);
+    expect(await readFile(join(cursorSkillsDir, "prism-startup", "SKILL.md"), "utf8"))
+      .toContain("name: prism-startup");
+    expect((await readdir(agentsSkillsDir)).filter((name) => name === ".prism-managed-skills.json"))
+      .toHaveLength(1);
+  });
+
+  it("fails before mutation when Cursor's native skill root is an unrelated user symlink", async () => {
+    const fixture = await mkdtemp(join(tmpdir(), "prism-cursor-skills-conflict-"));
+    roots.push(fixture);
+    const agentsSkillsDir = join(fixture, ".agents", "skills");
+    const cursorHome = join(fixture, ".cursor");
+    const userSkillsDir = join(fixture, "user-owned-skills");
+    const cursorSkillsDir = join(cursorHome, "skills");
+    await mkdir(agentsSkillsDir, { recursive: true });
+    await mkdir(cursorHome);
+    await mkdir(userSkillsDir);
+    await writeFile(join(userSkillsDir, "SENTINEL.md"), "preserve me\n");
+    await symlink(userSkillsDir, cursorSkillsDir);
+    const fetchImpl = vi.fn(() => jsonResponse(manifest("free", []))) as unknown as typeof fetch;
+    const applyManifest = vi.fn(async () => undefined);
+
+    const result = await synchronizeSkillManifest({
+      homeDir: fixture, applyManifest, configuredCredential: false, fetchImpl,
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toMatch(/user-owned symlink; preserved without changes/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(applyManifest).not.toHaveBeenCalled();
+    expect((await lstat(cursorSkillsDir)).isSymbolicLink()).toBe(true);
+    expect(await readFile(join(userSkillsDir, "SENTINEL.md"), "utf8")).toBe("preserve me\n");
+    await expect(readFile(join(agentsSkillsDir, "prism-startup", "SKILL.md"))).rejects.toThrow();
+  });
+
+  it("downgrades every managed discovery root while preserving unowned and locally modified host content", async () => {
     const agentsSkillsDir = await root();
     const claudeCodeSkillsDir = join(dirname(agentsSkillsDir), ".claude", "skills");
+    const cursorSkillsDir = join(dirname(agentsSkillsDir), ".cursor", "skills");
     const claudeUnowned = join(claudeCodeSkillsDir, "user-owned");
     const claudeSameNameConflict = join(claudeCodeSkillsDir, "aba-precision-protocol");
+    const cursorUnowned = join(cursorSkillsDir, "user-owned");
+    const cursorSameNameConflict = join(cursorSkillsDir, "aba-precision-protocol");
     await mkdir(claudeUnowned, { recursive: true });
     await mkdir(claudeSameNameConflict, { recursive: true });
+    await mkdir(cursorUnowned, { recursive: true });
+    await mkdir(cursorSameNameConflict, { recursive: true });
     await writeFile(join(claudeUnowned, "SKILL.md"), "keep my Claude skill");
     await writeFile(join(claudeSameNameConflict, "SKILL.md"), "keep my same-name Claude skill");
+    await writeFile(join(cursorUnowned, "SKILL.md"), "keep my Cursor skill");
+    await writeFile(join(cursorSameNameConflict, "SKILL.md"), "keep my same-name Cursor skill");
     const applyManifest = vi.fn(async () => undefined);
     const paid = manifest("enterprise", ["paid-skill"]);
     const free = manifest("free", []);
 
     const paidResult = await synchronizeSkillManifest({
-      agentsSkillsDir, claudeCodeSkillsDir, applyManifest, ...paidAuth,
+      agentsSkillsDir, claudeCodeSkillsDir, cursorSkillsDir, applyManifest, ...paidAuth,
       fetchImpl: vi.fn(() => jsonResponse(paid)) as unknown as typeof fetch,
     });
     expect(paidResult.conflicts).toEqual(["aba-precision-protocol"]);
     await writeFile(join(claudeCodeSkillsDir, "paid-skill", "local-note.md"), "preserve this edit");
+    await writeFile(join(cursorSkillsDir, "paid-skill", "local-note.md"), "preserve this Cursor edit");
     const result = await synchronizeSkillManifest({
-      agentsSkillsDir, claudeCodeSkillsDir, applyManifest, ...paidAuth,
+      agentsSkillsDir, claudeCodeSkillsDir, cursorSkillsDir, applyManifest, ...paidAuth,
       fetchImpl: vi.fn(() => jsonResponse(free)) as unknown as typeof fetch,
     });
 
     expect(result.status).toBe("applied");
     expect(result.pruned).toEqual(["paid-skill"]);
     expect(result.conflicts).toEqual(["aba-precision-protocol", "paid-skill"]);
-    for (const nativeRoot of [agentsSkillsDir, claudeCodeSkillsDir]) {
+    for (const nativeRoot of [agentsSkillsDir, claudeCodeSkillsDir, cursorSkillsDir]) {
       await expect(readFile(join(nativeRoot, "paid-skill", "SKILL.md"))).rejects.toThrow();
     }
     expect(await readFile(join(claudeUnowned, "SKILL.md"), "utf8")).toBe("keep my Claude skill");
     expect(await readFile(join(claudeSameNameConflict, "SKILL.md"), "utf8"))
       .toBe("keep my same-name Claude skill");
-    const quarantine = join(dirname(claudeCodeSkillsDir), ".prism-skill-quarantine");
-    const preserved = (await readdir(quarantine)).find((name) => name.startsWith("paid-skill-"));
-    expect(preserved).toBeTruthy();
-    expect(await readFile(join(quarantine, preserved!, "local-note.md"), "utf8")).toBe("preserve this edit");
+    expect(await readFile(join(cursorUnowned, "SKILL.md"), "utf8")).toBe("keep my Cursor skill");
+    expect(await readFile(join(cursorSameNameConflict, "SKILL.md"), "utf8"))
+      .toBe("keep my same-name Cursor skill");
+    for (const [nativeRoot, expected] of [
+      [claudeCodeSkillsDir, "preserve this edit"],
+      [cursorSkillsDir, "preserve this Cursor edit"],
+    ] as const) {
+      const quarantine = join(dirname(nativeRoot), ".prism-skill-quarantine");
+      const preserved = (await readdir(quarantine)).find((name) => name.startsWith("paid-skill-"));
+      expect(preserved).toBeTruthy();
+      expect(await readFile(join(quarantine, preserved!, "local-note.md"), "utf8")).toBe(expected);
+    }
   });
 
   it("upgrades and downgrades while pruning only marked Prism-managed native skills", async () => {
@@ -513,6 +615,29 @@ describe("subscription-tier skill manifest sync", () => {
       await expect(readFile(join(nativeRoot, "paid-skill", "SKILL.md"))).rejects.toThrow();
       expect((await filesUnder(nativeRoot)).some((path) => path.includes("paid-skill"))).toBe(false);
     }
+  });
+
+  it("creates an absent Cursor skill root before scanning committed entitlement recovery", async () => {
+    const agentsSkillsDir = await root();
+    const cursorSkillsDir = join(dirname(agentsSkillsDir), ".cursor", "skills");
+    const snapshot = manifest("free", []);
+    await applyManagedSkillManifest({
+      generation: snapshot.generation,
+      tier: snapshot.tier,
+      routingVersion: snapshot.routing_version,
+      skills: snapshot.skills.map(({ name, content, digest }) => ({ name, content, digest })),
+    });
+
+    const result = await synchronizeSkillManifest({
+      agentsSkillsDir,
+      cursorSkillsDir,
+      configuredCredential: false,
+      fetchImpl: vi.fn(() => jsonResponse(snapshot)) as unknown as typeof fetch,
+    });
+
+    expect(result.status).toBe("applied");
+    expect(await readFile(join(cursorSkillsDir, "prism-startup", "SKILL.md"), "utf8"))
+      .toContain("name: prism-startup");
   });
 
   it("enforces a validated downgrade even when the config DB transaction fails", async () => {

@@ -31,23 +31,29 @@ Prism externalises all durable state into two persistent stores before context f
 new conversation (including after compaction), the agent's mandatory first action is:
 
 ```
-session_load_context(project="<project>", level="standard")
+session_bootstrap({})
 ```
 
-This is enforced via `CLAUDE.md` — a project-level instruction file that Claude Code reads
-automatically at session start:
+`session_bootstrap` reads Agent Name, Default Role, Context Depth, and Auto-Load
+Projects from the dashboard. The host must not guess or hardcode a project or
+depth. The same canonical display is available without MCP through:
 
-```markdown
-## STEP 1: Auto-Load Prism Memory (MUST BE YOUR FIRST ACTION — NO EXCEPTIONS)
-
-YOUR LITERAL FIRST ACTION IN EVERY CONVERSATION MUST BE CALLING THIS TOOL:
-  mcp__prism-mcp__session_load_context(project="prism-mcp")
+```bash
+prism bootstrap
 ```
 
-`session_load_context` returns:
+`prism connect` provisions native startup instructions for supported hosts. It
+does not install lifecycle hooks. The first user turn activates the bootstrap;
+after a host-driven compaction, the same call reconstructs durable state.
+
+`session_bootstrap` returns one structured display containing:
 - The latest **handoff** snapshot (open TODOs, current task, key decisions, context)
 - A summary of recent **ledger** entries (work log, files changed, decisions made)
 - Active **knowledge** relevant to the current project context
+- The current synchronized subscription tier and provisioned skill status
+
+Use `session_load_context(project)` only for an explicit project reload or as a
+fallback with an older Prism server that does not expose `session_bootstrap`.
 
 The agent is fully oriented before writing a single byte of response.
 

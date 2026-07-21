@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
-  access, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, writeFile,
+  access, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -17,7 +17,7 @@ const INDEX = ".prism-managed-skills.json";
 const SHA256 = /^[a-f0-9]{64}$/i;
 const SAFE_NAME = /^[a-z0-9][a-z0-9_-]{0,127}$/;
 const TIERS = new Set(["free", "standard", "advanced", "enterprise"]);
-const CATEGORIES = new Set(["universal", "project", "prompt"]);
+const CATEGORIES = new Set(["universal", "project", "prompt", "native"]);
 const MAX_SKILLS = 500;
 const MAX_FILES_PER_SKILL = 500;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -43,7 +43,8 @@ export interface ManifestSkill {
   metadata: {
     protected: boolean;
     priority: number;
-    categories: Array<"universal" | "project" | "prompt">;
+    categories: Array<"universal" | "project" | "prompt" | "native">;
+    minimum_plan?: "free" | "standard" | "advanced" | "enterprise";
   };
   files: Record<string, ManifestFile>;
 }
@@ -101,6 +102,12 @@ export interface SkillSyncOptions {
    * ~/.agents/skills root, so tests and callers with custom roots stay isolated.
    */
   claudeCodeSkillsDir?: string | false;
+  /**
+   * Cursor's native user skill root. `false` disables the mirror. When omitted,
+   * Prism auto-detects Cursor only while using the production default
+   * ~/.agents/skills root, so tests and callers with custom roots stay isolated.
+   */
+  cursorSkillsDir?: string | false;
   fetchImpl?: typeof fetch;
   getJwt?: () => Promise<string | null>;
   invalidateJwt?: () => void;
@@ -120,6 +127,11 @@ let inFlight: Promise<SkillSyncResult> | null = null;
 let lastResult: SkillSyncResult | null = null;
 let lastFinishedAt = 0;
 const SUCCESS_TTL_MS = 5 * 60 * 1000;
+
+function isErrno(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error
+    && (error as NodeJS.ErrnoException).code === code;
+}
 
 function sha256(value: Uint8Array | string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -197,6 +209,13 @@ export function validateSkillManifest(payload: unknown): SkillManifest {
         !Array.isArray(metadata.categories) || metadata.categories.some((category) => typeof category !== "string" || !CATEGORIES.has(category))) {
       throw new Error(`invalid skill metadata: ${skill.name}`);
     }
+    if (metadata.minimum_plan !== undefined && (typeof metadata.minimum_plan !== "string" || !TIERS.has(metadata.minimum_plan))) {
+      throw new Error(`invalid skill minimum_plan: ${skill.name}`);
+    }
+    if (metadata.categories.includes("native") &&
+        (metadata.minimum_plan === undefined || metadata.minimum_plan === "free")) {
+      throw new Error(`native skill requires a paid minimum_plan: ${skill.name}`);
+    }
     if (!skill.files || typeof skill.files !== "object" || Array.isArray(skill.files)) throw new Error(`missing skill files: ${skill.name}`);
     const fileEntries = Object.entries(skill.files as Record<string, unknown>);
     if (fileEntries.length === 0 || fileEntries.length > MAX_FILES_PER_SKILL) throw new Error(`invalid file count: ${skill.name}`);
@@ -229,7 +248,14 @@ export function validateSkillManifest(payload: unknown): SkillManifest {
       digest: skill.digest.toLowerCase(),
       version: skill.version as number,
       source: skill.source,
-      metadata: metadata as ManifestSkill["metadata"],
+      metadata: {
+        protected: metadata.protected as boolean,
+        priority: metadata.priority as number,
+        categories: metadata.categories as ManifestSkill["metadata"]["categories"],
+        ...(metadata.minimum_plan === undefined
+          ? {}
+          : { minimum_plan: metadata.minimum_plan as ManifestSkill["metadata"]["minimum_plan"] }),
+      },
       files,
     };
   });
@@ -405,6 +431,7 @@ async function rollbackNativeOperations(operations: NativeOperation[], backupRoo
 }
 
 async function enforceNativeEntitlements(incomingNames: Iterable<string>, agentsSkillsDir: string): Promise<void> {
+  await ensureRealDirectory(agentsSkillsDir);
   await quarantineLegacyDiscoveryArtifacts(agentsSkillsDir);
   const incoming = new Set(incomingNames);
   const oldIndex = await readJson<NativeIndex>(join(agentsSkillsDir, INDEX));
@@ -435,6 +462,7 @@ async function resolveNativeSkillsDirs(options: SkillSyncOptions): Promise<strin
   const userHome = options.homeDir ?? homedir();
   const canonical = options.agentsSkillsDir ?? join(userHome, ".agents", "skills");
   let claudeCode: string | null = null;
+  let cursor: string | null = null;
 
   if (typeof options.claudeCodeSkillsDir === "string") {
     claudeCode = options.claudeCodeSkillsDir;
@@ -449,9 +477,61 @@ async function resolveNativeSkillsDirs(options: SkillSyncOptions): Promise<strin
     }
   }
 
-  return [...new Set([canonical, claudeCode]
+  if (typeof options.cursorSkillsDir === "string") {
+    cursor = options.cursorSkillsDir;
+  } else if (options.cursorSkillsDir !== false && options.agentsSkillsDir === undefined) {
+    // Cursor's native Agent Skills discovery root is ~/.cursor/skills. Keep
+    // ~/.agents/skills as the cross-host canonical copy and mirror only when a
+    // Cursor home already exists, so installing Prism alone creates no host
+    // configuration. This remains a regular, hook-free manifest transaction.
+    const cursorHome = join(userHome, ".cursor");
+    if (await exists(cursorHome)) cursor = join(cursorHome, "skills");
+  }
+
+  const candidates = [...new Set([canonical, claudeCode, cursor]
     .filter((path): path is string => Boolean(path))
     .map((path) => resolve(path)))];
+  const canonicalPath = candidates[0];
+  let canonicalTarget = canonicalPath;
+  try {
+    canonicalTarget = await realpath(canonicalPath);
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) throw error;
+  }
+
+  const deduplicated = [canonicalPath];
+  for (const candidate of candidates.slice(1)) {
+    let entry;
+    try {
+      entry = await lstat(candidate);
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) {
+        deduplicated.push(candidate);
+        continue;
+      }
+      throw error;
+    }
+    if (!entry.isSymbolicLink()) {
+      deduplicated.push(candidate);
+      continue;
+    }
+
+    // Cursor documents ~/.cursor/skills -> ~/.agents/skills as a compatible
+    // discovery setup. Treat only that exact target as the canonical root,
+    // including a temporarily dangling relative link. Every other symlink
+    // fails before fetch or mutation so Prism never writes through a
+    // user-owned path.
+    let linkTarget = resolve(dirname(candidate), await readlink(candidate));
+    try {
+      linkTarget = await realpath(candidate);
+    } catch (error) {
+      if (!isErrno(error, "ENOENT")) throw error;
+    }
+    if (linkTarget !== canonicalPath && linkTarget !== canonicalTarget) {
+      throw new Error(`native skill mirror is a user-owned symlink; preserved without changes: ${candidate}`);
+    }
+  }
+  return deduplicated;
 }
 
 function mergeNativeResults(
@@ -778,12 +858,14 @@ async function acquireSyncLock(agentsSkillsDir: string, waitMs = LOCK_WAIT_MS): 
 
 export async function synchronizeSkillManifest(options: SkillSyncOptions = {}): Promise<SkillSyncResult> {
   const empty = { installed: [], updated: [], pruned: [], conflicts: [] };
-  const nativeSkillsDirs = await resolveNativeSkillsDirs(options);
-  const agentsSkillsDir = nativeSkillsDirs[0];
+  let nativeSkillsDirs: string[] = [];
+  let agentsSkillsDir = "";
   let releaseLock: (() => Promise<void>) | null = null;
   let manifest: SkillManifest | null = null;
   let dbApplied = false;
   try {
+    nativeSkillsDirs = await resolveNativeSkillsDirs(options);
+    agentsSkillsDir = nativeSkillsDirs[0];
     // Fetch only after acquiring the shared lock. A waiter therefore fetches
     // the portal's current generation after the preceding process completes,
     // and DB/native state advance as one serialized pair.

@@ -550,21 +550,22 @@ The same block also appears automatically in `session_save_ledger` and `session_
 
 **Note:** This tracks `prism_infer` delegation only — not your host model's (Claude's) own token spend. For that, use Claude Code's `/cost` command.
 
-### Local-model delegation (opt-in)
+### Local-model delegation (local-first default)
 
-By default, your AI agent (Claude, Cursor, etc.) handles everything itself. You can optionally enable delegation so the agent offloads cheap, verifiable sub-tasks to local Ollama models at $0:
+Prism now gives Claude, Cursor, Gemini, Codex, and other MCP hosts the same workflow. For bounded, verifiable sub-tasks, the host calls `session_task_route` and then `prism_infer`. Prism loads the project's configured quick, standard, or deep memory context, selects a RAM-safe local Ollama model, and returns the result to the current host for verification. Routine work must not create host-native background-agent fan-out.
+
+Delegation is enabled by default. To opt out explicitly:
 
 ```bash
-# Enable via Prism config
-prism config set delegation_enabled true
+prism config set delegation_enabled false
 ```
 
-When enabled, the agent's task router may delegate qualifying work — bulk classification, field extraction, mechanical formatting — to `prism_infer` instead of using cloud tokens. The agent always verifies the result and redoes it itself if quality is degraded.
-
 **Guardrails:**
-- **Off by default** — enforced in code, not just convention
-- **Never delegates:** code/text that ships to the user, security/safety logic, planning/reasoning, anything where a silent quality drop isn't obvious
-- **Always verifies:** checks `quality_gate_failed` and `used_cloud` before trusting local output
+- **Local first, one current host:** local inference handles eligible bounded work; the current host handles unavailable, refused, degraded, tool-dependent, or reserved work.
+- **Never delegates:** security/safety decisions, planning, final user-facing decisions, or work where a silent quality drop would be hard to detect.
+- **Always verifies:** the host checks `quality_gate_failed` and `used_cloud` before using local output.
+- **Prism-owned selection:** the router forwards complexity, while `prism_infer` chooses 2B/4B/9B/27B using memory/context fit, installed models, live RAM, entitlements, and explicit overrides.
+- **No fan-out:** host-native/background subagents are a last resort, limited to one economy worker with no nesting.
 
 <details>
 <summary>How Prism survives context compaction</summary>

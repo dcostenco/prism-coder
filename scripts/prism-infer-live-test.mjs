@@ -1,25 +1,25 @@
 #!/usr/bin/env node
 /**
- * prism_infer Live Integration Test
+ * Prism local-routing live integration test
  * ───────────────────────────────────────────────────────────
- * Spawns the prism-mcp server over stdio and exercises the
- * prism_infer tool with three scenarios:
+ * Spawns the built prism-mcp server over stdio and verifies the real MCP
+ * session_task_route -> prism_infer contract.
  *
- *   1. Sanity   — list tools, confirm prism_infer is present
- *   2. Local hit — happy path against running Ollama
- *   3. Ceiling  — model_ceiling="1b7" forces smallest tier
+ * Default (fast, no model load):
+ *   1. Confirm session_task_route and prism_infer are exposed
+ *   2. Verify deterministic 4B, 9B, and 27B routing
+ *   3. Verify architecture, security, and host-tool workflows stay on host
  *
- * Optional scenarios (opt-in to avoid disrupting your dev box):
- *   --kill-ollama : SIGSTOP ollama before call → expect failure, restart after
- *   --cloud       : test cloud_fallback=true via synalux portal
+ * Optional (loads local models sequentially):
+ *   --infer — feed each local route's recommended_args back into prism_infer,
+ *             assert the selected tier, and unload Prism models between cases
  *
  * Usage:
- *   node scripts/prism-infer-live-test.mjs                  # core tests
- *   node scripts/prism-infer-live-test.mjs --cloud          # + cloud fallback
- *   node scripts/prism-infer-live-test.mjs --kill-ollama    # + Ollama-down sim
+ *   npm run test:routing:live
+ *   npm run test:routing:models
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -47,10 +47,76 @@ function loadDotenv(file) {
 }
 
 const FLAGS = new Set(process.argv.slice(2));
-const TEST_CLOUD = FLAGS.has("--cloud");
-const KILL_OLLAMA = FLAGS.has("--kill-ollama");
+const TEST_INFERENCE = FLAGS.has("--infer");
 
 const GB = 1024 ** 3;
+
+const ROUTE_CASES = [
+    {
+        label: "4B — trivial bounded edit",
+        expectedTarget: "claw",
+        expectedTier: "4b",
+        maxTokens: 128,
+        args: {
+            task_description: "fix typo in README, simple change",
+            files_involved: ["README.md"],
+            estimated_scope: "minor_edit",
+        },
+    },
+    {
+        label: "9B — bounded endpoint scaffold",
+        expectedTarget: "claw",
+        expectedTier: "9b",
+        maxTokens: 512,
+        args: {
+            task_description: "scaffold a new REST endpoint",
+            estimated_scope: "new_feature",
+        },
+    },
+    {
+        label: "27B — bounded difficult algorithm",
+        expectedTarget: "claw",
+        expectedTier: "27b",
+        maxTokens: 768,
+        args: {
+            task_description:
+                "Implement a self-contained dynamic programming algorithm from this complete specification with multiple edge cases.",
+            files_involved: ["src/solver.ts"],
+            estimated_scope: "new_feature",
+        },
+    },
+    {
+        label: "host — architecture judgment",
+        expectedTarget: "host",
+        args: {
+            task_description: "Design the architecture and migration strategy for services and persistence",
+            files_involved: ["src/service.ts"],
+            estimated_scope: "new_feature",
+        },
+    },
+    {
+        label: "host — security judgment",
+        expectedTarget: "host",
+        args: {
+            task_description: "Perform a security audit of authentication and investigate the vulnerability surface",
+            files_involved: ["src/auth.ts"],
+            estimated_scope: "bug_fix",
+        },
+    },
+    {
+        label: "host — real read-edit-verify regression",
+        expectedTarget: "host",
+        args: {
+            task_description:
+                "Read the Prism test harness, persist regression tests for the 4B, 9B, 27B and host-only routing matrix, update the real MCP live-test workflow, then run focused verification.",
+            files_involved: [
+                "tests/tools/task-router.test.ts",
+                "scripts/prism-infer-live-test.mjs",
+            ],
+            estimated_scope: "bug_fix",
+        },
+    },
+];
 
 // ─── Pretty output ─────────────────────────────────────────
 
@@ -144,73 +210,123 @@ function assert(cond, label) {
     else { bad(label); failures += 1; }
 }
 
+function parseFirstJsonBlock(result, label) {
+    const block = result?.content?.find((item) => item.type === "text")?.text;
+    if (!block) throw new Error(`${label}: tool returned no text content`);
+    try {
+        return JSON.parse(block);
+    } catch (error) {
+        throw new Error(`${label}: first text block is not JSON: ${error.message}`);
+    }
+}
+
+function expectedTierForComplexity(complexity) {
+    if (complexity <= 3) return "4b";
+    if (complexity <= 6) return "9b";
+    return "27b";
+}
+
+function loadedPrismModels() {
+    const result = spawnSync("ollama", ["ps"], { encoding: "utf8" });
+    if (result.error || result.status !== 0) return [];
+    const matches = result.stdout.match(/(?:dcostenco\/)?prism-coder:(?:2b|4b|9b|27b)/g) || [];
+    return [...new Set(matches)];
+}
+
+function waitMs(milliseconds) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function unloadPrismModels(timeoutMs = 10_000) {
+    for (const model of loadedPrismModels()) {
+        const result = spawnSync("ollama", ["stop", model], { encoding: "utf8" });
+        assert(result.status === 0, `unloaded ${model}`);
+    }
+
+    const deadline = Date.now() + timeoutMs;
+    let remaining = loadedPrismModels();
+    while (remaining.length > 0 && Date.now() < deadline) {
+        waitMs(250);
+        remaining = loadedPrismModels();
+    }
+    assert(remaining.length === 0, `Prism model unload completed${remaining.length ? ` (still loaded: ${remaining.join(", ")})` : ""}`);
+}
+
 // ─── Main ──────────────────────────────────────────────────
 
 async function main() {
-    head("Prism-Infer Live Test");
+    head("Prism Local-Routing Live Test");
     info(`server=${SERVER_PATH}`);
     info(`os.freemem=${(os.freemem() / GB).toFixed(1)} GB`);
     info(`os.totalmem=${(os.totalmem() / GB).toFixed(1)} GB`);
-    info(`flags: cloud=${TEST_CLOUD} killOllama=${KILL_OLLAMA}`);
+    info(`actual local inference=${TEST_INFERENCE}`);
 
     const client = new McpClient(SERVER_PATH);
     try {
         await client.initialize();
 
-        // ── 1. Sanity: tools/list contains prism_infer ──
+        // ── 1. Sanity: both halves of the MCP contract are exposed ──
         head("1. Sanity — tools/list");
         const listed = await client.listTools();
         const names = (listed.tools || []).map((t) => t.name);
+        assert(names.includes("session_task_route"), `session_task_route is in tools/list (found ${names.length} tools)`);
         assert(names.includes("prism_infer"), `prism_infer is in tools/list (found ${names.length} tools)`);
 
-        // ── 2. Local happy-path ──
-        head("2. Local happy-path");
-        const r1 = await client.callTool("prism_infer", {
-            prompt: "Reply with exactly one word: PONG",
-            max_tokens: 16,
-            temperature: 0,
-        });
-        const header1 = r1?.content?.[0]?.text ?? "";
-        const body1   = r1?.content?.[1]?.text ?? "";
-        info(`header: ${header1}`);
-        info(`body:   ${body1.slice(0, 80).replace(/\n/g, " ")}${body1.length > 80 ? "…" : ""}`);
-        assert(!r1.isError, "no error envelope");
-        assert(/backend=ollama-/.test(header1), "backend reported (ollama-*)");
-        assert(/free_ram=\d+MB/.test(header1), "ram_free_mb in header");
+        // ── 2. Route matrix through the real stdio MCP server ──
+        head("2. session_task_route matrix");
+        const localRoutes = [];
+        for (const testCase of ROUTE_CASES) {
+            const response = await client.callTool("session_task_route", testCase.args);
+            assert(!response.isError, `${testCase.label}: no MCP error envelope`);
+            const route = parseFirstJsonBlock(response, testCase.label);
+            info(`${testCase.label}: target=${route.target} complexity=${route.complexity_score}`);
+            assert(route.target === testCase.expectedTarget, `${testCase.label}: target=${testCase.expectedTarget}`);
 
-        // ── 3. Ceiling forces a smaller tier (8B, confirmed pulled) ──
-        head("3. model_ceiling='8b' caps cascade at 8B");
-        const r2 = await client.callTool("prism_infer", {
-            prompt: "Reply OK",
-            max_tokens: 8,
-            model_ceiling: "8b",
-        });
-        const header2 = r2?.content?.[0]?.text ?? "";
-        info(`header: ${header2}`);
-        assert(!r2.isError, "no error envelope (ceiling)");
-        assert(/backend=ollama-8b/.test(header2), "backend is ollama-8b");
-        assert(!/backend=ollama-(14|32)b/.test(header2), "did not escalate above ceiling");
+            if (testCase.expectedTarget === "host") {
+                assert(route.recommended_tool === null, `${testCase.label}: no local executor`);
+                assert(route.recommended_args === undefined, `${testCase.label}: no local arguments`);
+                continue;
+            }
 
-        // ── 4. Optional: ollama down → cloud fallback ──
-        if (TEST_CLOUD) {
-            head("4. cloud_fallback=true with synalux portal");
-            const r3 = await client.callTool("prism_infer", {
-                prompt: "Reply OK",
-                max_tokens: 8,
-                model_ceiling: "1b7",
-                cloud_fallback: true,
-            });
-            const header3 = r3?.content?.[0]?.text ?? "";
-            info(`header: ${header3}`);
-            // Cloud SHOULD NOT be used because local is up. But the header
-            // should still show used_cloud=false explicitly.
-            assert(/used_cloud=false/.test(header3), "local hit, used_cloud=false");
+            assert(route.recommended_tool === "prism_infer", `${testCase.label}: recommends prism_infer`);
+            const recommendedArgs = route.recommended_args || {};
+            assert(route.recommended_args !== undefined, `${testCase.label}: returns local arguments`);
+            assert(recommendedArgs.task_complexity === route.complexity_score, `${testCase.label}: forwards full complexity`);
+            assert(recommendedArgs.cloud_fallback === false, `${testCase.label}: disables cloud fallback`);
+            assert(recommendedArgs.escalation === "report", `${testCase.label}: reports local failures`);
+            assert(!("model_ceiling" in recommendedArgs), `${testCase.label}: prism_infer owns model selection`);
+            assert(!("think" in recommendedArgs), `${testCase.label}: prism_infer owns thinking selection`);
+
+            const selectedTier = expectedTierForComplexity(route.complexity_score);
+            assert(selectedTier === testCase.expectedTier, `${testCase.label}: complexity selects ${testCase.expectedTier}`);
+            localRoutes.push({ testCase, route });
         }
 
-        if (KILL_OLLAMA) {
-            head("5. Ollama unreachable simulation");
-            info("This requires you to manually `ollama serve` stop OR change LOCAL_LLM_URL to a dead port.");
-            info("Skipping automated kill — too risky for a dev box.");
+        // ── 3. Optional: execute the returned local arguments verbatim ──
+        if (TEST_INFERENCE) {
+            head("3. session_task_route -> prism_infer model execution");
+            unloadPrismModels();
+
+            for (const { testCase, route } of localRoutes) {
+                const result = await client.callTool("prism_infer", {
+                    ...route.recommended_args,
+                    max_tokens: testCase.maxTokens,
+                    temperature: 0,
+                    verify: false,
+                });
+                const header = result?.content?.[0]?.text ?? "";
+                const body = result?.content?.[1]?.text ?? "";
+                info(`${testCase.label}: ${header}`);
+                info(`output: ${body.slice(0, 100).replace(/\n/g, " ")}${body.length > 100 ? "…" : ""}`);
+                assert(!result.isError, `${testCase.label}: inference succeeded`);
+                assert(header.includes(`backend=ollama-${testCase.expectedTier}`), `${testCase.label}: used ${testCase.expectedTier} backend`);
+                assert(header.includes("used_cloud=false"), `${testCase.label}: stayed local`);
+                assert(/free_ram=\d+MB/.test(header), `${testCase.label}: reported RAM evidence`);
+                assert(!header.includes("quality_gate_failed=true"), `${testCase.label}: output was not truncated or degraded`);
+                unloadPrismModels();
+            }
+
+            assert(loadedPrismModels().length === 0, "no Prism model remains loaded after live tests");
         }
     } finally {
         client.close();

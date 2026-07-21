@@ -67,6 +67,9 @@ describe("Prism startup tool contract", () => {
     expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/Do not substitute session_load_context/i);
     expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/session_save_handoff to preserve state/i);
     expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/session_detect_drift/i);
+    expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/Prism local-first orchestration/i);
+    expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/Never create host-native or background subagents for routine work/i);
+    expect(PRISM_SERVER_INSTRUCTIONS).toMatch(/A host-native subagent is a last resort: at most one, no nesting/i);
   });
 
   it.each([

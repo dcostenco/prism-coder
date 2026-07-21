@@ -13,10 +13,10 @@
  * This saves 11GB+ RAM vs 27b and keeps response times fast.
  *
  *   tag                 weights   need free   ctx     role
- *   prism-coder:27b     ~16 GB    ≥ 20 GB     32K    quality (on-demand, Qwen3.5 DeltaNet, 100% BFCL)
- *   prism-coder:9b      ~ 5.8 GB  ≥  8 GB     32K    default router (Qwen3.5, 100% BFCL)
+ *   prism-coder:27b     ~16 GB    ≥ 20 GB      4K    quality (on-demand, Qwen3.5 DeltaNet, 100% BFCL)
+ *   prism-coder:9b      ~ 5.8 GB  ≥  8 GB      4K    default router (Qwen3.5, 100% BFCL)
  *   prism-coder:4b      ~ 3.4 GB  ≥  5 GB     32K    verifier (Qwen3.5, 100%)
- *   prism-coder:2b      ~ 2.3 GB  ≥  3 GB      8K    mobile / iPhone (Qwen3.5, 99.1%)
+ *   prism-coder:2b      ~ 2.3 GB  ≥  3 GB     32K    mobile / iPhone (Qwen3.5, 99.1%)
  *
  * Below 3 GB free → no local pick (caller must use cloud).
  */

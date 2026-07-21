@@ -374,20 +374,24 @@ export const PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS = parseInt(
 
 // ─── v7.1: Task Router Configuration ─────────────────────────
 // Deterministic heuristic-based routing for delegating coding tasks
-// between the host cloud model and the local claw-code-agent.
-// Set PRISM_TASK_ROUTER_ENABLED=true to unlock the session_task_route tool.
+// between the host cloud model and Prism's local worker. Local-first is the
+// default; set PRISM_TASK_ROUTER_ENABLED=false for an explicit operator opt-out.
 
 /** Master switch for the task router tool. */
-export const PRISM_TASK_ROUTER_ENABLED_ENV = process.env.PRISM_TASK_ROUTER_ENABLED === "true";
+export const PRISM_TASK_ROUTER_ENABLED_ENV = process.env.PRISM_TASK_ROUTER_ENABLED !== "false";
 
 /** Confidence threshold below which routing defaults to the host model. (Default: 0.6) */
 export const PRISM_TASK_ROUTER_CONFIDENCE_THRESHOLD = parseFloat(
   process.env.PRISM_TASK_ROUTER_CONFIDENCE_THRESHOLD || "0.6"
 );
 
-/** Maximum complexity score (1-10) that Claw can handle. Tasks above this → host. (Default: 4) */
+/**
+ * Operator ceiling for bounded local work (1-10). The router independently
+ * rejects architecture, security, tool-heavy, and other host-only work.
+ * Default 10 lets prism_infer select every entitled/RAM-safe local tier.
+ */
 export const PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY = parseInt(
-  process.env.PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY || "4", 10
+  process.env.PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY || "10", 10
 );
 
 // ─── v7.2: Verification Harness ──────────────────────────────

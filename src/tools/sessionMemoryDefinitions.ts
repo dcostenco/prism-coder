@@ -182,7 +182,9 @@ export const SESSION_BOOTSTRAP_TOOL: Tool = {
     "then returns the greeting and correctly scoped prior-session context. Emit no preamble. Print the complete tool result " +
     "verbatim as the entire first-turn startup display, before any optional answer. Do not summarize, paraphrase, rename " +
     "headings, reformat, or omit any returned section. Preserve its order and line content. For a greeting-only prompt, " +
-    "stop after the verbatim startup display. Do not guess or pass a project or depth.",
+    "stop after the verbatim startup display. Do not guess or pass a project or depth. Prism returns a stable " +
+    "conversation_id in structuredContent; reuse it for session_save_ledger, session_save_handoff, and " +
+    "session_detect_drift throughout this conversation without adding it to the visible greeting.",
   annotations: {
     readOnlyHint: true,
     destructiveHint: false,
@@ -194,7 +196,7 @@ export const SESSION_BOOTSTRAP_TOOL: Tool = {
     properties: {
       conversation_id: {
         type: "string",
-        description: "Optional stable key for this conversation; forwarded to every configured project load.",
+        description: "Optional stable key for this conversation. When omitted, Prism generates one and returns it in structuredContent.",
       },
       prompt: {
         type: "string",
@@ -1552,12 +1554,17 @@ export const SESSION_TASK_ROUTE_TOOL: Tool = {
   name: "session_task_route",
   description:
     "Analyze a coding task and recommend whether it should be handled by the host " +
-    "cloud model or delegated to the local claw-code-agent (Qwen3).\n\n" +
+    "cloud model or delegated to Prism's local memory-aware worker (Qwen3). " +
+    "The `claw` target value is retained for API compatibility.\n\n" +
     "**How to use:**\n" +
-    "1. Call this tool BEFORE writing code or executing a complex task\n" +
+    "1. Call this tool before delegating a bounded subtask\n" +
     "2. Read the `target` field in the response\n" +
-    "3. If target is `claw`, call `claw_run_task` with the task description\n" +
+    "3. If target is `claw`, call the returned `recommended_tool` (`prism_infer`) " +
+    "with `recommended_args`\n" +
     "4. If target is `host`, handle the task yourself\n\n" +
+    "Bounded high-complexity inference may still target `claw`; the forwarded 1-10 " +
+    "complexity selects 4B/9B/27B inside `prism_infer`. Architecture, security, " +
+    "host-tool workflows, and other reserved judgment remain on `host`.\n\n" +
     "**v7.1.0/v7.2.0:** Uses deterministic keyword/scope heuristics.\n" +
     "When a project is specified, routing is enhanced by analyzing past experience events " +
     "(success/failure/correction) to adjust confidence scores based on historical outcomes.",

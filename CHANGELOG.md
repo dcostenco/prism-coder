@@ -10,6 +10,12 @@ All notable changes to this project will be documented in this file.
 - Native package materialization under `~/.agents/skills`, including complete
   multi-file packages, atomic replacement, ownership markers, recovery, and
   bounded cross-process locking.
+- One canonical local-first orchestration policy for Claude Code, Claude
+  Desktop, Cursor, Gemini CLI, and Codex. MCP initialize instructions carry it
+  to every host; native instruction files reinforce it where supported.
+- Memory-aware local workers: `prism_infer` accepts `project`,
+  `context_depth`, and `conversation_id`, then loads bounded
+  quick/standard/deep project history as untrusted historical data.
 
 ### Changed
 - Platform skill activation now intersects the current manifest entitlement;
@@ -24,6 +30,16 @@ All notable changes to this project will be documented in this file.
 - Claude Code receives a small ownership-marked native `~/CLAUDE.md` block
   because live acceptance proved MCP metadata and skill discovery alone do not
   reliably trigger a first-turn tool call.
+- Local delegation is now the default, with an explicit setting/environment
+  opt-out. `session_task_route` returns the real `prism_infer` executor and
+  bounded arguments instead of the nonexistent `claw_run_task` tool.
+- `session_task_route` forwards a deterministic complexity hint but does not
+  choose a model. `prism_infer` centrally selects 4B/9B/27B using complexity,
+  memory/context fit, installed models, live RAM, entitlements, and explicit
+  caller overrides.
+- `prism connect` disables Codex and Gemini native fan-out. Codex retains a
+  capped Terra/low fallback profile for an explicit future re-enable; Claude
+  Code's fallback subagent model is pinned to Sonnet.
 
 ### Fixed
 - Codex no longer needs a second restart after `prism connect`: the command
@@ -43,6 +59,8 @@ All notable changes to this project will be documented in this file.
   package-content regression coverage.
 - Added exact legacy-hook migration coverage for success, sync failure,
   disabled sync, dry-run, idempotence, malformed settings, and near matches.
+- Added cross-host policy, native setting preservation, router-to-executor,
+  memory-depth, historical-data escaping, and explicit opt-out coverage.
 
 ## [20.2.1] - 2026-07-20 — Subscription-Aware Memory
 

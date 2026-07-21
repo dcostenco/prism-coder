@@ -27,6 +27,8 @@
     "test:watch": "vitest",
     "test:load": "vitest run tests/load/",
     "test:ci": "vitest run --reporter=junit --outputFile=test-results.xml",
+    "test:routing:live": "npm run build && node scripts/prism-infer-live-test.mjs",
+    "test:routing:models": "npm run build && node scripts/prism-infer-live-test.mjs --infer",
     "test:mcp": "node ./test_cross_mcp.js",
     "import": "node dist/utils/universalImporter.js"
   },

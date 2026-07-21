@@ -207,12 +207,32 @@ import {
   sessionViewImageHandler,
   sanitizeMemoryInput,
 } from "../../src/tools/ledgerHandlers.js";
+import { REQUIRED_NATIVE_SKILL_NAMES } from "../../src/tools/skillRouting.js";
+import {
+  markContextLoaded,
+  noteDriftSessionStart,
+  requireContextLoaded,
+} from "../../src/session/sessionContext.js";
+
+const BOOTSTRAP_DEPTH_CASES = ["quick", "standard", "deep"] as const;
+const BOOTSTRAP_TIER_SKILLS = {
+  free: [],
+  standard: ["dev-engineering-super-skill"],
+  advanced: ["research-knowledge-super-skill"],
+  enterprise: ["ai-agent-super-skill", "bcba_ai_assistant"],
+} as const;
+const BOOTSTRAP_TIER_DEPTH_CASES = Object.entries(BOOTSTRAP_TIER_SKILLS).flatMap(
+  ([tier, tierSkills]) => BOOTSTRAP_DEPTH_CASES.map((depth) => ({ tier, tierSkills, depth })),
+);
 
 const mockGetStorage = vi.mocked(getStorage);
 const mockGetSetting = vi.mocked(getSetting);
 const mockGetAllSettings = vi.mocked(getAllSettings);
 const mockRefreshConfigStorageCache = vi.mocked(refreshConfigStorageCache);
 const mockAwaitSkillManifestSync = vi.mocked(awaitSkillManifestSync);
+const mockMarkContextLoaded = vi.mocked(markContextLoaded);
+const mockNoteDriftSessionStart = vi.mocked(noteDriftSessionStart);
+const mockRequireContextLoaded = vi.mocked(requireContextLoaded);
 
 // ======================================================================
 // HELPERS — build a fresh storage stub per test
@@ -270,6 +290,9 @@ describe("ledgerHandlers", () => {
     mockGetStorage.mockResolvedValue(storage as any);
     mockGetSetting.mockResolvedValue("");
     mockGetAllSettings.mockResolvedValue({});
+    mockRequireContextLoaded.mockImplementation(() => null);
+    mockMarkContextLoaded.mockImplementation(() => undefined);
+    mockNoteDriftSessionStart.mockImplementation(() => undefined);
   });
 
   // ====================================================================
@@ -974,7 +997,7 @@ describe("ledgerHandlers", () => {
         expect(text).toContain("Open TODOs");
         expect(text).toContain("more TODOs omitted");
         expect(text).toContain("</prism_memory>");
-        expect(text.includes("Last Summary")).toBe(expectsSummary);
+        expect(text.includes("Last Session Summary")).toBe(expectsSummary);
         expect(text.includes("Recent Sessions")).toBe(expectsRecent);
         expect(text.includes("Session History")).toBe(expectsHistory);
       },
@@ -1109,7 +1132,7 @@ describe("ledgerHandlers", () => {
       expect(text).toContain("Last work on prism-mcp");
       expect(text).toContain("Last work on portal");
       expect(text).toContain("Earlier prism-mcp session");
-      expect(text).toContain("Native skills provisioned by prism connect");
+      expect(text).toContain("Protected fallback names");
       expect(text).not.toContain("NATIVE_SKILL_BODY_MUST_NOT_BE_INLINED");
       expect(text.length).toBeLessThan(10_000);
       expect(storage.loadContext).toHaveBeenCalledTimes(2);
@@ -1128,9 +1151,166 @@ describe("ledgerHandlers", () => {
 
       expect(result.isError).toBe(false);
       expect(result.content[0].text).toContain("Welcome back, Dmitri");
+      expect(result.content[0].text).toContain("Agent Identity:** global — Dmitri");
       expect(result.content[0].text).toContain("loading quick context");
       expect(result.content[0].text).toContain("No Auto-Load Projects");
       expect(storage.loadContext).not.toHaveBeenCalled();
+    });
+
+    it("uses truthful identity fallbacks when dashboard identity is unconfigured", async () => {
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        agent_name: "",
+        default_role: "",
+        default_context_depth: "quick",
+        autoload_projects: "",
+      }[key] ?? fallback));
+
+      const result = await sessionBootstrapHandler({});
+      const text = result.content[0].text as string;
+
+      expect(text).toContain("Welcome back, developer");
+      expect(text).toContain("Agent Identity:** global — developer");
+      expect(text).not.toContain("None — None");
+    });
+
+    it.each(BOOTSTRAP_TIER_DEPTH_CASES)(
+      "uses the synchronized $tier manifest for the $depth structured greeting",
+      async ({ tier, tierSkills, depth }) => {
+        const manifestNames = [...REQUIRED_NATIVE_SKILL_NAMES, ...tierSkills];
+        mockAwaitSkillManifestSync.mockResolvedValueOnce({
+          status: "unchanged",
+          tier,
+          generation: "a".repeat(64),
+          entitledNames: manifestNames,
+          installed: [],
+          updated: [],
+          pruned: [],
+          conflicts: [],
+        });
+        mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+          autoload_projects: "prism-mcp",
+          default_context_depth: depth,
+          agent_name: "Dmitri",
+          default_role: "dev",
+          "skill_manifest:tier": tier,
+          "skill_manifest:names": JSON.stringify(manifestNames),
+        }[key] ?? fallback));
+        storage.loadContext.mockResolvedValue({
+          last_summary: "Depth-aware summary",
+          pending_todo: ["Verify native greeting"],
+          recent_sessions: [{ summary: "Recent session", created_at: "2026-07-20T12:00:00Z" }],
+          session_history: [{ summary: "Historical session", created_at: "2026-07-19T12:00:00Z" }],
+          version: 12,
+        });
+
+        const result = await sessionBootstrapHandler({});
+        const text = result.content[0].text as string;
+
+        expect(text.length).toBeLessThanOrEqual({ quick: 4_000, standard: 8_000, deep: 30_000 }[depth]);
+        expect(text).toContain("Agent Identity:** dev — Dmitri");
+        expect(text).toContain(`Subscription tier:** ${tier}`);
+        expect(text).toContain(`Provisioned skills:** ${manifestNames.length}`);
+        expect(text).toContain(`Context depth:** ${depth}`);
+        expect(text).toContain("automatic from Synalux · current · committed manifest");
+        expect(text).toContain("Open TODOs");
+        expect(text).toContain("Session Version");
+        for (const coreSkill of REQUIRED_NATIVE_SKILL_NAMES) expect(text).toContain(coreSkill);
+        for (const tierSkill of tierSkills) {
+          expect(text).toContain(tierSkill);
+          if (tierSkill.endsWith("-super-skill")) {
+            expect(text).toContain(`${tierSkill.slice(0, -"-super-skill".length)} (${tierSkill})`);
+          }
+        }
+        const entitledTierSkills = new Set<string>(tierSkills);
+        const skillsFromOtherTiers = Object.values(BOOTSTRAP_TIER_SKILLS)
+          .flat()
+          .filter((skill) => !entitledTierSkills.has(skill));
+        for (const unentitledSkill of skillsFromOtherTiers) expect(text).not.toContain(unentitledSkill);
+        expect(text).not.toContain("stale-paid-skill");
+        expect(text.includes("Last Session Summary")).toBe(depth !== "quick");
+        expect(text.includes("Recent Sessions")).toBe(depth !== "quick");
+        expect(text.includes("Session History")).toBe(depth === "deep");
+      },
+    );
+
+    it("uses a validated partial downgrade instead of stale committed paid skills", async () => {
+      const currentFreeNames = [...REQUIRED_NATIVE_SKILL_NAMES];
+      mockAwaitSkillManifestSync.mockResolvedValueOnce({
+        status: "partial",
+        tier: "free",
+        generation: "b".repeat(64),
+        entitledNames: currentFreeNames,
+        installed: [],
+        updated: [],
+        pruned: [],
+        conflicts: [],
+        error: "config DB apply incomplete",
+      });
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "prism-mcp",
+        default_context_depth: "standard",
+        agent_name: "Dmitri",
+        default_role: "global",
+        "skill_manifest:tier": "enterprise",
+        "skill_manifest:names": JSON.stringify([
+          ...currentFreeNames,
+          "stale-paid-skill",
+          "stale-super-skill",
+        ]),
+      }[key] ?? fallback));
+      storage.loadContext.mockResolvedValue({ last_summary: "Current work", version: 3 });
+
+      const result = await sessionBootstrapHandler({});
+      const text = result.content[0].text as string;
+
+      expect(text).toContain("Subscription tier:** free");
+      expect(text).toContain("Entitled skills (materialization incomplete)");
+      expect(text).toContain("automatic from Synalux · partial · native materialization incomplete");
+      expect(text).not.toContain("Provisioned skills");
+      expect(text).not.toContain("available");
+      expect(text).not.toContain("stale-paid-skill");
+      expect(text).not.toContain("stale-super-skill");
+    });
+
+    it("preserves every System Ready heading within the quick budget for an adversarial manifest", async () => {
+      const longSuperSkills = Array.from({ length: 240 }, (_, index) =>
+        `super-${String(index).padStart(3, "0")}-${"x".repeat(96)}-super-skill`);
+      const longTierSkills = Array.from({ length: 240 }, (_, index) =>
+        `tier-${String(index).padStart(3, "0")}-${"y".repeat(104)}`);
+      const manifestNames = [...REQUIRED_NATIVE_SKILL_NAMES, ...longSuperSkills, ...longTierSkills];
+      mockAwaitSkillManifestSync.mockResolvedValueOnce({
+        status: "unchanged",
+        tier: "enterprise",
+        generation: "c".repeat(64),
+        entitledNames: manifestNames,
+        installed: [],
+        updated: [],
+        pruned: [],
+        conflicts: [],
+      });
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "prism-mcp",
+        default_context_depth: "quick",
+        agent_name: "Dmitri",
+        default_role: "global",
+        "skill_manifest:tier": "enterprise",
+        "skill_manifest:names": JSON.stringify(manifestNames),
+      }[key] ?? fallback));
+      storage.loadContext.mockResolvedValue({ pending_todo: ["Keep headings visible"], version: 7 });
+
+      const result = await sessionBootstrapHandler({});
+      const text = result.content[0].text as string;
+
+      expect(text.length).toBeLessThanOrEqual(4_000);
+      expect(text).toContain("Prism System Ready");
+      expect(text).toContain("Subscription tier");
+      expect(text).toContain("Provisioned skills");
+      expect(text).toContain("Core/protected skills provisioned");
+      expect(text).toContain("Super-skills provisioned");
+      expect(text).toContain("Other tier skills provisioned");
+      expect(text).toContain("Context depth");
+      expect(text).toContain("Skill sync");
+      expect(text).toContain("more provisioned");
     });
 
     it("rejects malformed bootstrap arguments before touching storage", async () => {
@@ -1138,6 +1318,70 @@ describe("ledgerHandlers", () => {
         "Invalid arguments for session_bootstrap",
       );
       expect(storage.loadContext).not.toHaveBeenCalled();
+    });
+
+    it("generates a stable hidden conversation id and carries it through bootstrap, ledger, handoff, and drift registration", async () => {
+      const registered = new Set<string>();
+      mockMarkContextLoaded.mockImplementation((conversationId) => { registered.add(conversationId); });
+      mockRequireContextLoaded.mockImplementation((conversationId) => conversationId && registered.has(conversationId)
+        ? null
+        : { blocked: true, error: "context_not_loaded" });
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "test-project",
+        default_context_depth: "standard",
+        agent_name: "Dmitri",
+      }[key] ?? fallback));
+      storage.loadContext.mockResolvedValue({ last_summary: "Prior work", version: 2 });
+
+      const bootstrap = await sessionBootstrapHandler({});
+      const conversationId = bootstrap.structuredContent.conversation_id as string;
+      expect(conversationId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(bootstrap.content[0].text).not.toContain(conversationId);
+      expect(mockMarkContextLoaded).toHaveBeenCalledWith(conversationId, "test-project", "1");
+      expect(mockNoteDriftSessionStart).toHaveBeenCalledWith(conversationId);
+
+      expect((await sessionSaveLedgerHandler({
+        project: "test-project", conversation_id: conversationId, summary: "Finished startup",
+      })).isError).toBe(false);
+      expect((await sessionSaveHandoffHandler({
+        project: "test-project", conversation_id: conversationId, last_summary: "Finished startup",
+      })).isError).toBe(false);
+      expect(mockRequireContextLoaded).toHaveBeenCalledWith(conversationId);
+    });
+
+    it("reuses a supplied conversation id and flattens dashboard identity controls", async () => {
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "test-project",
+        default_context_depth: "quick",
+        agent_name: "Dmitri\r\n> injected\u0000",
+        default_role: "dev\n- forged",
+      }[key] ?? fallback));
+      storage.loadContext.mockResolvedValue({ version: 1 });
+
+      const result = await sessionBootstrapHandler({ conversation_id: "stable-conversation" });
+      expect(result.structuredContent.conversation_id).toBe("stable-conversation");
+      expect(result.content[0].text).toContain("Welcome back, Dmitri \\> injected");
+      expect(result.content[0].text).toContain("Agent Identity:** dev \\- forged — Dmitri");
+      expect(result.content[0].text).not.toContain("\n> injected");
+    });
+
+    it("surfaces partial materialization conflicts without claiming availability", async () => {
+      mockAwaitSkillManifestSync.mockResolvedValueOnce({
+        status: "partial", tier: "standard", generation: "d".repeat(64),
+        entitledNames: [...REQUIRED_NATIVE_SKILL_NAMES, "dev-engineering-super-skill"],
+        installed: [], updated: [], pruned: [], conflicts: ["dev-engineering-super-skill"],
+        error: "native materialization incomplete",
+      });
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "test-project", default_context_depth: "quick", agent_name: "Dmitri",
+      }[key] ?? fallback));
+      storage.loadContext.mockResolvedValue({ version: 1 });
+
+      const text = (await sessionBootstrapHandler({})).content[0].text as string;
+      expect(text).toContain("Entitled skills (materialization incomplete)");
+      expect(text).toContain("1 local conflict preserved");
+      expect(text).not.toContain("Super-skills provisioned");
+      expect(text).not.toContain("available");
     });
   });
 

@@ -30,6 +30,7 @@ import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
 import { getCurrentGitState, getGitDrift } from "../utils/git.js";
 import { getSetting, getAllSettings, refreshConfigStorageCache } from "../storage/configStorage.js";
+import type { SkillSyncResult } from "../skillManifestSync.js";
 import { mergeHandoff, dbToHandoffSchema, sanitizeForMerge } from "../utils/crdtMerge.js";
 import { resolveProject } from "../utils/projectResolver.js";
 
@@ -167,6 +168,138 @@ const NATIVE_CONTEXT_LIMITS = {
     keywords: [18, 60],
   },
 } as const;
+
+const NATIVE_SKILL_NAME = /^[a-z0-9][a-z0-9_-]{0,127}$/;
+const NATIVE_STATUS_SKILL_LIST_MAX_CHARS = 600;
+const SYNALUX_TIERS = new Set(["free", "standard", "advanced", "enterprise"]);
+const SKILL_SYNC_STATUS_LABELS: Record<SkillSyncResult["status"], string> = {
+  applied: "automatic from Synalux · updated",
+  unchanged: "automatic from Synalux · current",
+  partial: "automatic from Synalux · partial",
+  disabled: "disabled",
+  failed: "automatic from Synalux · unavailable",
+};
+
+interface NativeSkillManifestSnapshot {
+  names: string[];
+  tier: string;
+  source: "validated-partial" | "committed" | "protected-fallback";
+  syncStatus: SkillSyncResult["status"];
+  conflicts: string[];
+}
+
+function parseNativeSkillNames(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.filter(
+      (name): name is string => typeof name === "string" && NATIVE_SKILL_NAME.test(name),
+    ))];
+  } catch {
+    return [];
+  }
+}
+
+async function resolveNativeSkillManifestSnapshot(
+  syncResult: SkillSyncResult,
+): Promise<NativeSkillManifestSnapshot> {
+  const { REQUIRED_NATIVE_SKILL_NAMES } = await import("./skillRouting.js");
+  const [storedNamesValue, storedTierValue] = await Promise.all([
+    getSetting("skill_manifest:names", "[]"),
+    getSetting("skill_manifest:tier", ""),
+  ]);
+  const partialNames = syncResult.status === "partial" && Array.isArray(syncResult.entitledNames)
+    ? syncResult.entitledNames.filter((name): name is string =>
+      typeof name === "string" && NATIVE_SKILL_NAME.test(name))
+    : [];
+  const storedNames = parseNativeSkillNames(storedNamesValue);
+  const names = partialNames.length > 0
+    ? [...new Set(partialNames)]
+    : storedNames.length > 0
+      ? storedNames
+      : [...REQUIRED_NATIVE_SKILL_NAMES];
+  const source: NativeSkillManifestSnapshot["source"] = partialNames.length > 0
+    ? "validated-partial"
+    : storedNames.length > 0
+      ? "committed"
+      : "protected-fallback";
+  const candidateTier = syncResult.status === "partial" ? syncResult.tier : storedTierValue || syncResult.tier;
+  const tier = typeof candidateTier === "string" && SYNALUX_TIERS.has(candidateTier)
+    ? candidateTier
+    : "free";
+  return {
+    names,
+    tier,
+    source,
+    syncStatus: syncResult.status,
+    conflicts: [...new Set(syncResult.conflicts)],
+  };
+}
+
+function formatBoundedSkillNames(names: string[], omittedLabel: string): string {
+  if (names.length === 0) return "none";
+  const shown: string[] = [];
+  for (const name of names) {
+    const candidate = [...shown, name].join(", ");
+    const omittedCount = names.length - shown.length - 1;
+    const omission = omittedCount > 0 ? `, … ${omittedCount} more ${omittedLabel}` : "";
+    if (candidate.length + omission.length > NATIVE_STATUS_SKILL_LIST_MAX_CHARS) break;
+    shown.push(name);
+  }
+  const omittedCount = names.length - shown.length;
+  return shown.join(", ") + (omittedCount > 0 ? `, … ${omittedCount} more ${omittedLabel}` : "");
+}
+
+function escapeNativeMarkdown(value: string): string {
+  return value.replace(/([\\`*_[\]{}()#+.!|>~-])/g, "\\$1");
+}
+
+/** Keep dashboard-controlled identity values on one inert display line. */
+function sanitizeNativeIdentity(value: string): string {
+  return value.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function buildNativeSystemReadyBlock(
+  snapshot: NativeSkillManifestSnapshot,
+  depth: NativeContextDepth,
+): Promise<string> {
+  const { REQUIRED_NATIVE_SKILL_NAMES } = await import("./skillRouting.js");
+  const provisioned = new Set(snapshot.names);
+  const coreSkills = REQUIRED_NATIVE_SKILL_NAMES.filter((name) => provisioned.has(name));
+  const coreSkillSet = new Set<string>(REQUIRED_NATIVE_SKILL_NAMES);
+  const superSkills = snapshot.names.filter((name) => name.endsWith("-super-skill"));
+  const superSkillAliases = superSkills.map((name) => `${name.slice(0, -"-super-skill".length)} (${name})`);
+  const otherTierSkills = snapshot.names.filter((name) =>
+    !coreSkillSet.has(name) && !name.endsWith("-super-skill"));
+  const conflictSuffix = snapshot.conflicts.length > 0
+    ? ` · ${snapshot.conflicts.length} local conflict${snapshot.conflicts.length === 1 ? "" : "s"} preserved`
+    : "";
+  if (snapshot.source === "validated-partial") {
+    return `> **Prism System Ready**\n>\n` +
+      `> - 🪪 **Subscription tier:** ${snapshot.tier}\n` +
+      `> - 📦 **Entitled skills (materialization incomplete):** ${snapshot.names.length}\n` +
+      `> - 📚 **Core/protected entitlements:** ${formatBoundedSkillNames(coreSkills, "entitled")}\n` +
+      `> - 🧩 **Super-skill entitlements:** ${formatBoundedSkillNames(superSkillAliases, "entitled")}\n` +
+      `> - 🛠️ **Other tier entitlements:** ${formatBoundedSkillNames(otherTierSkills, "entitled")}\n` +
+      `> - 🧠 **Context depth:** ${depth}\n` +
+      `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · native materialization incomplete${conflictSuffix}`;
+  }
+  if (snapshot.source === "protected-fallback") {
+    return `> **Prism System Ready**\n>\n` +
+      `> - 🪪 **Subscription tier:** ${snapshot.tier}\n` +
+      `> - 🛡️ **Protected fallback names:** ${formatBoundedSkillNames(coreSkills, "fallback")}\n` +
+      `> - 🧠 **Context depth:** ${depth}\n` +
+      `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · no committed manifest${conflictSuffix}`;
+  }
+  return `> **Prism System Ready**\n>\n` +
+    `> - 🪪 **Subscription tier:** ${snapshot.tier}\n` +
+    `> - 📦 **Provisioned skills:** ${snapshot.names.length}\n` +
+    `> - 📚 **Core/protected skills provisioned:** ${formatBoundedSkillNames(coreSkills, "provisioned")}\n` +
+    `> - 🧩 **Super-skills provisioned:** ${formatBoundedSkillNames(superSkillAliases, "provisioned")}\n` +
+    `> - 🛠️ **Other tier skills provisioned:** ${formatBoundedSkillNames(otherTierSkills, "provisioned")}\n` +
+    `> - 🧠 **Context depth:** ${depth}\n` +
+    `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · committed manifest${conflictSuffix}`;
+}
 
 function capNativeStartupText(
   text: string,
@@ -809,6 +942,8 @@ interface SessionLoadContextOptions {
   includeSkillContent?: boolean;
   /** Fair-share display budget when session_bootstrap loads multiple projects. */
   nativeMaxChars?: number;
+  /** One coherent manifest generation shared across a multi-project bootstrap. */
+  skillSyncResult?: SkillSyncResult;
 }
 
 export async function sessionLoadContextHandler(
@@ -849,37 +984,19 @@ export async function sessionLoadContextHandler(
   // call, never during the MCP initialize handshake, so the current session
   // observes one coherent manifest generation.
   const { awaitSkillManifestSync } = await import("../skillManifestSync.js");
-  const skillSyncResult = await awaitSkillManifestSync();
-  // Another Prism process may have committed a newer generation while this
-  // process's startup result is still inside its TTL.
-  await refreshConfigStorageCache();
+  const skillSyncResult = options.skillSyncResult ?? await awaitSkillManifestSync();
+  if (!options.skillSyncResult) {
+    // Another Prism process may have committed a newer generation while this
+    // process's startup result is still inside its TTL.
+    await refreshConfigStorageCache();
+  }
   const { OFFLINE_FALLBACK } = await import("./skillRouting.js");
   const protectedFallbackEntries = OFFLINE_FALLBACK.universal.filter(
     (entry): entry is import("./skillRouting.js").SkillEntry => typeof entry !== "string" && entry.protected === true,
   );
   const protectedFallbackNames = new Set(protectedFallbackEntries.map((entry) => entry.name));
-  let entitledSkillNames = new Set<string>();
-  const partialManifestNames = skillSyncResult.status === "partial" && Array.isArray(skillSyncResult.entitledNames)
-    ? skillSyncResult.entitledNames.filter((name): name is string => typeof name === "string" && name.length > 0)
-    : [];
-  if (partialManifestNames.length > 0) {
-    // The portal response was valid but the config DB or native apply was
-    // incomplete. Its allowlist is newer than stale DB activation metadata.
-    entitledSkillNames = new Set(partialManifestNames);
-  } else {
-    try {
-      const storedNames = JSON.parse(await getSetting("skill_manifest:names", "[]"));
-      if (Array.isArray(storedNames)) {
-        entitledSkillNames = new Set(storedNames.filter((name): name is string => typeof name === "string"));
-      }
-    } catch {
-      // Invalid/missing activation metadata fails closed. Skill content remains
-      // in last-good storage but is not activated without a validated manifest.
-    }
-  }
-  if (entitledSkillNames.size === 0) {
-    entitledSkillNames = new Set(protectedFallbackNames);
-  }
+  const manifestSnapshot = await resolveNativeSkillManifestSnapshot(skillSyncResult);
+  const entitledSkillNames = new Set(manifestSnapshot.names);
 
   const storage = await getStorage();
   const effectiveRole = role || await getSetting("default_role", "") || undefined;
@@ -942,12 +1059,17 @@ export async function sessionLoadContextHandler(
     const freshText = `No session context found for project "${project}" at level ${level}.\n` +
       `This project has no previous session history. Starting fresh.` +
       freshSkillBlock;
+    const nativeFreshText = `${MEMORY_BOUNDARY_PREFIX}📋 Session context for "${project}" (${level}):\n` +
+      (level === "quick" ? "" : `\n**Last Session Summary:** None\n`) +
+      `\n**Open TODOs:** None\n` +
+      `\n**Session Version:** None\n` +
+      `\nThis project has no previous session history. Starting fresh.`;
     return {
       content: [{
         type: "text",
         text: includeSkillContent
           ? freshText
-          : capNativeStartupText(freshText, level, options.nativeMaxChars),
+          : capNativeStartupText(nativeFreshText, level, options.nativeMaxChars, MEMORY_BOUNDARY_SUFFIX),
       }],
       isError: false,
     };
@@ -1165,14 +1287,16 @@ export async function sessionLoadContextHandler(
     // Drift and split-brain warnings are safety-critical, so keep them ahead
     // of lower-priority historical detail when the startup budget is tight.
     nativeContext += splitBrainWarning + driftReport;
-    if (limits.summary > 0 && d.last_summary) {
-      nativeContext += `\n**Last Summary:** ${compact(d.last_summary, limits.summary)}\n`;
+    if (limits.summary > 0) {
+      nativeContext += `\n**Last Session Summary:** ${d.last_summary ? compact(d.last_summary, limits.summary) : "None"}\n`;
     }
     if (Array.isArray(d.pending_todo) && d.pending_todo.length > 0) {
       const todos = d.pending_todo.slice(0, limits.todos[0]);
       nativeContext += `\n**Open TODOs:**\n` + todos
         .map((todo: unknown) => `- ${compact(todo, limits.todos[1])}`)
         .join("\n") + omitted(d.pending_todo.length, todos.length, "TODOs") + `\n`;
+    } else {
+      nativeContext += `\n**Open TODOs:** None\n`;
     }
     if (limits.recent[0] > 0 && Array.isArray(d.recent_sessions) && d.recent_sessions.length > 0) {
       const recentSessions = d.recent_sessions.slice(0, limits.recent[0]);
@@ -1217,12 +1341,7 @@ export async function sessionLoadContextHandler(
         .join(", ")}` +
         (d.keywords.length > keywords.length ? `, … ${d.keywords.length - keywords.length} more omitted` : "") + `\n`;
     }
-    if (version) nativeContext += `\n**Session Version:** ${compact(version, 40)}\n`;
-    if (agentName || effectiveRole) {
-      nativeContext += `\n**Agent:** ${compact(agentName || "Agent", 120)}` +
-        (effectiveRole ? ` · Role: ${compact(effectiveRole, 120)}` : "") +
-        ` · Native skills provisioned by prism connect\n`;
-    }
+    nativeContext += `\n**Session Version:** ${version === null || version === undefined ? "None" : compact(version, 40)}\n`;
     if (convId) {
       const { markContextLoaded, noteDriftSessionStart } = await import("../session/sessionContext.js");
       const { BOUNDARIES_VERSION } = await import("../boundaries/boundaries.js");
@@ -1527,7 +1646,17 @@ export async function sessionBootstrapHandler(args: unknown = {}) {
   if (input.prompt !== undefined && typeof input.prompt !== "string") {
     throw new Error("Invalid arguments for session_bootstrap");
   }
+  const suppliedConversationId = typeof input.conversation_id === "string"
+    ? input.conversation_id.trim()
+    : "";
+  const conversationId = suppliedConversationId || randomUUID();
 
+  const { awaitSkillManifestSync } = await import("../skillManifestSync.js");
+  const skillSyncResult = await awaitSkillManifestSync();
+  // The sync may have committed settings through a different process/client.
+  // Refresh before reading identity, boot settings, tier, and manifest names so
+  // every line in the greeting describes the same durable generation.
+  await refreshConfigStorageCache();
   const [configuredProjects, configuredDepth, agentName, defaultRole] = await Promise.all([
     getSetting("autoload_projects", ""),
     getSetting("default_context_depth", "standard"),
@@ -1538,20 +1667,30 @@ export async function sessionBootstrapHandler(args: unknown = {}) {
     ? configuredDepth as NativeContextDepth
     : "standard";
   const projects = [...new Set(configuredProjects.split(",").map((project) => project.trim()).filter(Boolean))];
-  const configuredGreetingName = agentName.trim();
+  const configuredGreetingName = sanitizeNativeIdentity(agentName);
   const greetingName = configuredGreetingName
-    ? compactWithOmissionCount(configuredGreetingName, 80)
+    ? escapeNativeMarkdown(compactWithOmissionCount(configuredGreetingName, 80))
     : "developer";
+  const role = sanitizeNativeIdentity(defaultRole) || "global";
+  const manifestSnapshot = await resolveNativeSkillManifestSnapshot(skillSyncResult);
+  const systemReadyBlock = await buildNativeSystemReadyBlock(manifestSnapshot, depth);
   const greeting = `👋 Welcome back, ${greetingName}. Prism is loading ${depth} context.`;
+  const identityBlock = `- 🤖 **Agent Identity:** ${escapeNativeMarkdown(compactWithOmissionCount(role, 80))} — ${greetingName}`;
+  const startupHeader = `${greeting}\n\n${identityBlock}`;
 
   if (projects.length === 0) {
-    const noProjectsText = `${greeting}\n\n⚠️ No Auto-Load Projects are configured in the Prism dashboard.`;
+    const unconfiguredState = (depth === "quick" ? "" : `\n- 📝 **Last Session Summary:** Not loaded`) +
+      `\n- ✅ **Open TODOs:** Not loaded` +
+      `\n- 🔄 **Session Version:** Not loaded`;
+    const noProjectsText = `${startupHeader}${unconfiguredState}\n\n` +
+      `⚠️ No Auto-Load Projects are configured in the Prism dashboard.\n\n${systemReadyBlock}`;
     return {
       content: [{
         type: "text",
         text: capNativeStartupText(noProjectsText, depth),
       }],
       isError: false,
+      structuredContent: { conversation_id: conversationId, projects: [], depth },
     };
   }
 
@@ -1567,7 +1706,8 @@ export async function sessionBootstrapHandler(args: unknown = {}) {
     const omissionLength = omittedProjectsText ? omittedProjectsText.length + 2 : 0;
     const separatorsLength = Math.max(0, renderedProjectCount - 1) * 2;
     perProjectMaxChars = Math.floor(
-      (startupMaxChars - greeting.length - 2 - omissionLength - separatorsLength) / renderedProjectCount,
+      (startupMaxChars - startupHeader.length - systemReadyBlock.length - 4 - omissionLength - separatorsLength) /
+        renderedProjectCount,
     );
     if (perProjectMaxChars >= 512 || renderedProjectCount === 1) break;
     renderedProjectCount -= 1;
@@ -1580,9 +1720,9 @@ export async function sessionBootstrapHandler(args: unknown = {}) {
       project,
       level: depth,
       role: defaultRole || undefined,
-      conversation_id: input.conversation_id as string | undefined,
+      conversation_id: conversationId,
       prompt: input.prompt as string | undefined,
-    }, { includeSkillContent: false, nativeMaxChars: perProjectMaxChars });
+    }, { includeSkillContent: false, nativeMaxChars: perProjectMaxChars, skillSyncResult });
     const text = result.content?.map((part: any) => part?.text).filter(Boolean).join("\n") ||
       `No session context found for project "${project}".`;
     loaded.push(text);
@@ -1592,10 +1732,16 @@ export async function sessionBootstrapHandler(args: unknown = {}) {
   return {
     content: [{
       type: "text",
-      text: `${greeting}\n\n${loaded.join("\n\n")}` +
-        (omittedProjectsText ? `\n\n${omittedProjectsText}` : ""),
+      text: `${startupHeader}\n\n${loaded.join("\n\n")}` +
+        (omittedProjectsText ? `\n\n${omittedProjectsText}` : "") +
+        `\n\n${systemReadyBlock}`,
     }],
     isError: hadError,
+    structuredContent: {
+      conversation_id: conversationId,
+      projects: projects.slice(0, renderedProjectCount),
+      depth,
+    },
   };
 }
 

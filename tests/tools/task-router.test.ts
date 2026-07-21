@@ -13,11 +13,18 @@ import { describe, it, expect, vi } from "vitest";
 // Mock config to avoid pulling in the full dependency chain
 vi.mock("../../src/config.js", () => ({
   PRISM_TASK_ROUTER_CONFIDENCE_THRESHOLD: 0.6,
-  PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY: 4,
+  PRISM_TASK_ROUTER_MAX_CLAW_COMPLEXITY: 10,
 }));
 
-import { computeRoute, type TaskRouteResult } from "../../src/tools/taskRouterHandler.js";
-import { isSessionTaskRouteArgs, type SessionTaskRouteArgs } from "../../src/tools/sessionMemoryDefinitions.js";
+import { computeRoute } from "../../src/tools/taskRouterHandler.js";
+import {
+  isSessionTaskRouteArgs,
+  SESSION_TASK_ROUTE_TOOL,
+} from "../../src/tools/sessionMemoryDefinitions.js";
+import {
+  PRISM_INFER_TOOL,
+  resolveRequestedModelCeiling,
+} from "../../src/tools/prismInferHandler.js";
 
 // ─── Type Guard Tests ────────────────────────────────────────
 
@@ -75,6 +82,12 @@ describe("isSessionTaskRouteArgs", () => {
 // ─── Routing Result Shape Tests ──────────────────────────────
 
 describe("computeRoute output shape", () => {
+  it("advertises the bounded-high-complexity and hard-host-boundary contract", () => {
+    expect(SESSION_TASK_ROUTE_TOOL.description).toMatch(/bounded high-complexity/i);
+    expect(SESSION_TASK_ROUTE_TOOL.description).toMatch(/4B\/9B\/27B/);
+    expect(SESSION_TASK_ROUTE_TOOL.description).toMatch(/architecture, security/i);
+  });
+
   it("returns all required fields", () => {
     const result = computeRoute({ task_description: "create a new file" });
     expect(result).toHaveProperty("target");
@@ -101,14 +114,77 @@ describe("computeRoute output shape", () => {
     expect(result.complexity_score).toBeLessThanOrEqual(10);
   });
 
-  it("recommended_tool is 'claw_run_task' when target is claw", () => {
+  it("recommends the exposed prism_infer executor with bounded local-first arguments", () => {
     const result = computeRoute({
       task_description: "fix typo in the readme, simple, straightforward",
       estimated_scope: "minor_edit",
+      project: "prism-mcp",
     });
     if (result.target === "claw") {
-      expect(result.recommended_tool).toBe("claw_run_task");
+      expect(result.recommended_tool).toBe(PRISM_INFER_TOOL.name);
+      expect(result.recommended_args).toEqual({
+        prompt: "fix typo in the readme, simple, straightforward",
+        project: "prism-mcp",
+        mode: "code",
+        task_complexity: result.complexity_score,
+        cloud_fallback: false,
+        escalation: "report",
+      });
     }
+  });
+
+  it("forwards complexity but leaves model and thinking selection to prism_infer", () => {
+    const result = computeRoute({
+      task_description: "scaffold a new REST endpoint",
+      estimated_scope: "new_feature",
+      project: "prism-mcp",
+    });
+
+    expect(result.target).toBe("claw");
+    expect(result.complexity_score).toBe(4);
+    expect(result.recommended_args).toMatchObject({
+      task_complexity: result.complexity_score,
+      cloud_fallback: false,
+    });
+    expect(result.recommended_args).not.toHaveProperty("model_ceiling");
+    expect(result.recommended_args).not.toHaveProperty("think");
+  });
+
+  it.each([
+    {
+      label: "4B for a trivial bounded edit",
+      args: {
+        task_description: "fix typo in README, simple change",
+        files_involved: ["README.md"],
+        estimated_scope: "minor_edit" as const,
+      },
+      expectedCeiling: "4b",
+    },
+    {
+      label: "9B for a bounded endpoint scaffold",
+      args: {
+        task_description: "scaffold a new REST endpoint",
+        estimated_scope: "new_feature" as const,
+      },
+      expectedCeiling: "9b",
+    },
+    {
+      label: "27B for a bounded difficult algorithm",
+      args: {
+        task_description:
+          "Implement a self-contained dynamic programming algorithm from this complete specification with multiple edge cases.",
+        files_involved: ["src/solver.ts"],
+        estimated_scope: "new_feature" as const,
+      },
+      expectedCeiling: "27b",
+    },
+  ])("routes $label through prism_infer without pinning a model", ({ args, expectedCeiling }) => {
+    const result = computeRoute(args);
+
+    expect(result.target).toBe("claw");
+    expect(result.recommended_tool).toBe(PRISM_INFER_TOOL.name);
+    expect(result.recommended_args).not.toHaveProperty("model_ceiling");
+    expect(resolveRequestedModelCeiling(result.recommended_args!)).toBe(expectedCeiling);
   });
 
   it("recommended_tool is null when target is host", () => {
@@ -184,6 +260,49 @@ describe("computeRoute routing logic", () => {
       estimated_scope: "refactor",
     });
     expect(result.target).toBe("host");
+  });
+
+  it.each([
+    {
+      label: "architecture judgment",
+      task_description: "Design the architecture and migration strategy for services and persistence",
+      files_involved: ["src/service.ts"],
+      estimated_scope: "new_feature" as const,
+    },
+    {
+      label: "security judgment",
+      task_description: "Perform a security audit of authentication and investigate the vulnerability surface",
+      files_involved: ["src/auth.ts"],
+      estimated_scope: "bug_fix" as const,
+    },
+    {
+      label: "host-tool workflow",
+      task_description: "First, read files. Second, modify the file. Finally, run the tests.",
+      files_involved: ["src/router.ts"],
+      estimated_scope: "bug_fix" as const,
+    },
+    {
+      label: "natural-language read-edit-verify workflow",
+      task_description:
+        "Read the Prism test harness, persist regression tests for the 4B, 9B, 27B and host-only routing matrix, update the real MCP live-test workflow, then run focused verification.",
+      files_involved: [
+        "tests/tools/task-router.test.ts",
+        "scripts/prism-infer-live-test.mjs",
+      ],
+      estimated_scope: "bug_fix" as const,
+    },
+    {
+      label: "concurrency diagnosis",
+      task_description: "Diagnose the root cause of a race condition in the concurrent request handler",
+      files_involved: ["src/handler.ts"],
+      estimated_scope: "bug_fix" as const,
+    },
+  ])("keeps $label on the host even when the file scope looks bounded", (args) => {
+    const result = computeRoute(args);
+
+    expect(result.target).toBe("host");
+    expect(result.recommended_tool).toBeNull();
+    expect(result.recommended_args).toBeUndefined();
   });
 });
 

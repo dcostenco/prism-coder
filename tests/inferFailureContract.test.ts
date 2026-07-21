@@ -394,7 +394,7 @@ describe("§5.4 — ctx gate", () => {
             freemem: bigRam,
             callLayer1: vi.fn(async () => "UNCERTAIN_LENGTH" as const),
         });
-        const r = await runInfer({ prompt: midPrompt, model_ceiling: "27b" }, deps);
+        const r = await runInfer({ prompt: midPrompt, mode: "code", task_complexity: 8 }, deps);
         expect(r.attempts).toContainEqual({ tier: "prism-coder:27b", reason: "ctx_insufficient" });
         expect(r.attempts).toContainEqual({ tier: "prism-coder:9b", reason: "ctx_insufficient" });
         expect(r.backend).toBe("ollama-4b"); // first tier whose ctx fits

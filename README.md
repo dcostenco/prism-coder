@@ -20,6 +20,25 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ## What's New in v20.2.2
 
+### One Local-First Workflow Across Every Agent
+`prism connect` now installs one orchestration contract for Claude Code,
+Claude Desktop, Cursor, Gemini CLI, and Codex. Bounded delegated work goes to
+`session_task_route` and the local `prism_infer` worker first; routine work must
+not create background host agents. Local workers can receive the active
+project's dashboard-configured quick, standard, or deep memory and select a
+RAM-safe 2B/4B/9B/27B model at call time. The router forwards complexity but
+does not choose the model; `prism_infer` owns the final decision using memory
+and context fit, installed models, live RAM, entitlements, and explicit caller
+overrides.
+
+Codex and Gemini native agent fan-out are disabled during connect. Codex keeps
+a two-thread, one-level Terra/low fallback profile if the developer explicitly
+re-enables native agents later. Claude Code keeps native agents as a last-resort
+path but pins their model to Sonnet. Cursor and Claude Desktop do not expose a
+supported global subagent-policy file, so they receive the identical workflow
+through Prism's MCP server instructions. `prism_infer` safety boundaries and
+the host's final verification responsibility are unchanged.
+
 ### Subscription-Tier Skills Arrive Before the First Host Launch
 `prism connect` now downloads the authoritative Synalux skill manifest and
 materializes entitled packages in the native `~/.agents/skills` directory
@@ -56,6 +75,15 @@ untouched; native skills and server-side reminders preserve those Prism
 features without host lifecycle hooks. Because hosts expose no native
 session-end callback, handoff at shutdown is instruction-driven rather than a
 guaranteed lifecycle event.
+
+After Claude Code's native user registration succeeds, the same default or
+`--refresh` command checks the nearest `.mcp.json` from the current directory
+through the home directory. It removes only the exact legacy
+`prism-mcp` entry `{ "command": "npx", "args": ["-y", "prism-mcp-server"] }`
+that would otherwise shadow the user registration. Custom Prism entries and
+their additional fields, plus unrelated servers, are preserved; malformed
+files fail loud without changes. `--dry-run` reports the recognized migration
+without changing the file.
 
 ---
 
@@ -174,16 +202,37 @@ Use `prism connect --all` to target all five, `--host <name>` for one host, or
 `--dry-run` to preview the files that would change. Existing `prism` and
 `prism-mcp` entries are never overwritten by default. `--refresh` updates only
 an entry previously created by Prism; custom entries remain untouched.
+For Claude Code, both the default command and `--refresh` also remove the exact
+legacy project-scoped `npx -y prism-mcp-server` entry from the effective
+ancestor `.mcp.json` after the native user registration succeeds. No custom or
+near-match project entry is changed.
 Close the target MCP hosts before a non-dry-run registration so they cannot
 edit their configuration at the same time.
+
+The same connection installs the local-first orchestration contract:
+
+| Host | Managed containment |
+|---|---|
+| Codex | `features.multi_agent=false`; a 2-thread, depth-1 Terra/low fallback profile is retained for explicit re-enable |
+| Gemini CLI | `experimental.enableAgents=false` |
+| Claude Code | `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`; managed instructions reserve it for last-resort fallback |
+| Cursor | Canonical policy delivered through MCP initialize instructions |
+| Claude Desktop | Canonical policy delivered through MCP initialize instructions |
+
+All five receive `PRISM_AGENT_POLICY=local-first` in their managed Prism MCP
+entry. Routine tasks use the RAM-aware local worker; native/background fan-out
+is not the default workflow. `session_task_route` supplies a complexity hint;
+`prism_infer` remains the single owner of model and thinking selection and can
+choose 27B when its viability gates support it.
 
 Set `PRISM_STORAGE` before running `prism connect` to preserve an explicit
 storage choice in the generated host entries. This does not change local-model
 routing; Synalux cloud storage separately requires an active cloud-memory
 entitlement.
 
-Codex registration preserves `~/.codex/config.toml` and appends only a marked
-Prism-managed block. `CODEX_HOME` is respected when set and must already exist,
+Codex registration preserves unrelated `~/.codex/config.toml` content, appends
+only the marked Prism MCP block, and updates only the documented local-first
+feature/agent keys. `CODEX_HOME` is respected when set and must already exist,
 matching Codex's own contract. Restart Codex CLI, the
 IDE extension, or the ChatGPT desktop app after connecting.
 
@@ -591,19 +640,33 @@ The same block also appears automatically in `session_save_ledger` and `session_
 
 **Note:** The default session view tracks this MCP process's `prism_infer` delegation. The all-time view combines persisted MCP calls with Synalux VS Code panel inference. Neither view includes your host model's (Claude's) own token spend; use Claude Code's `/cost` command for that.
 
-### Local-model delegation (opt-in)
+### Local-model delegation (default)
 
-By default, your AI agent (Claude, Cursor, etc.) handles everything itself. You can optionally enable delegation so the agent offloads cheap, verifiable sub-tasks to local Ollama models at $0:
+Prism routes qualifying bounded work—bulk classification, field extraction,
+mechanical formatting, test generation, and similar tasks—to local Ollama
+models before any host-native subagent. The agent checks `gate_outcome`,
+verifies the result, and continues in the current host thread when the local
+worker is unavailable, refused, or degraded.
 
-```bash
-# Enable via Prism config
-prism config set delegation_enabled true
+Pass project memory when the subtask depends on prior work:
+
+```json
+{
+  "prompt": "Generate the bounded regression-test cases.",
+  "project": "prism-mcp",
+  "context_depth": "standard",
+  "conversation_id": "<from session_bootstrap>",
+  "mode": "code",
+  "cloud_fallback": false,
+  "escalation": "report"
+}
 ```
 
-When enabled, the agent's task router may delegate qualifying work — bulk classification, field extraction, mechanical formatting — to `prism_infer` instead of using cloud tokens. The agent always verifies the result and redoes it itself if quality is degraded.
+Omit `context_depth` to use the dashboard setting. Turn off the dashboard Task
+Router toggle or set `PRISM_TASK_ROUTER_ENABLED=false` for an explicit opt-out.
 
 **Guardrails:**
-- **Off by default** — enforced in code, not just convention
+- **Local by default** — an explicit operator opt-out is preserved
 - **Never delegates:** code/text that ships to the user, security/safety logic, planning/reasoning, anything where a silent quality drop isn't obvious
 - **Always verifies:** checks `quality_gate_failed` and `used_cloud` before trusting local output
 
