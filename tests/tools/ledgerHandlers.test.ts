@@ -932,6 +932,108 @@ describe("ledgerHandlers", () => {
       },
     );
 
+    it.each([
+      ["quick", 4_000, false, false, false],
+      ["standard", 8_000, true, true, false],
+      ["deep", 30_000, true, true, true],
+    ] as const)(
+      "bounds adversarial %s startup context without changing its depth contract",
+      async (depth, maxChars, expectsSummary, expectsRecent, expectsHistory) => {
+        const longValue = "context ".repeat(1_000);
+        const manyValues = Array.from({ length: 80 }, (_, index) => `${index}: ${longValue}`);
+        mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+          autoload_projects: "prism-mcp",
+          default_context_depth: depth,
+          agent_name: "Dmitri",
+          default_role: "dev",
+        }[key] ?? fallback));
+        storage.loadContext.mockResolvedValue({
+          last_summary: longValue,
+          active_branch: longValue,
+          key_context: longValue,
+          pending_todo: manyValues,
+          active_decisions: manyValues,
+          keywords: manyValues,
+          behavioral_warnings: manyValues.map((summary) => ({ summary })),
+          recent_sessions: manyValues.map((summary, index) => ({
+            summary,
+            created_at: `2026-07-${String((index % 28) + 1).padStart(2, "0")}T12:00:00Z`,
+          })),
+          session_history: manyValues.map((summary, index) => ({
+            summary,
+            created_at: `2026-06-${String((index % 28) + 1).padStart(2, "0")}T12:00:00Z`,
+          })),
+          version: 9,
+        });
+
+        const result = await sessionBootstrapHandler({});
+        const text = result.content[0].text as string;
+
+        expect(text.length).toBeLessThanOrEqual(maxChars);
+        expect(text).toContain("Welcome back, Dmitri");
+        expect(text).toContain("Open TODOs");
+        expect(text).toContain("more TODOs omitted");
+        expect(text).toContain("</prism_memory>");
+        expect(text.includes("Last Summary")).toBe(expectsSummary);
+        expect(text.includes("Recent Sessions")).toBe(expectsRecent);
+        expect(text.includes("Session History")).toBe(expectsHistory);
+      },
+    );
+
+    it("shares the standard startup budget across every configured project", async () => {
+      const longSummary = "summary ".repeat(2_000);
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "prism-mcp,portal",
+        default_context_depth: "standard",
+        agent_name: "Dmitri",
+      }[key] ?? fallback));
+      storage.loadContext.mockImplementation(async (project: string) => ({
+        last_summary: `${project}: ${longSummary}`,
+        pending_todo: Array.from({ length: 30 }, () => longSummary),
+        recent_sessions: Array.from({ length: 30 }, () => ({
+          summary: longSummary,
+          created_at: "2026-07-20T12:00:00Z",
+        })),
+        version: 1,
+      }));
+
+      const result = await sessionBootstrapHandler({});
+      const text = result.content[0].text as string;
+
+      expect(text.length).toBeLessThanOrEqual(8_000);
+      expect(text).toContain('Session context for "prism-mcp"');
+      expect(text).toContain('Session context for "portal"');
+      expect(text.match(/<prism_memory context="historical">/g)).toHaveLength(2);
+      expect(text.match(/<\/prism_memory>/g)).toHaveLength(2);
+    });
+
+    it("omits excess configured projects explicitly instead of exceeding the startup budget", async () => {
+      const projects = Array.from({ length: 40 }, (_, index) => `project-${index}`);
+      const longSummary = "summary ".repeat(2_000);
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: projects.join(","),
+        default_context_depth: "standard",
+        agent_name: "Dmitri",
+      }[key] ?? fallback));
+      storage.loadContext.mockResolvedValue({
+        last_summary: longSummary,
+        pending_todo: [longSummary],
+        recent_sessions: [{ summary: longSummary, created_at: "2026-07-20T12:00:00Z" }],
+        version: 1,
+      });
+
+      const result = await sessionBootstrapHandler({});
+      const text = result.content[0].text as string;
+      const openingTags = text.match(/<prism_memory context="historical">/g) || [];
+      const closingTags = text.match(/<\/prism_memory>/g) || [];
+
+      expect(text.length).toBeLessThanOrEqual(8_000);
+      expect(text).toContain("additional Auto-Load Projects omitted at standard depth");
+      expect(openingTags.length).toBeGreaterThan(0);
+      expect(openingTags).toHaveLength(closingTags.length);
+      expect(storage.loadContext.mock.calls.length).toBeLessThan(projects.length);
+    });
+
     it("uses dashboard projects, identity, role, and depth for the hook-free greeting", async () => {
       const nativeSkillBody = `NATIVE_SKILL_BODY_MUST_NOT_BE_INLINED${"x".repeat(120_000)}`;
       mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
