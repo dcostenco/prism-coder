@@ -179,8 +179,10 @@ export const SESSION_BOOTSTRAP_TOOL: Tool = {
     "with an empty object before any user-facing response. Do not substitute session_load_context when this tool is available. " +
     "This starts a Prism-backed conversation without host hooks. " +
     "Prism reads the dashboard's Auto-Load Projects, Context Depth (quick/standard/deep), developer name, and default role, " +
-    "then returns the greeting and correctly scoped prior-session context. Display every returned Last Summary, Open TODOs, " +
-    "Recent Sessions, or Session History field even for a greeting-only prompt. Do not guess or pass a project or depth.",
+    "then returns the greeting and correctly scoped prior-session context. Emit no preamble. Print the complete tool result " +
+    "verbatim as the entire first-turn startup display, before any optional answer. Do not summarize, paraphrase, rename " +
+    "headings, reformat, or omit any returned section. Preserve its order and line content. For a greeting-only prompt, " +
+    "stop after the verbatim startup display. Do not guess or pass a project or depth.",
   annotations: {
     readOnlyHint: true,
     destructiveHint: false,
