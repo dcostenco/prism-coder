@@ -159,6 +159,12 @@ instruction file, `~/.claude/CLAUDE.md`. An older Prism-managed block in
 `~/CLAUDE.md` is then removed without changing any unrelated instructions.
 Prism leaves the old block in place if canonical installation fails.
 
+Claude Code's model still owns the final assistant message. The managed block
+and MCP metadata require the complete startup display, but hook-free MCP cannot
+force a third-party host to relay tool output verbatim. Registration and
+context loading are deterministic; the visible verbatim greeting is
+best-effort unless a host lifecycle integration or Prism-owned surface is used.
+
 For a user-wide registration, add the server with Claude Code's CLI:
 
 ```bash

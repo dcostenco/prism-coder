@@ -28,10 +28,18 @@ first launch instead of requiring a second restart. Prism rechecks the same
 snapshot at MCP startup, session load, and every five minutes—without host
 lifecycle hooks.
 
-On the first user turn, native hosts call `session_bootstrap({})`; Prism then
-uses the dashboard's developer name, Auto-Load Projects, and quick, standard,
-or deep setting. The response stays focused on greeting and session state
-because tier skills are already present in the host's native skill directory.
+On the first user turn, Prism's native skill, MCP metadata, and managed host
+instructions request one `session_bootstrap({})` call. Prism then uses the
+dashboard's developer name, Auto-Load Projects, and quick, standard, or deep
+setting. The response stays focused on greeting and session state because tier
+skills are already present in the host's native skill directory.
+
+Hook-free MCP can provide and prioritize that ready-to-display block, but the
+host model still owns the final assistant message and may summarize it. Prism
+does not claim a deterministic verbatim greeting on third-party chat surfaces;
+that would require a host lifecycle hook, launcher, extension, or Prism-owned
+panel. Context loading itself remains complete even when a host shortens the
+visible reply.
 
 Free accounts receive the protected 12-skill foundation. Paid accounts receive
 the current subscribed routing set. Upgrades install newly entitled packages;

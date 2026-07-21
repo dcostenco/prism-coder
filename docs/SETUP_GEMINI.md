@@ -24,6 +24,13 @@ Gemini must load it with native tool discovery and then invoke it; shell, file,
 and subagent inspection are not substitutes. Discovery or invocation failure is
 reported as a Prism startup failure and stops the turn.
 
+Gemini's model still owns the final assistant message. MCP and native
+instructions can request the complete startup display, but cannot force a
+third-party host to relay it verbatim without a lifecycle hook or a
+Prism-owned surface. The hook-free setup guarantees registration and makes the
+configured context available to the turn; visible verbatim relay is
+best-effort.
+
 Prism preserves all instructions outside its marked block, the file's newline
 style and mode, and a symlink's target. A recognized legacy Prism startup
 section is replaced in place. Similar user-authored sections are preserved.
