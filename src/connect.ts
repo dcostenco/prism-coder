@@ -1,9 +1,12 @@
 import {
   accessSync,
+  closeSync,
   constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -176,6 +179,79 @@ const CODEX_LOCAL_FIRST_POLICY = {
 const CODEX_POLICY_MARKER_PREFIX = "# >>> prism connect managed: local-first";
 const CODEX_POLICY_MARKER_SUFFIX = "# <<< prism connect managed: local-first";
 
+interface RegularTextSnapshot {
+  text: string;
+  writePath: string;
+  symlinkPath?: string;
+}
+
+/**
+ * Read a host-owned text file through one descriptor, then verify that the
+ * pathname still identifies that same regular file. This prevents a path from
+ * being swapped between a metadata check and the read while retaining Prism's
+ * documented support for symlinked dotfiles.
+ */
+function readRegularTextSnapshot(
+  filePath: string,
+  allowSymlink = true,
+): RegularTextSnapshot {
+  const nonBlocking = typeof constants.O_NONBLOCK === "number" ? constants.O_NONBLOCK : 0;
+  const noFollow = !allowSymlink && typeof constants.O_NOFOLLOW === "number"
+    ? constants.O_NOFOLLOW
+    : 0;
+  let descriptor: number;
+  try {
+    descriptor = openSync(filePath, constants.O_RDONLY | nonBlocking | noFollow);
+  } catch (error) {
+    // A dangling symlink is an existing, unsafe entry rather than an absent
+    // config. Detect it only after the descriptor open failed, so this probe
+    // cannot become a check-then-read race.
+    if (isErrno(error, "ENOENT")) {
+      let pathInfo: ReturnType<typeof lstatSync> | undefined;
+      try {
+        pathInfo = lstatSync(filePath);
+      } catch (probeError) {
+        if (!isErrno(probeError, "ENOENT")) throw probeError;
+      }
+      if (pathInfo?.isSymbolicLink()) {
+        throw new Error(`symlink target is unavailable: ${filePath}`);
+      }
+    }
+    throw error;
+  }
+
+  try {
+    const openedInfo = fstatSync(descriptor);
+    if (!openedInfo.isFile()) throw new Error("target is not a regular file");
+
+    const pathInfo = lstatSync(filePath);
+    let writePath = filePath;
+    let symlinkPath: string | undefined;
+    if (pathInfo.isSymbolicLink()) {
+      if (!allowSymlink) throw new Error("symlink is not allowed");
+      writePath = realpathSync(filePath);
+      symlinkPath = filePath;
+    } else if (!pathInfo.isFile()) {
+      throw new Error("target is not a regular file");
+    }
+
+    const currentInfo = statSync(writePath);
+    if (!currentInfo.isFile()
+      || currentInfo.dev !== openedInfo.dev
+      || currentInfo.ino !== openedInfo.ino) {
+      throw new Error("file changed while Prism was opening it; retry");
+    }
+
+    return {
+      text: readFileSync(descriptor, "utf8"),
+      writePath,
+      symlinkPath,
+    };
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export function normalizeHostName(value: string): ConnectHostName {
   const normalized = value.trim().toLowerCase();
   const host = HOST_ALIASES[normalized];
@@ -315,11 +391,7 @@ export function writeInstallationReceipt(
 
   let originalText: string | undefined;
   try {
-    const receiptInfo = lstatSync(receiptPath);
-    if (receiptInfo.isSymbolicLink() || !receiptInfo.isFile()) {
-      throw new Error("receipt must be a regular Prism-owned file");
-    }
-    originalText = readFileSync(receiptPath, "utf8");
+    originalText = readRegularTextSnapshot(receiptPath, false).text;
     const current: unknown = JSON.parse(originalText);
     if (!isJsonObject(current)
       || current.schema_version !== INSTALLATION_RECEIPT_SCHEMA_VERSION
@@ -382,13 +454,10 @@ export function migrateLegacyClaudeProjectMcp(
   let symlinkPath: string | undefined;
   let originalText: string;
   try {
-    const pathInfo = lstatSync(configPath);
-    if (pathInfo.isSymbolicLink()) {
-      writePath = realpathSync(configPath);
-      symlinkPath = configPath;
-    }
-    if (!statSync(writePath).isFile()) throw new Error("config is not a regular file");
-    originalText = readFileSync(writePath, "utf8");
+    const snapshot = readRegularTextSnapshot(configPath);
+    writePath = snapshot.writePath;
+    symlinkPath = snapshot.symlinkPath;
+    originalText = snapshot.text;
   } catch (error) {
     throw new Error(`Could not inspect Claude project MCP config: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -465,13 +534,10 @@ export function migrateLegacyClaudeHooks(
   let originalText: string;
 
   try {
-    const pathInfo = lstatSync(configPath);
-    if (pathInfo.isSymbolicLink()) {
-      writePath = realpathSync(configPath);
-      symlinkPath = configPath;
-      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
-    }
-    originalText = readFileSync(writePath, "utf8");
+    const snapshot = readRegularTextSnapshot(configPath);
+    writePath = snapshot.writePath;
+    symlinkPath = snapshot.symlinkPath;
+    originalText = snapshot.text;
   } catch (error) {
     if (isErrno(error, "ENOENT")) return { path: configPath, status: "unchanged", removed: 0 };
     throw new Error(`Could not inspect Claude hook settings: ${error instanceof Error ? error.message : String(error)}`);
@@ -550,14 +616,11 @@ export function migrateLegacyClaudeInstructions(
   let instructionEntryExists = false;
 
   try {
-    const pathInfo = lstatSync(instructionPath);
+    const snapshot = readRegularTextSnapshot(instructionPath);
     instructionEntryExists = true;
-    if (pathInfo.isSymbolicLink()) {
-      writePath = realpathSync(instructionPath);
-      symlinkPath = instructionPath;
-      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
-    }
-    originalText = readFileSync(writePath, "utf8");
+    writePath = snapshot.writePath;
+    symlinkPath = snapshot.symlinkPath;
+    originalText = snapshot.text;
   } catch (error) {
     if (!instructionEntryExists && isErrno(error, "ENOENT")) {
       return { path: instructionPath, status: "unchanged", removed: 0 };
@@ -606,14 +669,11 @@ export function migrateLegacyClaudeManagedStartup(
   let instructionEntryExists = false;
 
   try {
-    const pathInfo = lstatSync(instructionPath);
+    const snapshot = readRegularTextSnapshot(instructionPath);
     instructionEntryExists = true;
-    if (pathInfo.isSymbolicLink()) {
-      writePath = realpathSync(instructionPath);
-      symlinkPath = instructionPath;
-      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
-    }
-    originalText = readFileSync(writePath, "utf8");
+    writePath = snapshot.writePath;
+    symlinkPath = snapshot.symlinkPath;
+    originalText = snapshot.text;
   } catch (error) {
     if (!instructionEntryExists && isErrno(error, "ENOENT")) {
       return { path: instructionPath, status: "unchanged", removed: 0 };
@@ -672,14 +732,11 @@ export function configureClaudeNativeStartup(
   let instructionEntryExists = false;
 
   try {
-    const pathInfo = lstatSync(instructionPath);
+    const snapshot = readRegularTextSnapshot(instructionPath);
     instructionEntryExists = true;
-    if (pathInfo.isSymbolicLink()) {
-      writePath = realpathSync(instructionPath);
-      symlinkPath = instructionPath;
-      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
-    }
-    originalText = readFileSync(writePath, "utf8");
+    writePath = snapshot.writePath;
+    symlinkPath = snapshot.symlinkPath;
+    originalText = snapshot.text;
   } catch (error) {
     if (instructionEntryExists || !isErrno(error, "ENOENT")) {
       throw new Error(`Could not inspect Claude instructions: ${error instanceof Error ? error.message : String(error)}`);
@@ -776,14 +833,11 @@ export function configureGeminiNativeStartup(
   let instructionEntryExists = false;
 
   try {
-    const pathInfo = lstatSync(instructionPath);
+    const snapshot = readRegularTextSnapshot(instructionPath);
     instructionEntryExists = true;
-    if (pathInfo.isSymbolicLink()) {
-      writePath = realpathSync(instructionPath);
-      symlinkPath = instructionPath;
-      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
-    }
-    originalText = readFileSync(writePath, "utf8");
+    writePath = snapshot.writePath;
+    symlinkPath = snapshot.symlinkPath;
+    originalText = snapshot.text;
   } catch (error) {
     if (instructionEntryExists || !isErrno(error, "ENOENT")) {
       throw new Error(`Could not inspect Gemini instructions: ${error instanceof Error ? error.message : String(error)}`);
@@ -859,14 +913,11 @@ export function configureCodexNativeStartup(
   let instructionEntryExists = false;
 
   try {
-    const pathInfo = lstatSync(instructionPath);
+    const snapshot = readRegularTextSnapshot(instructionPath);
     instructionEntryExists = true;
-    if (pathInfo.isSymbolicLink()) {
-      writePath = realpathSync(instructionPath);
-      symlinkPath = instructionPath;
-      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
-    }
-    originalText = readFileSync(writePath, "utf8");
+    writePath = snapshot.writePath;
+    symlinkPath = snapshot.symlinkPath;
+    originalText = snapshot.text;
   } catch (error) {
     if (instructionEntryExists || !isErrno(error, "ENOENT")) {
       throw new Error(`Could not inspect Codex instructions: ${error instanceof Error ? error.message : String(error)}`);
@@ -926,13 +977,10 @@ function configureJsonAgentPolicy(
   let config: JsonObject = {};
 
   try {
-    const pathInfo = lstatSync(configPath);
-    if (pathInfo.isSymbolicLink()) {
-      writePath = realpathSync(configPath);
-      symlinkPath = configPath;
-      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
-    }
-    originalText = readFileSync(writePath, "utf8");
+    const snapshot = readRegularTextSnapshot(configPath);
+    writePath = snapshot.writePath;
+    symlinkPath = snapshot.symlinkPath;
+    originalText = snapshot.text;
     const parsed: unknown = JSON.parse(originalText);
     if (!isJsonObject(parsed)) throw new Error("top-level JSON value must be an object");
     config = parsed;
@@ -1080,13 +1128,10 @@ export function configureCodexAgentPolicy(
   let originalText: string | undefined;
 
   try {
-    const pathInfo = lstatSync(configPath);
-    if (pathInfo.isSymbolicLink()) {
-      writePath = realpathSync(configPath);
-      symlinkPath = configPath;
-      if (!statSync(writePath).isFile()) throw new Error("target is not a regular file");
-    }
-    originalText = readFileSync(writePath, "utf8");
+    const snapshot = readRegularTextSnapshot(configPath);
+    writePath = snapshot.writePath;
+    symlinkPath = snapshot.symlinkPath;
+    originalText = snapshot.text;
     parseToml(originalText);
   } catch (error) {
     if (!isErrno(error, "ENOENT")) {
@@ -1329,18 +1374,17 @@ function registerJsonHost(
   let symlinkPath: string | undefined;
 
   try {
-    const pathInfo = lstatSync(configPath);
-    if (pathInfo.isSymbolicLink()) {
-      try {
-        writePath = realpathSync(configPath);
-        symlinkPath = configPath;
-      } catch (error) {
-        return result(definition, "error", `config symlink target is unavailable: ${error instanceof Error ? error.message : String(error)}`);
-      }
+    const snapshot = readRegularTextSnapshot(configPath);
+    writePath = snapshot.writePath;
+    symlinkPath = snapshot.symlinkPath;
+    originalText = snapshot.text;
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) {
+      return result(definition, "error", `could not inspect config: ${error instanceof Error ? error.message : String(error)}`);
     }
-
+  }
+  if (originalText !== undefined) {
     try {
-      originalText = readFileSync(writePath, "utf8");
       const parsed: unknown = JSON.parse(originalText);
       if (!isJsonObject(parsed)) {
         throw new Error("top-level JSON value must be an object");
@@ -1348,10 +1392,6 @@ function registerJsonHost(
       config = parsed;
     } catch (error) {
       return result(definition, "error", `could not parse config: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  } catch (error) {
-    if (!isErrno(error, "ENOENT")) {
-      return result(definition, "error", `could not inspect config: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1435,21 +1475,17 @@ function registerCodexTomlHost(
   let symlinkPath: string | undefined;
 
   try {
-    const pathInfo = lstatSync(configPath);
-    if (pathInfo.isSymbolicLink()) {
-      try {
-        writePath = realpathSync(configPath);
-        symlinkPath = configPath;
-        if (!statSync(writePath).isFile()) {
-          throw new Error("config symlink target is not a regular file");
-        }
-      } catch (error) {
-        return result(definition, "error", `config symlink target is unavailable: ${error instanceof Error ? error.message : String(error)}`);
-      }
+    const snapshot = readRegularTextSnapshot(configPath);
+    writePath = snapshot.writePath;
+    symlinkPath = snapshot.symlinkPath;
+    originalText = snapshot.text;
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) {
+      return result(definition, "error", `could not inspect config: ${error instanceof Error ? error.message : String(error)}`);
     }
-
+  }
+  if (originalText !== undefined) {
     try {
-      originalText = readFileSync(writePath, "utf8");
       const parsed: unknown = parseToml(originalText);
       if (!isJsonObject(parsed)) {
         throw new Error("top-level TOML value must be a table");
@@ -1457,10 +1493,6 @@ function registerCodexTomlHost(
       config = parsed;
     } catch (error) {
       return result(definition, "error", `could not parse config: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  } catch (error) {
-    if (!isErrno(error, "ENOENT")) {
-      return result(definition, "error", `could not inspect config: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [20.2.6] - 2026-07-22 — Safe Host Configuration Reads
+
+### Fixed
+- Replaced check-then-read handling for Claude, Cursor, Gemini, and Codex
+  configuration files with descriptor-based reads and file-identity checks,
+  closing the host-config TOCTOU window while preserving supported symlinked
+  dotfiles.
+- Dangling configuration symlinks now fail loudly instead of being mistaken
+  for missing files, and Prism installation receipts cannot overwrite a
+  planted symlink target.
+
+### Tests
+- Added cross-host regressions for dangling symlinks and installation-receipt
+  symlink protection alongside the existing symlink-preservation and
+  concurrent-edit coverage.
+
 ## [20.2.5] - 2026-07-22 — Release Integrity and Dependency Security
 
 ### Fixed
