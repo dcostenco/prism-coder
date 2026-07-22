@@ -1,4 +1,4 @@
-name: Update i18n Translations
+name: Verify i18n Translations
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   update-translations:
@@ -24,16 +24,9 @@ jobs:
       - name: Generate i18n files
         run: python3 scripts/generate_i18n.py
 
-      - name: Check for changes
-        id: changes
+      - name: Verify generated translations are current
         run: |
-          git diff --quiet docs/i18n/ && echo "changed=false" >> $GITHUB_OUTPUT || echo "changed=true" >> $GITHUB_OUTPUT
-
-      - name: Commit and push
-        if: steps.changes.outputs.changed == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/i18n/
-          git commit -m "docs: auto-update i18n translations from README.md"
-          git push
+          if ! git diff --exit-code -- docs/i18n/; then
+            echo "::error::Generated translations are stale. Run 'python3 scripts/generate_i18n.py' and commit docs/i18n/."
+            exit 1
+          fi

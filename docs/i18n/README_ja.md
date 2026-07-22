@@ -18,6 +18,127 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ---
 
+## What Prism gives you
+
+- **Session memory that survives restarts** — resume projects with handoff notes,
+  recent work, open TODOs, and configurable quick, standard, or deep context.
+- **Local-first inference** — bounded work is routed through local Ollama models
+  first, with automatic 2B/4B/9B/27B selection based on installed models,
+  available RAM, context fit, and subscription entitlements.
+- **One setup for every agent** — `prism connect` configures Claude Code,
+  Claude Desktop, Cursor, Gemini CLI, and Codex while preserving unrelated
+  settings.
+- **Subscription-aware skills** — entitled skills are synchronized before the
+  host launches, with safe upgrades, downgrades, conflict preservation, and
+  offline last-good recovery.
+- **Hook-free startup** — MCP metadata and native instructions request Prism's
+  startup context without requiring lifecycle hooks or a Prism-owned launcher.
+- **Safe escalation and observability** — inference outcomes are explicit,
+  reserved content remains fail-closed, and local/cloud usage is recorded for
+  review.
+
+## Get started
+
+```bash
+npm install -g prism-mcp-server
+prism connect
+```
+
+Use `prism connect --dry-run` to preview changes, `prism connect --all` to
+configure every detected host, or `prism connect --refresh` to reconcile
+Prism-managed entries after an upgrade. Restart the host after connecting.
+
+Prism works locally without an account, API key, or cloud subscription. Add a
+Synalux subscription when you want cloud memory, paid-tier skills, or team
+features.
+
+---
+
+<details>
+<summary>Release history (optional)</summary>
+
+## What's New in v20.2.4
+
+### Reliable Session Memory That Shows Work, Not Greetings
+Greeting-only assistant replies are skipped before ledger writes. Existing
+greeting rows are filtered at read time across native startup, MCP context, and
+`prism load --json`, while entries containing decisions, TODOs, changed files,
+or non-session events remain visible. Historical rows are not destructively
+deleted. If Synalux has a transient startup failure, Prism displays one bounded
+local last-good snapshot and clearly labels it; permanent authorization or
+validation failures still fail loud, and later writes remain cloud-routed.
+
+---
+
+## What's New in v20.2.2
+
+### One Local-First Workflow Across Every Agent
+`prism connect` now installs one orchestration contract for Claude Code,
+Claude Desktop, Cursor, Gemini CLI, and Codex. Bounded delegated work goes to
+`session_task_route` and the local `prism_infer` worker first; routine work must
+not create background host agents. Local workers can receive the active
+project's dashboard-configured quick, standard, or deep memory and select a
+RAM-safe 2B/4B/9B/27B model at call time. The router forwards complexity but
+does not choose the model; `prism_infer` owns the final decision using memory
+and context fit, installed models, live RAM, entitlements, and explicit caller
+overrides.
+
+Codex and Gemini native agent fan-out are disabled during connect. Codex keeps
+a two-thread, one-level Terra/low fallback profile if the developer explicitly
+re-enables native agents later. Claude Code keeps native agents as a last-resort
+path but pins their model to Sonnet. Cursor and Claude Desktop do not expose a
+supported global subagent-policy file, so they receive the identical workflow
+through Prism's MCP server instructions. `prism_infer` safety boundaries and
+the host's final verification responsibility are unchanged.
+
+### Subscription-Tier Skills Arrive Before the First Host Launch
+`prism connect` now downloads the authoritative Synalux skill manifest and
+materializes entitled packages in the native `~/.agents/skills` directory
+before the command exits. Codex therefore sees the current skillset on its
+first launch instead of requiring a second restart. Prism rechecks the same
+snapshot at MCP startup, session load, and every five minutes—without host
+lifecycle hooks.
+
+On the first user turn, Prism's native skill, MCP metadata, and managed host
+instructions request one `session_bootstrap({})` call. Prism then uses the
+dashboard's developer name, Auto-Load Projects, and quick, standard, or deep
+setting. The response stays focused on greeting and session state because tier
+skills are already present in the host's native skill directory.
+
+Hook-free MCP can provide and prioritize that ready-to-display block, but the
+host model still owns the final assistant message and may summarize it. Prism
+does not claim a deterministic verbatim greeting on third-party chat surfaces;
+that would require a host lifecycle hook, launcher, extension, or Prism-owned
+panel. Context loading itself remains complete even when a host shortens the
+visible reply.
+
+Free accounts receive the protected 12-skill foundation. Paid accounts receive
+the current subscribed routing set. Upgrades install newly entitled packages;
+downgrades remove only Prism-owned packages while preserving local skills and
+locally modified conflicts.
+
+When upgrading an older Claude Code installation, `prism connect` removes only
+the exact Prism-owned startup, skill-sync, handoff, and drift hook actions from
+the legacy bootstrap. It also removes the recognized legacy Prism startup
+sections from `~/CLAUDE.md`, preserves every other instruction, and installs a
+small ownership-marked native block that selects `session_bootstrap({})` on the
+first turn. User hooks, custom instruction sections, and near matches remain
+untouched; native skills and server-side reminders preserve those Prism
+features without host lifecycle hooks. Because hosts expose no native
+session-end callback, handoff at shutdown is instruction-driven rather than a
+guaranteed lifecycle event.
+
+After Claude Code's native user registration succeeds, the same default or
+`--refresh` command checks the nearest `.mcp.json` from the current directory
+through the home directory. It removes only the exact legacy
+`prism-mcp` entry `{ "command": "npx", "args": ["-y", "prism-mcp-server"] }`
+that would otherwise shadow the user registration. Custom Prism entries and
+their additional fields, plus unrelated servers, are preserved; malformed
+files fail loud without changes. `--dry-run` reports the recognized migration
+without changing the file.
+
+---
+
 ## What's New in v20.2.1
 
 ### Subscription-Aware Memory Storage
@@ -117,6 +238,8 @@ External contributions now require signing the [Individual CLA](../../CLA.md). T
 
 ---
 
+</details>
+
 ## Quickstart
 
 The free tier needs no account, no API key, and no cloud. Install Prism, then
@@ -133,16 +256,37 @@ Use `prism connect --all` to target all five, `--host <name>` for one host, or
 `--dry-run` to preview the files that would change. Existing `prism` and
 `prism-mcp` entries are never overwritten by default. `--refresh` updates only
 an entry previously created by Prism; custom entries remain untouched.
+For Claude Code, both the default command and `--refresh` also remove the exact
+legacy project-scoped `npx -y prism-mcp-server` entry from the effective
+ancestor `.mcp.json` after the native user registration succeeds. No custom or
+near-match project entry is changed.
 Close the target MCP hosts before a non-dry-run registration so they cannot
 edit their configuration at the same time.
+
+The same connection installs the local-first orchestration contract:
+
+| Host | Managed containment |
+|---|---|
+| Codex | `features.multi_agent=false`; a 2-thread, depth-1 Terra/low fallback profile is retained for explicit re-enable |
+| Gemini CLI | `experimental.enableAgents=false` |
+| Claude Code | `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`; managed instructions reserve it for last-resort fallback |
+| Cursor | Canonical policy delivered through MCP initialize instructions |
+| Claude Desktop | Canonical policy delivered through MCP initialize instructions |
+
+All five receive `PRISM_AGENT_POLICY=local-first` in their managed Prism MCP
+entry. Routine tasks use the RAM-aware local worker; native/background fan-out
+is not the default workflow. `session_task_route` supplies a complexity hint;
+`prism_infer` remains the single owner of model and thinking selection and can
+choose 27B when its viability gates support it.
 
 Set `PRISM_STORAGE` before running `prism connect` to preserve an explicit
 storage choice in the generated host entries. This does not change local-model
 routing; Synalux cloud storage separately requires an active cloud-memory
 entitlement.
 
-Codex registration preserves `~/.codex/config.toml` and appends only a marked
-Prism-managed block. `CODEX_HOME` is respected when set and must already exist,
+Codex registration preserves unrelated `~/.codex/config.toml` content, appends
+only the marked Prism MCP block, and updates only the documented local-first
+feature/agent keys. `CODEX_HOME` is respected when set and must already exist,
 matching Codex's own contract. Restart Codex CLI, the
 IDE extension, or the ChatGPT desktop app after connecting.
 
@@ -431,42 +575,44 @@ The quality gate detected repeated sentences (≥3 of the same sentence in ≥6 
 
 ### vs AI coding assistants
 
-These tables are the maintainer's assessment as of June 2026. Verify claims that matter to you — products change fast.
+Product capabilities and plans change frequently. The comparison below is
+intentionally limited to publicly documented differences; it is not a claim
+that another product lacks an unlisted feature.
 
-| Feature | Prism Coder | GitHub Copilot | Cursor | Windsurf | Amazon Q | Devin |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| Local inference (open-weight) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Works fully offline | ✅ (free tier) | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Persistent cross-session memory | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Session drift detection | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| L3 grounding verifier | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Behavioral verification (pre-edit) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| MCP server (tools + memory) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Web IDE | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
-| VS Code extension | ✅ | ✅ | — | — | ✅ | ❌ |
-| Flat-rate team pricing | ✅ | ❌ (per-seat) | ❌ (per-seat) | ❌ | ❌ | ❌ |
-| HIPAA BAA available | ✅ (Enterprise) | ❌ | ❌ | ❌ | ❌ | ❌ |
+Legend: ✅ documented, ◐ conditional or plan-dependent, — not compared, ? verify
+with the provider.
+
+| Capability | Prism Coder | GitHub Copilot | Cursor | Amazon Q Developer |
+|---|:---:|:---:|:---:|:---:|
+| Local/open-weight inference | ✅ | ◐ | ◐ | ◐ |
+| Offline workflow | ✅ | ◐ | ? | ? |
+| Cross-session memory | ✅ | ◐ ([docs](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)) | ◐ | ◐ |
+| MCP integration | ✅ | ✅ ([docs](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)) | ✅ ([pricing](https://cursor.com/en-US/pricing)) | ◐ |
+| Local-first model routing | ✅ | ◐ | ◐ | ◐ |
+| Session drift and grounding checks | ✅ | — | — | — |
+| Setup surface | ✅ five hosts | ✅ CLI/IDE | ✅ editor/agents | ✅ IDE/CLI ([overview](https://aws.amazon.com/q/developer/build/)) |
+| Pricing model | ✅ Synalux tiers | ◐ | ◐ ([pricing](https://cursor.com/en-US/pricing)) | ✅ free + $19 Pro ([pricing](https://aws.amazon.com/q/developer/pricing/)) |
+
+Prism-specific compliance, contractual, and pricing terms are documented in
+the Synalux service agreement. Do not infer a competitor's HIPAA, BAA, or data
+handling status from this table.
 
 ### vs local AI / memory tools
 
 | Feature | Prism Coder | Ollama | LM Studio | Mem0 | Zep |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Local inference cascade | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Cloud fallback | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Persistent cross-session memory | ✅ | ❌ | ❌ | ✅ | ✅ |
-| Knowledge ingestion (MCP + webhook) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Cognitive routing (3-store) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Session drift detection | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Native MCP server | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Web IDE + VS Code extension | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Local inference cascade | ✅ | ✅ runtime | ✅ app | — | — |
+| Cloud fallback | ✅ optional | — | ◐ provider-dependent | ◐ | ◐ |
+| Persistent memory | ✅ | — | ◐ project context | ✅ | ✅ |
+| Knowledge/tool integration | ✅ MCP + ingestion | ◐ APIs | ◐ integrations | ✅ SDK/API | ✅ SDK/API |
+| MCP server | ✅ native | — | ◐ client integration | ◐ client integration | ◐ client integration |
 
-### Pricing — flat-rate, not per-seat
+### Pricing
 
-| | **Prism Coder** | GitHub Copilot | Cursor | Amazon Q |
-|---|:---:|:---:|:---:|:---:|
-| **Individual** | **$19/mo** | $10/mo | $20/mo | $19/mo |
-| **Team (5 devs)** | **$49/mo flat** | $95/mo | $200/mo | $95/mo |
-| **Enterprise (25 devs)** | **$99/mo flat** | $195/mo | $1,000/mo | Custom |
+Prism's current published tiers are listed below. Competitor pricing is
+usage- and plan-dependent, so consult the provider directly: [GitHub
+Copilot](https://github.com/features/copilot/plans), [Cursor](https://cursor.com/en-US/pricing),
+and [Amazon Q Developer](https://aws.amazon.com/q/developer/pricing/).
 
 ---
 
@@ -509,7 +655,7 @@ Prism exposes 40+ MCP tools. The core memory loop:
 | `verify_behavior` | Pre-edit scenario challenge — catch bad changes before they happen |
 | `knowledge_ingest` | Teach Prism a codebase or document |
 | `prism_infer` | Local-first inference (route/chat/code modes, thinking, cloud escalation) |
-| `inference_metrics` | Session delegation stats on demand (call count, tokens, local/cloud split) |
+| `inference_metrics` | Session delegation or persisted MCP + VS Code panel local/cloud stats |
 
 ### `prism_infer` — local-first inference with cloud escalation
 
@@ -534,7 +680,7 @@ Full TypeScript signatures live in [`src/tools/`](../../src/tools/); architectur
 
 ### `inference_metrics` — see your local-model usage on demand
 
-Call `inference_metrics` anytime mid-session to see how many `prism_infer` calls ran locally vs cloud, with actual token counts:
+Call `inference_metrics` anytime mid-session to see how many `prism_infer` calls ran locally vs cloud. Use `period: "all"` to atomically import the Synalux VS Code panel spool and include its local-serve rate in the persisted totals:
 
 ```
 📊 Inference Metrics — local-model delegation (this session):
@@ -548,24 +694,37 @@ Call `inference_metrics` anytime mid-session to see how many `prism_infer` calls
 
 The same block also appears automatically in `session_save_ledger` and `session_save_handoff` responses at session end.
 
-**Note:** This tracks `prism_infer` delegation only — not your host model's (Claude's) own token spend. For that, use Claude Code's `/cost` command.
+**Note:** The default session view tracks this MCP process's `prism_infer` delegation. The all-time view combines persisted MCP calls with Synalux VS Code panel inference. Neither view includes your host model's (Claude's) own token spend; use Claude Code's `/cost` command for that.
 
-### Local-model delegation (local-first default)
+### Local-model delegation (default)
 
-Prism now gives Claude, Cursor, Gemini, Codex, and other MCP hosts the same workflow. For bounded, verifiable sub-tasks, the host calls `session_task_route` and then `prism_infer`. Prism loads the project's configured quick, standard, or deep memory context, selects a RAM-safe local Ollama model, and returns the result to the current host for verification. Routine work must not create host-native background-agent fan-out.
+Prism routes qualifying bounded work—bulk classification, field extraction,
+mechanical formatting, test generation, and similar tasks—to local Ollama
+models before any host-native subagent. The agent checks `gate_outcome`,
+verifies the result, and continues in the current host thread when the local
+worker is unavailable, refused, or degraded.
 
-Delegation is enabled by default. To opt out explicitly:
+Pass project memory when the subtask depends on prior work:
 
-```bash
-prism config set delegation_enabled false
+```json
+{
+  "prompt": "Generate the bounded regression-test cases.",
+  "project": "prism-mcp",
+  "context_depth": "standard",
+  "conversation_id": "<from session_bootstrap>",
+  "mode": "code",
+  "cloud_fallback": false,
+  "escalation": "report"
+}
 ```
 
+Omit `context_depth` to use the dashboard setting. Turn off the dashboard Task
+Router toggle or set `PRISM_TASK_ROUTER_ENABLED=false` for an explicit opt-out.
+
 **Guardrails:**
-- **Local first, one current host:** local inference handles eligible bounded work; the current host handles unavailable, refused, degraded, tool-dependent, or reserved work.
-- **Never delegates:** security/safety decisions, planning, final user-facing decisions, or work where a silent quality drop would be hard to detect.
-- **Always verifies:** the host checks `quality_gate_failed` and `used_cloud` before using local output.
-- **Prism-owned selection:** the router forwards complexity, while `prism_infer` chooses 2B/4B/9B/27B using memory/context fit, installed models, live RAM, entitlements, and explicit overrides.
-- **No fan-out:** host-native/background subagents are a last resort, limited to one economy worker with no nesting.
+- **Local by default** — an explicit operator opt-out is preserved
+- **Never delegates:** code/text that ships to the user, security/safety logic, planning/reasoning, anything where a silent quality drop isn't obvious
+- **Always verifies:** checks `quality_gate_failed` and `used_cloud` before trusting local output
 
 <details>
 <summary>How Prism survives context compaction</summary>
@@ -583,9 +742,36 @@ prism save                # save ledger + handoff
 prism search <query>      # search code across repos (exact / regex / symbol / semantic)
 prism review <files...>   # AI code review — security, performance, style
 prism scan <files...>     # security scan — secrets, licenses, Dockerfile
+prism browser ...         # persistent local browser testing and structured automation
 prism push                # push local SQLite to the cloud backend
 prism register-models     # alias dcostenco/prism-coder:* -> prism-coder:*
 ```
+
+### `prism browser` — local browser testing
+
+The npm package includes Prism's Python/Playwright browser runner; no separate
+Prism Browser app or DMG is required. It adds a stable agent-facing CLI around
+Playwright with reusable named profiles, multi-action pipe/REPL sessions,
+redacted local audit logs, and guarded preload scripts for local apps. Use pipe
+or REPL mode when several actions must share one page session:
+
+```bash
+printf 'open http://127.0.0.1:3000\nwait-for #app\nread-dom #app\n' | \
+  prism browser --headless --local-only pipe
+```
+
+Local apps can load repeatable pre-navigation test helpers with
+`--inject ./tests/browser-init.js`. Custom injection requires `--local-only`;
+public navigation and non-loopback requests are rejected in that mode. Install
+the local runtime once with `pip3 install playwright playwright-stealth` and
+`python3 -m playwright install chromium`.
+
+Use raw Playwright for authored suites that need its full assertion, tracing,
+fixture, and parallel-worker APIs. Use `prism browser` when an AI agent needs a
+small, persistent, auditable local browser session through one consistent CLI.
+The compatibility patches are best effort; they are not a CAPTCHA-bypass
+guarantee. See [Prism Browser local testing](../prism-browser.md) for the
+command surface, safety model, and verified acceptance cases.
 
 ### `prism search` — semantic code search
 

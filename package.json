@@ -125,9 +125,14 @@
     }
   },
   "overrides": {
-    "hono": "^4.12.18",
-    "fast-uri": "^3.1.2",
-    "ip-address": "^10.2.0"
+    "@hono/node-server": "^2.0.5",
+    "body-parser": "^2.3.0",
+    "fast-uri": "^3.1.4",
+    "hono": "^4.12.27",
+    "ip-address": "^10.2.0",
+    "protobufjs": "^7.6.5",
+    "sharp": "^0.35.0",
+    "tar": "^7.5.19"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
