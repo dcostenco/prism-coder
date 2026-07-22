@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [20.2.5] - 2026-07-22 — Release Integrity and Dependency Security
+
+### Fixed
+- Updated transitive dependency overrides so clean installs resolve patched
+  Hono, `body-parser`, `fast-uri`, `protobufjs`, Sharp, and `tar` releases;
+  `npm audit --audit-level=high` now reports zero vulnerabilities.
+- Replaced the i18n workflow's direct push to protected `main` with a
+  deterministic generated-document verification gate. Translation drift now
+  fails CI without bypassing required branch checks.
+- Republished the 20.2.4 session-memory reliability changes from the final,
+  CI-repaired source after the original npm artifact raced the repair commit.
+
+### Tests
+- Verified the complete Vitest suite, TypeScript build, dependency import
+  smoke tests, clean audit, deterministic i18n generation, and npm package
+  contents before release.
+
 ## [20.2.4] - 2026-07-22 — Reliable, Substantive Session Memory
 
 ### Fixed
