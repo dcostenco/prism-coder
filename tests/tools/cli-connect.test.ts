@@ -43,6 +43,7 @@ import {
   migrateLegacyClaudeManagedStartup,
   normalizeHostName,
   resolveInstalledServerPath,
+  writeInstallationReceipt,
   type ConnectHostName,
 } from "../../src/connect.js";
 import {
@@ -207,6 +208,53 @@ afterEach(() => {
 });
 
 describe("prism connect", () => {
+  it("fails closed on dangling host-config symlinks instead of treating them as absent", () => {
+    for (const host of ["cursor", "codex"] as const) {
+      const homeDir = makeHome();
+      const path = configPath(homeDir, host);
+      const missingTarget = join(homeDir, "missing-target");
+      mkdirSync(dirname(path), { recursive: true });
+      symlinkSync(missingTarget, path);
+
+      const result = connectHosts({
+        hosts: [host],
+        homeDir,
+        platform: "darwin",
+        serverPath: "/pkg/dist/server.js",
+        nodePath: "/usr/bin/node",
+        env: {},
+      });
+
+      expect(result.results[0].status).toBe("error");
+      expect(result.results[0].message).toMatch(/symlink target is unavailable/);
+      expect(lstatSync(path).isSymbolicLink()).toBe(true);
+      expect(existsSync(missingTarget)).toBe(false);
+    }
+  });
+
+  it("never overwrites a symlink target planted at the Prism installation receipt", () => {
+    const homeDir = makeHome();
+    const receiptDirectory = join(homeDir, ".prism-mcp");
+    const receiptPath = join(receiptDirectory, "installation.json");
+    const victimPath = join(homeDir, "user-owned.json");
+    const victimText = '{"owner":"user"}\n';
+    mkdirSync(receiptDirectory, { recursive: true });
+    writeFileSync(victimPath, victimText);
+    symlinkSync(victimPath, receiptPath);
+
+    expect(() => writeInstallationReceipt(homeDir, {
+      schema_version: 1,
+      owner: "prism-connect",
+      node_path: "/usr/bin/node",
+      cli_path: "/pkg/dist/cli.js",
+      server_path: "/pkg/dist/server.js",
+      package_version: "test",
+    })).toThrow(/Could not inspect Prism installation receipt/);
+
+    expect(readFileSync(victimPath, "utf8")).toBe(victimText);
+    expect(lstatSync(receiptPath).isSymbolicLink()).toBe(true);
+  });
+
   it("removes only the exact legacy Prism project registration from the effective ancestor", () => {
     const homeDir = makeHome();
     const cwd = join(homeDir, "work", "project", "src");
