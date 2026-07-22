@@ -19,7 +19,16 @@ beforeAll(async () => {
 afterAll(async () => {
   storage.closeConfigStorage();
   delete process.env.PRISM_CONFIG_PATH;
-  await rm(dir, { recursive: true, force: true });
+  try {
+    await rm(dir, { recursive: true, force: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // libsql-js#228 can retain a closed native handle until V8 cleanup on
+    // Windows. The runner removes its temp tree when the process exits.
+    if (process.platform !== "win32" || !["EBUSY", "EPERM", "ENOTEMPTY"].includes(code ?? "")) {
+      throw error;
+    }
+  }
 });
 
 describe("atomic managed-skill config storage", () => {

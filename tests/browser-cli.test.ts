@@ -26,7 +26,16 @@ import {
 
 const scriptPath = resolve('scripts/dev/browse.py');
 const python = resolvePythonCommand();
+const playwrightRuntimeAvailable = python ? hasPlaywrightRuntime(python) : false;
 const tempDirs: string[] = [];
+
+function expectPosixMode(path: string, mode: number): void {
+  // Windows reports synthesized 0666/0777 mode bits; ACLs, not POSIX bits,
+  // own access control there. Keep the permission contract strict on Unix.
+  if (process.platform !== 'win32') {
+    expect(statSync(path).mode & 0o777).toBe(mode);
+  }
+}
 
 function makeTempDir(prefix: string): string {
   const path = mkdtempSync(join(tmpdir(), prefix));
@@ -96,9 +105,12 @@ describe('Prism Browser package and launcher contract', () => {
     ]);
   });
 
-  it.skipIf(!python)('verifies the Python browser runtime before launching', () => {
+  it.skipIf(!python || !playwrightRuntimeAvailable)(
+    'verifies the installed Python browser runtime before launching',
+    () => {
     expect(hasPlaywrightRuntime(python!)).toBe(true);
-  });
+    },
+  );
 });
 
 describe.skipIf(!python)('Prism Browser Python safety helpers', () => {
@@ -151,8 +163,8 @@ describe.skipIf(!python)('Prism Browser Python safety helpers', () => {
     expect(result.status, result.stderr).toBe(0);
     const auditPath = result.stdout.trim();
     const audit = readFileSync(auditPath, 'utf8');
-    expect(statSync(auditPath).mode & 0o777).toBe(0o600);
-    expect(statSync(dirname(auditPath)).mode & 0o777).toBe(0o700);
+    expectPosixMode(auditPath, 0o600);
+    expectPosixMode(dirname(auditPath), 0o700);
     expect(audit).toContain('https://example.test/private');
     expect(audit).toContain('[EMAIL-REDACTED]');
     expect(audit).not.toMatch(/user|password|token|secret|fragment|hidden/);

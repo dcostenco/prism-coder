@@ -53,7 +53,16 @@ afterEach(async () => {
     delete process.env[LEDGER_PATH_ENV];
     delete process.env.PRISM_DATA_DIR;
     _resetInferLedgerForTest();
-    await rm(directory, { recursive: true, force: true });
+    try {
+        await rm(directory, { recursive: true, force: true });
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        // libsql-js#228 can retain a closed native handle until V8 cleanup on
+        // Windows. The runner removes its temp tree when the process exits.
+        if (process.platform !== "win32" || !["EBUSY", "EPERM", "ENOTEMPTY"].includes(code ?? "")) {
+            throw error;
+        }
+    }
 });
 
 describe("panel metrics spool ingestion", () => {

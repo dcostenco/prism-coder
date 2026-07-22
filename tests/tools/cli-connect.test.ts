@@ -73,6 +73,14 @@ function expectLocalFirstPolicy(instructions: string): void {
   expect(instructions).toContain("A host-native subagent is a last resort: at most one, no nesting");
 }
 
+function expectPosixMode(path: string, mode: number): void {
+  // Windows exposes synthesized mode bits; the content and atomic-write
+  // assertions still run there, while Unix retains the exact mode contract.
+  if (process.platform !== "win32") {
+    expect(statSync(path).mode & 0o777).toBe(mode);
+  }
+}
+
 function makeHome(): string {
   const home = mkdtempSync(join(tmpdir(), "prism-connect-"));
   tempHomes.push(home);
@@ -233,7 +241,7 @@ describe("prism connect", () => {
       prism: { command: "custom-prism", args: ["--keep-me"] },
       other: { command: "other-server", custom: { keep: true } },
     });
-    expect(statSync(projectConfigPath).mode & 0o777).toBe(0o640);
+    expectPosixMode(projectConfigPath, 0o640);
     expect(migrateLegacyClaudeProjectMcp(homeDir, cwd)).toMatchObject({
       status: "unchanged",
       removed: 0,
@@ -437,7 +445,7 @@ describe("prism connect", () => {
     expect(readFileSync(target, "utf8")).toBe(prefix + suffix);
     expect(lstatSync(instructionPath).isSymbolicLink()).toBe(true);
     expect(realpathSync(instructionPath)).toBe(realpathSync(target));
-    expect(statSync(target).mode & 0o777).toBe(0o640);
+    expectPosixMode(target, 0o640);
     expect(migrateLegacyClaudeManagedStartup(homeDir)).toMatchObject({ status: "unchanged", removed: 0 });
 
     const racedHome = makeHome();
@@ -491,7 +499,7 @@ describe("prism connect", () => {
     expectLocalFirstPolicy(configured);
     expect(configured).not.toContain("# Startup — MANDATORY");
     expect(configured.slice(configured.indexOf("# Paths"))).toBe("# Paths\n\n- Keep this user rule.\n");
-    expect(statSync(instructionPath).mode & 0o777).toBe(0o640);
+    expectPosixMode(instructionPath, 0o640);
     expect(readFileSync(agentsPath, "utf8")).toBe(agents);
     expect(configureGeminiNativeStartup(homeDir)).toMatchObject({ status: "unchanged" });
 
@@ -522,7 +530,7 @@ describe("prism connect", () => {
     expect(lstatSync(instructionPath).isSymbolicLink()).toBe(true);
     expect(realpathSync(instructionPath)).toBe(realpathSync(target));
     expect(configured.replaceAll("\r\n", "")).not.toContain("\n");
-    expect(statSync(target).mode & 0o777).toBe(0o640);
+    expectPosixMode(target, 0o640);
 
     const racedHome = makeHome();
     const racedPath = join(racedHome, ".gemini", "GEMINI.md");
@@ -572,7 +580,7 @@ describe("prism connect", () => {
     expect(configured).toContain("`session_bootstrap({})`, exactly once");
     expect(configured).toContain("Do not call `session_load_context`");
     expect(configured.replaceAll("\r\n", "")).not.toContain("\n");
-    expect(statSync(instructionPath).mode & 0o777).toBe(0o640);
+    expectPosixMode(instructionPath, 0o640);
     expectVerbatimStartupContract(configured);
     expectLocalFirstPolicy(configured);
 
@@ -667,7 +675,7 @@ describe("prism connect", () => {
     expect(realpathSync(instructionPath)).toBe(realpathSync(target));
     expect(readFileSync(target, "utf8")).toContain("USER RULE\n");
     expect(readFileSync(target, "utf8")).toContain("prism connect managed: codex native startup");
-    expect(statSync(target).mode & 0o777).toBe(0o640);
+    expectPosixMode(target, 0o640);
 
     const racedHome = makeHome();
     const racedPath = join(racedHome, ".codex", "AGENTS.md");
@@ -766,7 +774,7 @@ describe("prism connect", () => {
         nodePath: "/usr/bin/node",
         env: {},
       });
-      expect(statSync(newPath).mode & 0o777).toBe(0o600);
+      expectPosixMode(newPath, 0o600);
 
       const existingHome = makeHome();
       const existingPath = configPath(existingHome, "codex");
@@ -780,7 +788,7 @@ describe("prism connect", () => {
         nodePath: "/usr/bin/node",
         env: {},
       });
-      expect(statSync(existingPath).mode & 0o777).toBe(0o640);
+      expectPosixMode(existingPath, 0o640);
     },
   );
 
@@ -1037,7 +1045,7 @@ describe("prism connect", () => {
     expect(registered.results[0].status).toBe("registered");
     expect(lstatSync(path).isSymbolicLink()).toBe(true);
     if (process.platform !== "win32") {
-      expect(statSync(target).mode & 0o777).toBe(0o640);
+      expectPosixMode(target, 0o640);
     }
 
     const before = readFileSync(target, "utf8");
@@ -1697,6 +1705,7 @@ describe("prism connect", () => {
       const result = await runBuiltCli(["connect", "--host", "codex"], {
         ...process.env,
         HOME: homeDir,
+        USERPROFILE: homeDir,
         CODEX_HOME: codexHome,
         PRISM_CONFIG_PATH: join(homeDir, "prism-config.db"),
         PRISM_SKILL_SYNC_DISABLED: "false",

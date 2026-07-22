@@ -11,6 +11,10 @@ All notable changes to this project will be documented in this file.
 - Replaced the i18n workflow's direct push to protected `main` with a
   deterministic generated-document verification gate. Translation drift now
   fails CI without bypassing required branch checks.
+- Made the six-platform CLI matrix portable: one Linux lane installs and
+  verifies the optional Prism Browser runtime, Windows uses `USERPROFILE` for
+  native skill materialization, Unix-only mode assertions stay Unix-only, and
+  known libSQL test-handle cleanup behavior no longer masks passing behavior.
 - Republished the 20.2.4 session-memory reliability changes from the final,
   CI-repaired source after the original npm artifact raced the repair commit.
 
