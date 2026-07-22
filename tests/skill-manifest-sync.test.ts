@@ -157,6 +157,41 @@ describe("subscription-tier skill manifest sync", () => {
     }
   });
 
+  it("materializes the prompt-routed direct Synalux local-browser package in every native host root", async () => {
+    const fixture = await mkdtemp(join(tmpdir(), "prism-local-browser-sync-"));
+    roots.push(fixture);
+    const agentsSkillsDir = join(fixture, ".agents", "skills");
+    const claudeCodeSkillsDir = join(fixture, ".claude", "skills");
+    const cursorSkillsDir = join(fixture, ".cursor", "skills");
+    const snapshot = manifest("standard", ["local-browser"]);
+    const browser = snapshot.skills.find((item) => item.name === "local-browser")!;
+    browser.metadata.categories = ["prompt"];
+    const testContent = "def test_contract():\n    assert True\n";
+    browser.files["test_local_browser.py"] = {
+      content: testContent,
+      digest: digest(testContent),
+      encoding: "utf8",
+    };
+    snapshot.generation = computeSkillManifestGeneration(snapshot);
+
+    const result = await synchronizeSkillManifest({
+      agentsSkillsDir,
+      claudeCodeSkillsDir,
+      cursorSkillsDir,
+      applyManifest: vi.fn(async () => undefined),
+      fetchImpl: vi.fn(() => jsonResponse(snapshot)) as unknown as typeof fetch,
+      ...paidAuth,
+    });
+
+    expect(result.status).toBe("applied");
+    for (const nativeRoot of [agentsSkillsDir, claudeCodeSkillsDir, cursorSkillsDir]) {
+      expect(await readFile(join(nativeRoot, "local-browser", "SKILL.md"), "utf8"))
+        .toContain("name: local-browser");
+      expect(await readFile(join(nativeRoot, "local-browser", "test_local_browser.py"), "utf8"))
+        .toBe(testContent);
+    }
+  });
+
   it("installs every sibling skill referenced by an entitled SKILL.md", async () => {
     const agentsSkillsDir = await root();
     const claudeCodeSkillsDir = join(dirname(agentsSkillsDir), ".claude", "skills");

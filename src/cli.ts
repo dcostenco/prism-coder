@@ -28,6 +28,7 @@ import {
   migrateLegacyClaudeProjectMcp,
   normalizeHostName,
 } from './connect.js';
+import { runBrowserCli } from './browserCli.js';
 
 const program = new Command();
 
@@ -115,6 +116,12 @@ program
   .command('bootstrap')
   .description('Print the canonical dashboard-configured first-turn Prism greeting')
   .action(runBootstrapCommand);
+
+// Parsed by the direct dispatch at the bottom so all Python CLI flags pass
+// through unchanged. Registering it here keeps the command visible in help.
+program
+  .command('browser')
+  .description('Run the packaged local Prism Browser automation CLI');
 
 // ─── prism connect ────────────────────────────────────────────
 // Registers this installed package with supported MCP hosts. The
@@ -927,4 +934,14 @@ program
     if (fail > 0) process.exit(1);
   });
 
-await program.parseAsync(process.argv);
+if (process.argv[2] === 'browser') {
+  try {
+    const exitCode = await runBrowserCli(process.argv.slice(3));
+    if (exitCode !== 0) process.exitCode = exitCode;
+  } catch (err) {
+    console.error(`Prism Browser failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+  }
+} else {
+  await program.parseAsync(process.argv);
+}

@@ -29,7 +29,7 @@
 ## Development (3)
 - **dev-engineering-super-skill** — Full-stack architecture, testing, DevOps
 - **code-mode-skill** — Add sandbox code execution to MCP servers
-- **local-browser** — Stealth browser automation via browse.py (WebKit/Playwright); covers navigation, screenshots, DOM, Google Docs, bot-detection evasion, HIPAA audit logging
+- **local-browser** — Packaged local browser automation via `prism browser`; persistent profiles, shared pipe/REPL sessions, redacted audit logging, and loopback-only preload scripts ([guide](../docs/prism-browser.md))
 
 ## Business (8)
 - **pm-super-skill** — Product management, roadmaps, sprints

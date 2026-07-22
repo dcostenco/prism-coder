@@ -28,6 +28,7 @@ MODES:
 
 import argparse
 import datetime
+import hashlib
 import io
 import json
 import os
@@ -40,6 +41,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -50,6 +52,8 @@ DEFAULT_PROFILE = "default"
 DEFAULT_TIMEOUT = 30000
 DEFAULT_VIEWPORT = (1440, 900)
 REPL_IDLE_TIMEOUT = 600  # 10 minutes — auto-close to prevent zombie Chromium
+MAX_INIT_SCRIPT_BYTES = 256 * 1024
+PROFILE_NAME_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
 STEALTH_AVAILABLE = False
 
 try:
@@ -66,6 +70,110 @@ PHI_PATTERNS = [
     (re.compile(r'\bMRN[-:#]?\s*\d{4,12}\b', re.IGNORECASE), '[MRN-REDACTED]'),
     (re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'), '[EMAIL-REDACTED]'),
 ]
+
+
+def validate_profile_name(profile: str) -> str:
+    """Keep persistent profiles inside BROWSER_DATA_DIR."""
+    if not PROFILE_NAME_PATTERN.fullmatch(profile):
+        raise ValueError(
+            "Profile names must be 1-64 characters using letters, numbers, '.', '_' or '-'."
+        )
+    return profile
+
+
+def stable_profile_index(profile: str, count: int) -> int:
+    """Return a cross-process stable choice for profile-scoped settings."""
+    if count <= 0:
+        raise ValueError("count must be positive")
+    digest = hashlib.sha256(profile.encode('utf-8')).digest()
+    return int.from_bytes(digest[:8], 'big') % count
+
+
+def is_local_test_url(url: str, allow_internal=False) -> bool:
+    """Allow only loopback HTTP(S) and self-contained browser URLs."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+
+    if parsed.scheme in ('data', 'about'):
+        return True
+    if allow_internal and parsed.scheme == 'blob':
+        return is_local_test_url(parsed.path, allow_internal=False)
+    if parsed.scheme not in ('http', 'https'):
+        return False
+
+    hostname = (parsed.hostname or '').lower().rstrip('.')
+    return (
+        hostname in ('localhost', '127.0.0.1', '::1')
+        or hostname.endswith('.localhost')
+    )
+
+
+def redact_audit_target(target: str) -> str:
+    """Remove credentials, query strings, fragments and data payloads from audit targets."""
+    if not target:
+        return ""
+    compact = str(target).replace('\n', ' ').replace('\r', ' ')
+    try:
+        parsed = urlsplit(compact)
+    except ValueError:
+        return sanitize_phi(compact)[:300]
+
+    if parsed.scheme == 'data':
+        return 'data:[redacted]'
+    if parsed.scheme in ('http', 'https'):
+        hostname = parsed.hostname or ''
+        if ':' in hostname and not hostname.startswith('['):
+            hostname = f'[{hostname}]'
+        netloc = hostname
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
+        if port:
+            netloc = f'{netloc}:{port}'
+        return urlunsplit((parsed.scheme, netloc, parsed.path or '/', '', ''))[:300]
+    return sanitize_phi(compact)[:300]
+
+
+def _sanitize_audit_text(value: str) -> str:
+    """Sanitize arbitrary audit details, including embedded URLs."""
+    compact = str(value).replace('\n', ' ').replace('\r', ' ')
+    url_pattern = re.compile(r'(?i)(?:https?|data):[^\s|]+')
+    compact = url_pattern.sub(lambda match: redact_audit_target(match.group(0)), compact)
+    return sanitize_phi(compact)[:300]
+
+
+def load_local_init_script(script_path: str) -> tuple[str, str]:
+    """Load and guard a custom pre-navigation script for local test pages only."""
+    candidate = Path(script_path).expanduser()
+    if candidate.is_symlink():
+        raise ValueError(f"Init script must not be a symlink: {script_path}")
+    try:
+        stat = candidate.stat()
+    except OSError as exc:
+        raise ValueError(f"Cannot read init script: {script_path}") from exc
+    if not candidate.is_file() or candidate.suffix.lower() not in ('.js', '.mjs'):
+        raise ValueError("Init scripts must be regular .js or .mjs files.")
+    if stat.st_size > MAX_INIT_SCRIPT_BYTES:
+        raise ValueError(f"Init scripts must be at most {MAX_INIT_SCRIPT_BYTES} bytes.")
+    try:
+        source = candidate.read_text(encoding='utf-8')
+    except UnicodeDecodeError as exc:
+        raise ValueError("Init scripts must be UTF-8 text.") from exc
+
+    digest = hashlib.sha256(source.encode('utf-8')).hexdigest()[:12]
+    guarded = f"""
+(() => {{
+  const host = location.hostname.toLowerCase().replace(/\\.$/, '');
+  const allowed = location.protocol === 'data:' || location.protocol === 'about:' ||
+    host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.localhost');
+  if (!allowed) return;
+  {source}
+}})();
+"""
+    return guarded, digest
 
 # ---------------------------------------------------------------------------
 # Stealth Configuration — the core anti-detection engine
@@ -334,7 +442,13 @@ def secure_delete(filepath: str):
 # ---------------------------------------------------------------------------
 def _ensure_audit_log_permissions():
     """Create audit log with strict permissions (chmod 600) so other processes can't read it."""
-    AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        os.chmod(AUDIT_LOG_PATH.parent, 0o700)
+    except Exception:
+        pass
+    if AUDIT_LOG_PATH.is_symlink():
+        raise RuntimeError(f"Refusing symlinked audit log: {AUDIT_LOG_PATH}")
     if not AUDIT_LOG_PATH.exists():
         AUDIT_LOG_PATH.touch(mode=0o600)
     else:
@@ -348,10 +462,11 @@ def audit_log(action: str, target: str = "", details: str = ""):
     """Write audit log entry. Records WHAT and WHERE, never content."""
     _ensure_audit_log_permissions()
     ts = datetime.datetime.now().isoformat()
-    safe = details[:200] if details else ""
+    safe_target = redact_audit_target(target)
+    safe_details = _sanitize_audit_text(details) if details else ""
     try:
-        with open(AUDIT_LOG_PATH, 'a') as f:
-            f.write(f"{ts} | {action} | {target} | {safe}\n")
+        with open(AUDIT_LOG_PATH, 'a', encoding='utf-8') as f:
+            f.write(f"{ts} | {action} | {safe_target} | {safe_details}\n")
     except Exception:
         pass
 
@@ -401,18 +516,24 @@ class StealthBrowserSession:
 
     def __init__(self, profile=DEFAULT_PROFILE, headless=False,
                  timeout=DEFAULT_TIMEOUT, viewport=DEFAULT_VIEWPORT,
-                 stealth_level="full"):
-        self.profile = profile
+                 stealth_level="full", local_only=False,
+                 init_script_paths=None):
+        self.profile = validate_profile_name(profile)
         self.headless = headless
         self.timeout = timeout
         self.viewport = viewport
         self.stealth_level = stealth_level  # "full", "light", "none"
-        self.profile_dir = BROWSER_DATA_DIR / profile
+        self.local_only = local_only
+        self.profile_dir = BROWSER_DATA_DIR / self.profile
         self._playwright = None
         self._context = None
         self._page = None
+        script_paths = list(init_script_paths or [])
+        if script_paths and not self.local_only:
+            raise ValueError("Custom init scripts require --local-only.")
+        self._init_scripts = [load_local_init_script(path) for path in script_paths]
         # Pick a consistent UA for this profile
-        ua_idx = hash(profile) % len(STEALTH_USER_AGENTS)
+        ua_idx = stable_profile_index(self.profile, len(STEALTH_USER_AGENTS))
         self._user_agent = STEALTH_USER_AGENTS[ua_idx]
 
     def __enter__(self):
@@ -455,6 +576,12 @@ class StealthBrowserSession:
         # Apply stealth evasions
         if self.stealth_level != "none":
             self._apply_stealth()
+        elif self.local_only:
+            self._apply_local_only_guard()
+
+        for source, digest in self._init_scripts:
+            self._context.add_init_script(source)
+            audit_log("init_script", f"sha256={digest}", "scope=local-only")
 
         # Get or create page
         if self._context.pages:
@@ -463,7 +590,7 @@ class StealthBrowserSession:
             self._page = self._context.new_page()
 
         audit_log("session_start", f"profile={self.profile}",
-                  f"stealth={self.stealth_level},headless={self.headless}")
+                  f"stealth={self.stealth_level},headless={self.headless},local_only={self.local_only}")
 
     def _apply_stealth(self):
         """Apply multi-layer stealth evasions."""
@@ -495,6 +622,10 @@ class StealthBrowserSession:
         # Layer 3: Route handler to fix headers
         def fix_headers(route, request):
             """Ensure realistic HTTP headers on every request."""
+            if self.local_only and not is_local_test_url(request.url, allow_internal=True):
+                audit_log("request_blocked", request.url, "policy=local-only")
+                route.abort("blockedbyclient")
+                return
             headers = {
                 **request.headers,
                 'sec-ch-ua': '"Chromium";v="131", "Google Chrome";v="131", "Not_A_Brand";v="24"',
@@ -515,6 +646,19 @@ class StealthBrowserSession:
             audit_log("stealth", "header_fix", "routing_active")
         except Exception as e:
             audit_log("stealth", "header_fix", f"error={e}")
+            if self.local_only:
+                raise RuntimeError("Cannot enforce --local-only network isolation.") from e
+
+    def _apply_local_only_guard(self):
+        """Block non-loopback network requests when stealth routing is disabled."""
+        def guard(route, request):
+            if is_local_test_url(request.url, allow_internal=True):
+                route.continue_()
+                return
+            audit_log("request_blocked", request.url, "policy=local-only")
+            route.abort("blockedbyclient")
+
+        self._context.route("**/*", guard)
 
     def _validate_fingerprint_consistency(self):
         """
@@ -560,14 +704,19 @@ class StealthBrowserSession:
 # ---------------------------------------------------------------------------
 def cmd_open(session, url):
     """Navigate to URL."""
+    if session.local_only and not is_local_test_url(url):
+        raise ValueError("--local-only permits only loopback HTTP(S), data:, and about: URLs.")
+
+    session.page.goto(url, wait_until='domcontentloaded')
     try:
-        session.page.goto(url, wait_until='domcontentloaded')
         session.page.wait_for_load_state('networkidle', timeout=15000)
-    except Exception:
-        pass  # networkidle may timeout on heavy pages, that's ok
+    except Exception as exc:
+        # A continuously-polling page can be usable without reaching networkidle.
+        if type(exc).__name__ != 'TimeoutError':
+            raise
     title = session.page.title()
     current_url = session.page.url
-    audit_log("open", url, f"title={title}")
+    audit_log("open", url, f"title_chars={len(title)}")
     return {"status": "ok", "url": current_url, "title": title}
 
 
@@ -636,6 +785,15 @@ def cmd_type_text(session, selector, text, human=True):
         session.page.fill(selector, text)
     audit_log("type", selector, f"chars={len(text)}")
     return {"status": "ok", "action": "type", "selector": selector, "chars": len(text)}
+
+
+def cmd_press(session, key):
+    """Press one Playwright keyboard key or key combination."""
+    if not key:
+        raise ValueError("Usage: press <key>")
+    session.page.keyboard.press(key)
+    audit_log("press", "keyboard", f"key={key}")
+    return {"status": "ok", "action": "press", "key": key}
 
 
 def cmd_scroll(session, direction="down", amount=3):
@@ -889,7 +1047,7 @@ def run_repl(session, sanitize=False):
                     "commands": [
                         "open <url>", "screenshot [path]", "read-dom [selector]", "read-page",
                         "click <selector>", "type <selector> <text>", "scroll [up|down]",
-                        "wait-for <selector>", "eval <js>",
+                        "press <key>", "wait-for <selector>", "eval <js>",
                         "gdoc-read", "gdoc-type <text>", "gdoc-find <text>",
                         "stealth-test", "url", "title", "quit"
                     ]
@@ -910,6 +1068,8 @@ def run_repl(session, sanitize=False):
                     result = cmd_type_text(session, tparts[0], tparts[1])
                 else:
                     result = {"status": "error", "action": "type", "message": "Usage: type <selector> <text>"}
+            elif cmd == 'press':
+                result = cmd_press(session, arg)
             elif cmd == 'scroll':
                 result = cmd_scroll(session, arg or "down")
             elif cmd in ('wait-for', 'waitfor', 'wait'):
@@ -951,6 +1111,7 @@ def run_repl(session, sanitize=False):
 # ---------------------------------------------------------------------------
 def run_pipe(session, sanitize=False):
     """Read commands from stdin, one per line."""
+    had_error = False
     for line in sys.stdin:
         line = line.strip()
         if not line or line.startswith('#'):
@@ -971,8 +1132,17 @@ def run_pipe(session, sanitize=False):
                 result = cmd_read_page(session, sanitize)
             elif cmd == 'click':
                 result = cmd_click(session, arg)
+            elif cmd == 'type':
+                tparts = arg.split(maxsplit=1)
+                if len(tparts) != 2:
+                    raise ValueError("Usage: type <selector> <text>")
+                result = cmd_type_text(session, tparts[0], tparts[1])
+            elif cmd == 'press':
+                result = cmd_press(session, arg)
             elif cmd == 'scroll':
                 result = cmd_scroll(session, arg or "down")
+            elif cmd in ('wait-for', 'waitfor'):
+                result = cmd_wait_for(session, arg)
             elif cmd == 'eval':
                 result = cmd_eval(session, arg, sanitize)
             elif cmd == 'gdoc-read':
@@ -984,12 +1154,29 @@ def run_pipe(session, sanitize=False):
             elif cmd == 'wait':
                 time.sleep(float(arg) if arg else 1)
                 result = {"status": "ok", "action": "wait"}
+            elif cmd in ('stealth-test', 'stealthtest', 'test'):
+                result = cmd_stealth_test(session)
+            elif cmd == 'url':
+                result = {"status": "ok", "action": "url", "url": session.page.url}
+            elif cmd == 'title':
+                result = {"status": "ok", "action": "title", "title": session.page.title()}
+            else:
+                result = {"status": "error", "action": cmd, "message": f"Unknown command: {cmd}"}
         except Exception as e:
-            result = {"status": "error", "message": str(e)}
+            result = {
+                "status": "error",
+                "action": cmd,
+                "error_type": type(e).__name__,
+                "message": str(e),
+            }
+
+        if result and result.get("status") not in ("ok",):
+            had_error = True
 
         if result:
             print(json.dumps(result, default=str))
             sys.stdout.flush()
+    return not had_error
 
 
 # ---------------------------------------------------------------------------
@@ -1008,6 +1195,10 @@ def build_parser():
     p.add_argument('--viewport', default='1440x900', help='Viewport WxH')
     p.add_argument('--stealth', choices=['full', 'light', 'none'], default='full',
                    help='Stealth level: full (all layers), light (JS only), none')
+    p.add_argument('--local-only', action='store_true',
+                   help='Reject non-loopback navigation and network requests')
+    p.add_argument('--inject', action='append', default=[], metavar='PATH',
+                   help='Inject a UTF-8 .js/.mjs file before local page scripts (repeatable; requires --local-only)')
     p.add_argument('--skip-fv-check', action='store_true', help='Skip FileVault check')
 
     sub = p.add_subparsers(dest='command')
@@ -1032,6 +1223,9 @@ def build_parser():
     s = sub.add_parser('type', help='Type text')
     s.add_argument('selector')
     s.add_argument('text')
+
+    s = sub.add_parser('press', help='Press a keyboard key or key combination')
+    s.add_argument('key')
 
     s = sub.add_parser('scroll', help='Scroll page')
     s.add_argument('--direction', '-d', choices=['up', 'down'], default='down')
@@ -1074,7 +1268,13 @@ def main():
     except Exception:
         viewport = DEFAULT_VIEWPORT
 
+    if args.inject and not args.local_only:
+        parser.error('--inject requires --local-only')
+    if args.local_only and args.command == 'open' and not is_local_test_url(args.url):
+        parser.error('--local-only permits only loopback HTTP(S), data:, and about: URLs')
+
     cleanup_files = []
+    exit_code = 0
 
     with StealthBrowserSession(
         profile=args.profile,
@@ -1082,12 +1282,15 @@ def main():
         timeout=args.timeout,
         viewport=viewport,
         stealth_level=args.stealth,
+        local_only=args.local_only,
+        init_script_paths=args.inject,
     ) as session:
 
         if args.command == 'repl':
             run_repl(session, args.sanitize)
         elif args.command == 'pipe':
-            run_pipe(session, args.sanitize)
+            if not run_pipe(session, args.sanitize):
+                exit_code = 1
         elif args.command == 'stealth-test':
             print(json.dumps(cmd_stealth_test(session), indent=2, default=str))
         else:
@@ -1112,6 +1315,8 @@ def main():
                 result = cmd_click(session, args.selector)
             elif args.command == 'type':
                 result = cmd_type_text(session, args.selector, args.text)
+            elif args.command == 'press':
+                result = cmd_press(session, args.key)
             elif args.command == 'scroll':
                 result = cmd_scroll(session, args.direction, args.amount)
             elif args.command == 'wait-for':
@@ -1133,7 +1338,8 @@ def main():
 
     for f in cleanup_files:
         secure_delete(f)
+    return exit_code
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

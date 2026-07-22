@@ -729,9 +729,36 @@ prism save                # save ledger + handoff
 prism search <query>      # search code across repos (exact / regex / symbol / semantic)
 prism review <files...>   # AI code review — security, performance, style
 prism scan <files...>     # security scan — secrets, licenses, Dockerfile
+prism browser ...         # persistent local browser testing and structured automation
 prism push                # push local SQLite to the cloud backend
 prism register-models     # alias dcostenco/prism-coder:* -> prism-coder:*
 ```
+
+### `prism browser` — local browser testing
+
+The npm package includes Prism's Python/Playwright browser runner; no separate
+Prism Browser app or DMG is required. It adds a stable agent-facing CLI around
+Playwright with reusable named profiles, multi-action pipe/REPL sessions,
+redacted local audit logs, and guarded preload scripts for local apps. Use pipe
+or REPL mode when several actions must share one page session:
+
+```bash
+printf 'open http://127.0.0.1:3000\nwait-for #app\nread-dom #app\n' | \
+  prism browser --headless --local-only pipe
+```
+
+Local apps can load repeatable pre-navigation test helpers with
+`--inject ./tests/browser-init.js`. Custom injection requires `--local-only`;
+public navigation and non-loopback requests are rejected in that mode. Install
+the local runtime once with `pip3 install playwright playwright-stealth` and
+`python3 -m playwright install chromium`.
+
+Use raw Playwright for authored suites that need its full assertion, tracing,
+fixture, and parallel-worker APIs. Use `prism browser` when an AI agent needs a
+small, persistent, auditable local browser session through one consistent CLI.
+The compatibility patches are best effort; they are not a CAPTCHA-bypass
+guarantee. See [Prism Browser local testing](docs/prism-browser.md) for the
+command surface, safety model, and verified acceptance cases.
 
 ### `prism search` — semantic code search
 
