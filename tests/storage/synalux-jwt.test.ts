@@ -213,4 +213,34 @@ describe("SynaluxStorage — JWT exchange + caching", () => {
     expect(exchangeCalls.length).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
+
+  it("dedupes identical concurrent context reads without caching completed results", async () => {
+    let resolveContext: ((res: Response) => void) | null = null;
+    const contextPromise = new Promise<Response>((resolve) => { resolveContext = resolve; });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { status: "success", jwt: "jwt-shared", expires_in: 900 }))
+      .mockReturnValueOnce(contextPromise)
+      .mockResolvedValueOnce(jsonResponse(200, {
+        status: "success",
+        context: { last_summary: "refreshed context", version: 4 },
+      }));
+
+    const storage = new SynaluxStorage();
+    const first = storage.loadContext("prism-mcp", "standard", "user-1", "global");
+    const second = storage.loadContext("prism-mcp", "standard", "user-1", "global");
+    resolveContext!(jsonResponse(200, {
+      status: "success",
+      context: { last_summary: "shared context", version: 3 },
+    }));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { last_summary: "shared context", version: 3 },
+      { last_summary: "shared context", version: 3 },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await expect(storage.loadContext("prism-mcp", "standard", "user-1", "global"))
+      .resolves.toEqual({ last_summary: "refreshed context", version: 4 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });

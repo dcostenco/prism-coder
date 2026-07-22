@@ -29,6 +29,8 @@ import {
   normalizeHostName,
 } from './connect.js';
 import { runBrowserCli } from './browserCli.js';
+import { filterPrismMemoryContext } from './utils/memoryQuality.js';
+import { isRecoverableStartupStorageError } from './utils/startupRecovery.js';
 
 const program = new Command();
 
@@ -47,18 +49,19 @@ export function buildLoadJsonOutput(
   level: string,
   metadata: LoadJsonOutputMetadata,
 ) {
+  const filteredData = filterPrismMemoryContext(data);
   let history: any[] = [];
   let historyLimit = 0;
   if (level === 'standard') {
-    history = Array.isArray(data.recent_sessions) ? data.recent_sessions : [];
+    history = Array.isArray(filteredData.recent_sessions) ? filteredData.recent_sessions : [];
     historyLimit = 5;
   } else if (level === 'deep') {
     // Canonical deep context uses session_history. Fall back only when that
     // field is absent so older portal responses remain consumable.
-    history = Array.isArray(data.session_history)
-      ? data.session_history
-      : Array.isArray(data.recent_sessions)
-        ? data.recent_sessions
+    history = Array.isArray(filteredData.session_history)
+      ? filteredData.session_history
+      : Array.isArray(filteredData.recent_sessions)
+        ? filteredData.recent_sessions
         : [];
     historyLimit = 50;
   }
@@ -67,15 +70,15 @@ export function buildLoadJsonOutput(
     agent_name: metadata.agentName || null,
     handoff: [{
       project,
-      role: metadata.effectiveRole || data.role || 'global',
-      last_summary: data.last_summary || null,
-      pending_todo: data.pending_todo || null,
-      active_decisions: data.active_decisions || null,
-      keywords: data.keywords || null,
-      key_context: data.key_context || null,
-      active_branch: data.active_branch || null,
-      version: data.version ?? null,
-      updated_at: data.updated_at || null,
+      role: metadata.effectiveRole || filteredData.role || 'global',
+      last_summary: filteredData.last_summary || null,
+      pending_todo: filteredData.pending_todo || null,
+      active_decisions: filteredData.active_decisions || null,
+      keywords: filteredData.keywords || null,
+      key_context: filteredData.key_context || null,
+      active_branch: filteredData.active_branch || null,
+      version: filteredData.version ?? null,
+      updated_at: filteredData.updated_at || null,
     }],
     // Keep the established key for callers while sourcing the canonical field
     // for the requested depth.
@@ -97,17 +100,42 @@ program
   .version(SERVER_CONFIG.version);
 
 /** Print the canonical hook-free first-turn display used by the MCP tool. */
+export const isRecoverableBootstrapStorageError = isRecoverableStartupStorageError;
+
+async function printBootstrapDisplay(): Promise<void> {
+  const result = await sessionBootstrapHandler({});
+  const output = result.content?.map((part: any) => part?.text).filter(Boolean).join('\n') || '';
+  if (!output) throw new Error('session_bootstrap returned no display content');
+  console.log(output);
+  if (result.isError) process.exitCode = 1;
+}
+
 export async function runBootstrapCommand(): Promise<void> {
+  const previousStorage = process.env.PRISM_STORAGE;
   try {
-    const result = await sessionBootstrapHandler({});
-    const output = result.content?.map((part: any) => part?.text).filter(Boolean).join('\n') || '';
-    if (!output) throw new Error('session_bootstrap returned no display content');
-    console.log(output);
-    if (result.isError) process.exitCode = 1;
+    try {
+      await printBootstrapDisplay();
+    } catch (err) {
+      if (!isRecoverableBootstrapStorageError(err)) throw err;
+
+      // Startup is a read-only display. If paid cloud memory is temporarily
+      // unavailable, retry this one read against the local last-good database
+      // instead of blocking the host's entire first turn. Do not persist the
+      // override: normal saves still use the configured subscription backend.
+      await closeStorage().catch(() => { });
+      process.env.PRISM_STORAGE = 'local';
+      console.error('Prism cloud startup unavailable; using local last-good context for this startup.');
+      await printBootstrapDisplay();
+    }
   } catch (err) {
     console.error(`Bootstrap failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exitCode = 1;
   } finally {
+    if (previousStorage === undefined) {
+      delete process.env.PRISM_STORAGE;
+    } else {
+      process.env.PRISM_STORAGE = previousStorage;
+    }
     await closeStorage().catch(() => { });
   }
 }

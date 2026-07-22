@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [20.2.4] - 2026-07-22 — Reliable, Substantive Session Memory
+
+### Fixed
+- Greeting-only assistant replies are no longer written to the session ledger.
+- Existing greeting-only rows are filtered from quick, standard, and deep
+  context without deleting history or hiding rows with decisions, TODOs, files,
+  or non-session event types.
+- Direct MCP `session_bootstrap` and `prism bootstrap` use one bounded local
+  last-good snapshot when Synalux has a transient rate, network, timeout, or
+  server failure. Permanent authorization and validation failures remain loud,
+  and later writes keep using the configured cloud backend.
+- Identical concurrent context reads share one portal request without caching
+  completed responses, reducing startup bursts while keeping later reads fresh.
+
+### Tests
+- Added regressions for observed VS Code greeting rows, immutable context
+  filtering, transient-vs-permanent startup failures, local snapshot reuse,
+  cloud-write preservation, concurrent read coalescing, and all five native
+  host registration paths.
+
 ## [20.2.2] - 2026-07-21 — Automatic Tier Skill Sync
 
 ### Added

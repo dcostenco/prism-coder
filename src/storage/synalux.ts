@@ -82,12 +82,17 @@ interface JwtExchangeResponse {
 /** Refresh JWT this many ms before expiry to avoid edge-case 401s. */
 const JWT_REFRESH_LEEWAY_MS = 60_000;
 
+function buildContextLoadKey(project: string, level: string, userId: string, role?: string): string {
+  return JSON.stringify({ project, level, userId, role: role ?? "" });
+}
+
 export class SynaluxStorage extends SupabaseStorage {
   private readonly baseUrl: string;
   private readonly refreshToken: string;
   private cachedJwt: string | null = null;
   private cachedJwtExpiresAt = 0;
   private inflightExchange: Promise<string> | null = null;
+  private readonly inflightContextLoads = new Map<string, Promise<ContextResult>>();
 
   constructor() {
     super();
@@ -266,29 +271,44 @@ export class SynaluxStorage extends SupabaseStorage {
   // ─── Context ─────────────────────────────────────────────────
 
   async loadContext(project: string, level: string, userId: string, role?: string): Promise<ContextResult> {
-    const result = await this.portalPost("/api/v1/prism/memory", {
-      action: "load_context",
-      project,
-      level,
-      user_id: userId,
-      role,
-    });
-    // Current portals return the canonical flat `context`. Older deployed
-    // portals returned `{ handoff, recent_sessions }`; normalize that envelope
-    // here so the formatter can still see last_summary, TODOs, version, and
-    // session history during a rolling portal/client upgrade.
-    if (result.context === null) return null;
-    if (result.context && typeof result.context === "object" && !Array.isArray(result.context)) {
-      return result.context as Record<string, unknown>;
+    const key = buildContextLoadKey(project, level, userId, role);
+    const existing = this.inflightContextLoads.get(key);
+    if (existing) return existing;
+
+    const request = (async (): Promise<ContextResult> => {
+      const result = await this.portalPost("/api/v1/prism/memory", {
+        action: "load_context",
+        project,
+        level,
+        user_id: userId,
+        role,
+      });
+      // Current portals return the canonical flat `context`. Older deployed
+      // portals returned `{ handoff, recent_sessions }`; normalize that envelope
+      // here so the formatter can still see last_summary, TODOs, version, and
+      // session history during a rolling portal/client upgrade.
+      if (result.context === null) return null;
+      if (result.context && typeof result.context === "object" && !Array.isArray(result.context)) {
+        return result.context as Record<string, unknown>;
+      }
+      if (result.handoff === null) return null;
+      if (result.handoff && typeof result.handoff === "object" && !Array.isArray(result.handoff)) {
+        return {
+          ...(result.handoff as Record<string, unknown>),
+          recent_sessions: Array.isArray(result.recent_sessions) ? result.recent_sessions : [],
+        };
+      }
+      return result as ContextResult;
+    })();
+    this.inflightContextLoads.set(key, request);
+
+    try {
+      return await request;
+    } finally {
+      if (this.inflightContextLoads.get(key) === request) {
+        this.inflightContextLoads.delete(key);
+      }
     }
-    if (result.handoff === null) return null;
-    if (result.handoff && typeof result.handoff === "object" && !Array.isArray(result.handoff)) {
-      return {
-        ...(result.handoff as Record<string, unknown>),
-        recent_sessions: Array.isArray(result.recent_sessions) ? result.recent_sessions : [],
-      };
-    }
-    return result as ContextResult;
   }
 
   // ─── Forget memory (GDPR surgical deletion) ──────────────────

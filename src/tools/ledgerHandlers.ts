@@ -33,6 +33,11 @@ import { getSetting, getAllSettings, refreshConfigStorageCache } from "../storag
 import type { SkillSyncResult } from "../skillManifestSync.js";
 import { mergeHandoff, dbToHandoffSchema, sanitizeForMerge } from "../utils/crdtMerge.js";
 import { resolveProject } from "../utils/projectResolver.js";
+import type { StorageBackend } from "../storage/interface.js";
+import {
+  isRecoverableStartupStorageError,
+  LOCAL_STARTUP_FALLBACK_NOTICE,
+} from "../utils/startupRecovery.js";
 
 // ─── Phase 1: Explainability & Memory Lineage ────────────────
 // These utilities provide structured tracing metadata for search operations.
@@ -342,6 +347,7 @@ function compactWithOmissionCount(value: unknown, maxChars: number): string {
  */
 import { computeEffectiveImportance, recordMemoryAccess } from "../utils/cognitiveMemory.js";
 import { formatInferenceMetrics, resetInferenceMetrics, getInferenceSnapshot } from "../utils/inferenceMetrics.js";
+import { filterPrismMemoryContext, isGreetingOnlyMemoryEntry } from "../utils/memoryQuality.js";
 export async function sessionSaveLedgerHandler(args: unknown) {
   if (!isSessionSaveLedgerArgs(args)) {
     throw new Error("Invalid arguments for session_save_ledger");
@@ -368,6 +374,18 @@ export async function sessionSaveLedgerHandler(args: unknown) {
   const files_changed = args.files_changed ? sanitizeArray(args.files_changed) : undefined;
   const decisions = args.decisions ? sanitizeArray(args.decisions) : undefined;
   const role = args.role;
+
+  if (isGreetingOnlyMemoryEntry({ summary, todos, files_changed, decisions })) {
+    return {
+      content: [{
+        type: "text",
+        text: (_saveLedgerGateWarning ? `⚠️ ${_saveLedgerGateWarning}\n\n` : "") +
+          "ℹ️ Greeting-only turn skipped; no ledger entry was written.",
+      }],
+      isError: false,
+    };
+  }
+
   const storage = await getStorage();
 
   // ─── Project mismatch validation (v13 — hard-rejects on mismatch) ───
@@ -944,6 +962,8 @@ interface SessionLoadContextOptions {
   nativeMaxChars?: number;
   /** One coherent manifest generation shared across a multi-project bootstrap. */
   skillSyncResult?: SkillSyncResult;
+  /** Scoped reader used only by session_bootstrap fallback. */
+  storageOverride?: StorageBackend;
 }
 
 export async function sessionLoadContextHandler(
@@ -998,7 +1018,7 @@ export async function sessionLoadContextHandler(
   const manifestSnapshot = await resolveNativeSkillManifestSnapshot(skillSyncResult);
   const entitledSkillNames = new Set(manifestSnapshot.names);
 
-  const storage = await getStorage();
+  const storage = options.storageOverride ?? await getStorage();
   const effectiveRole = role || await getSetting("default_role", "") || undefined;
   const loadEntitledRoleSkill = async (): Promise<string> => {
     if (!effectiveRole) return "";
@@ -1010,12 +1030,12 @@ export async function sessionLoadContextHandler(
     }
     return await getSetting(`user_skill:${effectiveRole}`, "");
   };
-  const data = await storage.loadContext(project, level, PRISM_USER_ID, effectiveRole);  // v3.0: role with dashboard fallback
+  const loadedData = await storage.loadContext(project, level, PRISM_USER_ID, effectiveRole);  // v3.0: role with dashboard fallback
 
   // F4 fix: inject protected skills even for fresh projects.
   // Previously this returned before skill injection, leaving new projects with zero
   // behavioral guardrails for the entire session. Now protected skills always load.
-  if (!data) {
+  if (!loadedData) {
     let freshSkillBlock = "";
     const freshLoadedSkills = new Set<string>();
     if (includeSkillContent) {
@@ -1074,6 +1094,8 @@ export async function sessionLoadContextHandler(
       isError: false,
     };
   }
+
+  const data = filterPrismMemoryContext(loadedData as Record<string, any>);
 
   const version = (data as any)?.version;
   const versionNote = version
@@ -1635,7 +1657,21 @@ export async function sessionLoadContextHandler(
  * Hook-free first-turn entrypoint used by the native prism-startup skill.
  * Configuration, rather than the host model, owns project and depth selection.
  */
-export async function sessionBootstrapHandler(args: unknown = {}) {
+interface SessionBootstrapOptions {
+  localStorageFactory?: () => Promise<StorageBackend>;
+}
+
+async function createLocalStartupStorage(): Promise<StorageBackend> {
+  const { SqliteStorage } = await import("../storage/sqlite.js");
+  const storage = new SqliteStorage();
+  await storage.initialize(true);
+  return storage;
+}
+
+export async function sessionBootstrapHandler(
+  args: unknown = {},
+  options: SessionBootstrapOptions = {},
+) {
   if (typeof args !== "object" || args === null || Array.isArray(args)) {
     throw new Error("Invalid arguments for session_bootstrap");
   }
@@ -1706,41 +1742,76 @@ export async function sessionBootstrapHandler(args: unknown = {}) {
     const omissionLength = omittedProjectsText ? omittedProjectsText.length + 2 : 0;
     const separatorsLength = Math.max(0, renderedProjectCount - 1) * 2;
     perProjectMaxChars = Math.floor(
-      (startupMaxChars - startupHeader.length - systemReadyBlock.length - 4 - omissionLength - separatorsLength) /
+      (startupMaxChars - startupHeader.length - systemReadyBlock.length - LOCAL_STARTUP_FALLBACK_NOTICE.length -
+        6 - omissionLength - separatorsLength) /
         renderedProjectCount,
     );
     if (perProjectMaxChars >= 512 || renderedProjectCount === 1) break;
     renderedProjectCount -= 1;
   }
 
-  const loaded: string[] = [];
-  let hadError = false;
-  for (const project of projects.slice(0, renderedProjectCount)) {
-    const result = await sessionLoadContextHandler({
-      project,
-      level: depth,
-      role: defaultRole || undefined,
-      conversation_id: conversationId,
-      prompt: input.prompt as string | undefined,
-    }, { includeSkillContent: false, nativeMaxChars: perProjectMaxChars, skillSyncResult });
-    const text = result.content?.map((part: any) => part?.text).filter(Boolean).join("\n") ||
-      `No session context found for project "${project}".`;
-    loaded.push(text);
-    hadError ||= result.isError === true;
+  const renderedProjects = projects.slice(0, renderedProjectCount);
+  const loadProjects = async (storageOverride?: StorageBackend) => {
+    const loaded: string[] = [];
+    let hadError = false;
+    for (const project of renderedProjects) {
+      const result = await sessionLoadContextHandler({
+        project,
+        level: depth,
+        role: defaultRole || undefined,
+        conversation_id: conversationId,
+        prompt: input.prompt as string | undefined,
+      }, {
+        includeSkillContent: false,
+        nativeMaxChars: perProjectMaxChars,
+        skillSyncResult,
+        storageOverride,
+      });
+      const text = result.content?.map((part: any) => part?.text).filter(Boolean).join("\n") ||
+        `No session context found for project "${project}".`;
+      loaded.push(text);
+      hadError ||= result.isError === true;
+    }
+    return { loaded, hadError };
+  };
+
+  let localStorage: StorageBackend | null = null;
+  let usedLocalFallback = false;
+  let startupContext: Awaited<ReturnType<typeof loadProjects>>;
+  try {
+    try {
+      startupContext = await loadProjects();
+    } catch (error) {
+      if (!isRecoverableStartupStorageError(error)) throw error;
+      localStorage = await (options.localStorageFactory ?? createLocalStartupStorage)();
+      usedLocalFallback = true;
+      startupContext = await loadProjects(localStorage);
+    }
+  } finally {
+    if (localStorage) {
+      try {
+        await localStorage.close();
+      } catch (error) {
+        debugLog(`[session_bootstrap] Local fallback close failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
+
+  const fallbackNotice = usedLocalFallback ? `${LOCAL_STARTUP_FALLBACK_NOTICE}\n\n` : "";
 
   return {
     content: [{
       type: "text",
-      text: `${startupHeader}\n\n${loaded.join("\n\n")}` +
+      text: `${startupHeader}\n\n${fallbackNotice}${startupContext.loaded.join("\n\n")}` +
         (omittedProjectsText ? `\n\n${omittedProjectsText}` : "") +
         `\n\n${systemReadyBlock}`,
     }],
-    isError: hadError,
+    isError: startupContext.hadError,
     structuredContent: {
       conversation_id: conversationId,
-      projects: projects.slice(0, renderedProjectCount),
+      projects: renderedProjects,
       depth,
+      context_source: usedLocalFallback ? "local-last-good" : activeStorageBackend,
     },
   };
 }

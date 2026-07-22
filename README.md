@@ -57,6 +57,19 @@ features.
 <details>
 <summary>Release history (optional)</summary>
 
+## What's New in v20.2.4
+
+### Reliable Session Memory That Shows Work, Not Greetings
+Greeting-only assistant replies are skipped before ledger writes. Existing
+greeting rows are filtered at read time across native startup, MCP context, and
+`prism load --json`, while entries containing decisions, TODOs, changed files,
+or non-session events remain visible. Historical rows are not destructively
+deleted. If Synalux has a transient startup failure, Prism displays one bounded
+local last-good snapshot and clearly labels it; permanent authorization or
+validation failures still fail loud, and later writes remain cloud-routed.
+
+---
+
 ## What's New in v20.2.2
 
 ### One Local-First Workflow Across Every Agent

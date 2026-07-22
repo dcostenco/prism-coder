@@ -349,6 +349,27 @@ describe("ledgerHandlers", () => {
       expect(storage.saveLedger).toHaveBeenCalledTimes(1);
     });
 
+    it("skips greeting-only turns without resolving a project or writing storage", async () => {
+      const result = await sessionSaveLedgerHandler({
+        ...validArgs,
+        summary: "[VSCode] Hi there! Hello — it's great to see you. How can I assist you today?",
+      });
+
+      expect(result.isError).toBe(false);
+      expect(result.content[0].text).toContain("Greeting-only turn skipped");
+      expect(storage.saveLedger).not.toHaveBeenCalled();
+    });
+
+    it("keeps a greeting summary when it contains structured work", async () => {
+      await sessionSaveLedgerHandler({
+        ...validArgs,
+        summary: "Hello",
+        decisions: ["Use a bounded local worker"],
+      });
+
+      expect(storage.saveLedger).toHaveBeenCalledTimes(1);
+    });
+
     it("passes sanitized summary to storage", async () => {
       await sessionSaveLedgerHandler({
         ...validArgs,
@@ -585,6 +606,28 @@ describe("ledgerHandlers", () => {
       expect(text).toContain("Deploy to staging");
       expect(text).toContain("Use JWT tokens");
       expect(text).toContain("auth, jwt");
+    });
+
+    it("removes legacy greeting memories while retaining substantive work", async () => {
+      storage.loadContext.mockResolvedValue({
+        last_summary: "[VSCode] Hello! How can I assist you today?",
+        recent_sessions: [
+          { summary: "[VSCode] Hi there! Hello — it's great to see you. How can I assist you today?" },
+          { summary: "Implemented browser approval policy", created_at: "2026-07-22T12:00:00Z" },
+        ],
+        session_history: [
+          { summary: "Hello! 👋", created_at: "2026-07-21T12:00:00Z" },
+          { summary: "Verified local inference routing", created_at: "2026-07-20T12:00:00Z" },
+        ],
+      });
+
+      const result = await sessionLoadContextHandler(validArgs);
+      const text = result.content[0].text as string;
+
+      expect(text).not.toContain("How can I assist you today");
+      expect(text).not.toContain("Hello! 👋");
+      expect(text).toContain("Implemented browser approval policy");
+      expect(text).toContain("Verified local inference routing");
     });
 
     it("includes version note in response when version is present", async () => {
@@ -1028,6 +1071,61 @@ describe("ledgerHandlers", () => {
       expect(text).toContain('Session context for "portal"');
       expect(text.match(/<prism_memory context="historical">/g)).toHaveLength(2);
       expect(text.match(/<\/prism_memory>/g)).toHaveLength(2);
+    });
+
+    it("retries every project from one local snapshot after a transient cloud failure without rerouting writes", async () => {
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "prism-mcp,portal",
+        default_context_depth: "standard",
+        agent_name: "Dmitri",
+      }[key] ?? fallback));
+      storage.loadContext.mockImplementation(async (project: string) => {
+        if (project === "portal") {
+          throw new Error("[SynaluxStorage] /api/v1/prism/memory failed: Rate limit exceeded");
+        }
+        return { last_summary: "Cloud result must be discarded", version: 8 };
+      });
+      const localStorage = makeStorageStub();
+      localStorage.loadContext.mockImplementation(async (project: string) => ({
+        last_summary: `Local last-good ${project}`,
+        version: 7,
+      }));
+      const localStorageFactory = vi.fn(async () => localStorage as any);
+
+      const result = await sessionBootstrapHandler({}, { localStorageFactory });
+      const text = result.content[0].text as string;
+
+      expect(result.isError).toBe(false);
+      expect(result.structuredContent.context_source).toBe("local-last-good");
+      expect(text).toContain("Synalux cloud context is temporarily unavailable");
+      expect(text).toContain("Local last-good prism-mcp");
+      expect(text).toContain("Local last-good portal");
+      expect(text).not.toContain("Cloud result must be discarded");
+      expect(storage.loadContext).toHaveBeenCalledTimes(2);
+      expect(localStorage.loadContext).toHaveBeenCalledTimes(2);
+      expect(localStorage.close).toHaveBeenCalledOnce();
+      expect(localStorage.saveLedger).not.toHaveBeenCalled();
+      expect(localStorage.saveHandoff).not.toHaveBeenCalled();
+
+      await sessionSaveHandoffHandler({
+        project: "test-project",
+        last_summary: "Write remains on configured storage",
+      });
+      expect(storage.saveHandoff).toHaveBeenCalledOnce();
+      expect(localStorage.saveHandoff).not.toHaveBeenCalled();
+    });
+
+    it("fails loud on non-transient bootstrap errors instead of masking them with local context", async () => {
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "prism-mcp",
+        default_context_depth: "standard",
+      }[key] ?? fallback));
+      storage.loadContext.mockRejectedValue(new Error("Unexpected context formatter failure"));
+      const localStorageFactory = vi.fn(async () => makeStorageStub() as any);
+
+      await expect(sessionBootstrapHandler({}, { localStorageFactory }))
+        .rejects.toThrow("Unexpected context formatter failure");
+      expect(localStorageFactory).not.toHaveBeenCalled();
     });
 
     it("omits excess configured projects explicitly instead of exceeding the startup budget", async () => {

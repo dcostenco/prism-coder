@@ -384,6 +384,26 @@ describe("CLI Load — JSON Mode", () => {
     });
   });
 
+  it("omits greeting-only handoff and ledger rows from JSON output", () => {
+    const output = buildLoadJsonOutput("prism-mcp", {
+      last_summary: "[VSCode] Hello! How can I assist you today?",
+      recent_sessions: [
+        { summary: "Hi! 👋", session_date: "2026-07-22T12:00:00Z" },
+        { summary: "Fixed duplicate greeting memory", session_date: "2026-07-21T12:00:00Z" },
+      ],
+    }, "standard", {
+      agentName: "Dmitri",
+      gitHash: "abc1234",
+      gitBranch: "main",
+      packageVersion: "9.2.1",
+    });
+
+    expect(output.handoff[0].last_summary).toBeNull();
+    expect(output.recent_ledger.map((entry) => entry.summary)).toEqual([
+      "Fixed duplicate greeting memory",
+    ]);
+  });
+
   it("serializes at most fifty canonical session_history entries at deep depth", () => {
     const output = buildLoadJsonOutput("test-project", {
       ...MOCK_HANDOFF_DATA,

@@ -87,13 +87,48 @@ describe("prism bootstrap", () => {
     expect(mockCloseStorage).toHaveBeenCalledOnce();
   });
 
+  it("falls back to local last-good context when cloud startup is rate limited", async () => {
+    const previousStorage = process.env.PRISM_STORAGE;
+    process.env.PRISM_STORAGE = "synalux";
+    const storageModes: Array<string | undefined> = [];
+    mockSessionBootstrapHandler.mockImplementation(async () => {
+      storageModes.push(process.env.PRISM_STORAGE);
+      if (storageModes.length === 1) {
+        throw new Error("[SynaluxStorage] /api/v1/prism/memory failed: Rate limit exceeded");
+      }
+      return {
+        content: [{ type: "text", text: CANONICAL_BOOTSTRAP_TEXT }],
+        isError: false,
+      };
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      await runBootstrapCommand();
+
+      expect(storageModes).toEqual(["synalux", "local"]);
+      expect(log).toHaveBeenCalledOnce();
+      expect(log).toHaveBeenCalledWith(CANONICAL_BOOTSTRAP_TEXT);
+      expect(error).toHaveBeenCalledWith(
+        "Prism cloud startup unavailable; using local last-good context for this startup.",
+      );
+      expect(process.env.PRISM_STORAGE).toBe("synalux");
+      expect(process.exitCode).toBeUndefined();
+      expect(mockCloseStorage).toHaveBeenCalledTimes(2);
+    } finally {
+      if (previousStorage === undefined) delete process.env.PRISM_STORAGE;
+      else process.env.PRISM_STORAGE = previousStorage;
+    }
+  });
+
   it("fails loud when the canonical handler cannot produce a display", async () => {
-    mockSessionBootstrapHandler.mockRejectedValue(new Error("storage unavailable"));
+    mockSessionBootstrapHandler.mockRejectedValue(new Error("unexpected formatter failure"));
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await runBootstrapCommand();
 
-    expect(error).toHaveBeenCalledWith("Bootstrap failed: storage unavailable");
+    expect(error).toHaveBeenCalledWith("Bootstrap failed: unexpected formatter failure");
     expect(process.exitCode).toBe(1);
     expect(mockCloseStorage).toHaveBeenCalledOnce();
   });
