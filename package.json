@@ -154,7 +154,7 @@
     "jsdom": "^29.0.1",
     "openai": "^6.32.0",
     "p-limit": "^7.3.0",
-    "postcss": "8.5.12",
+    "postcss": "8.5.23",
     "quickjs-emscripten": "^0.32.0",
     "smol-toml": "^1.7.0",
     "stream-json": "^2.0.0",
