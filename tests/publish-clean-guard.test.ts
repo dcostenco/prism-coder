@@ -134,6 +134,24 @@ describe("published-version conflict guard", () => {
         expect(result.status).toBe(0);
     });
 
+    it("--manifest-only skips the published check, because the registry republish runs AFTER npm publish", () => {
+        // Without this the guard blocks the very republish it exists to
+        // protect: the registry workflow runs post-publish, so "this version
+        // is on npm" is its correct precondition. Observed on 20.7.0.
+        const repo = repoWithPackage("pkg", "20.6.0");
+        const full = runGuardWithPublished(repo, "20.6.0");
+        expect(full.status).toBe(1);
+        expect(full.stderr).toContain("already published");
+
+        const scoped = spawnSync(process.execPath, [SCRIPT, "--manifest-only"], {
+            cwd: repo,
+            encoding: "utf8",
+            env: { ...process.env, PRISM_GUARD_PUBLISHED_VERSION: "20.6.0" },
+        });
+        expect(scoped.status).toBe(0);
+        expect(scoped.stderr).not.toContain("already published");
+    });
+
     it("fails OPEN for a package the registry does not know", () => {
         // A first release must still work, so an unknown package cannot block.
         const result = runGuardWithPublished(repoWithPackage("pkg", "1.0.0"), "");
