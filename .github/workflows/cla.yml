@@ -25,4 +25,4 @@ jobs:
           path-to-signatures: "signatures/cla.json"
           path-to-document: "CLA.md"
           branch: "cla-signatures"
-          allowlist: "dependabot[bot],github-actions[bot]"
+          allowlist: "dependabot[bot],github-actions[bot],dcostenco"
