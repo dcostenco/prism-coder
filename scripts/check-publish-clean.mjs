@@ -30,6 +30,33 @@ export function serverManifestVersionMismatches(packageJson, serverJson) {
   return problems;
 }
 
+/**
+ * Every OTHER manifest that carries a version and is published to a
+ * storefront. The Codex plugin manifest sat at 20.6.0 through the 20.7.0
+ * release and was caught only by reading it before a marketplace submission
+ * — server.json was guarded, this was not. Any file listed here is held to
+ * the same rule: if it declares a version, it must be package.json's.
+ */
+const VERSIONED_MANIFESTS = ["plugins/prism/.codex-plugin/plugin.json"];
+
+function checkVersionedManifests(repoRoot, expected) {
+  const problems = [];
+  for (const relative of VERSIONED_MANIFESTS) {
+    let raw;
+    try {
+      raw = readFileSync(join(repoRoot, relative), "utf8");
+    } catch (error) {
+      if (error && error.code === "ENOENT") continue; // not this repo's concern
+      throw error;
+    }
+    const manifest = JSON.parse(raw);
+    if (manifest.version !== undefined && manifest.version !== expected) {
+      problems.push(`${relative} version is ${manifest.version}, expected ${expected}`);
+    }
+  }
+  return problems;
+}
+
 function checkServerManifest(repoRoot) {
   // A repo without a registry manifest has nothing to drift: repos that never
   // published to the MCP Registry (and the guard's own test fixtures) must
@@ -44,7 +71,11 @@ function checkServerManifest(repoRoot) {
     if (error && error.code === "ENOENT") return [];
     throw error;
   }
-  return serverManifestVersionMismatches(JSON.parse(rawPackage), JSON.parse(rawServer));
+  const packageJson = JSON.parse(rawPackage);
+  return [
+    ...serverManifestVersionMismatches(packageJson, JSON.parse(rawServer)),
+    ...checkVersionedManifests(repoRoot, packageJson.version),
+  ];
 }
 
 /**

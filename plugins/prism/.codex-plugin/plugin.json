@@ -1,6 +1,6 @@
 {
   "name": "prism",
-  "version": "20.6.0",
+  "version": "20.7.0",
   "description": "Persistent session memory for Codex. Prism restores what you were doing across sessions — decisions, open TODOs, changed files — and carries knowledge search, drift detection, and local-first inference. Memory stays in SQLite on your machine by default.\n\nOn the first user turn of a conversation, call session_bootstrap once before answering, then print its result verbatim as the startup display.",
   "author": {
     "name": "Synalux"
