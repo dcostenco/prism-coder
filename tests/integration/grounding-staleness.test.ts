@@ -85,8 +85,13 @@ describe("grounding staleness probe", () => {
         // invisible on macOS/Linux; Windows refuses with
         //   EBUSY: resource busy or locked, unlink '...\isolated.db'
         // which is why this suite failed only on the windows CI legs.
-        await storage?.close();
-        rmSync(dir, { recursive: true, force: true });
+        // finally: a close() failure must not skip cleanup, or this trades a
+        // Windows unlink error for a leaked temp directory on every platform.
+        try {
+            await storage?.close();
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     it("marks the outdated note with its age in the evidence the model reads", () => {
