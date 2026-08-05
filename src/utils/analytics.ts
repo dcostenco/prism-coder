@@ -91,6 +91,15 @@ async function ensureTable(): Promise<void> {
 
 /** Reset DB connection and in-memory buffer (for tests). */
 export function _resetDb(): void {
+    // Close before dropping the reference. Nulling alone leaks the underlying
+    // sqlite handle: harmless on POSIX (unlink works on open files), but on
+    // Windows the file stays locked, so a suite that resets between cases
+    // accumulates locks on the analytics DB and cannot clean up its temp dir.
+    try {
+        _db?.close();
+    } catch {
+        // A close failure must never break a test reset.
+    }
     _db = null;
     _tableReady = false;
     BUFFER.length = 0;
