@@ -21,7 +21,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -283,15 +283,58 @@ async function currentDigest(path: string): Promise<string | null> {
   }
 }
 
-async function writeAtomic(dir: string, target: string, content: string): Promise<void> {
+/**
+ * Exclusive install: hard-link the temp file into place. Unlike rename(2),
+ * link(2) fails with EEXIST instead of overwriting, so a file that appears
+ * between our existence check and the install cannot be clobbered (TOCTOU).
+ * Returns false when the target already exists.
+ */
+async function installExclusive(dir: string, target: string, content: string): Promise<boolean> {
   const temp = join(dir, `.prism-agent-${randomUUID()}.tmp`);
   await writeFile(temp, content, { mode: 0o600 });
   try {
-    await rename(temp, target);
+    await link(temp, target);
+    return true;
   } catch (error) {
+    if (isErrno(error, "EEXIST")) return false;
+    throw error;
+  } finally {
     await rm(temp, { force: true });
+  }
+}
+
+/**
+ * Claim-then-verify mutation: atomically rename the target out of the root,
+ * re-hash the CLAIMED bytes, and only act when they still match the recorded
+ * digest. A mismatch (someone edited the file inside the check→act window)
+ * restores the file byte-identical and reports a conflict. This closes the
+ * check-then-act race CodeQL flags (js/file-system-race): after the rename we
+ * operate on a path no other writer targets, and the decision digest is
+ * computed from those exact bytes.
+ */
+async function claimVerified(
+  dir: string,
+  target: string,
+  expectedDigest: string,
+): Promise<{ claimed: string } | "gone" | "mismatch"> {
+  const claimPath = join(dir, `.prism-agent-claim-${randomUUID()}.tmp`);
+  try {
+    await rename(target, claimPath);
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return "gone";
     throw error;
   }
+  const bytes = await readFile(claimPath);
+  if (sha256(bytes) !== expectedDigest) {
+    await rename(claimPath, target); // restore byte-identical
+    return "mismatch";
+  }
+  return { claimed: claimPath };
+}
+
+function isErrno(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error
+    && (error as NodeJS.ErrnoException).code === code;
 }
 
 /**
@@ -327,19 +370,22 @@ export async function materializeAgentDefinitions(
   const finalFiles: Record<string, AgentIndexEntry> = {};
 
   // Downgrades first, mirroring the skill engine's ordering: entitlement
-  // removal must not depend on the success of later installs.
+  // removal must not depend on the success of later installs. Deletion is
+  // claim-then-verify: the digest that authorizes the rm is computed from the
+  // bytes AFTER they leave the discovery root, so an edit racing the check
+  // can never be destroyed.
   for (const [name, entry] of Object.entries(owned)) {
     if (incoming.has(name)) continue;
     const target = join(targetDir, entry.file);
-    const digestOnDisk = await currentDigest(target);
-    if (digestOnDisk === null) continue; // already gone
-    if (digestOnDisk === entry.digest) {
-      await rm(target, { force: true });
-      pruned.push(name);
-    } else {
+    const claim = await claimVerified(targetDir, target, entry.digest);
+    if (claim === "gone") continue; // already gone
+    if (claim === "mismatch") {
       // Hand-edited content survives; we merely stop claiming it.
       conflicts.push(name);
+      continue;
     }
+    await rm(claim.claimed, { force: true });
+    pruned.push(name);
   }
 
   for (const [name, rendered] of incoming) {
@@ -347,9 +393,16 @@ export async function materializeAgentDefinitions(
     const renderedDigest = sha256(Buffer.from(rendered.content, "utf8"));
     const digestOnDisk = await currentDigest(target);
     if (digestOnDisk === null) {
-      await writeAtomic(targetDir, target, rendered.content);
-      installed.push(name);
-      finalFiles[name] = { digest: renderedDigest, file: rendered.file };
+      // Exclusive install: a file appearing inside the window makes link()
+      // fail instead of being overwritten; re-judge it as foreign content.
+      if (await installExclusive(targetDir, target, rendered.content)) {
+        installed.push(name);
+        finalFiles[name] = { digest: renderedDigest, file: rendered.file };
+      } else if (await currentDigest(target) === renderedDigest) {
+        finalFiles[name] = { digest: renderedDigest, file: rendered.file };
+      } else {
+        conflicts.push(name);
+      }
       continue;
     }
     const record = owned[name];
@@ -368,9 +421,23 @@ export async function materializeAgentDefinitions(
       finalFiles[name] = { digest: renderedDigest, file: rendered.file };
       continue;
     }
-    await writeAtomic(targetDir, target, rendered.content);
-    updated.push(name);
-    finalFiles[name] = { digest: renderedDigest, file: rendered.file };
+    // Update = claim the old version out (verifying the recorded digest on
+    // the claimed bytes), then exclusively install the new render. A racer
+    // in either window wins the file and we report a conflict instead of
+    // clobbering; the claimed old version is ours and safe to discard.
+    const claim = await claimVerified(targetDir, target, record.digest);
+    if (claim === "mismatch") {
+      conflicts.push(name);
+      continue;
+    }
+    const installedNow = await installExclusive(targetDir, target, rendered.content);
+    if (claim !== "gone") await rm(claim.claimed, { force: true });
+    if (installedNow) {
+      updated.push(name);
+      finalFiles[name] = { digest: renderedDigest, file: rendered.file };
+    } else {
+      conflicts.push(name);
+    }
   }
 
   const nextIndex: AgentIndex = { owner: OWNER, generation: section.generation, files: finalFiles };
