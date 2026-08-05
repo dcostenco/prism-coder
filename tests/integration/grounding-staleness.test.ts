@@ -90,7 +90,12 @@ describe("grounding staleness probe", () => {
         try {
             await storage?.close();
         } finally {
-            rmSync(dir, { recursive: true, force: true });
+            // close() alone was NOT enough (verified on CI): Windows releases
+            // file handles asynchronously, so the unlink races the release and
+            // still hits EBUSY. maxRetries/retryDelay is Node's documented
+            // mechanism for precisely this — it retries EBUSY/EPERM/ENOTEMPTY
+            // on Windows rather than failing the suite in teardown.
+            rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
         }
     });
 
