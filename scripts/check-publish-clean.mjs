@@ -31,8 +31,20 @@ export function serverManifestVersionMismatches(packageJson, serverJson) {
 }
 
 function checkServerManifest(repoRoot) {
-  const read = (name) => JSON.parse(readFileSync(join(repoRoot, name), "utf8"));
-  return serverManifestVersionMismatches(read("package.json"), read("server.json"));
+  // A repo without a registry manifest has nothing to drift: repos that never
+  // published to the MCP Registry (and the guard's own test fixtures) must
+  // pass untouched. Only an EXISTING manifest is held to the sync contract —
+  // a present-but-corrupt server.json still fails loudly via the caller.
+  let rawServer;
+  let rawPackage;
+  try {
+    rawServer = readFileSync(join(repoRoot, "server.json"), "utf8");
+    rawPackage = readFileSync(join(repoRoot, "package.json"), "utf8");
+  } catch (error) {
+    if (error && error.code === "ENOENT") return [];
+    throw error;
+  }
+  return serverManifestVersionMismatches(JSON.parse(rawPackage), JSON.parse(rawServer));
 }
 
 function workingTreeStatus(repoRoot) {
