@@ -23,7 +23,7 @@ jobs:
       # stale packages[].version failed the real guard and then PASSED the
       # fallback — a publish gate that fails open is not a gate.
       - name: Guard — manifest must match package.json
-        run: node scripts/check-publish-clean.mjs
+        run: node scripts/check-publish-clean.mjs --manifest-only
       - name: Install mcp-publisher
         env:
           MCP_PUBLISHER_VERSION: v1.8.0

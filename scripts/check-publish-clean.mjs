@@ -141,7 +141,16 @@ if (IS_MAIN) {
     process.exitCode = 1;
   }
 
+  // --manifest-only: verify the manifests agree, but SKIP the
+  // already-published check. The registry publish workflow runs AFTER npm
+  // publish, so "this version is on npm" is its correct precondition, not an
+  // error — without this flag the guard blocks the very republish it exists
+  // to protect (it did, on 20.7.0). npm publish itself passes no flag and
+  // still gets the full gate.
+  const manifestOnly = process.argv.includes("--manifest-only");
+
   try {
+    if (manifestOnly) throw { code: "SKIP" };
     let raw;
     try {
       raw = readFileSync(join(process.cwd(), "package.json"), "utf8");
@@ -161,7 +170,11 @@ if (IS_MAIN) {
       }
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`npm publish: skipped the published-version check (${message})`);
+    if (error?.code === "SKIP") {
+      console.log("manifest-only mode: skipping the published-version check.");
+    } else {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`npm publish: skipped the published-version check (${message})`);
+    }
   }
 }
