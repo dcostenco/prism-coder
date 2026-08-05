@@ -73,6 +73,16 @@ export function publishedVersionConflict(name, version, lookup) {
 }
 
 function npmLatestVersion(name) {
+  // Test seam. Without it this check's own tests assert against the LIVE
+  // registry, so they encode whatever is published at the moment they were
+  // written — and publishing 20.7.0 immediately falsified a test that had
+  // hard-coded 20.6.0 as "already published". A guard whose tests break every
+  // time you release is worse than no tests.
+  const override = process.env.PRISM_GUARD_PUBLISHED_VERSION;
+  if (override !== undefined) {
+    if (override === "") throw new Error("simulated: package not published");
+    return override;
+  }
   return execFileSync("npm", ["view", name, "version"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
