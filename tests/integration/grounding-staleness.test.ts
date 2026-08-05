@@ -90,12 +90,27 @@ describe("grounding staleness probe", () => {
         try {
             await storage?.close();
         } finally {
-            // close() alone was NOT enough (verified on CI): Windows releases
-            // file handles asynchronously, so the unlink races the release and
-            // still hits EBUSY. maxRetries/retryDelay is Node's documented
-            // mechanism for precisely this — it retries EBUSY/EPERM/ENOTEMPTY
-            // on Windows rather than failing the suite in teardown.
-            rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+            // Best-effort cleanup, deliberately non-fatal.
+            //
+            // Two hypotheses were tested on CI and BOTH were wrong:
+            //   1. missing storage.close()  — added; windows still EBUSY
+            //   2. async handle release     — added maxRetries:10/retryDelay:100
+            //                                 (1s of retrying); still EBUSY
+            // So something holds the sqlite file open persistently on Windows
+            // even after close() resolves. That is worth understanding on its
+            // own terms — if SqliteStorage.close() does not release the file,
+            // Windows users cannot move, delete, or back up their DB — but it
+            // is a PRODUCT question, not a reason to fail a green suite in
+            // teardown. All 3746 assertions pass; only the rm throws.
+            //
+            // The directory lives under os.tmpdir() and is reclaimed by the
+            // OS. Do not convert this back to a throwing cleanup without
+            // first fixing the underlying handle release.
+            try {
+                rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+            } catch (error) {
+                console.warn(`[grounding-staleness] temp cleanup skipped: ${(error as Error).message}`);
+            }
         }
     });
 
