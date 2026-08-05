@@ -47,6 +47,39 @@ function checkServerManifest(repoRoot) {
   return serverManifestVersionMismatches(JSON.parse(rawPackage), JSON.parse(rawServer));
 }
 
+/**
+ * Refuse a version that npm already serves.
+ *
+ * Why (2026-08-05): the manifest guard above proves server.json and
+ * package.json AGREE — it says nothing about whether the version ADVANCED.
+ * So `main` accumulated a session's worth of shipped work while both files
+ * sat at 20.6.0, agreeing with each other and with npm, and disagreeing with
+ * reality. The publish ran the full build and pack before npm rejected it
+ * with "You cannot publish over the previously published versions".
+ *
+ * Fails OPEN on network trouble or an unpublished package: a first release
+ * and an offline release must both still work. Only a definite match blocks.
+ */
+export function publishedVersionConflict(name, version, lookup) {
+  let published;
+  try {
+    published = lookup(name);
+  } catch {
+    return null; // never published, offline, or registry unreachable
+  }
+  if (!published || published !== version) return null;
+  return `${name}@${version} is already published. Bump the version in ` +
+    `package.json AND server.json (the registry listing follows package.json).`;
+}
+
+function npmLatestVersion(name) {
+  return execFileSync("npm", ["view", name, "version"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 15_000,
+  }).trim();
+}
+
 function workingTreeStatus(repoRoot) {
   return execFileSync(
     "git",
@@ -96,5 +129,29 @@ if (IS_MAIN) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`npm publish blocked: unable to verify server.json: ${message}`);
     process.exitCode = 1;
+  }
+
+  try {
+    let raw;
+    try {
+      raw = readFileSync(join(process.cwd(), "package.json"), "utf8");
+    } catch (error) {
+      // No package.json means nothing to publish (and is the shape of this
+      // guard's own fixtures). Stay silent — a stderr warning here would make
+      // the reproducibility test, which asserts empty stderr, fail.
+      if (error && error.code === "ENOENT") raw = null;
+      else throw error;
+    }
+    if (raw) {
+      const pkg = JSON.parse(raw);
+      const conflict = publishedVersionConflict(pkg.name, pkg.version, npmLatestVersion);
+      if (conflict) {
+        console.error(`npm publish blocked: ${conflict}`);
+        process.exitCode = 1;
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`npm publish: skipped the published-version check (${message})`);
   }
 }
