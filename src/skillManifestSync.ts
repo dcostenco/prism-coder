@@ -911,6 +911,37 @@ async function acquireSyncLock(agentsSkillsDir: string, waitMs = LOCK_WAIT_MS): 
   };
 }
 
+/**
+ * Converge every detected host's agent root onto the portal-validated agent
+ * section. Prefixed outcomes per host; a failure on one host degrades to a
+ * conflict rather than aborting the others or the skill result.
+ */
+async function materializeAgentsAcrossHosts(
+  section: AgentSection,
+  options: SkillSyncOptions,
+): Promise<Pick<SkillSyncResult, "installed" | "updated" | "pruned" | "conflicts">> {
+  const result = { installed: [] as string[], updated: [] as string[], pruned: [] as string[], conflicts: [] as string[] };
+  const hostTargets = [
+    { prefix: "agent", dir: await resolveClaudeAgentsDir(options), render: renderClaudeAgent },
+    { prefix: "agent-codex", dir: await resolveCodexAgentsDir(options), render: renderCodexAgent },
+    { prefix: "agent-gemini", dir: await resolveGeminiAgentsDir(options), render: renderGeminiAgent },
+  ];
+  for (const host of hostTargets) {
+    if (!host.dir) continue;
+    try {
+      const outcome = await materializeAgentDefinitions(section, host.dir, host.render);
+      result.installed.push(...outcome.installed.map((name) => `${host.prefix}:${name}`));
+      result.updated.push(...outcome.updated.map((name) => `${host.prefix}:${name}`));
+      result.pruned.push(...outcome.pruned.map((name) => `${host.prefix}:${name}`));
+      result.conflicts.push(...outcome.conflicts.map((name) => `${host.prefix}:${name}`));
+    } catch (error) {
+      console.error(`[Prism Skill Sync] ${host.prefix} materialization failed: ${error instanceof Error ? error.message : String(error)}`);
+      result.conflicts.push(`${host.prefix}:sync-failed`);
+    }
+  }
+  return result;
+}
+
 export async function synchronizeSkillManifest(options: SkillSyncOptions = {}): Promise<SkillSyncResult> {
   const empty = { installed: [], updated: [], pruned: [], conflicts: [] };
   let nativeSkillsDirs: string[] = [];
@@ -955,24 +986,11 @@ export async function synchronizeSkillManifest(options: SkillSyncOptions = {}): 
     // prefix. A failure on one host never rolls back skill state or the
     // other hosts — it surfaces as a conflict instead.
     if (manifest.agentSection) {
-      const hostTargets = [
-        { prefix: "agent", dir: await resolveClaudeAgentsDir(options), render: renderClaudeAgent },
-        { prefix: "agent-codex", dir: await resolveCodexAgentsDir(options), render: renderCodexAgent },
-        { prefix: "agent-gemini", dir: await resolveGeminiAgentsDir(options), render: renderGeminiAgent },
-      ];
-      for (const host of hostTargets) {
-        if (!host.dir) continue;
-        try {
-          const outcome = await materializeAgentDefinitions(manifest.agentSection, host.dir, host.render);
-          native.installed.push(...outcome.installed.map((name) => `${host.prefix}:${name}`));
-          native.updated.push(...outcome.updated.map((name) => `${host.prefix}:${name}`));
-          native.pruned.push(...outcome.pruned.map((name) => `${host.prefix}:${name}`));
-          native.conflicts.push(...outcome.conflicts.map((name) => `${host.prefix}:${name}`));
-        } catch (error) {
-          console.error(`[Prism Skill Sync] ${host.prefix} materialization failed: ${error instanceof Error ? error.message : String(error)}`);
-          native.conflicts.push(`${host.prefix}:sync-failed`);
-        }
-      }
+      const outcome = await materializeAgentsAcrossHosts(manifest.agentSection, options);
+      native.installed.push(...outcome.installed);
+      native.updated.push(...outcome.updated);
+      native.pruned.push(...outcome.pruned);
+      native.conflicts.push(...outcome.conflicts);
     }
     const status = native.installed.length || native.updated.length || native.pruned.length ? "applied" : "unchanged";
     return {
@@ -995,6 +1013,18 @@ export async function synchronizeSkillManifest(options: SkillSyncOptions = {}): 
         await enforceNativeEntitlements(entitledNames, nativeSkillsDir);
       } catch (enforcement) {
         enforcementErrors.push(`${nativeSkillsDir}: ${enforcement instanceof Error ? enforcement.message : String(enforcement)}`);
+      }
+      // Agent definitions need the SAME downgrade guarantee as skills. Without
+      // this, a tier downgrade whose DB apply throws prunes paid skills but
+      // leaves paid agent definitions in every host root until some later
+      // successful sync — exactly the local-fault-becomes-entitlement-bypass
+      // the skill path above exists to prevent.
+      if (manifest.agentSection) {
+        try {
+          await materializeAgentsAcrossHosts(manifest.agentSection, options);
+        } catch (enforcement) {
+          enforcementErrors.push(`agents: ${enforcement instanceof Error ? enforcement.message : String(enforcement)}`);
+        }
       }
       enforcementError = enforcementErrors.length > 0
         ? `; entitlement cleanup failed: ${enforcementErrors.join(", ")}`

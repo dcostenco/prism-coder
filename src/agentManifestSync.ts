@@ -297,6 +297,18 @@ async function installExclusive(dir: string, target: string, content: string): P
     return true;
   } catch (error) {
     if (isErrno(error, "EEXIST")) return false;
+    // Filesystems without hard-link support (exFAT/FAT32, several SMB and
+    // container-volume mounts) reject link(2) outright. Without this fallback
+    // those users receive ZERO agent definitions and only a stderr line —
+    // the exclusivity hardening would have silently disabled the feature.
+    // rename(2) is marginally weaker against a concurrent writer inside the
+    // check→act window; delivering nothing is strictly worse.
+    if (isErrno(error, "EPERM") || isErrno(error, "ENOTSUP") ||
+        isErrno(error, "EOPNOTSUPP") || isErrno(error, "EXDEV")) {
+      if (await currentDigest(target) !== null) return false;
+      await rename(temp, target);
+      return true;
+    }
     throw error;
   } finally {
     await rm(temp, { force: true });

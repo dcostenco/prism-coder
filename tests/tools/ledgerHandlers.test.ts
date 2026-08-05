@@ -1027,7 +1027,8 @@ describe("ledgerHandlers", () => {
 
   describe("sessionBootstrapHandler", () => {
     it("greets a first run with actions and the paid CTA, never with absence", async () => {
-      // First run = dashboard never touched: no agent identity, no projects.
+      // First run = dashboard never touched: no agent identity, no projects,
+      // no prior bootstrap marker.
       mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
         "skill_manifest:tier": "free",
         "skill_manifest:names": JSON.stringify(["prism-startup"]),
@@ -1038,7 +1039,7 @@ describe("ledgerHandlers", () => {
 
       expect(text).toContain("Welcome to Prism");
       expect(text).toContain("onboarding_wizard");
-      expect(text).toContain("http://localhost");
+      expect(text).toContain("Dashboard:");
       // The paid funnel's one guaranteed impression (2026-08-05 first-run
       // audit: the startup path referenced upgrade_url zero times).
       expect(text).toContain("https://synalux.ai/pricing");
@@ -1047,6 +1048,40 @@ describe("ledgerHandlers", () => {
       // followed by three "Not loaded" rows — an all-absence payload.
       expect(text).not.toContain("Welcome back");
       expect(text).not.toContain("Not loaded");
+    });
+
+    it("advertises the dashboard URL only when something is actually listening", async () => {
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        "skill_manifest:tier": "free",
+        "skill_manifest:names": JSON.stringify(["prism-startup"]),
+      }[key] ?? fallback));
+      const originalPort = process.env.PRISM_DASHBOARD_PORT;
+
+      // Closed port: the port file persists across boots, so a URL must never
+      // be promised on that evidence alone.
+      process.env.PRISM_DASHBOARD_PORT = "1"; // reserved, never listening
+      try {
+        const dead = (await sessionBootstrapHandler({})).content[0].text as string;
+        expect(dead).toContain("Dashboard:** not running");
+        expect(dead).not.toContain("http://localhost");
+
+        // Live port: bind an ephemeral listener and confirm it is advertised.
+        const net = await import("node:net");
+        const server = net.createServer();
+        const port: number = await new Promise((done) => {
+          server.listen(0, "127.0.0.1", () => done((server.address() as any).port));
+        });
+        process.env.PRISM_DASHBOARD_PORT = String(port);
+        try {
+          const live = (await sessionBootstrapHandler({})).content[0].text as string;
+          expect(live).toContain(`http://localhost:${port}`);
+        } finally {
+          await new Promise((done) => server.close(() => done(null)));
+        }
+      } finally {
+        if (originalPort === undefined) delete process.env.PRISM_DASHBOARD_PORT;
+        else process.env.PRISM_DASHBOARD_PORT = originalPort;
+      }
     });
 
     it("keeps the returning-user shape when an identity exists without projects, adding the dashboard URL", async () => {
@@ -1061,7 +1096,9 @@ describe("ledgerHandlers", () => {
 
       expect(text).toContain("Welcome back, Dmitri");
       expect(text).toContain("Not loaded");
-      expect(text).toContain("http://localhost");
+      // Dashboard is surfaced either as a live URL or an honest "not running";
+      // the point is that it reaches stdout at all (it was stderr-only).
+      expect(text).toContain("Dashboard:");
       expect(result.structuredContent).not.toMatchObject({ first_run: true });
       // Paid tiers never see the upgrade line.
       expect(text).not.toContain("https://synalux.ai/pricing");

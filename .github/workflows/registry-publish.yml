@@ -19,14 +19,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # No `||` fallback: the fallback only compared top-level versions, so a
+      # stale packages[].version failed the real guard and then PASSED the
+      # fallback — a publish gate that fails open is not a gate.
       - name: Guard — manifest must match package.json
-        run: node scripts/check-publish-clean.mjs --manifest-only || node -e "
-          const s=require('./server.json'), p=require('./package.json');
-          if (s.version !== p.version) { console.error('server.json '+s.version+' != package.json '+p.version); process.exit(1); }
-          console.log('manifest in sync:', s.version);"
+        run: node scripts/check-publish-clean.mjs
       - name: Install mcp-publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.0
+          MCP_PUBLISHER_SHA256: 1370446bbe74d562608e8005a6ccce02d146a661fbd78674e11cc70b9618d6cf
         run: |
-          curl -fsSL https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz | tar xz
+          # Pinned + checksum-verified: this job holds id-token: write for the
+          # registry namespace, so an unpinned `latest` tarball would run
+          # arbitrary future code with publish credentials.
+          curl -fsSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz
           sudo mv mcp-publisher /usr/local/bin/
       - name: Publish to MCP Registry
         run: |

@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import * as os from "node:os";
+import * as net from "node:net";
 import { randomUUID } from "node:crypto";
 import { redactSettings, toMarkdown } from "./commonHelpers.js";
 import { scanAndRedactPHI } from "../utils/phiGuard.js";
@@ -30,7 +31,7 @@ import { getStorage, activeStorageBackend } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
 import { getCurrentGitState, getGitDrift } from "../utils/git.js";
-import { getSetting, getAllSettings, refreshConfigStorageCache } from "../storage/configStorage.js";
+import { getSetting, setSetting, getAllSettings, refreshConfigStorageCache } from "../storage/configStorage.js";
 import type { SkillSyncResult } from "../skillManifestSync.js";
 import { mergeHandoff, dbToHandoffSchema, sanitizeForMerge } from "../utils/crdtMerge.js";
 import { resolveProject } from "../utils/projectResolver.js";
@@ -419,15 +420,37 @@ function freeTierUpgradeLine(tier: string): string {
  * writes the port to ~/.prism-mcp/dashboard.port — read that, then the env
  * override, then the default.
  */
-function readDashboardUrl(): string {
-  let port = process.env.PRISM_DASHBOARD_PORT || "3000";
-  try {
-    const recorded = fs.readFileSync(nodePath.join(os.homedir(), ".prism-mcp", "dashboard.port"), "utf8").trim();
-    if (/^\d{2,5}$/.test(recorded)) port = recorded;
-  } catch {
-    // port file absent — dashboard not started yet this boot; defaults hold
+async function readDashboardUrl(): Promise<string | null> {
+  // Precedence: explicit env override > recorded port file > default. The
+  // file is written by whatever dashboard ran last and persists across boots,
+  // so it must never outrank configuration the operator set for THIS process.
+  let port = (process.env.PRISM_DASHBOARD_PORT || "").trim();
+  if (!port) {
+    try {
+      const recorded = fs.readFileSync(nodePath.join(os.homedir(), ".prism-mcp", "dashboard.port"), "utf8").trim();
+      if (/^\d{2,5}$/.test(recorded)) port = recorded;
+    } catch {
+      // port file absent — dashboard not started yet this boot; default holds
+    }
   }
-  return `http://localhost:${port}`;
+  if (!port) port = "3000";
+  // The port file persists across boots and is never cleaned up, so it is
+  // evidence of a PREVIOUS dashboard, not a running one. Advertising a dead
+  // URL as the first-run headline action is worse than omitting it, so probe
+  // before promising. Bounded so startup latency cannot regress.
+  const listening = await new Promise<boolean>((resolveProbe) => {
+    const socket = new net.Socket();
+    const done = (value: boolean) => {
+      socket.destroy();
+      resolveProbe(value);
+    };
+    socket.setTimeout(250);
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+    socket.connect(Number(port), "127.0.0.1");
+  });
+  return listening ? `http://localhost:${port}` : null;
 }
 
 function capNativeStartupText(
@@ -1954,7 +1977,19 @@ export async function sessionBootstrapHandler(
   // with "Welcome back", three "Not loaded" rows, a warning, and three
   // statements of what it doesn't have — an all-absence payload with no next
   // step, no dashboard URL (stderr-only), and no path to the paid tier.
-  const isFirstRun = projects.length === 0 && !configuredGreetingName;
+  // First run must mean NEW, not merely unconfigured: a user with saved
+  // sessions who never set a name or projects would otherwise be told "first
+  // run detected" every single session. A durable marker is written after the
+  // first bootstrap, so this is decisive rather than heuristic.
+  const bootstrapSeen = (await getSetting("first_bootstrap_at", "")).trim();
+  const isFirstRun = projects.length === 0 && !configuredGreetingName && !bootstrapSeen;
+  if (!bootstrapSeen) {
+    try {
+      await setSetting("first_bootstrap_at", new Date().toISOString());
+    } catch {
+      // Marker is an optimization; a write failure must never block startup.
+    }
+  }
   const greeting = isFirstRun
     ? `👋 Welcome to Prism — first run detected. Let's get you productive in a few minutes.`
     : `👋 Welcome back, ${greetingName}. Prism is loading ${depth} context.`;
@@ -1962,7 +1997,10 @@ export async function sessionBootstrapHandler(
   const startupHeader = isFirstRun ? greeting : `${greeting}\n\n${identityBlock}`;
 
   if (projects.length === 0) {
-    const dashboardLine = `- 🎛️ **Dashboard:** ${readDashboardUrl()} — configure projects, identity, and context depth`;
+    const dashboardUrl = await readDashboardUrl();
+    const dashboardLine = dashboardUrl
+      ? `- 🎛️ **Dashboard:** ${dashboardUrl} — configure projects, identity, and context depth`
+      : `- 🎛️ **Dashboard:** not running — start Prism's dashboard to configure projects, identity, and context depth`;
     if (isFirstRun) {
       // Action-first instead of absence-first: every line is a capability or
       // a next step. The wizard exists and is well-built; route to it.
