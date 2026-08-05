@@ -100,7 +100,9 @@ export function publishedVersionConflict(name, version, lookup) {
   }
   if (!published || published !== version) return null;
   return `${name}@${version} is already published. Bump the version in ` +
-    `package.json AND server.json (the registry listing follows package.json).`;
+    `package.json, server.json (incl. packages[].version), and every entry in ` +
+    `VERSIONED_MANIFESTS — naming only some of them is how the Codex plugin ` +
+    `manifest drifted a full release behind.`;
 }
 
 function npmLatestVersion(name) {
@@ -160,7 +162,7 @@ if (IS_MAIN) {
     const problems = checkServerManifest(process.cwd());
     if (problems.length) {
       console.error(
-        "npm publish blocked: server.json disagrees with package.json.\n" +
+        "npm publish blocked: a versioned manifest disagrees with package.json.\n" +
           "The MCP Registry listing would ship stale versions:\n  " +
           problems.join("\n  "),
       );
@@ -168,7 +170,7 @@ if (IS_MAIN) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`npm publish blocked: unable to verify server.json: ${message}`);
+    console.error(`npm publish blocked: unable to verify the versioned manifests: ${message}`);
     process.exitCode = 1;
   }
 
@@ -180,8 +182,9 @@ if (IS_MAIN) {
   // still gets the full gate.
   const manifestOnly = process.argv.includes("--manifest-only");
 
-  try {
-    if (manifestOnly) throw { code: "SKIP" };
+  if (manifestOnly) {
+    console.log("manifest-only mode: skipping the published-version check.");
+  } else try {
     let raw;
     try {
       raw = readFileSync(join(process.cwd(), "package.json"), "utf8");
@@ -201,11 +204,7 @@ if (IS_MAIN) {
       }
     }
   } catch (error) {
-    if (error?.code === "SKIP") {
-      console.log("manifest-only mode: skipping the published-version check.");
-    } else {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`npm publish: skipped the published-version check (${message})`);
-    }
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`npm publish: skipped the published-version check (${message})`);
   }
 }
