@@ -1026,6 +1026,47 @@ describe("ledgerHandlers", () => {
   });
 
   describe("sessionBootstrapHandler", () => {
+    it("greets a first run with actions and the paid CTA, never with absence", async () => {
+      // First run = dashboard never touched: no agent identity, no projects.
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        "skill_manifest:tier": "free",
+        "skill_manifest:names": JSON.stringify(["prism-startup"]),
+      }[key] ?? fallback));
+
+      const result = await sessionBootstrapHandler({});
+      const text = result.content[0].text as string;
+
+      expect(text).toContain("Welcome to Prism");
+      expect(text).toContain("onboarding_wizard");
+      expect(text).toContain("http://localhost");
+      // The paid funnel's one guaranteed impression (2026-08-05 first-run
+      // audit: the startup path referenced upgrade_url zero times).
+      expect(text).toContain("https://synalux.ai/pricing");
+      expect(result.structuredContent).toMatchObject({ first_run: true, projects: [] });
+      // The measured 2026-08-05 failure mode: "Welcome back" to a stranger
+      // followed by three "Not loaded" rows — an all-absence payload.
+      expect(text).not.toContain("Welcome back");
+      expect(text).not.toContain("Not loaded");
+    });
+
+    it("keeps the returning-user shape when an identity exists without projects, adding the dashboard URL", async () => {
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        agent_name: "Dmitri",
+        "skill_manifest:tier": "enterprise",
+        "skill_manifest:names": JSON.stringify(["prism-startup"]),
+      }[key] ?? fallback));
+
+      const result = await sessionBootstrapHandler({});
+      const text = result.content[0].text as string;
+
+      expect(text).toContain("Welcome back, Dmitri");
+      expect(text).toContain("Not loaded");
+      expect(text).toContain("http://localhost");
+      expect(result.structuredContent).not.toMatchObject({ first_run: true });
+      // Paid tiers never see the upgrade line.
+      expect(text).not.toContain("https://synalux.ai/pricing");
+    });
+
     it.each([
       ["quick", false, false],
       ["standard", true, true],
@@ -1327,9 +1368,13 @@ describe("ledgerHandlers", () => {
       const result = await sessionBootstrapHandler({});
       const text = result.content[0].text as string;
 
-      expect(text).toContain("Welcome back, developer");
-      expect(text).toContain("Agent Identity:** global — developer");
+      // Truthful now means honest about being NEW: no identity + no projects
+      // is a first run, and "Welcome back, developer" to a stranger was the
+      // 2026-08-05 first-run audit's headline defect.
+      expect(text).toContain("Welcome to Prism");
+      expect(text).not.toContain("Welcome back");
       expect(text).not.toContain("None — None");
+      expect(result.structuredContent).toMatchObject({ first_run: true });
     });
 
     it.each(BOOTSTRAP_TIER_DEPTH_CASES)(

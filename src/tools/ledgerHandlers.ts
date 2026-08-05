@@ -25,6 +25,7 @@ import { buildVaultDirectory } from "../utils/vaultExporter.js";
  */
 
 import { debugLog } from "../utils/logger.js";
+import { FREE_ENTITLEMENTS } from "../utils/entitlements.js";
 import { getStorage, activeStorageBackend } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
@@ -376,7 +377,8 @@ async function buildNativeSystemReadyBlock(
       `> - 🛠️ **Other tier entitlements:** ${formatBoundedSkillNames(otherTierSkills, "entitled")}\n` +
       `> - 🧠 **Context depth:** ${depth}\n` +
       `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · native materialization incomplete${conflictSuffix}` +
-      conflictWarning;
+      conflictWarning +
+      freeTierUpgradeLine(snapshot.tier);
   }
   if (snapshot.source === "tier-fallback") {
     return `> **Prism System Ready**\n>\n` +
@@ -384,7 +386,8 @@ async function buildNativeSystemReadyBlock(
       `> - 🛡️ **Fallback skill names:** ${formatBoundedSkillNames(snapshot.names, "fallback")}\n` +
       `> - 🧠 **Context depth:** ${depth}\n` +
       `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · no committed manifest${conflictSuffix}` +
-      conflictWarning;
+      conflictWarning +
+      freeTierUpgradeLine(snapshot.tier);
   }
   return `> **Prism System Ready**\n>\n` +
     `> - 🪪 **Subscription tier:** ${snapshot.tier}\n` +
@@ -394,7 +397,37 @@ async function buildNativeSystemReadyBlock(
     `> - 🛠️ **Other tier skills provisioned:** ${formatBoundedSkillNames(otherTierSkills, "provisioned")}\n` +
     `> - 🧠 **Context depth:** ${depth}\n` +
     `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · committed manifest${conflictSuffix}` +
-    conflictWarning;
+    conflictWarning +
+    freeTierUpgradeLine(snapshot.tier);
+}
+
+/**
+ * The paid funnel's one startup line. Before 2026-08-05 the upgrade_url was
+ * surfaced only AFTER a user hit an entitlement gate (sessionDriftHandler,
+ * queryMemoryNaturalHandler); the startup path — the only guaranteed
+ * impression — referenced it zero times.
+ */
+function freeTierUpgradeLine(tier: string): string {
+  if (tier !== "free") return "";
+  return `\n> - 💎 **Free tier:** paid plans unlock the full skill library, ` +
+    `super-skills, and agent routing → ${FREE_ENTITLEMENTS.upgrade_url}`;
+}
+
+/**
+ * Dashboard URL for startup output. The bound port is announced on stderr
+ * only (MCP stdio owns stdout), so users never saw it; the dashboard also
+ * writes the port to ~/.prism-mcp/dashboard.port — read that, then the env
+ * override, then the default.
+ */
+function readDashboardUrl(): string {
+  let port = process.env.PRISM_DASHBOARD_PORT || "3000";
+  try {
+    const recorded = fs.readFileSync(nodePath.join(os.homedir(), ".prism-mcp", "dashboard.port"), "utf8").trim();
+    if (/^\d{2,5}$/.test(recorded)) port = recorded;
+  } catch {
+    // port file absent — dashboard not started yet this boot; defaults hold
+  }
+  return `http://localhost:${port}`;
 }
 
 function capNativeStartupText(
@@ -1916,16 +1949,42 @@ export async function sessionBootstrapHandler(
   const role = sanitizeNativeIdentity(defaultRole) || "global";
   const manifestSnapshot = await resolveNativeSkillManifestSnapshot(skillSyncResult);
   const systemReadyBlock = await buildNativeSystemReadyBlock(manifestSnapshot, depth);
-  const greeting = `👋 Welcome back, ${greetingName}. Prism is loading ${depth} context.`;
+  // First run = the dashboard has never been touched: no agent identity AND no
+  // projects. Measured 2026-08-05: a brand-new free-tier install was greeted
+  // with "Welcome back", three "Not loaded" rows, a warning, and three
+  // statements of what it doesn't have — an all-absence payload with no next
+  // step, no dashboard URL (stderr-only), and no path to the paid tier.
+  const isFirstRun = projects.length === 0 && !configuredGreetingName;
+  const greeting = isFirstRun
+    ? `👋 Welcome to Prism — first run detected. Let's get you productive in a few minutes.`
+    : `👋 Welcome back, ${greetingName}. Prism is loading ${depth} context.`;
   const identityBlock = `- 🤖 **Agent Identity:** ${escapeNativeMarkdown(compactWithOmissionCount(role, 80))} — ${greetingName}`;
-  const startupHeader = `${greeting}\n\n${identityBlock}`;
+  const startupHeader = isFirstRun ? greeting : `${greeting}\n\n${identityBlock}`;
 
   if (projects.length === 0) {
+    const dashboardLine = `- 🎛️ **Dashboard:** ${readDashboardUrl()} — configure projects, identity, and context depth`;
+    if (isFirstRun) {
+      // Action-first instead of absence-first: every line is a capability or
+      // a next step. The wizard exists and is well-built; route to it.
+      const firstRunText = `${greeting}\n\n` +
+        `- 🚀 **Get started:** run the \`onboarding_wizard\` tool (guided setup, ~3 minutes)\n` +
+        `${dashboardLine}\n` +
+        `- 💾 **Already working?** \`session_save_ledger\` records this session; the next one resumes with full context\n\n` +
+        `${systemReadyBlock}`;
+      return {
+        content: [{
+          type: "text",
+          text: capNativeStartupText(firstRunText, depth),
+        }],
+        isError: false,
+        structuredContent: { conversation_id: conversationId, projects: [], depth, first_run: true },
+      };
+    }
     const unconfiguredState = (depth === "quick" ? "" : `\n- 📝 **Last Session Summary:** Not loaded`) +
       `\n- ✅ **Open TODOs:** Not loaded` +
       `\n- 🔄 **Session Version:** Not loaded`;
     const noProjectsText = `${startupHeader}${unconfiguredState}\n\n` +
-      `⚠️ No Auto-Load Projects are configured in the Prism dashboard.\n\n${systemReadyBlock}`;
+      `⚠️ No Auto-Load Projects are configured in the Prism dashboard.\n${dashboardLine}\n\n${systemReadyBlock}`;
     return {
       content: [{
         type: "text",

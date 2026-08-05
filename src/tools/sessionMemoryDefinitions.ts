@@ -1640,8 +1640,8 @@ export const ONBOARDING_WIZARD_TOOL: Tool = {
     "Interactive setup wizard for new Prism users. Provides a step-by-step " +
     "guided experience to get productive in under 3 minutes.\n\n" +
     "**Actions:**\n" +
-    "- `start` — Begin the wizard from step 1\n" +
-    "- `next` — Advance to the next step\n" +
+    "- `start` (default when omitted) — Begin the wizard from step 1\n" +
+    "- `next` — Advance past `step` (pass the step number you are on)\n" +
     "- `status` — Check current wizard progress\n" +
     "- `skip` — Skip to completion\n\n" +
     "Each step returns instructions, code snippets, and progress percentage.",
@@ -1651,7 +1651,12 @@ export const ONBOARDING_WIZARD_TOOL: Tool = {
       action: {
         type: "string",
         enum: ["start", "next", "status", "skip"],
-        description: "Wizard action to perform.",
+        description: "Wizard action to perform. Omitted = start.",
+      },
+      step: {
+        type: "integer",
+        minimum: 0,
+        description: "The step_index from the previous response; used by `next` and `status`.",
       },
       project_name: {
         type: "string",
@@ -1663,12 +1668,12 @@ export const ONBOARDING_WIZARD_TOOL: Tool = {
         description: "IDE client for config generation.",
       },
     },
-    required: ["action"],
   },
 };
 
 export interface OnboardingWizardArgs {
-  action: "start" | "next" | "status" | "skip";
+  action?: "start" | "next" | "status" | "skip";
+  step?: number;
   project_name?: string;
   ide_client?: string;
 }
@@ -1678,8 +1683,15 @@ export function isOnboardingWizardArgs(
 ): args is OnboardingWizardArgs {
   if (typeof args !== "object" || args === null) return false;
   const a = args as Record<string, unknown>;
-  if (typeof a.action !== "string") return false;
-  if (!["start", "next", "status", "skip"].includes(a.action)) return false;
+  // A bare call is the front door for brand-new users (the startup greeting
+  // routes here) — it must work, defaulting to `start`. Measured 2026-08-05:
+  // requiring `action` made the tool the first thing a new user touches AND
+  // the first error they see.
+  if (a.action !== undefined &&
+      (typeof a.action !== "string" || !["start", "next", "status", "skip"].includes(a.action))) {
+    return false;
+  }
+  if (a.step !== undefined && (!Number.isInteger(a.step) || (a.step as number) < 0)) return false;
   if (a.project_name !== undefined && typeof a.project_name !== "string") return false;
   if (a.ide_client !== undefined && typeof a.ide_client !== "string") return false;
   return true;

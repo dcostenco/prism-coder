@@ -20,6 +20,8 @@ import {
 
 // ─── Onboarding Wizard Handler ───────────────────────────────
 
+type OnboardingWizardAction = "start" | "next" | "status" | "skip";
+
 export async function onboardingWizardHandler(args: Record<string, unknown>) {
     if (!isOnboardingWizardArgs(args)) {
         return {
@@ -28,7 +30,18 @@ export async function onboardingWizardHandler(args: Record<string, unknown>) {
         };
     }
 
-    const { step, responses } = args;
+    // The schema advertises action-based navigation while this handler
+    // historically read `{step, responses}` — fields the validator never
+    // passed, so `next`/`status`/`skip` all silently rendered step 1 and a
+    // bare call was rejected outright (measured 2026-08-05). Map the
+    // advertised contract onto the stateless wizard: the client carries the
+    // step number between calls.
+    const action = (args.action as OnboardingWizardAction | undefined) ?? "start";
+    const currentStep = typeof args.step === "number" ? args.step : 0;
+    const step = action === "start" ? undefined
+        : action === "next" ? currentStep + 1
+        : action === "status" ? currentStep
+        : Number.MAX_SAFE_INTEGER; // skip → past the final step = completion
 
     try {
         const wizard = await import("../onboarding/wizard.js");
@@ -43,6 +56,7 @@ export async function onboardingWizardHandler(args: Record<string, unknown>) {
                     text: JSON.stringify({
                         status: "in_progress",
                         current_step: state.currentStep,
+                        step_index: 0,
                         total_steps: 8,
                         step: content,
                         summary: wizard.getWizardSummary(state),
@@ -51,12 +65,15 @@ export async function onboardingWizardHandler(args: Record<string, unknown>) {
             };
         }
 
-        // Advance to next step
+        // Advance to the requested step position. Wizard steps are NAMED
+        // ("welcome", "storage", …); the numeric step_index in every response
+        // is what clients echo back for `next`/`status`.
         const state = wizard.createWizardState();
-        // Advance to the requested step position
         let currentState = state;
-        for (let i = 0; i < (step as number); i++) {
+        let stepIndex = 0;
+        for (let i = 0; i < step && !wizard.isWizardComplete(currentState); i++) {
             currentState = wizard.advanceWizard(currentState);
+            stepIndex += 1;
         }
 
         if (wizard.isWizardComplete(currentState)) {
@@ -84,6 +101,7 @@ export async function onboardingWizardHandler(args: Record<string, unknown>) {
                 text: JSON.stringify({
                     status: "in_progress",
                     current_step: currentState.currentStep,
+                    step_index: stepIndex,
                     step: content,
                     summary: wizard.getWizardSummary(currentState),
                 }, null, 2),
