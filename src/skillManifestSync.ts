@@ -8,6 +8,10 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   applyManagedSkillManifest, getSetting, refreshConfigStorageCache,
 } from "./storage/configStorage.js";
+import {
+  materializeAgentDefinitions, resolveClaudeAgentsDir, validateAgentSection,
+  type AgentSection,
+} from "./agentManifestSync.js";
 import { FREE_NATIVE_SKILL_NAMES, REQUIRED_NATIVE_SKILL_NAMES } from "./tools/skillRouting.js";
 import { getSynaluxJwt, invalidateSynaluxJwt } from "./utils/synaluxJwt.js";
 
@@ -57,6 +61,12 @@ export interface SkillManifest {
   tier: "free" | "standard" | "advanced" | "enterprise";
   routing_version: number;
   skills: ManifestSkill[];
+  /**
+   * Optional agent-definition section (portal `agents` + `agents_generation`
+   * fields). Absent on servers that predate agents. Deliberately OUTSIDE the
+   * skills `generation` hash — see agentManifestSync.ts for the contract.
+   */
+  agentSection?: AgentSection | null;
 }
 
 export interface SkillSyncResult {
@@ -108,6 +118,12 @@ export interface SkillSyncOptions {
    * ~/.agents/skills root, so tests and callers with custom roots stay isolated.
    */
   cursorSkillsDir?: string | false;
+  /**
+   * Claude Code's agent-definition root (~/.claude/agents). `false` disables
+   * agent materialization. When omitted, auto-detected under the same
+   * production-default guard as the skill mirrors.
+   */
+  claudeCodeAgentsDir?: string | false;
   fetchImpl?: typeof fetch;
   getJwt?: () => Promise<string | null>;
   invalidateJwt?: () => void;
@@ -816,6 +832,10 @@ async function fetchManifest(options: SkillSyncOptions): Promise<SkillManifest> 
   if (!headers.Authorization && manifest.tier !== "free") {
     throw new Error("unauthenticated skill manifest must be free tier");
   }
+  // Agents ride the same response under separate fields. A malformed section
+  // is contract drift and must fail the fetch loudly — treating it as "no
+  // agents" would convert server corruption into a silent prune signal.
+  manifest.agentSection = validateAgentSection(payload);
   return manifest;
 }
 
@@ -925,6 +945,25 @@ export async function synchronizeSkillManifest(options: SkillSyncOptions = {}): 
       nativeResults.push(await materializeNative(manifest, nativeSkillsDir, options));
     }
     const native = mergeNativeResults(nativeResults);
+    // Agent definitions are additive: they piggyback on the manifest with
+    // their own generation, and their outcome reports under an `agent:`
+    // prefix. A failure here never rolls back or degrades skill state — it
+    // surfaces as a conflict instead.
+    if (manifest.agentSection) {
+      const agentsDir = await resolveClaudeAgentsDir(options);
+      if (agentsDir) {
+        try {
+          const outcome = await materializeAgentDefinitions(manifest.agentSection, agentsDir);
+          native.installed.push(...outcome.installed.map((name) => `agent:${name}`));
+          native.updated.push(...outcome.updated.map((name) => `agent:${name}`));
+          native.pruned.push(...outcome.pruned.map((name) => `agent:${name}`));
+          native.conflicts.push(...outcome.conflicts.map((name) => `agent:${name}`));
+        } catch (error) {
+          console.error(`[Prism Skill Sync] agent materialization failed: ${error instanceof Error ? error.message : String(error)}`);
+          native.conflicts.push("agent:sync-failed");
+        }
+      }
+    }
     const status = native.installed.length || native.updated.length || native.pruned.length ? "applied" : "unchanged";
     return {
       status,
