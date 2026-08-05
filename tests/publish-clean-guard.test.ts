@@ -6,10 +6,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const SCRIPT = resolve(process.cwd(), "scripts/check-publish-clean.mjs");
 const tempRepos: string[] = [];
+// Windows: import() of a raw path like C:\... treats the drive letter as a
+// protocol and throws "SyntaxError: Invalid or unexpected token". A file://
+// URL is the portable form.
+const GUARD_MODULE = pathToFileURL(SCRIPT).href;
 
 function createCommittedRepo(): string {
   const repo = mkdtempSync(resolve(tmpdir(), "prism-publish-guard-"));
@@ -101,19 +106,19 @@ describe("published-version conflict guard", () => {
     // each other and with npm, and disagreeing with reality. The publish ran
     // a full build and pack before npm rejected it.
     it("blocks a version npm already serves", async () => {
-        const { publishedVersionConflict } = await import("../scripts/check-publish-clean.mjs");
+        const { publishedVersionConflict } = await import(GUARD_MODULE);
         const conflict = publishedVersionConflict("pkg", "20.6.0", () => "20.6.0");
         expect(conflict).toContain("already published");
         expect(conflict).toContain("server.json");
     });
 
     it("allows a version that advances past the published one", async () => {
-        const { publishedVersionConflict } = await import("../scripts/check-publish-clean.mjs");
+        const { publishedVersionConflict } = await import(GUARD_MODULE);
         expect(publishedVersionConflict("pkg", "20.7.0", () => "20.6.0")).toBeNull();
     });
 
     it("fails OPEN when the registry is unreachable or the package is new", async () => {
-        const { publishedVersionConflict } = await import("../scripts/check-publish-clean.mjs");
+        const { publishedVersionConflict } = await import(GUARD_MODULE);
         // A first release and an offline release must both still work.
         expect(publishedVersionConflict("pkg", "1.0.0", () => { throw new Error("ENOTFOUND"); })).toBeNull();
         expect(publishedVersionConflict("pkg", "1.0.0", () => "")).toBeNull();
