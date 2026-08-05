@@ -79,7 +79,13 @@ describe("grounding staleness probe", () => {
         evidence = buildGroundedEvidenceContext(sources as QuerySource[]);
     });
 
-    afterAll(() => {
+    afterAll(async () => {
+        // Close the DB before unlinking its directory. POSIX allows removing a
+        // file that still has an open descriptor, so a leaked handle is
+        // invisible on macOS/Linux; Windows refuses with
+        //   EBUSY: resource busy or locked, unlink '...\isolated.db'
+        // which is why this suite failed only on the windows CI legs.
+        await storage?.close();
         rmSync(dir, { recursive: true, force: true });
     });
 
