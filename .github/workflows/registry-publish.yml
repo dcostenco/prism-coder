@@ -1,0 +1,34 @@
+name: MCP Registry Publish
+# Root cause of the 1.5.0→20.6.0 registry drift: publishing was fully manual
+# and nothing ever republished after the initial listing. This workflow makes
+# the registry listing follow main: any change to server.json republishes via
+# GitHub OIDC (no stored secrets — the registry validates namespace ownership
+# against this repository).
+on:
+  push:
+    branches: [main]
+    paths: ["server.json"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write # GitHub OIDC login to the MCP registry
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard — manifest must match package.json
+        run: node scripts/check-publish-clean.mjs --manifest-only || node -e "
+          const s=require('./server.json'), p=require('./package.json');
+          if (s.version !== p.version) { console.error('server.json '+s.version+' != package.json '+p.version); process.exit(1); }
+          console.log('manifest in sync:', s.version);"
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz | tar xz
+          sudo mv mcp-publisher /usr/local/bin/
+      - name: Publish to MCP Registry
+        run: |
+          mcp-publisher login github-oidc
+          mcp-publisher publish

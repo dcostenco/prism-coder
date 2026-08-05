@@ -1,0 +1,20 @@
+{
+  "name": "prism",
+  "interface": {
+    "displayName": "Prism"
+  },
+  "plugins": [
+    {
+      "name": "prism",
+      "source": {
+        "source": "local",
+        "path": "./plugins/prism"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Engineering"
+    }
+  ]
+}

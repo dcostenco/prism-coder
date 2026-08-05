@@ -14,6 +14,11 @@ REVIEW_PROMPT.md
 
 # MCP runtime config (contains API keys)
 .mcp.json
+# ...except a distributed plugin's server declaration, which is the whole point
+# of the plugin and carries no keys (npx invocation only). Without this
+# negation the published plugin installs its skills and registers no MCP
+# server at all.
+!plugins/*/.mcp.json
 
 # Build & environment
 node_modules/

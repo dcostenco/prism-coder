@@ -1,0 +1,19 @@
+{
+  "name": "prism",
+  "description": "Persistent session memory for Claude Code. Prism restores what you were doing across sessions — decisions, open TODOs, changed files — and carries knowledge search, drift detection, and local-first inference. Memory stays in SQLite on your machine by default.",
+  "author": {
+    "name": "Synalux",
+    "email": "support@synalux.ai"
+  },
+  "homepage": "https://synalux.ai",
+  "repository": "https://github.com/dcostenco/prism-coder",
+  "license": "Apache-2.0",
+  "keywords": [
+    "memory",
+    "session-memory",
+    "context",
+    "knowledge-search",
+    "local-first",
+    "mcp"
+  ]
+}

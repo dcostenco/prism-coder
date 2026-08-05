@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "prism",
+  "description": "Prism — persistent session memory, knowledge search, and local-first inference for coding agents",
+  "owner": {
+    "name": "Synalux",
+    "email": "support@synalux.ai"
+  },
+  "plugins": [
+    {
+      "name": "prism",
+      "description": "Persistent session memory for Claude Code. Restores prior decisions, open TODOs, and changed files at the start of each session; adds knowledge search, goal-drift detection, and local-first inference. Memory stays in SQLite on your machine by default.",
+      "author": {
+        "name": "Synalux",
+        "email": "support@synalux.ai"
+      },
+      "category": "productivity",
+      "source": "./plugins/prism",
+      "homepage": "https://synalux.ai"
+    }
+  ]
+}
