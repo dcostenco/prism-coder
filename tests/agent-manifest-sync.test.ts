@@ -3,9 +3,15 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { parse as parseToml } from "smol-toml";
 import {
   materializeAgentDefinitions,
+  parseAgentDefinition,
+  renderCodexAgent,
+  renderGeminiAgent,
   resolveClaudeAgentsDir,
+  resolveCodexAgentsDir,
+  resolveGeminiAgentsDir,
   validateAgentSection,
   type AgentSection,
 } from "../src/agentManifestSync.js";
@@ -90,7 +96,7 @@ describe("materializeAgentDefinitions", () => {
     expect(await readFile(join(dir, "fast-scanner.md"), "utf8")).toBe(scanner.content);
     const index = JSON.parse(await readFile(join(dir, ".prism-agents.json"), "utf8"));
     expect(index.owner).toBe("prism-mcp");
-    expect(index.files["fast-scanner"]).toBe(scanner.digest);
+    expect(index.files["fast-scanner"]).toEqual({ digest: scanner.digest, file: "fast-scanner.md" });
   });
 
   it("is idempotent: an unchanged section performs no writes", async () => {
@@ -140,7 +146,7 @@ describe("materializeAgentDefinitions", () => {
     const adopt = await materializeAgentDefinitions(section(incoming), dir);
     expect(adopt).toEqual({ installed: [], updated: [], pruned: [], conflicts: [] });
     const index = JSON.parse(await readFile(join(dir, ".prism-agents.json"), "utf8"));
-    expect(index.files["fast-scanner"]).toBe(incoming.digest);
+    expect(index.files["fast-scanner"]).toEqual({ digest: incoming.digest, file: "fast-scanner.md" });
   });
 
   it("prunes a pristine owned file on entitlement loss but preserves a hand-edited one", async () => {
@@ -155,6 +161,103 @@ describe("materializeAgentDefinitions", () => {
     const remaining = await readdir(dir);
     expect(remaining).not.toContain("fast-scanner.md");
     expect(await readFile(join(dir, "deep-verifier.md"), "utf8")).toBe("hand tuned\n");
+  });
+});
+
+describe("host renderers", () => {
+  const canonical = [
+    "---",
+    "name: fast-scanner",
+    "description: Cheap agent for bounded mechanical work.",
+    "tools: Read, Grep, Glob",
+    "model: haiku",
+    "effort: low",
+    "---",
+    "",
+    "You are a fast scanner. Return raw data.",
+    "",
+  ].join("\n");
+
+  it("parses canonical frontmatter and body", () => {
+    const { fields, body } = parseAgentDefinition(canonical);
+    expect(fields).toMatchObject({ name: "fast-scanner", effort: "low", model: "haiku" });
+    expect(body).toContain("You are a fast scanner.");
+    expect(parseAgentDefinition("no frontmatter")).toEqual({ fields: {}, body: "no frontmatter" });
+  });
+
+  it("renders valid codex TOML with mapped effort and tool-derived sandbox", () => {
+    const scanner = { name: "fast-scanner", content: canonical, digest: digest(canonical) };
+    const rendered = renderCodexAgent(scanner)!;
+    expect(rendered.file).toBe("fast-scanner.toml");
+    const parsed = parseToml(rendered.content) as Record<string, unknown>;
+    expect(parsed).toMatchObject({
+      name: "fast-scanner",
+      description: "Cheap agent for bounded mechanical work.",
+      model_reasoning_effort: "low",
+      sandbox_mode: "read-only",
+    });
+    expect(parsed.developer_instructions).toContain("You are a fast scanner.");
+    // Model tier deliberately does NOT travel to foreign hosts.
+    expect(rendered.content).not.toContain("haiku");
+
+    const verifierContent = canonical
+      .replace("tools: Read, Grep, Glob", "tools: Read, Grep, Glob, Bash")
+      .replace("effort: low", "effort: xhigh");
+    const verifier = { name: "fast-scanner", content: verifierContent, digest: digest(verifierContent) };
+    const parsedVerifier = parseToml(renderCodexAgent(verifier)!.content) as Record<string, unknown>;
+    expect(parsedVerifier.model_reasoning_effort).toBe("high"); // xhigh maps into codex vocabulary
+    expect(parsedVerifier.sandbox_mode).toBe("workspace-write"); // Bash implies execution
+  });
+
+  it("survives TOML-hostile bodies: quotes, backslashes, triple-quote runs", () => {
+    const hostile = `---\nname: hostile\ndescription: has "quotes" and \\ paths\neffort: low\ntools: Read\n---\nsay """hi""" C:\\temp\\x and "quoted"\n`;
+    const agent = { name: "hostile", content: hostile, digest: digest(hostile) };
+    const parsed = parseToml(renderCodexAgent(agent)!.content) as Record<string, unknown>;
+    expect(parsed.description).toBe('has "quotes" and \\ paths');
+    expect(parsed.developer_instructions).toContain('say """hi""" C:\\temp\\x and "quoted"');
+  });
+
+  it("renders gemini markdown with reduced frontmatter and preserved body", () => {
+    const scanner = { name: "fast-scanner", content: canonical, digest: digest(canonical) };
+    const rendered = renderGeminiAgent(scanner)!;
+    expect(rendered.file).toBe("fast-scanner.md");
+    const { fields, body } = parseAgentDefinition(rendered.content);
+    expect(fields).toEqual({ name: "fast-scanner", description: "Cheap agent for bounded mechanical work." });
+    expect(fields.tools).toBeUndefined();
+    expect(fields.effort).toBeUndefined();
+    expect(body).toContain("You are a fast scanner.");
+  });
+
+  it("materializes and prunes renderer-shaped files through the same ownership engine", async () => {
+    const dir = join(await tempRoot(), "codex-agents");
+    const scanner = definition("fast-scanner");
+    const first = await materializeAgentDefinitions(section(scanner), dir, renderCodexAgent);
+    expect(first.installed).toEqual(["fast-scanner"]);
+    expect(parseToml(await readFile(join(dir, "fast-scanner.toml"), "utf8"))).toMatchObject({ name: "fast-scanner" });
+    const gone = await materializeAgentDefinitions(section(), dir, renderCodexAgent);
+    expect(gone.pruned).toEqual(["fast-scanner"]);
+    expect((await readdir(dir)).filter((file) => file.endsWith(".toml"))).toEqual([]);
+  });
+});
+
+describe("host root resolvers", () => {
+  it("detects codex (incl. CODEX_HOME) and gemini homes under the production-default guard", async () => {
+    const home = await tempRoot();
+    const { mkdir } = await import("node:fs/promises");
+    expect(await resolveCodexAgentsDir({ homeDir: home, env: {} })).toBeNull();
+    expect(await resolveGeminiAgentsDir({ homeDir: home })).toBeNull();
+    await mkdir(join(home, ".codex"));
+    await mkdir(join(home, ".gemini"));
+    expect(await resolveCodexAgentsDir({ homeDir: home, env: {} })).toBe(join(home, ".codex", "agents"));
+    expect(await resolveGeminiAgentsDir({ homeDir: home })).toBe(join(home, ".gemini", "agents"));
+    const custom = join(home, "custom-codex");
+    await mkdir(custom);
+    expect(await resolveCodexAgentsDir({ homeDir: home, env: { CODEX_HOME: custom } })).toBe(join(custom, "agents"));
+    // Custom skill roots (test isolation) suppress auto-detection.
+    expect(await resolveCodexAgentsDir({ homeDir: home, env: {}, agentsSkillsDir: "/custom" })).toBeNull();
+    expect(await resolveGeminiAgentsDir({ homeDir: home, agentsSkillsDir: "/custom" })).toBeNull();
+    expect(await resolveCodexAgentsDir({ homeDir: home, env: {}, codexAgentsDir: false })).toBeNull();
+    expect(await resolveGeminiAgentsDir({ homeDir: home, geminiAgentsDir: false })).toBeNull();
   });
 });
 
@@ -177,11 +280,13 @@ describe("synchronizeSkillManifest agent wiring", () => {
     };
   }
 
-  it("materializes served agents alongside skills and reports them with an agent: prefix", async () => {
+  it("materializes served agents into every detected host root with per-host prefixes", async () => {
     _resetSkillManifestSyncForTest();
     const fixture = await tempRoot();
     const agentsSkillsDir = join(fixture, "skills");
     const claudeCodeAgentsDir = join(fixture, ".claude", "agents");
+    const codexAgentsDir = join(fixture, ".codex", "agents");
+    const geminiAgentsDir = join(fixture, ".gemini", "agents");
     const skills = [...REQUIRED_NATIVE_SKILL_NAMES].map(skillEntry)
       .sort((a, b) => a.metadata.priority - b.metadata.priority || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     const snapshot: SkillManifest = {
@@ -201,6 +306,8 @@ describe("synchronizeSkillManifest agent wiring", () => {
       claudeCodeSkillsDir: false,
       cursorSkillsDir: false,
       claudeCodeAgentsDir,
+      codexAgentsDir,
+      geminiAgentsDir,
       applyManifest: vi.fn(async () => undefined),
       fetchImpl: vi.fn(() => jsonResponse(payload)) as unknown as typeof fetch,
       configuredCredential: true,
@@ -208,8 +315,17 @@ describe("synchronizeSkillManifest agent wiring", () => {
     });
 
     expect(result.status).toBe("applied");
-    expect(result.installed).toContain("agent:fast-scanner");
+    expect(result.installed).toEqual(expect.arrayContaining([
+      "agent:fast-scanner", "agent-codex:fast-scanner", "agent-gemini:fast-scanner",
+    ]));
+    // Claude receives the canonical bytes; codex a TOML render; gemini a
+    // reduced-frontmatter markdown render.
     expect(await readFile(join(claudeCodeAgentsDir, "fast-scanner.md"), "utf8")).toBe(scanner.content);
+    const codexParsed = parseToml(await readFile(join(codexAgentsDir, "fast-scanner.toml"), "utf8")) as Record<string, unknown>;
+    expect(codexParsed.name).toBe("fast-scanner");
+    expect(codexParsed.model_reasoning_effort).toBe("low");
+    const geminiParsed = parseAgentDefinition(await readFile(join(geminiAgentsDir, "fast-scanner.md"), "utf8"));
+    expect(geminiParsed.fields).toEqual({ name: "fast-scanner", description: expect.any(String) });
 
     // FROZEN CONTRACT: agents ride outside the skills generation. A payload
     // whose agents perturbed `generation` would have failed validation above,

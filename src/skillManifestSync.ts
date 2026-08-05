@@ -9,7 +9,8 @@ import {
   applyManagedSkillManifest, getSetting, refreshConfigStorageCache,
 } from "./storage/configStorage.js";
 import {
-  materializeAgentDefinitions, resolveClaudeAgentsDir, validateAgentSection,
+  materializeAgentDefinitions, renderClaudeAgent, renderCodexAgent, renderGeminiAgent,
+  resolveClaudeAgentsDir, resolveCodexAgentsDir, resolveGeminiAgentsDir, validateAgentSection,
   type AgentSection,
 } from "./agentManifestSync.js";
 import { FREE_NATIVE_SKILL_NAMES, REQUIRED_NATIVE_SKILL_NAMES } from "./tools/skillRouting.js";
@@ -124,6 +125,10 @@ export interface SkillSyncOptions {
    * production-default guard as the skill mirrors.
    */
   claudeCodeAgentsDir?: string | false;
+  /** Codex agent root (~/.codex/agents, TOML renders). Same semantics. */
+  codexAgentsDir?: string | false;
+  /** Gemini CLI agent root (~/.gemini/agents, reduced markdown). Same semantics. */
+  geminiAgentsDir?: string | false;
   fetchImpl?: typeof fetch;
   getJwt?: () => Promise<string | null>;
   invalidateJwt?: () => void;
@@ -946,21 +951,26 @@ export async function synchronizeSkillManifest(options: SkillSyncOptions = {}): 
     }
     const native = mergeNativeResults(nativeResults);
     // Agent definitions are additive: they piggyback on the manifest with
-    // their own generation, and their outcome reports under an `agent:`
-    // prefix. A failure here never rolls back or degrades skill state — it
-    // surfaces as a conflict instead.
+    // their own generation, and each host's outcome reports under its own
+    // prefix. A failure on one host never rolls back skill state or the
+    // other hosts — it surfaces as a conflict instead.
     if (manifest.agentSection) {
-      const agentsDir = await resolveClaudeAgentsDir(options);
-      if (agentsDir) {
+      const hostTargets = [
+        { prefix: "agent", dir: await resolveClaudeAgentsDir(options), render: renderClaudeAgent },
+        { prefix: "agent-codex", dir: await resolveCodexAgentsDir(options), render: renderCodexAgent },
+        { prefix: "agent-gemini", dir: await resolveGeminiAgentsDir(options), render: renderGeminiAgent },
+      ];
+      for (const host of hostTargets) {
+        if (!host.dir) continue;
         try {
-          const outcome = await materializeAgentDefinitions(manifest.agentSection, agentsDir);
-          native.installed.push(...outcome.installed.map((name) => `agent:${name}`));
-          native.updated.push(...outcome.updated.map((name) => `agent:${name}`));
-          native.pruned.push(...outcome.pruned.map((name) => `agent:${name}`));
-          native.conflicts.push(...outcome.conflicts.map((name) => `agent:${name}`));
+          const outcome = await materializeAgentDefinitions(manifest.agentSection, host.dir, host.render);
+          native.installed.push(...outcome.installed.map((name) => `${host.prefix}:${name}`));
+          native.updated.push(...outcome.updated.map((name) => `${host.prefix}:${name}`));
+          native.pruned.push(...outcome.pruned.map((name) => `${host.prefix}:${name}`));
+          native.conflicts.push(...outcome.conflicts.map((name) => `${host.prefix}:${name}`));
         } catch (error) {
-          console.error(`[Prism Skill Sync] agent materialization failed: ${error instanceof Error ? error.message : String(error)}`);
-          native.conflicts.push("agent:sync-failed");
+          console.error(`[Prism Skill Sync] ${host.prefix} materialization failed: ${error instanceof Error ? error.message : String(error)}`);
+          native.conflicts.push(`${host.prefix}:sync-failed`);
         }
       }
     }

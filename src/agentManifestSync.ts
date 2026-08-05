@@ -50,11 +50,109 @@ export interface AgentSyncOutcome {
   conflicts: string[];
 }
 
+/** A host-specific rendering of one canonical agent definition. */
+export interface RenderedAgent {
+  file: string;
+  content: string;
+}
+
+export type AgentRenderer = (agent: AgentDefinition) => RenderedAgent | null;
+
+interface AgentIndexEntry {
+  digest: string;
+  file: string;
+}
+
 interface AgentIndex {
   owner: typeof OWNER;
   generation: string;
-  files: Record<string, string>;
+  files: Record<string, AgentIndexEntry>;
 }
+
+/** Parsed canonical AGENT.md: Claude-style frontmatter plus prompt body. */
+export interface ParsedAgentDefinition {
+  fields: Record<string, string>;
+  body: string;
+}
+
+export function parseAgentDefinition(content: string): ParsedAgentDefinition {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (!match) return { fields: {}, body: content };
+  const fields: Record<string, string> = {};
+  for (const line of match[1].split("\n")) {
+    const entry = line.match(/^([A-Za-z_-]+):\s*(.*)$/);
+    if (entry) fields[entry[1]] = entry[2].trim();
+  }
+  return { fields, body: content.slice(match[0].length) };
+}
+
+// ─── Host renderers ──────────────────────────────────────────
+//
+// The canonical format is Claude Code's agent markdown; other hosts receive a
+// translation of the universally-expressible subset. Model tier is
+// DELIBERATELY not translated: model namespaces are host-specific and rotate
+// (gpt-5.6-* today), so foreign hosts keep their own configured defaults
+// (codex: default_subagent_model) and only the proven effort/tool-surface
+// levers travel.
+
+/** Claude Code: the canonical content verbatim. */
+export const renderClaudeAgent: AgentRenderer = (agent) => ({
+  file: `${agent.name}.md`,
+  content: agent.content,
+});
+
+const CODEX_EFFORT: Record<string, string> = {
+  low: "low", medium: "medium", high: "high", xhigh: "high", max: "high",
+};
+
+function tomlString(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+}
+
+function tomlMultiline(value: string): string {
+  // Escaping every backslash and quote keeps any body (including """ runs)
+  // valid inside a multiline basic string while preserving literal newlines.
+  return `"""\n${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"""`;
+}
+
+/**
+ * Codex: ~/.codex/agents/<name>.toml. Keys verified against codex 0.146.0:
+ * name, description, developer_instructions, model_reasoning_effort,
+ * sandbox_mode. A Bash-bearing tool surface implies the agent must execute
+ * reproductions, so it gets workspace-write; otherwise read-only.
+ */
+export const renderCodexAgent: AgentRenderer = (agent) => {
+  const { fields, body } = parseAgentDefinition(agent.content);
+  const effort = CODEX_EFFORT[fields.effort ?? ""];
+  const tools = (fields.tools ?? "").split(",").map((tool) => tool.trim());
+  const sandbox = tools.includes("Bash") ? "workspace-write" : "read-only";
+  const lines = [
+    `name = ${tomlString(agent.name)}`,
+    `description = ${tomlString(fields.description ?? agent.name)}`,
+    ...(effort ? [`model_reasoning_effort = ${tomlString(effort)}`] : []),
+    `sandbox_mode = ${tomlString(sandbox)}`,
+    `developer_instructions = ${tomlMultiline(body)}`,
+  ];
+  return { file: `${agent.name}.toml`, content: `${lines.join("\n")}\n` };
+};
+
+/**
+ * Gemini CLI: ~/.gemini/agents/<name>.md (verified loadAgentsFromDirectory:
+ * .md files, "_"-prefixed skipped). Frontmatter is reduced to the fields
+ * gemini understands; Claude-specific keys (tools/model/effort) are dropped
+ * rather than risked against a stricter parser. Coexists with the
+ * prism-connect agent policy that owns ~/.gemini/settings.json overrides.
+ */
+export const renderGeminiAgent: AgentRenderer = (agent) => {
+  const { fields, body } = parseAgentDefinition(agent.content);
+  const frontmatter = [
+    "---",
+    `name: ${agent.name}`,
+    `description: ${fields.description ?? agent.name}`,
+    "---",
+  ].join("\n");
+  return { file: `${agent.name}.md`, content: `${frontmatter}\n\n${body}` };
+};
 
 function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
@@ -118,14 +216,55 @@ export async function resolveClaudeAgentsDir(options: {
   return join(claudeHome, "agents");
 }
 
+async function detectHostAgentsDir(hostHome: string): Promise<string | null> {
+  try {
+    const stat = await lstat(hostHome);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
+  } catch {
+    return null;
+  }
+  return join(hostHome, "agents");
+}
+
+/** Codex agent root (~/.codex/agents or $CODEX_HOME/agents), same guards. */
+export async function resolveCodexAgentsDir(options: {
+  homeDir?: string;
+  codexAgentsDir?: string | false;
+  agentsSkillsDir?: string;
+  env?: NodeJS.ProcessEnv;
+} = {}): Promise<string | null> {
+  if (options.codexAgentsDir === false) return null;
+  if (typeof options.codexAgentsDir === "string") return options.codexAgentsDir;
+  if (options.agentsSkillsDir !== undefined) return null;
+  const configured = (options.env ?? process.env).CODEX_HOME?.trim();
+  const codexHome = configured || join(options.homeDir ?? homedir(), ".codex");
+  return detectHostAgentsDir(codexHome);
+}
+
+/** Gemini CLI agent root (~/.gemini/agents), same guards. */
+export async function resolveGeminiAgentsDir(options: {
+  homeDir?: string;
+  geminiAgentsDir?: string | false;
+  agentsSkillsDir?: string;
+} = {}): Promise<string | null> {
+  if (options.geminiAgentsDir === false) return null;
+  if (typeof options.geminiAgentsDir === "string") return options.geminiAgentsDir;
+  if (options.agentsSkillsDir !== undefined) return null;
+  return detectHostAgentsDir(join(options.homeDir ?? homedir(), ".gemini"));
+}
+
+const SAFE_FILE = /^[A-Za-z0-9_-]+\.(md|toml)$/;
+
 async function readIndex(path: string): Promise<AgentIndex | null> {
   try {
     const parsed = JSON.parse(await readFile(path, "utf8")) as Partial<AgentIndex>;
     if (parsed?.owner !== OWNER || typeof parsed.files !== "object" || !parsed.files) return null;
-    const files: Record<string, string> = {};
-    for (const [name, digest] of Object.entries(parsed.files)) {
-      if (SAFE_NAME.test(name) && typeof digest === "string" && SHA256.test(digest)) {
-        files[name] = digest.toLowerCase();
+    const files: Record<string, AgentIndexEntry> = {};
+    for (const [name, entry] of Object.entries(parsed.files)) {
+      if (!SAFE_NAME.test(name) || !entry || typeof entry !== "object") continue;
+      const { digest, file } = entry as Partial<AgentIndexEntry>;
+      if (typeof digest === "string" && SHA256.test(digest) && typeof file === "string" && SAFE_FILE.test(file)) {
+        files[name] = { digest: digest.toLowerCase(), file };
       }
     }
     return { owner: OWNER, generation: typeof parsed.generation === "string" ? parsed.generation : "", files };
@@ -163,6 +302,7 @@ async function writeAtomic(dir: string, target: string, content: string): Promis
 export async function materializeAgentDefinitions(
   section: AgentSection,
   targetDir: string,
+  render: AgentRenderer = renderClaudeAgent,
 ): Promise<AgentSyncOutcome> {
   await mkdir(targetDir, { recursive: true, mode: 0o700 });
   const rootStat = await lstat(targetDir);
@@ -172,22 +312,28 @@ export async function materializeAgentDefinitions(
   const indexPath = join(targetDir, INDEX);
   const index = await readIndex(indexPath);
   const owned = index?.files ?? {};
-  const incoming = new Map(section.agents.map((agent) => [agent.name, agent]));
+  const incoming = new Map<string, RenderedAgent>();
+  for (const agent of section.agents) {
+    const rendered = render(agent);
+    if (rendered === null) continue;
+    if (!SAFE_FILE.test(rendered.file)) throw new Error(`unsafe rendered agent file: ${rendered.file}`);
+    incoming.set(agent.name, rendered);
+  }
 
   const installed: string[] = [];
   const updated: string[] = [];
   const pruned: string[] = [];
   const conflicts: string[] = [];
-  const finalFiles: Record<string, string> = {};
+  const finalFiles: Record<string, AgentIndexEntry> = {};
 
   // Downgrades first, mirroring the skill engine's ordering: entitlement
   // removal must not depend on the success of later installs.
-  for (const [name, recordedDigest] of Object.entries(owned)) {
+  for (const [name, entry] of Object.entries(owned)) {
     if (incoming.has(name)) continue;
-    const target = join(targetDir, `${name}.md`);
+    const target = join(targetDir, entry.file);
     const digestOnDisk = await currentDigest(target);
     if (digestOnDisk === null) continue; // already gone
-    if (digestOnDisk === recordedDigest) {
+    if (digestOnDisk === entry.digest) {
       await rm(target, { force: true });
       pruned.push(name);
     } else {
@@ -196,33 +342,35 @@ export async function materializeAgentDefinitions(
     }
   }
 
-  for (const agent of section.agents) {
-    const target = join(targetDir, `${agent.name}.md`);
+  for (const [name, rendered] of incoming) {
+    const target = join(targetDir, rendered.file);
+    const renderedDigest = sha256(Buffer.from(rendered.content, "utf8"));
     const digestOnDisk = await currentDigest(target);
     if (digestOnDisk === null) {
-      await writeAtomic(targetDir, target, agent.content);
-      installed.push(agent.name);
-      finalFiles[agent.name] = agent.digest;
+      await writeAtomic(targetDir, target, rendered.content);
+      installed.push(name);
+      finalFiles[name] = { digest: renderedDigest, file: rendered.file };
       continue;
     }
-    const pristine = owned[agent.name] !== undefined && digestOnDisk === owned[agent.name];
+    const record = owned[name];
+    const pristine = record !== undefined && record.file === rendered.file && digestOnDisk === record.digest;
     if (!pristine) {
-      if (digestOnDisk === agent.digest) {
+      if (digestOnDisk === renderedDigest) {
         // Byte-identical foreign file: adopt without writing. Content equality
         // is the strongest ownership evidence available for a single file.
-        finalFiles[agent.name] = agent.digest;
+        finalFiles[name] = { digest: renderedDigest, file: rendered.file };
       } else {
-        conflicts.push(agent.name);
+        conflicts.push(name);
       }
       continue;
     }
-    if (digestOnDisk === agent.digest) {
-      finalFiles[agent.name] = agent.digest;
+    if (digestOnDisk === renderedDigest) {
+      finalFiles[name] = { digest: renderedDigest, file: rendered.file };
       continue;
     }
-    await writeAtomic(targetDir, target, agent.content);
-    updated.push(agent.name);
-    finalFiles[agent.name] = agent.digest;
+    await writeAtomic(targetDir, target, rendered.content);
+    updated.push(name);
+    finalFiles[name] = { digest: renderedDigest, file: rendered.file };
   }
 
   const nextIndex: AgentIndex = { owner: OWNER, generation: section.generation, files: finalFiles };
