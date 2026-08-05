@@ -21,7 +21,7 @@
  * ======================================================================
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import * as os from "node:os";
@@ -1026,6 +1026,18 @@ describe("ledgerHandlers", () => {
   });
 
   describe("sessionBootstrapHandler", () => {
+    // Pin every bootstrap test to a dead port by default. Without this the
+    // dashboard probe reaches whatever the developer happens to be running
+    // locally, so results differ between a laptop and CI — the exact
+    // environment coupling that made an earlier assertion pass here and fail
+    // in CI. Tests that care about the probe set this explicitly.
+    const savedDashboardPort = process.env.PRISM_DASHBOARD_PORT;
+    beforeEach(() => { process.env.PRISM_DASHBOARD_PORT = "1"; });
+    afterAll(() => {
+      if (savedDashboardPort === undefined) delete process.env.PRISM_DASHBOARD_PORT;
+      else process.env.PRISM_DASHBOARD_PORT = savedDashboardPort;
+    });
+
     it("greets a first run with actions and the paid CTA, never with absence", async () => {
       // First run = dashboard never touched: no agent identity, no projects,
       // no prior bootstrap marker.
@@ -1065,18 +1077,39 @@ describe("ledgerHandlers", () => {
         expect(dead).toContain("Dashboard:** not running");
         expect(dead).not.toContain("http://localhost");
 
-        // Live port: bind an ephemeral listener and confirm it is advertised.
-        const net = await import("node:net");
-        const server = net.createServer();
-        const port: number = await new Promise((done) => {
-          server.listen(0, "127.0.0.1", () => done((server.address() as any).port));
+        const http = await import("node:http");
+        const serve = async (handler: http.RequestListener) => {
+          const server = http.createServer(handler);
+          const port: number = await new Promise((done) => {
+            server.listen(0, "127.0.0.1", () => done((server.address() as any).port));
+          });
+          return { server, port };
+        };
+
+        // A FOREIGN listener must be rejected. The default port is 3000 — the
+        // most commonly occupied port on a developer machine — so a bare
+        // liveness check would point a first-run user at their own dev server.
+        const foreign = await serve((_req, res) => { res.statusCode = 404; res.end("not prism"); });
+        process.env.PRISM_DASHBOARD_PORT = String(foreign.port);
+        try {
+          const wrong = (await sessionBootstrapHandler({})).content[0].text as string;
+          expect(wrong).toContain("Dashboard:** not running");
+          expect(wrong).not.toContain(`http://localhost:${foreign.port}`);
+        } finally {
+          await new Promise((done) => foreign.server.close(() => done(null)));
+        }
+
+        // A real dashboard answers /api/health with 200 and IS advertised.
+        const real = await serve((req, res) => {
+          if (req.url === "/api/health") { res.statusCode = 200; res.end("{}"); return; }
+          res.statusCode = 404; res.end();
         });
-        process.env.PRISM_DASHBOARD_PORT = String(port);
+        process.env.PRISM_DASHBOARD_PORT = String(real.port);
         try {
           const live = (await sessionBootstrapHandler({})).content[0].text as string;
-          expect(live).toContain(`http://localhost:${port}`);
+          expect(live).toContain(`http://localhost:${real.port}`);
         } finally {
-          await new Promise((done) => server.close(() => done(null)));
+          await new Promise((done) => real.server.close(() => done(null)));
         }
       } finally {
         if (originalPort === undefined) delete process.env.PRISM_DASHBOARD_PORT;

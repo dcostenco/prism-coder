@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import * as os from "node:os";
-import * as net from "node:net";
+import * as http from "node:http";
 import { randomUUID } from "node:crypto";
 import { redactSettings, toMarkdown } from "./commonHelpers.js";
 import { scanAndRedactPHI } from "../utils/phiGuard.js";
@@ -436,21 +436,25 @@ async function readDashboardUrl(): Promise<string | null> {
   if (!port) port = "3000";
   // The port file persists across boots and is never cleaned up, so it is
   // evidence of a PREVIOUS dashboard, not a running one. Advertising a dead
-  // URL as the first-run headline action is worse than omitting it, so probe
-  // before promising. Bounded so startup latency cannot regress.
-  const listening = await new Promise<boolean>((resolveProbe) => {
-    const socket = new net.Socket();
-    const done = (value: boolean) => {
-      socket.destroy();
-      resolveProbe(value);
-    };
-    socket.setTimeout(250);
-    socket.once("connect", () => done(true));
-    socket.once("timeout", () => done(false));
-    socket.once("error", () => done(false));
-    socket.connect(Number(port), "127.0.0.1");
+  // URL as the first-run headline action is worse than omitting it.
+  //
+  // A TCP connect is NOT sufficient: it proves something is listening, not
+  // that it is Prism. The default is 3000 — the single most commonly occupied
+  // port on a developer machine — so a bare liveness check would confidently
+  // point a first-run user at their own dev server. Hit the dashboard's
+  // /api/health instead, so identity is verified rather than assumed.
+  const healthy = await new Promise<boolean>((resolveProbe) => {
+    const request = http.get(
+      { host: "127.0.0.1", port: Number(port), path: "/api/health", timeout: 300 },
+      (response) => {
+        response.resume(); // drain so the socket can close
+        resolveProbe(response.statusCode === 200);
+      },
+    );
+    request.once("timeout", () => { request.destroy(); resolveProbe(false); });
+    request.once("error", () => resolveProbe(false));
   });
-  return listening ? `http://localhost:${port}` : null;
+  return healthy ? `http://localhost:${port}` : null;
 }
 
 function capNativeStartupText(
