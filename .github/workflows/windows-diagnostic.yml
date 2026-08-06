@@ -1,0 +1,41 @@
+name: Windows Diagnostic
+
+# A trimmed, on-demand Windows instrument — NOT a gate.
+#
+# The full CLI Integration matrix takes ~7 minutes per iteration and answers
+# only pass/fail. Six attempts at the Windows EBUSY teardown failure were
+# designed blind because of that loop: three were empirically refuted, and the
+# one that turned CI green did so by making cleanup non-fatal rather than by
+# releasing the handle.
+#
+# This job runs ONLY the diagnostic, ONLY on windows-x64 — the exact platform
+# where the bug lives, and the only Windows arch libsql ships a native binding
+# for (@libsql/win32-x64-msvc; there is no win32-arm64, which is why a local
+# Windows-on-ARM VM cannot faithfully reproduce it).
+#
+# Run it from the Actions tab or:  gh workflow run windows-diagnostic.yml
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      # No Python/browser runtime, no audit, no leak guard, no build of the
+      # full test suite — this job exists to answer one question quickly.
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: SQLite handle-release diagnostic
+        run: npx vitest run tests/verification/windows-sqlite-handle.test.ts --reporter=verbose
