@@ -128,9 +128,12 @@ describe("Windows sqlite handle release (diagnostic)", { timeout: 60_000 }, () =
     report("E5 raw client, DELETE", d5);
 
     // E6 — the actual product operation: restoreFromBackup ends in
-    // copyFileSync(backup, dbPath), writing ONTO the live database. Reading
-    // from it (createBackup) is permitted, so backup works; this proves
-    // whether the WRITE direction fails, and whether closing first fixes it.
+    // copyFileSync(backup, dbPath), writing ONTO the live database.
+    //
+    // RESULT (windows-x64, measured): all three directions succeed. The lock
+    // blocks unlink/rename ONLY — not reading and not overwriting. Restore
+    // was therefore never broken on Windows; an earlier claim that it was had
+    // been inferred from the E1 unlink failure rather than measured.
     const d6 = mkdtempSync(join(tmpdir(), "prism-diag-e6-"));
     const s6 = await seed(d6);
     const live6 = join(d6, "isolated.db");
@@ -143,7 +146,7 @@ describe("Windows sqlite handle release (diagnostic)", { timeout: 60_000 }, () =
     } catch (error) {
       overwriteWhileOpen = `${(error as NodeJS.ErrnoException).code} (${(error as NodeJS.ErrnoException).syscall})`;
     }
-    console.log(`[E6] overwrite live db WHILE OPEN (restore, pre-fix): ${overwriteWhileOpen}`);
+    console.log(`[E6] overwrite live db WHILE OPEN: ${overwriteWhileOpen}`);
     await s6.close();
     let overwriteAfterClose = "OK";
     try {
@@ -151,7 +154,7 @@ describe("Windows sqlite handle release (diagnostic)", { timeout: 60_000 }, () =
     } catch (error) {
       overwriteAfterClose = `${(error as NodeJS.ErrnoException).code} (${(error as NodeJS.ErrnoException).syscall})`;
     }
-    console.log(`[E6] overwrite AFTER close() (restore, post-fix): ${overwriteAfterClose}`);
+    console.log(`[E6] overwrite AFTER close(): ${overwriteAfterClose}`);
 
     console.log("\n=== HOW TO READ THIS ===");
     console.log("E1 EBUSY but E4 clean  -> the leak is in SqliteStorage, not libsql");
@@ -159,8 +162,8 @@ describe("Windows sqlite handle release (diagnostic)", { timeout: 60_000 }, () =
     console.log("E2 clean but E1 EBUSY  -> wal_checkpoint(TRUNCATE) before close is the one-line product fix");
     console.log("E3 still EBUSY         -> not a timing race; the handle is never released");
     console.log("only -shm/-wal EBUSY   -> the db handle IS released; only sidecars linger");
-    console.log("E6 overwrite-while-open fails but after-close succeeds -> closeStorage()");
-    console.log("   before copyFileSync is the correct fix for restoreFromBackup");
+    console.log("E6 all three OK        -> the lock blocks unlink/rename ONLY, not");
+    console.log("   read or overwrite; restore is unaffected on every platform");
 
     for (const dir of [d1, d2, d3, d4, d5, d6]) {
       try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* reclaimed by OS */ }

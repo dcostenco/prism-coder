@@ -224,16 +224,19 @@ export async function restoreFromBackup(
         const preRestoreResult = await createBackup(dbPath);
         debugLog(`Pre-restore backup: ${preRestoreResult.success ? "OK" : "FAILED"}`);
 
-        // Release the live connection BEFORE overwriting the file.
+        // Release the live connection BEFORE swapping the file underneath it.
         //
-        // Reading a locked file is permitted — which is why createBackup()
-        // works — but writing ONTO one is not. Measured on windows-x64
-        // (2026-08-05): libsql does not release the database handle on
-        // close(), so unlink/overwrite fails EBUSY. Without this, restore
-        // failed on Windows *after* the pre-restore backup was written: it
-        // errored midway through the one operation whose entire purpose is
-        // recovery. POSIX tolerates overwriting an open file, so this was
-        // invisible on macOS and Linux.
+        // NOT a platform workaround. Measured on windows-x64 (2026-08-05):
+        // overwriting the database while a connection is open SUCCEEDS on
+        // every platform — SQLite shares the file for reading and writing,
+        // and only unlink/rename are blocked. So restore was never broken.
+        //
+        // The reason is correctness: replacing a database file beneath a live
+        // connection leaves that connection pointing at bytes it did not
+        // read, with a stale page cache and a WAL that no longer describes
+        // the file. SQLite documents this as unsafe. closeStorage() makes the
+        // swap atomic from the connection's point of view — the next
+        // getStorage() opens the restored file cleanly.
         const { closeStorage } = await import("../storage/index.js");
         await closeStorage();
 
