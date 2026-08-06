@@ -1,5 +1,5 @@
 # Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
-# Prism MCP — The Mind Palace for AI Agents
+# Prism — persistent session memory for AI coding agents (local-first, on-device)
 
 startCommand:
   type: stdio
