@@ -38,6 +38,21 @@ badge pointed at a different server (dcostenco/BCBA)."
 
 Use the canonical description above; repo URL `https://github.com/dcostenco/prism-coder`.
 
+## Paste-ready: amendment to Claude plugin review (submission shows old copy)
+
+The pending `claude-community` submission snapshots the form text, so the
+listing will publish with the pre-#128 description unless amended. Send via
+the submission confirmation email / plugin-review channel:
+
+> Subject: synalux-prism (pending review) — updated description
+>
+> While our submission for `synalux-prism` (repo
+> `dcostenco/prism-coder`, path `plugins/prism`) is pending review, we
+> refreshed the plugin description in the repo's `.claude-plugin/plugin.json`.
+> If the published listing uses the form text rather than the manifest, please
+> use the manifest description (current on `main`). No other change — same
+> slug, same repo, same path. Thanks!
+
 ## Measurement
 
 Re-check ~2 weeks after the external listings land:

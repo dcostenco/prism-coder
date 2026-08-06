@@ -38,6 +38,25 @@ jobs:
           tar xzf mcp-publisher.tar.gz
           sudo mv mcp-publisher /usr/local/bin/
       - name: Publish to MCP Registry
+        # Registry versions are immutable: a server.json change without a
+        # version bump (description edits, metadata) always gets 400
+        # "cannot publish duplicate version". That is the expected outcome for
+        # a metadata-only merge — the change rides the next release — not a
+        # failure. Verified 2026-08-06: a description-only merge produced a
+        # red X that read as "publish broken" while nothing was wrong. Only
+        # the duplicate-version rejection is tolerated; every other error
+        # still fails the job.
         run: |
           mcp-publisher login github-oidc
-          mcp-publisher publish
+          set +e
+          output=$(mcp-publisher publish 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ $status -ne 0 ]; then
+            if printf '%s' "$output" | grep -q "duplicate version"; then
+              echo "::notice::Version already on the registry — metadata changes ride the next release. No-op."
+              exit 0
+            fi
+            exit $status
+          fi
