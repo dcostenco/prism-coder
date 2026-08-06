@@ -24,9 +24,24 @@ describe('Migration Utility', () => {
   });
 
   afterAll(() => {
-    // Cleanup
-    if (fs.existsSync(TMP_DIR)) {
-      fs.rmSync(TMP_DIR, { recursive: true, force: true });
+    // Best-effort cleanup, deliberately non-fatal — same treatment as
+    // tests/integration/grounding-staleness.test.ts, and the same cause.
+    //
+    // libsql's close() does not finalize outstanding prepared statements, so
+    // a connection survives until GC runs finalizers
+    // (tursodatabase/libsql-js#228). On Windows that lingering handle keeps a
+    // file alive inside TMP_DIR, and the recursive remove fails with
+    // ENOTEMPTY on rmdir. POSIX permits unlinking open files, which is why
+    // this only ever breaks the windows legs.
+    //
+    // The assertions all pass; only teardown throws. Failing a green suite on
+    // an upstream handle leak we cannot fix from here would be noise, so warn
+    // instead. maxRetries covers the case where GC does run in time.
+    if (!fs.existsSync(TMP_DIR)) return;
+    try {
+      fs.rmSync(TMP_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (error) {
+      console.warn(`[migration.test] temp cleanup skipped: ${(error as Error).message}`);
     }
   });
 
