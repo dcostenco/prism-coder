@@ -12,7 +12,20 @@ import { getSetting } from "./configStorage.js";
 export function isValidHttpUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
+    if (parsed.protocol === "https:") return true;
+    // Plain http is accepted ONLY for loopback, where the traffic never leaves
+    // the machine — the local Supabase stack runs on 127.0.0.1:54321.
+    //
+    // Every caller of this function is gating a CLOUD backend, so accepting
+    // http for a remote host meant session content — summaries, decisions,
+    // filenames — could be sent unencrypted. The privacy policy states this
+    // traffic travels over TLS; before this change that was true only because
+    // the default base URL happens to be https, not because anything enforced
+    // it. A published claim should be guaranteed by the code, not by a default
+    // the user can silently override.
+    if (parsed.protocol !== "http:") return false;
+    const host = parsed.hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
   } catch {
     return false;
   }

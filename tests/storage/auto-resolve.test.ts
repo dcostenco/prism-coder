@@ -107,12 +107,20 @@ describe("isValidHttpUrl — URL validation edge cases", () => {
     // These pass the protocol check; defense-in-depth lives downstream
     // (HTTP client TLS validation, server-side allow-listing, etc.).
 
-    it("does not block SSRF-style URLs at this layer", () => {
-        // The resolver's URL check only validates protocol, not hostname.
-        // SSRF defense belongs in the HTTP client (or upstream allow-list),
-        // not here. This test pins the contract so a future tightening is
-        // an explicit decision, not an accident.
-        expect(isValidHttpUrl("http://169.254.169.254/latest/meta-data/")).toBe(true);
+    it("still does not block SSRF-style URLs at this layer", () => {
+        // The resolver's URL check validates protocol only, never hostname.
+        // SSRF defense belongs in the HTTP client (or an upstream allow-list),
+        // not here. The original version of this test pinned the contract so
+        // that "a future tightening is an explicit decision, not an accident";
+        // this IS that decision, recorded rather than silently absorbed.
+        //
+        // Changed 2026-08-06: plain http to a REMOTE host is now rejected,
+        // because the published privacy policy states cloud memory travels
+        // over TLS and only the default base URL was making that true. The
+        // metadata address over https still passes — hostname filtering
+        // remains out of scope here.
+        expect(isValidHttpUrl("https://169.254.169.254/latest/meta-data/")).toBe(true);
+        expect(isValidHttpUrl("http://169.254.169.254/latest/meta-data/")).toBe(false);
     });
 
     it("handles extremely long URLs without crashing", () => {
