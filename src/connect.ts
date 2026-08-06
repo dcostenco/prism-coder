@@ -1602,7 +1602,17 @@ function registerCodexTomlHost(
   // configure the same server twice under one key, so every Prism tool appears
   // in duplicate and load order decides which wins. Skip instead, and say why —
   // an unexplained no-op is worse than the duplicate it prevents.
-  const providingPlugin = codexPluginProvidesPrismMcp(dirname(configPath));
+  // Build the set of plugins Codex will actually load: present in [plugins]
+  // and not explicitly disabled. Detection must not fire on a stale cache
+  // entry for a plugin that is disabled or gone.
+  const enabledPluginKeys = new Set<string>();
+  const pluginsTable = isJsonObject(config) ? config.plugins : undefined;
+  if (isJsonObject(pluginsTable)) {
+    for (const [key, entry] of Object.entries(pluginsTable)) {
+      if (isJsonObject(entry) && entry.enabled !== false) enabledPluginKeys.add(key);
+    }
+  }
+  const providingPlugin = codexPluginProvidesPrismMcp(dirname(configPath), enabledPluginKeys);
   if (providingPlugin && !locateCodexManagedBlock(originalText ?? "")) {
     // "existing" rather than a new status: the server IS already registered,
     // just by the plugin rather than by us. Nothing to do is the truth.
@@ -1728,9 +1738,19 @@ function serializeCodexManagedBlock(entry: JsonObject, existingText: string): st
  * Detection reads the installed plugin's own manifest rather than matching a
  * plugin NAME, so it keeps working if the plugin is renamed or vendored:
  *   <codexHome>/plugins/cache/<marketplace>/<plugin>/<version>/.mcp.json
- * Any enabled plugin whose .mcp.json declares a prism-mcp server counts.
+ *
+ * A cache manifest is necessary but NOT sufficient: a disabled or half-removed
+ * plugin leaves its .mcp.json on disk (verified 2026-08-06 — flipping
+ * `enabled = false` in config.toml does not clear the cache). Counting file
+ * presence alone would make `prism connect` skip its own registration for a
+ * plugin that is not actually providing the server, leaving the user with no
+ * prism-mcp at all. So the plugin@marketplace key must ALSO be enabled in the
+ * caller's parsed config for it to count.
  */
-export function codexPluginProvidesPrismMcp(codexHome: string): string | null {
+export function codexPluginProvidesPrismMcp(
+  codexHome: string,
+  enabledPluginKeys: ReadonlySet<string>,
+): string | null {
   const cacheRoot = join(codexHome, "plugins", "cache");
   let marketplaces: string[];
   try {
@@ -1750,8 +1770,13 @@ export function codexPluginProvidesPrismMcp(codexHome: string): string | null {
           const parsed = JSON.parse(readFileSync(manifest, "utf8")) as {
             mcpServers?: Record<string, unknown>;
           };
-          if (parsed?.mcpServers && Object.prototype.hasOwnProperty.call(parsed.mcpServers, "prism-mcp")) {
-            return `${plugin}@${marketplace}`;
+          const key = `${plugin}@${marketplace}`;
+          if (
+            enabledPluginKeys.has(key) &&
+            parsed?.mcpServers &&
+            Object.prototype.hasOwnProperty.call(parsed.mcpServers, "prism-mcp")
+          ) {
+            return key;
           }
         } catch {
           // absent or unreadable manifest — not a provider
