@@ -1949,18 +1949,32 @@ const DEMO_PROJECT = "prism-demo";
  * machine. If either half fails we return null and the greeting simply
  * omits the demo — a first run must never break on a demo.
  */
-async function seedAndRecallDemoMemory(conversationId: string): Promise<string | null> {
+export async function seedAndRecallDemoMemory(conversationId: string): Promise<string | null> {
   try {
     const storage = await getStorage();
-    await storage.saveLedger({
-      project: DEMO_PROJECT,
-      conversation_id: conversationId,
-      user_id: PRISM_USER_ID,
-      summary: "Prism saved this memory during your first session to demonstrate recall.",
-      todos: ["Try it yourself: ask your agent to `session_save_ledger` at the end of this session"],
-      decisions: ["Demo memory — delete anytime with session_forget_memory or from the dashboard"],
-      keywords: ["demo", "first-run"],
-    });
+    // Idempotence before insert: the first_bootstrap_at marker is
+    // check-then-set, so two hosts bootstrapping a fresh machine at once BOTH
+    // take the first-run branch (observed setups run several agents
+    // concurrently). Seeding only when no demo row exists narrows that race
+    // from "every concurrent first run inserts" to a near-simultaneous
+    // read-read window, and the loser still renders the winner's row — the
+    // user sees one demo either way.
+    const existing = (await storage.getLedgerEntries({
+      project: `eq.${DEMO_PROJECT}`,
+      user_id: `eq.${PRISM_USER_ID}`,
+      limit: "1",
+    })) as unknown[];
+    if (existing.length === 0) {
+      await storage.saveLedger({
+        project: DEMO_PROJECT,
+        conversation_id: conversationId,
+        user_id: PRISM_USER_ID,
+        summary: "Prism saved this memory during your first session to demonstrate recall.",
+        todos: ["Try it yourself: ask your agent to `session_save_ledger` at the end of this session"],
+        decisions: ["Demo memory — delete anytime with session_forget_memory or from the dashboard"],
+        keywords: ["demo", "first-run"],
+      });
+    }
     const rows = (await storage.getLedgerEntries({
       project: `eq.${DEMO_PROJECT}`,
       user_id: `eq.${PRISM_USER_ID}`,
