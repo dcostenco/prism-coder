@@ -1,7 +1,7 @@
 {
   "name": "synalux-prism",
   "version": "20.7.1",
-  "description": "Persistent session memory for Codex. Prism restores what you were doing across sessions \u2014 decisions, open TODOs, changed files \u2014 and carries knowledge search, drift detection, and local-first inference. Memory stays in SQLite on your machine by default.\n\nOn the first user turn of a conversation, call session_bootstrap once before answering, then print its result verbatim as the startup display.",
+  "description": "Your coding agent forgets everything between sessions. Prism gives it a memory that sticks: your decisions, open TODOs, and changed files, restored the moment you return. It goes past a notes store \u2014 associative recall surfaces related past work, drift detection catches a long session wandering off-goal, and an on-device model reasons over all of it. Local-only by default: your work and the model reading it never leave your machine.",
   "author": {
     "name": "Synalux"
   },
@@ -10,18 +10,21 @@
   "license": "Apache-2.0",
   "keywords": [
     "memory",
-    "session-memory",
-    "context",
-    "knowledge-search",
     "local-first",
+    "local-inference",
+    "on-device",
+    "drift-detection",
+    "knowledge-graph",
+    "offline",
+    "privacy",
     "mcp"
   ],
   "mcpServers": "./.mcp.json",
   "skills": "./skills/",
   "interface": {
     "displayName": "Prism",
-    "shortDescription": "Session memory that survives across conversations",
-    "longDescription": "Prism gives Codex a memory that outlives a single conversation. It restores prior decisions, open TODOs, and changed files at the start of each session, searches an indexed knowledge store, and detects when a long session has drifted from its original goal. Memory is stored in SQLite on your own machine by default; a subscription may be used instead for multi-device sync.",
+    "shortDescription": "The memory your agent forgets to have \u2014 on-device recall, drift detection, local inference.",
+    "longDescription": "Your coding agent forgets everything between sessions. Prism gives it a memory that sticks: your decisions, open TODOs, and changed files, restored the moment you return. It goes past a notes store \u2014 associative recall surfaces related past work, drift detection catches a long session wandering off-goal, and an on-device model reasons over all of it. Local-only by default: your work and the model reading it never leave your machine.",
     "developerName": "Synalux",
     "category": "Engineering",
     "capabilities": [
@@ -30,7 +33,7 @@
     ],
     "websiteURL": "https://synalux.ai",
     "defaultPrompt": [
-      "What was I working on last session?"
+      "What was I working on last session \u2014 and did I drift from the goal?"
     ]
   }
 }

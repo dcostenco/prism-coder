@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "prism",
-  "description": "Prism \u2014 persistent session memory, knowledge search, and local-first inference for coding agents",
+  "description": "Prism \u2014 the memory your coding agent forgets to have. On-device recall, drift detection, and local inference. Nothing leaves your machine by default.",
   "owner": {
     "name": "Synalux",
     "email": "support@synalux.ai"
@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "synalux-prism",
-      "description": "Persistent session memory for Claude Code. Restores prior decisions, open TODOs, and changed files at the start of each session; adds knowledge search, goal-drift detection, and local-first inference. Memory stays in SQLite on your machine by default.",
+      "description": "Your coding agent forgets everything between sessions. Prism gives it a memory that sticks: your decisions, open TODOs, and changed files, restored the moment you return. It goes past a notes store \u2014 associative recall surfaces related past work, drift detection catches a long session wandering off-goal, and an on-device model reasons over all of it. Local-only by default: your work and the model reading it never leave your machine.",
       "author": {
         "name": "Synalux",
         "email": "support@synalux.ai"
