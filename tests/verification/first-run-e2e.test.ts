@@ -15,12 +15,17 @@
  * 20.7.0 and verified against the published tarball; this test keeps them fixed.
  *
  * Determinism: a scrubbed HOME (no config, no memory, no marker), skill sync
- * disabled (no network), and a dashboard port nothing listens on.
+ * disabled (no network), and a bound foreign HTTP server for the dashboard
+ * probe. It deliberately does NOT assume a port is closed — "nothing listens
+ * on port 1" held on macOS and was FALSE on the Windows runner, where
+ * something answered 200 and the greeting advertised http://localhost:1.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import * as http from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +36,7 @@ const SERVER = path.resolve(__dirname, "../../dist/server.js");
 describe("first-run experience (E2E over stdio)", { timeout: 60_000 }, () => {
   let client: Client;
   let scrubHome: string;
+  let foreignServer: http.Server;
   let greeting = "";
   let structured: Record<string, unknown> | null = null;
 
@@ -38,6 +44,20 @@ describe("first-run experience (E2E over stdio)", { timeout: 60_000 }, () => {
     // The suite runs after "Build TypeScript" in CI. Fail loudly rather than
     // silently passing against a stale or absent build.
     expect(existsSync(SERVER), `built server missing at ${SERVER} — run npm run build`).toBe(true);
+
+    // Point the dashboard probe at a REAL server that is not Prism, rather
+    // than at a port assumed to be closed. "Nothing listens on port 1" is a
+    // portability assumption, not a fact: on the Windows runner something
+    // answered 200 there and the greeting advertised http://localhost:1.
+    // A bound 404 responder is deterministic everywhere AND proves the
+    // stronger property — identity is verified, not mere liveness.
+    foreignServer = http.createServer((_req, res) => {
+      res.statusCode = 404;
+      res.end("not prism");
+    });
+    const foreignPort: number = await new Promise((done) => {
+      foreignServer.listen(0, "127.0.0.1", () => done((foreignServer.address() as AddressInfo).port));
+    });
 
     scrubHome = mkdtempSync(path.join(tmpdir(), "prism-first-run-e2e-"));
     const transport = new StdioClientTransport({
@@ -48,7 +68,7 @@ describe("first-run experience (E2E over stdio)", { timeout: 60_000 }, () => {
         HOME: scrubHome,
         USERPROFILE: scrubHome, // Windows equivalent of HOME
         PRISM_SKILL_SYNC_DISABLED: "true",
-        PRISM_DASHBOARD_PORT: "1", // reserved; nothing ever listens here
+        PRISM_DASHBOARD_PORT: String(foreignPort),
       },
     });
     client = new Client({ name: "first-run-e2e", version: "1.0.0" });
@@ -65,6 +85,7 @@ describe("first-run experience (E2E over stdio)", { timeout: 60_000 }, () => {
   afterAll(async () => {
     try {
       await client?.close();
+      await new Promise((done) => foreignServer?.close(() => done(null)));
     } finally {
       // Best-effort: the server holds sqlite handles that Windows releases on
       // its own schedule. A cleanup failure must not fail a passing suite.
@@ -92,10 +113,12 @@ describe("first-run experience (E2E over stdio)", { timeout: 60_000 }, () => {
     expect(greeting).toContain("free");
   });
 
-  it("reports the dashboard honestly instead of advertising a dead URL", () => {
-    // Port 1 is not listening, so no URL may be promised.
+  it("rejects a listener that is not Prism instead of advertising it", () => {
+    // A foreign 404 responder is bound on that port, so a bare liveness check
+    // would advertise someone else's service — on a dev machine, most likely
+    // the user's own app on :3000.
     expect(greeting).toContain("not running");
-    expect(greeting).not.toContain("http://localhost:1");
+    expect(greeting).not.toContain("http://localhost");
   });
 
   it("flags the run as first in structured output", () => {
