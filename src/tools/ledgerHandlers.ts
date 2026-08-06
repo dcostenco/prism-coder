@@ -1934,6 +1934,66 @@ async function createLocalStartupStorage(): Promise<StorageBackend> {
   return storage;
 }
 
+/** Project name for the first-run demo memory. Its own project so it can never
+ * mix with real work, and trivially removable as a unit. */
+const DEMO_PROJECT = "prism-demo";
+
+/**
+ * First-run seed-and-show: write one demo ledger entry, then READ IT BACK
+ * through the storage layer and render from the read-back row.
+ *
+ * The read-back is the point. Rendering the local variable would prove
+ * nothing — a broken storage backend would still print a convincing
+ * "recalled" block. Rendering only what getLedgerEntries returned means the
+ * block the user sees IS evidence the save→recall loop works on their
+ * machine. If either half fails we return null and the greeting simply
+ * omits the demo — a first run must never break on a demo.
+ */
+export async function seedAndRecallDemoMemory(conversationId: string): Promise<string | null> {
+  try {
+    const storage = await getStorage();
+    // Idempotence before insert: the first_bootstrap_at marker is
+    // check-then-set, so two hosts bootstrapping a fresh machine at once BOTH
+    // take the first-run branch (observed setups run several agents
+    // concurrently). Seeding only when no demo row exists narrows that race
+    // from "every concurrent first run inserts" to a near-simultaneous
+    // read-read window, and the loser still renders the winner's row — the
+    // user sees one demo either way.
+    const existing = (await storage.getLedgerEntries({
+      project: `eq.${DEMO_PROJECT}`,
+      user_id: `eq.${PRISM_USER_ID}`,
+      limit: "1",
+    })) as unknown[];
+    if (existing.length === 0) {
+      await storage.saveLedger({
+        project: DEMO_PROJECT,
+        conversation_id: conversationId,
+        user_id: PRISM_USER_ID,
+        summary: "Prism saved this memory during your first session to demonstrate recall.",
+        todos: ["Try it yourself: ask your agent to `session_save_ledger` at the end of this session"],
+        decisions: ["Demo memory — delete anytime with session_forget_memory or from the dashboard"],
+        keywords: ["demo", "first-run"],
+      });
+    }
+    const rows = (await storage.getLedgerEntries({
+      project: `eq.${DEMO_PROJECT}`,
+      user_id: `eq.${PRISM_USER_ID}`,
+      order: "created_at.desc",
+      limit: "1",
+    })) as Array<{ summary?: string; todos?: string[] }>;
+    const recalled = rows[0];
+    if (!recalled?.summary) return null;
+    const todo = Array.isArray(recalled.todos) && recalled.todos[0] ? `\n  - TODO it carried: ${recalled.todos[0]}` : "";
+    return (
+      `- 🧠 **Watch this — Prism just saved a memory and recalled it from disk:**\n` +
+      `  - "${recalled.summary}"${todo}\n` +
+      `  - This round-trip is what every future session gets: your decisions, TODOs, and changed files, back the moment you return. (Demo lives in the \`${DEMO_PROJECT}\` project — delete it anytime.)`
+    );
+  } catch {
+    return null;
+  }
+}
+
 export async function sessionBootstrapHandler(
   args: unknown = {},
   options: SessionBootstrapOptions = {},
@@ -2008,7 +2068,17 @@ export async function sessionBootstrapHandler(
     if (isFirstRun) {
       // Action-first instead of absence-first: every line is a capability or
       // a next step. The wizard exists and is well-built; route to it.
+      //
+      // Seed-and-show: a memory product's payoff is structurally deferred to
+      // session 2 — "it remembered" can't be felt until you come back. So the
+      // first run seeds one clearly-marked demo memory and shows it RECALLED,
+      // read back through the real storage layer (not string theater), so the
+      // save→recall loop is felt in session 1. The demo lives in its own
+      // project so it never mixes with real work, and this branch only runs
+      // once — the first_bootstrap_at marker above is durable.
+      const demoRecall = await seedAndRecallDemoMemory(conversationId);
       const firstRunText = `${greeting}\n\n` +
+        (demoRecall ? `${demoRecall}\n` : "") +
         `- 🚀 **Get started:** run the \`onboarding_wizard\` tool (guided setup, ~3 minutes)\n` +
         `${dashboardLine}\n` +
         `- 💾 **Already working?** \`session_save_ledger\` records this session; the next one resumes with full context\n\n` +
