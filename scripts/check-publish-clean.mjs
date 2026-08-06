@@ -75,10 +75,31 @@ function checkManifestVersions(repoRoot) {
     throw error;
   }
   const packageJson = JSON.parse(rawPackage);
+  const serverJson = JSON.parse(rawServer);
   return [
-    ...serverManifestVersionMismatches(packageJson, JSON.parse(rawServer)),
+    ...serverManifestVersionMismatches(packageJson, serverJson),
     ...checkVersionedManifests(repoRoot, packageJson.version),
+    ...serverDescriptionTooLong(serverJson),
   ];
+}
+
+/**
+ * The MCP Registry rejects a server.json description over 100 characters
+ * (422 "expected length <= 100" — measured live 2026-08-06, when a 369-char
+ * description rewrite sailed through local CI and every manifest check, then
+ * failed the publish workflow on main). The registry validates in Go, so we
+ * bound BYTES, the stricter reading — a limit that passes here must pass
+ * there regardless of how it counts.
+ */
+const REGISTRY_DESCRIPTION_MAX = 100;
+
+export function serverDescriptionTooLong(serverJson) {
+  const description = serverJson?.description;
+  if (typeof description !== "string") return [];
+  const bytes = Buffer.byteLength(description, "utf8");
+  return bytes > REGISTRY_DESCRIPTION_MAX
+    ? [`server.json description is ${bytes} bytes; the MCP Registry rejects over ${REGISTRY_DESCRIPTION_MAX} (422 at publish time)`]
+    : [];
 }
 
 /**

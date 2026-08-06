@@ -134,6 +134,41 @@ describe("published-version conflict guard", () => {
         expect(result.status).toBe(0);
     });
 
+    // The MCP Registry rejects a description over 100 chars with a 422 — at
+    // publish time, on main, after every local gate passed. Measured
+    // 2026-08-06 when a 369-char description rewrite failed exactly there.
+    // The guard must catch it before a PR merges, not after.
+    function repoWithDescription(description: string): string {
+        const repo = repoWithPackage("pkg", "1.0.0");
+        writeFileSync(
+            resolve(repo, "server.json"),
+            JSON.stringify({ name: "io.github.x/pkg", version: "1.0.0", description }, null, 2),
+        );
+        execFileSync("git", ["add", "server.json"], { cwd: repo });
+        execFileSync("git", ["commit", "--quiet", "-m", "server"], { cwd: repo });
+        return repo;
+    }
+
+    it("blocks a server.json description the registry would 422", () => {
+        const result = spawnSync(process.execPath, [SCRIPT, "--manifest-only"], {
+            cwd: repoWithDescription("x".repeat(101)),
+            encoding: "utf8",
+            env: { ...process.env },
+        });
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("MCP Registry rejects over 100");
+    });
+
+    it("allows a description at exactly the registry limit", () => {
+        const result = spawnSync(process.execPath, [SCRIPT, "--manifest-only"], {
+            cwd: repoWithDescription("x".repeat(100)),
+            encoding: "utf8",
+            env: { ...process.env },
+        });
+        expect(result.stderr).not.toContain("MCP Registry");
+        expect(result.status).toBe(0);
+    });
+
     it("--manifest-only skips the published check, because the registry republish runs AFTER npm publish", () => {
         // Without this the guard blocks the very republish it exists to
         // protect: the registry workflow runs post-publish, so "this version
