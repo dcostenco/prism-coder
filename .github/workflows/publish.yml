@@ -4,6 +4,17 @@ on:
   push:
     tags:
       - 'v*'
+  # A tag push is a ONE-SHOT event: if Actions cannot schedule the run when the
+  # tag lands, GitHub does not retroactively fire it once Actions recovers —
+  # the tag sits there looking released with nothing published, and the only
+  # way out is deleting and re-pushing a published ref. That is exactly the
+  # state the 2026-08-06 Actions major_outage would have left 20.8.0 in.
+  #
+  # Manual dispatch makes the release re-runnable instead. It is safe to press
+  # twice: the "Check if version already published" step below skips a version
+  # npm already serves, so a redundant run is a no-op rather than a red X.
+  # Runs against the selected ref (default main), which is where releases land.
+  workflow_dispatch:
 
 # Default-deny token; the publish job opts in to id-token below for
 # npm provenance attestation. contents:read is needed for checkout.
