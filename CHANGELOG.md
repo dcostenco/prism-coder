@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## [20.8.0] - 2026-08-06 — Found, Then Kept
+
+### Added
+- **First run proves the memory works instead of describing it.** A memory
+  product's payoff is structurally deferred: "it remembered" cannot be felt
+  until you come back, and most trial users never do. `session_bootstrap` now
+  seeds one demo memory on first run and shows it *recalled* — rendered
+  exclusively from the storage read-back, so a broken backend produces no block
+  rather than a convincing fake one. Lives in its own `prism-demo` project,
+  announces its own removability, one-shot via the durable first-run marker,
+  and idempotent so concurrent first runs cannot double-seed.
+
+### Changed
+- **Discovery metadata rewritten across every surface.** The MCP Registry
+  search is name-only: `memory`, `session memory`, and `coding agent memory`
+  each returned Prism zero times, so nobody who did not already know the name
+  could find it. npm descriptions led with acronyms ("SLERP-optimized GRPO
+  alignment, Zero-Search HDC/HRR retrieval") and `package.json` carried 62
+  keywords including `telepathy`, `morning-briefing`, and `reality-drift` — a
+  spam signal registries downrank. Descriptions now lead with the four things
+  measured as rare among 73 direct competitors (local inference: 2, drift
+  detection: 2, associative recall: ~6 of 2298); keywords trimmed 62 -> 12.
+- **Plugin description leads with the differentiators**, not the commodity
+  phrase four community competitors use verbatim.
+
+### Fixed
+- **Codex plugin detection required only a cached manifest, never an enabled
+  plugin.** A disabled or half-removed plugin leaves its `.mcp.json` on disk, so
+  `connect` could skip its own registration for a plugin that was not providing
+  the server — leaving the user with no `prism-mcp` at all.
+- **The registry rejects a description over 100 characters (422).** npm has no
+  such cap, so the rewrite passed every local gate and failed after merge. The
+  publish guard now enforces the limit in the PR, bounded in bytes.
+- **Registry publish no longer reports a red X for metadata-only merges.**
+  Registry versions are immutable, so a `server.json` change without a version
+  bump always returns "cannot publish duplicate version" — the expected
+  outcome, not a failure. Only that rejection is tolerated; every other error
+  still fails the job.
+- **TLS is enforced rather than assumed** for cloud storage URLs: a remote
+  `http://` endpoint is upgraded to `https://` instead of silently sending
+  session content in the clear. The privacy policy's claim is now true by
+  construction.
+
 ## [20.7.1] - 2026-08-06 — The Guard That Blocked Its Own Release
 
 ### Fixed
