@@ -33,3 +33,34 @@ describe("cloud backend URL validation requires TLS", () => {
     expect(isValidHttpUrl("not a url")).toBe(false);
   });
 });
+
+describe("insecure cloud URLs are upgraded, not just rejected", () => {
+  it("upgrades a remote http URL to https", async () => {
+    const { upgradeInsecureCloudUrl } = await import("../src/storage/index.js");
+    expect(upgradeInsecureCloudUrl("http://synalux.ai")).toBe("https://synalux.ai");
+    expect(upgradeInsecureCloudUrl("http://example.com:8080/base")).toBe("https://example.com:8080/base");
+  });
+
+  it("leaves loopback alone — that traffic never crosses a network", () => {
+    // The local Supabase stack serves plain http on 54321; upgrading it would
+    // break local development for no security gain.
+    return import("../src/storage/index.js").then(({ upgradeInsecureCloudUrl }) => {
+      expect(upgradeInsecureCloudUrl("http://127.0.0.1:54321")).toBe("http://127.0.0.1:54321");
+      expect(upgradeInsecureCloudUrl("http://localhost:54321")).toBe("http://localhost:54321");
+    });
+  });
+
+  it("leaves https and malformed input untouched", async () => {
+    const { upgradeInsecureCloudUrl } = await import("../src/storage/index.js");
+    expect(upgradeInsecureCloudUrl("https://synalux.ai")).toBe("https://synalux.ai");
+    expect(upgradeInsecureCloudUrl("not a url")).toBe("not a url");
+  });
+
+  it("an upgraded URL then PASSES validation, so the user is not blocked", async () => {
+    const { upgradeInsecureCloudUrl, isValidHttpUrl } = await import("../src/storage/index.js");
+    // Before: http://synalux.ai failed validation and surfaced as
+    // "credentials are missing or invalid" — a message about the wrong thing.
+    expect(isValidHttpUrl("http://synalux.ai")).toBe(false);
+    expect(isValidHttpUrl(upgradeInsecureCloudUrl("http://synalux.ai"))).toBe(true);
+  });
+});

@@ -32,6 +32,37 @@ export function isValidHttpUrl(url: string): boolean {
 }
 
 /**
+ * Upgrade a remote http:// cloud URL to https:// rather than rejecting it.
+ *
+ * Rejecting was the first fix for the plaintext gap, and it closed the hole
+ * but reported it badly: a user who set an http base URL got "credentials are
+ * missing or invalid", which says nothing about the protocol being the
+ * problem. Upgrading keeps the guarantee — session content never leaves over
+ * plaintext — while letting a working configuration keep working.
+ *
+ * Loopback is left alone: http on 127.0.0.1 never crosses a network, and the
+ * local Supabase stack serves plain http on 54321.
+ *
+ * The upgrade is announced, not silent. If the host genuinely has no TLS
+ * listener the connection fails afterwards, and the log line is what explains
+ * why.
+ */
+export function upgradeInsecureCloudUrl(raw: string): string {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:") return raw;
+    const host = parsed.hostname;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return raw;
+    parsed.protocol = "https:";
+    const upgraded = parsed.toString().replace(/\/+$/, "");
+    debugLog(`[Prism Storage] Upgraded ${raw} to ${upgraded}: session content is never sent over plaintext to a remote host.`);
+    return upgraded;
+  } catch {
+    return raw;
+  }
+}
+
+/**
  * Probe for synalux credentials: env vars first, then config DB.
  * Returns true if usable credentials are now in process.env.
  */
@@ -40,11 +71,13 @@ export async function ensureSynaluxCredentials(): Promise<boolean> {
   // Re-check process.env directly: SYNALUX_CONFIGURED is captured at module
   // load, so credentials injected later by another caller would be invisible
   // to it. Mirrors ensureSupabaseCredentials below.
-  const envUrl = process.env.PRISM_SYNALUX_BASE_URL?.trim() || process.env.SYNALUX_BASE_URL?.trim();
+  const rawEnvUrl = process.env.PRISM_SYNALUX_BASE_URL?.trim() || process.env.SYNALUX_BASE_URL?.trim();
+  const envUrl = rawEnvUrl ? upgradeInsecureCloudUrl(rawEnvUrl) : rawEnvUrl;
   const envKey = process.env.PRISM_SYNALUX_API_KEY?.trim();
   if (envUrl && envKey && isValidHttpUrl(envUrl)) return true;
-  const url = (await getSetting("PRISM_SYNALUX_BASE_URL"))?.trim() ||
+  const rawUrl = (await getSetting("PRISM_SYNALUX_BASE_URL"))?.trim() ||
     (await getSetting("SYNALUX_BASE_URL"))?.trim();
+  const url = rawUrl ? upgradeInsecureCloudUrl(rawUrl) : rawUrl;
   const key = (await getSetting("PRISM_SYNALUX_API_KEY"))?.trim();
   if (url && key && isValidHttpUrl(url)) {
     process.env.PRISM_SYNALUX_BASE_URL = url;
@@ -61,10 +94,12 @@ export async function ensureSynaluxCredentials(): Promise<boolean> {
  */
 async function ensureSupabaseCredentials(): Promise<boolean> {
   if (SUPABASE_CONFIGURED) return true;
-  const envUrl = process.env.SUPABASE_URL?.trim();
+  const rawEnvUrl = process.env.SUPABASE_URL?.trim();
+  const envUrl = rawEnvUrl ? upgradeInsecureCloudUrl(rawEnvUrl) : rawEnvUrl;
   const envKey = process.env.SUPABASE_KEY?.trim();
   if (envUrl && envKey && isValidHttpUrl(envUrl)) return true;
-  const url = (await getSetting("SUPABASE_URL"))?.trim();
+  const rawUrl = (await getSetting("SUPABASE_URL"))?.trim();
+  const url = rawUrl ? upgradeInsecureCloudUrl(rawUrl) : rawUrl;
   const key = (await getSetting("SUPABASE_KEY"))?.trim();
   if (url && key && isValidHttpUrl(url)) {
     process.env.SUPABASE_URL = url;
