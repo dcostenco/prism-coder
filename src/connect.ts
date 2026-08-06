@@ -8,6 +8,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   statSync,
@@ -1597,6 +1598,23 @@ function registerCodexTomlHost(
     }
   }
 
+  // A Codex plugin may already register prism-mcp. Writing our own entry would
+  // configure the same server twice under one key, so every Prism tool appears
+  // in duplicate and load order decides which wins. Skip instead, and say why —
+  // an unexplained no-op is worse than the duplicate it prevents.
+  const providingPlugin = codexPluginProvidesPrismMcp(dirname(configPath));
+  if (providingPlugin && !locateCodexManagedBlock(originalText ?? "")) {
+    // "existing" rather than a new status: the server IS already registered,
+    // just by the plugin rather than by us. Nothing to do is the truth.
+    return result(
+      definition,
+      "existing",
+      `the Codex plugin ${providingPlugin} already registers prism-mcp; ` +
+      "not adding a second registration under the same key. Remove the plugin " +
+      "if you would rather prism connect manage this server.",
+    );
+  }
+
   let managedBlock: { start: number; end: number } | undefined;
   try {
     managedBlock = locateCodexManagedBlock(originalText ?? "");
@@ -1695,6 +1713,53 @@ function serializeCodexManagedBlock(entry: JsonObject, existingText: string): st
   const newline = existingText.includes("\r\n") ? "\r\n" : "\n";
   const serialized = stringifyToml({ mcp_servers: { "prism-mcp": entry } }).trimEnd();
   return `${CODEX_MANAGED_START}\n${serialized}\n${CODEX_MANAGED_END}\n`.replaceAll("\n", newline);
+}
+
+
+/**
+ * Is a Codex plugin already providing the prism-mcp server?
+ *
+ * Installing the plugin and running `prism connect` both register a server
+ * under the key `prism-mcp`, so doing both leaves the same server configured
+ * twice — every Prism tool appears in duplicate, and which one wins depends on
+ * load order. Previously this was only documented ("install the plugin OR run
+ * prism connect, not both"), which puts the burden on the user to remember.
+ *
+ * Detection reads the installed plugin's own manifest rather than matching a
+ * plugin NAME, so it keeps working if the plugin is renamed or vendored:
+ *   <codexHome>/plugins/cache/<marketplace>/<plugin>/<version>/.mcp.json
+ * Any enabled plugin whose .mcp.json declares a prism-mcp server counts.
+ */
+export function codexPluginProvidesPrismMcp(codexHome: string): string | null {
+  const cacheRoot = join(codexHome, "plugins", "cache");
+  let marketplaces: string[];
+  try {
+    marketplaces = readdirSync(cacheRoot);
+  } catch {
+    return null; // no plugins installed
+  }
+  for (const marketplace of marketplaces) {
+    let plugins: string[];
+    try { plugins = readdirSync(join(cacheRoot, marketplace)); } catch { continue; }
+    for (const plugin of plugins) {
+      let versions: string[];
+      try { versions = readdirSync(join(cacheRoot, marketplace, plugin)); } catch { continue; }
+      for (const version of versions) {
+        const manifest = join(cacheRoot, marketplace, plugin, version, ".mcp.json");
+        try {
+          const parsed = JSON.parse(readFileSync(manifest, "utf8")) as {
+            mcpServers?: Record<string, unknown>;
+          };
+          if (parsed?.mcpServers && Object.prototype.hasOwnProperty.call(parsed.mcpServers, "prism-mcp")) {
+            return `${plugin}@${marketplace}`;
+          }
+        } catch {
+          // absent or unreadable manifest — not a provider
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function validateCodexCandidate(text: string): void {
