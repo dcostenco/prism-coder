@@ -1011,7 +1011,13 @@ describe("Stability: Memory Leak Smoke", () => {
 // Stability: Isolation Under Concurrent Storage Instances
 // ═══════════════════════════════════════════════════════════════
 
-describe("Stability: Multi-Instance Isolation", () => {
+// Creates three SQLite databases in parallel, each running full migrations
+// and index creation, so it inherited vitest's 10s default while doing far
+// more I/O than a unit test. It passed on every runner except the slowest
+// (windows-20.x timed out at exactly 10000ms while windows-22.x passed the
+// same commit) — an under-specified timeout, not a flake. Heavy suites here
+// declare their own budget; cli-integration uses 30s.
+describe("Stability: Multi-Instance Isolation", { timeout: 30_000 }, () => {
   it("3 parallel storage instances have zero data leakage", async () => {
     const instances = await Promise.all(
       Array.from({ length: 3 }, (_, i) => createTestDb(`isolation-${i}`))
