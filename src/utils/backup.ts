@@ -224,7 +224,22 @@ export async function restoreFromBackup(
         const preRestoreResult = await createBackup(dbPath);
         debugLog(`Pre-restore backup: ${preRestoreResult.success ? "OK" : "FAILED"}`);
 
-        // Copy backup over current database
+        // Release the live connection BEFORE overwriting the file.
+        //
+        // Reading a locked file is permitted — which is why createBackup()
+        // works — but writing ONTO one is not. Measured on windows-x64
+        // (2026-08-05): libsql does not release the database handle on
+        // close(), so unlink/overwrite fails EBUSY. Without this, restore
+        // failed on Windows *after* the pre-restore backup was written: it
+        // errored midway through the one operation whose entire purpose is
+        // recovery. POSIX tolerates overwriting an open file, so this was
+        // invisible on macOS and Linux.
+        const { closeStorage } = await import("../storage/index.js");
+        await closeStorage();
+
+        // Copy backup over current database. closeStorage() cleared the
+        // singleton, so the next getStorage() re-opens against the restored
+        // file and no caller retains a handle to the replaced one.
         copyFileSync(backupPath, dbPath);
 
         return {

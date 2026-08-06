@@ -24,7 +24,7 @@
  * the database, or its memory-mapped WAL/SHM sidecars.
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readdirSync, unlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readdirSync, unlinkSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteStorage } from "../../src/storage/sqlite.js";
@@ -127,14 +127,42 @@ describe("Windows sqlite handle release (diagnostic)", { timeout: 60_000 }, () =
     raw5.close();
     report("E5 raw client, DELETE", d5);
 
+    // E6 — the actual product operation: restoreFromBackup ends in
+    // copyFileSync(backup, dbPath), writing ONTO the live database. Reading
+    // from it (createBackup) is permitted, so backup works; this proves
+    // whether the WRITE direction fails, and whether closing first fixes it.
+    const d6 = mkdtempSync(join(tmpdir(), "prism-diag-e6-"));
+    const s6 = await seed(d6);
+    const live6 = join(d6, "isolated.db");
+    const copy6 = join(d6, "backup.db");
+    copyFileSync(live6, copy6); // read direction — expected to succeed
+    console.log(`\n[E6] copy FROM live db (backup direction): OK`);
+    let overwriteWhileOpen = "unexpectedly succeeded";
+    try {
+      copyFileSync(copy6, live6); // write direction, connection still open
+    } catch (error) {
+      overwriteWhileOpen = `${(error as NodeJS.ErrnoException).code} (${(error as NodeJS.ErrnoException).syscall})`;
+    }
+    console.log(`[E6] overwrite live db WHILE OPEN (restore, pre-fix): ${overwriteWhileOpen}`);
+    await s6.close();
+    let overwriteAfterClose = "OK";
+    try {
+      copyFileSync(copy6, live6);
+    } catch (error) {
+      overwriteAfterClose = `${(error as NodeJS.ErrnoException).code} (${(error as NodeJS.ErrnoException).syscall})`;
+    }
+    console.log(`[E6] overwrite AFTER close() (restore, post-fix): ${overwriteAfterClose}`);
+
     console.log("\n=== HOW TO READ THIS ===");
     console.log("E1 EBUSY but E4 clean  -> the leak is in SqliteStorage, not libsql");
     console.log("E4 EBUSY but E5 clean  -> WAL sidecars are memory-mapped; checkpoint/journal mode is the fix");
     console.log("E2 clean but E1 EBUSY  -> wal_checkpoint(TRUNCATE) before close is the one-line product fix");
     console.log("E3 still EBUSY         -> not a timing race; the handle is never released");
     console.log("only -shm/-wal EBUSY   -> the db handle IS released; only sidecars linger");
+    console.log("E6 overwrite-while-open fails but after-close succeeds -> closeStorage()");
+    console.log("   before copyFileSync is the correct fix for restoreFromBackup");
 
-    for (const dir of [d1, d2, d3, d4, d5]) {
+    for (const dir of [d1, d2, d3, d4, d5, d6]) {
       try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* reclaimed by OS */ }
     }
 
