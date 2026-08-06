@@ -92,20 +92,23 @@ describe("grounding staleness probe", () => {
         } finally {
             // Best-effort cleanup, deliberately non-fatal.
             //
-            // Two hypotheses were tested on CI and BOTH were wrong:
-            //   1. missing storage.close()  — added; windows still EBUSY
-            //   2. async handle release     — added maxRetries:10/retryDelay:100
-            //                                 (1s of retrying); still EBUSY
-            // So something holds the sqlite file open persistently on Windows
-            // even after close() resolves. That is worth understanding on its
-            // own terms — if SqliteStorage.close() does not release the file,
-            // Windows users cannot move, delete, or back up their DB — but it
-            // is a PRODUCT question, not a reason to fail a green suite in
-            // teardown. All 3746 assertions pass; only the rm throws.
+            // ROOT CAUSE, now identified (2026-08-05, measured on
+            // windows-x64): libsql's close() does not finalize outstanding
+            // prepared statements, so the connection — and its lock on the
+            // database file — survives until GC runs finalizers. Release is
+            // nondeterministic. Upstream: tursodatabase/libsql-js#228.
             //
-            // The directory lives under os.tmpdir() and is reclaimed by the
-            // OS. Do not convert this back to a throwing cleanup without
-            // first fixing the underlying handle release.
+            // That is why the two earlier fixes here could never have worked:
+            //   1. calling storage.close()   — close() is precisely what does
+            //                                  not release the handle
+            //   2. maxRetries/retryDelay     — a 3s wait fails too; it is not
+            //                                  a timing race
+            //
+            // On Windows the lock blocks unlink/rename ONLY; reading and
+            // overwriting still succeed, so no shipped feature is affected.
+            // POSIX permits unlinking an open file, which is why this is
+            // invisible on macOS and Linux. Cleanup therefore warns instead
+            // of failing a suite whose assertions all pass.
             try {
                 rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
             } catch (error) {

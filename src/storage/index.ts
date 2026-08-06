@@ -174,13 +174,35 @@ export async function getStorage(): Promise<StorageBackend> {
 }
 
 export async function closeStorage(): Promise<void> {
-  if (storageInstance) {
-    await storageInstance.close();
+  if (!storageInstance) return;
+  const closing = storageInstance;
+  // Clear the slot in `finally`: if close() throws, the previous code left a
+  // DEAD instance installed as the singleton, and every later getStorage()
+  // handed that broken connection to callers. An empty slot is strictly
+  // safer — the next getStorage() re-opens cleanly. The error still
+  // propagates, so a caller like restoreFromBackup can abort before swapping
+  // the database file.
+  try {
+    await closing.close();
+  } finally {
     storageInstance = null;
   }
 }
 
-/** Test-only: inject a pre-initialized storage instance into the singleton slot. */
+/**
+ * Test-only: inject a pre-initialized storage instance into the singleton slot.
+ *
+ * CONTRACT: the CALLER owns the lifecycle of what it injects. This function
+ * deliberately does NOT close the instance it replaces — callers pair the
+ * injection with their own cleanup (see createTestDb().cleanup), so closing
+ * here would double-close a storage the test still owns.
+ *
+ * Worth knowing when auditing handle leaks: an instance dropped without
+ * close() keeps its sqlite lock, and on Windows that lock blocks unlink of
+ * the database file until the process exits (libsql close() does not release
+ * it either — tursodatabase/libsql-js#228 — so closing is hygiene, not a
+ * guarantee).
+ */
 export function _setStorageForTesting(instance: StorageBackend | null): void {
   storageInstance = instance;
 }

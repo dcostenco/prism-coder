@@ -57,7 +57,7 @@ function checkVersionedManifests(repoRoot, expected) {
   return problems;
 }
 
-function checkServerManifest(repoRoot) {
+function checkManifestVersions(repoRoot) {
   // A repo without a registry manifest has nothing to drift: repos that never
   // published to the MCP Registry (and the guard's own test fixtures) must
   // pass untouched. Only an EXISTING manifest is held to the sync contract —
@@ -159,7 +159,7 @@ if (IS_MAIN) {
   }
 
   try {
-    const problems = checkServerManifest(process.cwd());
+    const problems = checkManifestVersions(process.cwd());
     if (problems.length) {
       console.error(
         "npm publish blocked: a versioned manifest disagrees with package.json.\n" +
