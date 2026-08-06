@@ -106,6 +106,20 @@ describe("first-run experience (E2E over stdio)", { timeout: 60_000 }, () => {
     expect(greeting).toContain("session_save_ledger");
   });
 
+  it("proves the save→recall loop in the first session, not the second", () => {
+    // A memory product's payoff is structurally deferred: "it remembered"
+    // can't be felt until you come back. Seed-and-show closes that gap — the
+    // greeting seeds a demo memory and renders it RECALLED. The block below
+    // is rendered exclusively from the storage read-back (never the local
+    // variable), so its presence in this E2E — scrubbed HOME, built server,
+    // real stdio — is evidence the save→recall round-trip works, not that a
+    // string was concatenated.
+    expect(greeting).toContain("saved a memory and recalled it from disk");
+    expect(greeting).toContain("prism-demo");
+    // The demo must announce its own removability — it is the user's disk.
+    expect(greeting).toContain("delete it anytime");
+  });
+
   it("surfaces the paid tier on the one guaranteed impression", () => {
     // Before 20.7.0 upgrade_url appeared only AFTER hitting an entitlement
     // gate; the startup path referenced it zero times.
@@ -158,5 +172,8 @@ describe("first-run experience (E2E over stdio)", { timeout: 60_000 }, () => {
     const text = String((second.content as Array<{ text?: string }>)?.[0]?.text ?? "");
     expect((second.structuredContent as Record<string, unknown>)?.first_run).not.toBe(true);
     expect(text).not.toContain("first run detected");
+    // The demo is one-shot: replaying it every session would turn the payoff
+    // into noise and re-seed rows the user may have deleted.
+    expect(text).not.toContain("saved a memory and recalled it");
   });
 });
