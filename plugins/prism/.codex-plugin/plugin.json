@@ -1,6 +1,6 @@
 {
   "name": "synalux-prism",
-  "version": "20.8.0",
+  "version": "20.8.1",
   "description": "Your coding agent forgets everything between sessions. Prism gives it a memory that sticks: your decisions, open TODOs, and changed files, restored the moment you return. It goes past a notes store \u2014 associative recall surfaces related past work, drift detection catches a long session wandering off-goal, and an on-device model reasons over all of it. Local-only by default: your work and the model reading it never leave your machine.",
   "author": {
     "name": "Synalux"

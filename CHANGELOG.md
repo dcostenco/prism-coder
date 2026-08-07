@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [20.8.1] - 2026-08-07 — The Dashboard Was Never Loading
+
+### Fixed
+- **The dashboard's inline script has been parse-dead since 2026-05-29.** A
+  quoting typo (`data-id='''`) introduced by the May XSS fix was a
+  SyntaxError that killed the entire script at parse time — every dashboard
+  from 20.6 through 20.8.0 rendered "Loading projects..." forever: project
+  selector, neural graph, session ledger, all dead. Found while capturing a
+  real screenshot for the README; the picture would not populate, and the
+  reason was real. Fixed with a double-quoted attribute (escapeHtml escapes
+  the quotes, so it stays injection-safe) and verified live: projects load,
+  the graph renders, zero page errors.
+- **The ES5 dashboard lint now parses the built output.** The lint existed
+  precisely for quote-escaping traps and stayed green through ten weeks of a
+  parse-dead dashboard, because it pattern-matched known traps instead of
+  parsing. It now renders the built dashboard HTML and runs node --check on
+  every inline script block — proven against this exact defect: broken source
+  fails naming the line, fixed source passes.
+
+### Changed
+- README hero and docs images are now real captures of the running v20.8
+  dashboard (scrubbed profile, authored demo data), replacing the generated
+  mockup. Dead BFCL blog link now points at the canonical leaderboard, and the
+  missing "What's New" entries for 20.7–20.8.0 are in place.
+
 ## [20.8.0] - 2026-08-06 — Found, Then Kept
 
 ### Added
