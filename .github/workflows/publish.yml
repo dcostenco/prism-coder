@@ -33,6 +33,9 @@ jobs:
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
+      # Trusted Publishing (OIDC) needs npm >= 11.5.1; Node 22 bundles 10.9.8.
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
       - run: npm ci
       - run: npm run build
       # Skip publish if this version is already on npm (e.g. tag was force-
@@ -50,7 +53,18 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+      # Trusted Publishing: npm verifies this workflow's GitHub OIDC identity
+      # directly, so there is NO token to store, expire, leak, or silently go
+      # blank. Requires the trusted publisher to be configured on npmjs.com for
+      # this package (repo dcostenco/prism-coder, workflow publish.yml).
+      #
+      # Why (2026-08-07): the stored NPM_TOKEN sat EMPTY for ten days — CI
+      # failed with ENEEDAUTH while every release quietly went out by hand,
+      # which is how the registry listing drifted ~19 majors. Replacing it with
+      # a fresh automation token then failed with EOTP, because npm is actively
+      # restricting 2FA-bypass tokens for direct publishing:
+      #   https://gh.io/npm-gat-bypass2fa-deprecation
+      # The token path is closing by design. This is the supported one, and it
+      # also produces provenance attestation automatically.
       - if: steps.check.outputs.skip != 'true'
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
