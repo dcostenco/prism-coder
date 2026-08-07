@@ -89,6 +89,54 @@ lines.forEach((raw, i) => {
   }
 });
 
+// ── 3. Parse the OUTPUT, not just pattern-match the source ──────────────────
+// The 2026-05-29 XSS fix used the exact data-id pattern this lint recommends,
+// but typo'd the quoting (data-id=''' + …) — a plain SyntaxError that killed
+// the whole inline script. Every dashboard from May 29 to Aug 7 rendered
+// "Loading projects..." forever, and this lint stayed green because it looks
+// for known traps, not for validity. Pattern lists cannot enumerate typos;
+// node --check can. So: extract every quoted-string fragment concatenation is
+// impossible statically, but the assembled inline <script> in the BUILT html
+// is checkable. If the dashboard has been built, render it and syntax-check
+// each inline block; skip silently when dist/ is absent (pre-build lint runs).
+(function syntaxCheckBuiltDashboard() {
+    const path = require('path');
+    const fs = require('fs');
+    const { execFileSync } = require('child_process');
+    const os = require('os');
+    const distUi = path.join(__dirname, '..', 'dist', 'dashboard', 'ui.js');
+    if (!fs.existsSync(distUi)) return; // not built yet — CI lints post-build
+    let html;
+    try {
+        const ui = require(distUi);
+        const render = ui.renderDashboardHTML || ui.default;
+        if (typeof render !== 'function') return;
+        html = String(render('lint'));
+    } catch { return; } // rendering needs runtime state — do not fail the lint on that
+    const blocks = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)]
+        .map(m => m[1]).filter(b => b.trim());
+    let bad = 0;
+    for (const [i, block] of blocks.entries()) {
+        const tmp = path.join(os.tmpdir(), `dash-lint-${process.pid}-${i}.js`);
+        fs.writeFileSync(tmp, block);
+        try {
+            execFileSync(process.execPath, ['--check', tmp], { stdio: 'pipe' });
+        } catch (e) {
+            bad++;
+            console.error(`✗ inline <script> block ${i} fails to parse:`);
+            console.error(String(e.stderr).split('\n').slice(0, 3).join('\n'));
+        } finally {
+            fs.unlinkSync(tmp);
+        }
+    }
+    if (bad) {
+        console.error(`${bad} inline script block(s) have syntax errors — the dashboard JS dies at parse time.`);
+        process.exit(1);
+    } else {
+        console.log(`✓ ${blocks.length} built inline script block(s) parse cleanly`);
+    }
+})();
+
 if (errors === 0) {
   console.log('[dashboard-es5] OK — no ES6 or quote-escape violations found.');
   process.exit(0);
@@ -96,3 +144,4 @@ if (errors === 0) {
   console.error(`[dashboard-es5] FAIL — ${errors} violation(s) found. Fix before committing.`);
   process.exit(1);
 }
+

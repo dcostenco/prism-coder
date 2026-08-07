@@ -8,7 +8,7 @@
 [![Models on HuggingFace](https://img.shields.io/badge/🤗-prism--coder-yellow)](https://huggingface.co/dcostenco)
 
 <p align="center">
-  <img src="docs/v11_hivemind_multi_agent_dashboard.jpg" alt="Prism Coder — Mind Palace Dashboard with Knowledge Graph and Multi-Agent Hivemind" width="700" />
+  <img src="docs/mind-palace-dashboard-v20.8.png" alt="Prism Mind Palace dashboard v20.8.0 — project state with handoff summary, pending TODOs, intent health, neural graph, and time-travel history" width="700" />
 </p>
 
 Prism Coder is an [MCP server](https://modelcontextprotocol.io) that gives Claude, Cursor, and other AI tools long-term memory that survives across sessions. It ships with the open-weight `prism-coder` model fleet (2B–27B) for fast, offline tool-routing — no cloud required.
@@ -115,6 +115,29 @@ or by re-enabling after each run.
 
 <details>
 <summary>Release history (optional)</summary>
+
+## What's New in v20.7 – v20.8.0
+
+- **First run proves the memory instead of describing it** — `session_bootstrap`
+  seeds one demo memory and shows it *recalled from disk*, so the save→recall
+  loop is felt in session 1. One-shot, contained in its own `prism-demo`
+  project, removable with one call.
+- **Dashboard fixed** — a quoting typo (shipped 2026-05-29) killed the inline
+  script at parse time, so every dashboard since rendered "Loading projects..."
+  forever. Fixed, and the ES5 lint now `node --check`s the built inline script
+  so an unparseable dashboard can never ship again.
+- **Trusted Publishing** — npm releases authenticate via GitHub OIDC. No stored
+  token to expire or leak, and every release carries a signed [provenance
+  attestation](https://docs.npmjs.com/generating-provenance-statements) — you
+  can verify the tarball you install was built from this repo by CI
+  (`npm audit signatures`).
+- **TLS enforced for cloud sync** — a remote `http://` storage URL is upgraded
+  to `https://` instead of silently sending session content in the clear.
+- **Codex plugin collision + enabled-state detection** — `prism connect` skips
+  its own registration only when a plugin *actually* provides `prism-mcp`
+  (cache present **and** enabled), preventing both duplicate and missing
+  servers.
+- Windows CI stabilized; registry/npm listings realigned and deduplicated.
 
 ## What's New in v20.6.0
 
@@ -604,7 +627,7 @@ Your AI agent forgets everything between sessions. Prism fixes that — and adds
 Every conversation feeds a persistent store. The next session loads the right context automatically — no re-explaining.
 
 <p align="center">
-  <img src="docs/mind-palace-dashboard.png" alt="Mind Palace Dashboard — project state, neural graph, pending TODOs" width="700" />
+  <img src="docs/mind-palace-dashboard-v20.8-full.png" alt="Mind Palace Dashboard — full page: session ledger, memory analytics, lifecycle controls, background scheduler" width="700" />
 </p>
 
 The dashboard shows your current project state, pending TODOs, intent health, and a neural knowledge graph — all built automatically from your agent sessions.
@@ -730,7 +753,7 @@ draft that may need correction—to Synalux for authenticated deterministic
 correction. Advertised custom host tools remain local. Set
 `route_guard: "local"` for a fully on-device route path.
 
-| Model | Ollama tag | Size | [BFCL](https://gorilla.cs.berkeley.edu/blogs/12_bfcl_v3_multi_turn.html) Accuracy | Role | Automatic routing tier |
+| Model | Ollama tag | Size | [BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html) Accuracy | Role | Automatic routing tier |
 |---|---|---|---|---|---|
 | Qwen3.5-4B Q3_K_M | `prism-coder:2b` | 2.3 GB | 99.1% × 3 seeds | iPhone / mobile first gate | Free |
 | Qwen3.5-4B Q4_K_M | `prism-coder:4b` | 3.4 GB | 100% × 3 seeds | Verifier | Free |

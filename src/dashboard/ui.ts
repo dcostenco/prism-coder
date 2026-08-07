@@ -1857,7 +1857,7 @@ function loadPipelines() {
                 html += '<div style="font-size:0.72rem;color:var(--accent-rose);margin-top:0.35rem;padding:0.3rem 0.5rem;background:rgba(244,63,94,0.08);border-radius:4px">⚠ ' + escapeHtml(p.error.slice(0, 200)) + '</div>';
             }
             if (isActive) {
-                html += '<div style="margin-top:0.5rem"><button onclick="abortPipeline(this.dataset.id)" data-id=''' + escapeHtml(p.id) + ''' class="cleanup-btn" style="font-size:0.72rem">🛑 Abort Pipeline</button></div>';
+                html += '<div style="margin-top:0.5rem"><button onclick="abortPipeline(this.dataset.id)" data-id="' + escapeHtml(p.id) + '" class="cleanup-btn" style="font-size:0.72rem">🛑 Abort Pipeline</button></div>';
             }
             html += '</div>';
         }
