@@ -632,6 +632,23 @@ Every conversation feeds a persistent store. The next session loads the right co
 
 The dashboard shows your current project state, pending TODOs, intent health, and a neural knowledge graph — all built automatically from your agent sessions.
 
+### Export — read the record outside the agent
+
+`session_export_memory` writes your memory out as plain files you can read,
+diff, and commit. Nothing goes through a model to produce it.
+
+```
+markdown   human-readable — drop it in a PR to show what the agent actually did
+json       machine-readable — import into another Prism instance
+vault      zipped Markdown with YAML frontmatter and [[wikilinks]] (Obsidian, Logseq)
+```
+
+This is the surface to reach for when you want to answer "did the agent verify
+this, or is it claiming it did?" — the export is a record you review after the
+fact, in a diff or a pull request, rather than a live view you have to go and
+open. The same data is available from the dashboard's **Export ZIP** and
+**Export Vault** buttons.
+
 ### Knowledge Graph — semantic + keyword + graph search
 
 Ask "what did I decide about the auth flow last month?" and get an answer with citations, combining vector similarity, full-text search, and graph traversal.
