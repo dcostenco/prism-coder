@@ -608,10 +608,10 @@ for manual configuration and host-specific paths.
 **Optional — local model fleet** for offline tool-routing. Pull whichever fits your hardware:
 
 ```bash
-ollama pull dcostenco/prism-coder:2b    # 2.3 GB · mobile / lightweight (99.1% routing accuracy)
-ollama pull dcostenco/prism-coder:4b    # 3.4 GB · verifier (100% accuracy)
-ollama pull dcostenco/prism-coder:9b    # 5.8 GB · default router (100% accuracy, Qwen3.5)
-ollama pull dcostenco/prism-coder:27b   # 16 GB  · complex tasks (100% accuracy)
+ollama pull dcostenco/prism-coder:2b    # 2.3 GB · mobile / lightweight (99.1% on our routing suite)
+ollama pull dcostenco/prism-coder:4b    # 3.4 GB · verifier (100% on our routing suite)
+ollama pull dcostenco/prism-coder:9b    # 5.8 GB · default router (100% on our routing suite, Qwen3.5)
+ollama pull dcostenco/prism-coder:27b   # 16 GB  · complex tasks (100% on our routing suite)
 ```
 
 Prism detects both the namespaced (`dcostenco/prism-coder:9b`) and bare (`prism-coder:9b`) Ollama tags automatically.
@@ -741,7 +741,7 @@ air-gap. **Enterprise** includes a HIPAA Business Associate Agreement.
 
 ## Models
 
-The `prism-coder` fleet uses Qwen3.5 for MCP tool-routing AND general inference. The 9B and 27B are fine-tuned with LoRA (r=128, all 64 layers including DeltaNet); the 2B and 4B use stock Qwen3.5-4B at different quantization levels. The 27B scored 100% on BFCL function-calling and 100% on an internal 15-problem coding eval at $0 inference cost.
+The `prism-coder` fleet uses Qwen3.5 for MCP tool-routing AND general inference. The 9B and 27B are fine-tuned with LoRA (r=128, all 64 layers including DeltaNet); the 2B and 4B use stock Qwen3.5-4B at different quantization levels. The 27B scored 100% on our internal 115-case tool-routing suite and 100% on an internal 15-problem coding eval, at $0 inference cost. These are self-run evaluations, not [BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html) leaderboard submissions.
 
 `prism_infer` supports three modes: `route` (tool routing, fast, nothink), `chat` (conversation with thinking), and `code` (code generation with thinking). In chat/code modes, the model uses `<think>` blocks for chain-of-thought reasoning, which are stripped before the response is served. If the local model fails a quality gate (empty, think-only, or truncated), paid tiers automatically escalate to Gemini 3.6 Flash via the Synalux portal.
 
@@ -753,12 +753,16 @@ draft that may need correction—to Synalux for authenticated deterministic
 correction. Advertised custom host tools remain local. Set
 `route_guard: "local"` for a fully on-device route path.
 
-| Model | Ollama tag | Size | [BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html) Accuracy | Role | Automatic routing tier |
+| Model | Ollama tag | Size | Routing accuracy¹ | Role | Automatic routing tier |
 |---|---|---|---|---|---|
 | Qwen3.5-4B Q3_K_M | `prism-coder:2b` | 2.3 GB | 99.1% × 3 seeds | iPhone / mobile first gate | Free |
 | Qwen3.5-4B Q4_K_M | `prism-coder:4b` | 3.4 GB | 100% × 3 seeds | Verifier | Free |
 | Qwen3.5-9B (LoRA) | `prism-coder:9b` | 5.8 GB | 100% × 3 seeds | Default router | Standard+ |
 | Qwen3.5-27B (LoRA) | `prism-coder:27b` | 16 GB | 100% × 3 seeds | Quality tier (DeltaNet, 28.5 tok/s) | Advanced+ |
+
+¹ Self-run on a narrow 115-case MCP tool-selection suite, 3 seeds. It says these
+models pick the right tool on our own eval, nothing more — not a general capability
+measure, and not an independent benchmark result. Full methodology caveats below.
 
 These tiers control automatic `prism_infer` selection, not Ollama itself. Any
 user can run any downloaded on-device model directly through Ollama on every
