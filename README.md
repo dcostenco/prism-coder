@@ -760,10 +760,12 @@ correction. Advertised custom host tools remain local. Set
 | Qwen3.5-9B (LoRA) | `prism-coder:9b` | 5.8 GB | 100% × 3 seeds | Default router | Standard+ |
 | Qwen3.5-27B (LoRA) | `prism-coder:27b` | 16 GB | 100% × 3 seeds | Quality tier (DeltaNet, 28.5 tok/s) | Advanced+ |
 
-¹ Self-run on a narrow 115-case MCP tool-selection suite, 3 seeds. This is
-**not** a [BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html) leaderboard result and not a
-general capability measure — it says these models pick the right tool on our own eval,
-nothing more. Full methodology caveats below.
+¹ Self-run on a narrow 115-case MCP tool-selection suite, 3 seeds. It says these
+models pick the right tool on our own eval, nothing more — not a general capability
+measure. A [BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html) integration was
+prepared and submitted in April 2026 (see `bfcl-submission/`); it has not been
+reviewed, so there is no independent leaderboard result to point at. Full methodology
+caveats below.
 
 These tiers control automatic `prism_infer` selection, not Ollama itself. Any
 user can run any downloaded on-device model directly through Ollama on every
