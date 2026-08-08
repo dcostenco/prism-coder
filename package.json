@@ -82,7 +82,8 @@
     "ip-address": "^10.2.0",
     "protobufjs": "^7.6.5",
     "sharp": "^0.35.0",
-    "tar": "^7.5.19"
+    "tar": "^7.5.19",
+    "nanoid": "^3.3.17"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
