@@ -762,10 +762,7 @@ correction. Advertised custom host tools remain local. Set
 
 ¹ Self-run on a narrow 115-case MCP tool-selection suite, 3 seeds. It says these
 models pick the right tool on our own eval, nothing more — not a general capability
-measure. A [BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html) integration was
-prepared and submitted in April 2026 (see `bfcl-submission/`); it has not been
-reviewed, so there is no independent leaderboard result to point at. Full methodology
-caveats below.
+measure, and not an independent benchmark result. Full methodology caveats below.
 
 These tiers control automatic `prism_infer` selection, not Ollama itself. Any
 user can run any downloaded on-device model directly through Ollama on every
