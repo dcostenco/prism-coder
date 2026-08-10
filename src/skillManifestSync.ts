@@ -388,6 +388,27 @@ type NativeOperation =
   | { type: "update"; name: string; target: string; backup: string }
   | { type: "prune"; name: string; target: string; backup: string };
 
+/**
+ * Restore owner rwx on a managed directory that exists but cannot be entered.
+ *
+ * Restores 0o700 EXACTLY rather than OR-ing owner bits onto whatever is there.
+ * These directories stage entitled skill content and pre-rollback backups, and
+ * every creation site already asks for 0o700; repairing 0o066 to 0o766 would
+ * "fix" an outage by leaving the staging area group- and world-accessible. It
+ * only fires on a directory already missing owner rwx — broken by definition —
+ * so no deliberate sharing mode is overridden.
+ *
+ * POSIX only. On Windows chmod maps to the read-only attribute alone and lstat
+ * reports 0o666 for every writable directory, so the condition can never be
+ * satisfied: without this guard the repair would fire on every call, chmod
+ * pointlessly, and still read back 0o666. The failure being repaired — a umask
+ * clearing the owner-execute bit — has no Windows analogue.
+ */
+async function repairOwnerAccess(path: string, mode: number): Promise<void> {
+  if (process.platform === "win32") return;
+  if ((mode & 0o700) !== 0o700) await chmod(path, 0o700);
+}
+
 async function ensureRealDirectory(path: string): Promise<void> {
   if (!(await exists(path))) await mkdir(path, { recursive: true, mode: 0o700 });
   const stat = await lstat(path);
@@ -404,13 +425,7 @@ async function ensureRealDirectory(path: string): Promise<void> {
   // every managed skill root stayed frozen at its 2026-08-01 content. Checking
   // "is a real directory" without checking "can I use it" made the outage
   // permanent — nothing in the loop ever repaired the mode.
-  // Restore 0o700 exactly rather than OR-ing owner bits onto whatever is there.
-  // These directories stage entitled skill content and pre-rollback backups, and
-  // every creation site already asks for 0o700; repairing 0o066 to 0o766 would
-  // "fix" the outage by leaving the staging area group- and world-accessible.
-  // The branch only fires on a directory already missing owner rwx — broken by
-  // definition — so no deliberate sharing mode is being overridden.
-  if ((stat.mode & 0o700) !== 0o700) await chmod(path, 0o700);
+  await repairOwnerAccess(path, stat.mode);
 }
 
 async function removeExpiredTransactions(base: string): Promise<void> {
@@ -642,7 +657,7 @@ async function materializeNative(
   const rootStat = await lstat(agentsSkillsDir);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("native skills root must be a real directory");
   // The readdir immediately below is the first thing an unusable root breaks.
-  if ((rootStat.mode & 0o700) !== 0o700) await chmod(agentsSkillsDir, 0o700);
+  await repairOwnerAccess(agentsSkillsDir, rootStat.mode);
   await quarantineLegacyDiscoveryArtifacts(agentsSkillsDir);
   // Transaction content must remain outside the native discovery root: some
   // hosts recursively scan it and would otherwise discover staged/pruned paid
@@ -874,7 +889,7 @@ async function acquireSyncLock(agentsSkillsDir: string, waitMs = LOCK_WAIT_MS): 
   // materialization, so a root that exists without owner rwx fails here first —
   // mkdir no-ops on an existing directory and every open below throws EACCES,
   // with nothing in the loop restoring the mode.
-  if ((rootStat.mode & 0o700) !== 0o700) await chmod(agentsSkillsDir, 0o700);
+  await repairOwnerAccess(agentsSkillsDir, rootStat.mode);
   const lockPath = join(agentsSkillsDir, ".prism-sync.lock");
   const deadline = Date.now() + Math.max(0, waitMs);
   const token = randomUUID();

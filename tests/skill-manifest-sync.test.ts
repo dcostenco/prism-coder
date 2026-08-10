@@ -163,7 +163,11 @@ describe("subscription-tier skill manifest sync", () => {
     }
   });
 
-  it("repairs an unusable managed directory to 0o700 without widening access", async () => {
+    // POSIX-only: Windows chmod maps to the read-only attribute alone and lstat
+  // reports 0o666 for every writable directory, so a directory that cannot be
+  // entered has no Windows analogue and the mode assertion is meaningless
+  // there. Ran red on windows-latest with "expected 438 to be 448" before this.
+it.skipIf(process.platform === "win32")("repairs an unusable managed directory to 0o700 without widening access", async () => {
     // Repairing must restore the creation intent, not merely unblock the run.
     // An earlier version of this fix OR-ed the owner bits onto whatever mode was
     // there, so 0o606 became 0o706 and the skills root — entitled, paid-tier
@@ -192,7 +196,11 @@ describe("subscription-tier skill manifest sync", () => {
       .toContain("name: prism-startup");
   });
 
-  it("materializes when the skills root itself cannot be entered", async () => {
+    // POSIX-only: Windows chmod maps to the read-only attribute alone and lstat
+  // reports 0o666 for every writable directory, so a directory that cannot be
+  // entered has no Windows analogue and the mode assertion is meaningless
+  // there. Ran red on windows-latest with "expected 438 to be 448" before this.
+it.skipIf(process.platform === "win32")("materializes when the skills root itself cannot be entered", async () => {
     // Found reviewing the transaction-directory fix: the root was guarded by a
     // plain mkdir (a no-op on an existing directory) plus a symlink check, so a
     // root left without owner rwx failed at the first readdir and nothing ever
@@ -213,7 +221,11 @@ describe("subscription-tier skill manifest sync", () => {
       .toContain("name: prism-startup");
   });
 
-  it("materializes through a pre-existing transaction directory that cannot be entered", async () => {
+    // POSIX-only: Windows chmod maps to the read-only attribute alone and lstat
+  // reports 0o666 for every writable directory, so a directory that cannot be
+  // entered has no Windows analogue and the mode assertion is meaningless
+  // there. Ran red on windows-latest with "expected 438 to be 448" before this.
+it.skipIf(process.platform === "win32")("materializes through a pre-existing transaction directory that cannot be entered", async () => {
     // The 2026-08-10 outage, reproduced. mkdir's mode is masked by the creating
     // process's umask, so a umask carrying the owner-execute bit leaves the
     // transaction base at drw------- : readable, writable, impossible to enter.
