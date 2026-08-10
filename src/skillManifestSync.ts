@@ -7,7 +7,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
-  applyManagedSkillManifest, getSetting, refreshConfigStorageCache,
+  applyManagedSkillManifest, getSetting, refreshConfigStorageCache, setSetting,
 } from "./storage/configStorage.js";
 import {
   materializeAgentDefinitions, renderClaudeAgent, renderCodexAgent, renderGeminiAgent,
@@ -17,6 +17,17 @@ import {
 import { FREE_NATIVE_SKILL_NAMES, REQUIRED_NATIVE_SKILL_NAMES } from "./tools/skillRouting.js";
 import { getSynaluxJwt, invalidateSynaluxJwt } from "./utils/synaluxJwt.js";
 import { mkdirUsable, repairOwnerAccess } from "./utils/usableDirectory.js";
+
+/**
+ * Generation whose files actually reached disk, as opposed to the generation
+ * the config DB accepted. They diverge exactly when materialization fails, and
+ * that divergence is what made the 2026-08-10 outage invisible: the DB half
+ * commits first (deliberately -- committed names are what let a crashed run
+ * prune obsolete skills offline on restart), so the client reported the new
+ * generation while every managed root stayed frozen for nine days. Only a
+ * completed materialization advances this key.
+ */
+export const MATERIALIZED_GENERATION_KEY = "skill_manifest:materialized_generation";
 
 const OWNER = "prism-skill-sync-v1";
 const MARKER = ".prism-managed.json";
@@ -1021,6 +1032,10 @@ export async function synchronizeSkillManifest(options: SkillSyncOptions = {}): 
       native.conflicts.push(...outcome.conflicts);
     }
     const status = native.installed.length || native.updated.length || native.pruned.length ? "applied" : "unchanged";
+    // Reached only when every native root materialized. A failure above throws
+    // past this point, leaving the previous value so the mismatch persists and
+    // stays visible until a sync genuinely succeeds.
+    await setSetting(MATERIALIZED_GENERATION_KEY, manifest.generation);
     return {
       status,
       tier: manifest.tier,

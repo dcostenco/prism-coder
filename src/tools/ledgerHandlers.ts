@@ -256,6 +256,8 @@ interface NativeSkillManifestSnapshot {
   source: "validated-partial" | "committed" | "tier-fallback";
   syncStatus: SkillSyncResult["status"];
   conflicts: string[];
+  /** Generation the DB accepted but whose files never reached disk. */
+  undeliveredGeneration: string;
 }
 
 function parseNativeSkillNames(value: string): string[] {
@@ -274,10 +276,32 @@ async function resolveNativeSkillManifestSnapshot(
   syncResult: SkillSyncResult,
 ): Promise<NativeSkillManifestSnapshot> {
   const { FREE_NATIVE_SKILL_NAMES, REQUIRED_NATIVE_SKILL_NAMES } = await import("./skillRouting.js");
-  const [storedNamesValue, storedTierValue] = await Promise.all([
-    getSetting("skill_manifest:names", "[]"),
-    getSetting("skill_manifest:tier", ""),
-  ]);
+  const [storedNamesValue, storedTierValue, committedGeneration, materializedGeneration] =
+    await Promise.all([
+      getSetting("skill_manifest:names", "[]"),
+      getSetting("skill_manifest:tier", ""),
+      getSetting("skill_manifest:generation", ""),
+      getSetting("skill_manifest:materialized_generation", ""),
+    ]);
+  // The DB half of a sync commits before files are written, by design: the
+  // committed names are what let a crashed run prune obsolete skills offline on
+  // restart. The cost is that this snapshot can describe an entitlement whose
+  // files never landed. A DIVERGENCE here is that exact state, and it persists
+  // across sessions -- a later sync reports "unchanged" because nothing needed
+  // writing, while the roots agents actually read stay frozen. Unreported, it
+  // ran for nine days on 2026-08-10.
+  // An EMPTY marker is "never recorded", not "never delivered": every install
+  // that predates the marker has a committed generation and no marker at all,
+  // and an offline user's failed fetch must not scream STALE at them on
+  // upgrade day. A false alarm here trains people to ignore the line, which is
+  // how the real one gets waved through. The fresh-install failure case is
+  // still covered -- that run's own syncStatus is "partial" and the
+  // validated-partial branch already reports materialization incomplete.
+  const undeliveredGeneration =
+    Boolean(committedGeneration) && Boolean(materializedGeneration) &&
+    committedGeneration !== materializedGeneration
+      ? committedGeneration
+      : "";
   const partialNamesInput = syncResult.status === "partial" && Array.isArray(syncResult.entitledNames)
     ? syncResult.entitledNames
     : null;
@@ -315,6 +339,7 @@ async function resolveNativeSkillManifestSnapshot(
     tier,
     source,
     syncStatus: syncResult.status,
+    undeliveredGeneration,
     conflicts: [...new Set(syncResult.conflicts)],
   };
 }
@@ -369,6 +394,16 @@ async function buildNativeSystemReadyBlock(
       `directory out of the native skills folder and rerun \`prism connect\` ` +
       `(or a session bootstrap) to reinstall the managed copy.`
     : "";
+  // Durable, not per-run: a later sync reports "unchanged" while the roots stay
+  // frozen from an earlier failed materialization. This line is the difference
+  // between that outage being visible on the next startup and it running for
+  // nine days.
+  const undeliveredWarning = snapshot.undeliveredGeneration
+    ? `\n> - ⚠️ **Skill files are STALE:** the entitlement DB is at generation ` +
+      `\`${snapshot.undeliveredGeneration.slice(0, 12)}…\` but its files never finished ` +
+      `reaching the skill roots. Agents are reading older skills. Run a sync ` +
+      `(restart the host or \`prism connect\`) and report this if it persists.`
+    : "";
   if (snapshot.source === "validated-partial") {
     return `> **Prism System Ready**\n>\n` +
       `> - 🪪 **Subscription tier:** ${snapshot.tier}\n` +
@@ -378,7 +413,7 @@ async function buildNativeSystemReadyBlock(
       `> - 🛠️ **Other tier entitlements:** ${formatBoundedSkillNames(otherTierSkills, "entitled")}\n` +
       `> - 🧠 **Context depth:** ${depth}\n` +
       `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · native materialization incomplete${conflictSuffix}` +
-      conflictWarning +
+      conflictWarning + undeliveredWarning +
       freeTierUpgradeLine(snapshot.tier);
   }
   if (snapshot.source === "tier-fallback") {
@@ -387,7 +422,7 @@ async function buildNativeSystemReadyBlock(
       `> - 🛡️ **Fallback skill names:** ${formatBoundedSkillNames(snapshot.names, "fallback")}\n` +
       `> - 🧠 **Context depth:** ${depth}\n` +
       `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · no committed manifest${conflictSuffix}` +
-      conflictWarning +
+      conflictWarning + undeliveredWarning +
       freeTierUpgradeLine(snapshot.tier);
   }
   return `> **Prism System Ready**\n>\n` +
@@ -398,7 +433,7 @@ async function buildNativeSystemReadyBlock(
     `> - 🛠️ **Other tier skills provisioned:** ${formatBoundedSkillNames(otherTierSkills, "provisioned")}\n` +
     `> - 🧠 **Context depth:** ${depth}\n` +
     `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · committed manifest${conflictSuffix}` +
-    conflictWarning +
+    conflictWarning + undeliveredWarning +
     freeTierUpgradeLine(snapshot.tier);
 }
 

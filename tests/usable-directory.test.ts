@@ -104,6 +104,34 @@ describe("owner-access repair", () => {
     expect(await mode(target)).toBe(0o770);
   });
 
+  posix("repairs an unreadable directory the descriptor path cannot open", async () => {
+    // 0o000 lacks owner-read, so open() fails and only the guarded pathname
+    // fallback can fix it -- the corner the fallback exists for.
+    const base = await root();
+    const target = join(base, "sealed");
+    await mkdir(target, { mode: 0o700 });
+    await chmod(target, 0o000);
+    await repairOwnerAccess(target, 0o000);
+    expect(await mode(target)).toBe(MANAGED_DIR_MODE);
+  });
+
+  posix("refuses a symlink to an UNREADABLE target", async () => {
+    // The proven attack against the first descriptor-based version: open()
+    // fails on an unreadable target, and an unguarded pathname fallback then
+    // chmods THROUGH the link -- the victim ended up 0o700. Reproduced live
+    // against the built helper during review before this guard existed.
+    const base = await root();
+    const victim = join(base, "victim");
+    await writeFile(victim, "sealed");
+    await chmod(victim, 0o000);
+    const link = join(base, "link");
+    await symlink(victim, link);
+
+    await expect(repairOwnerAccess(link, 0o000)).rejects.toThrow(/not a directory/);
+    expect(await mode(victim)).toBe(0o000);      // unchanged
+    await chmod(victim, 0o600);                  // let cleanup remove it
+  });
+
   posix("refuses to chmod through a symlink", async () => {
     // The repair acts on an open descriptor rather than the pathname, so a path
     // that resolves to something other than a directory cannot be used to

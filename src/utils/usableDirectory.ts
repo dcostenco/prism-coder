@@ -20,7 +20,7 @@
  * anywhere Prism creates a private directory — skill roots, agent roots, and the
  * config DB's parent — and a guard applied at two of three sites is not a guard.
  */
-import { chmodSync, lstatSync, mkdirSync } from "node:fs";
+import { constants as fsConstants, chmodSync, lstatSync, mkdirSync } from "node:fs";
 import { chmod, lstat, mkdir, open } from "node:fs/promises";
 import { isAbsolute, sep } from "node:path";
 
@@ -58,9 +58,23 @@ export async function repairOwnerAccess(path: string, mode: number): Promise<voi
   if ((mode & MANAGED_DIR_MODE) === MANAGED_DIR_MODE) return;
   let handle;
   try {
-    handle = await open(path, "r");
+    // O_NOFOLLOW: a symlink at this path must fail the open rather than hand us
+    // a descriptor to whatever it points at.
+    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   } catch {
-    await chmod(path, MANAGED_DIR_MODE);   // platforms that refuse to open a directory
+    // Opening a directory needs owner-read, so the very modes this exists to
+    // repair (0o000, 0o300) land here — as does any symlink, via O_NOFOLLOW.
+    // An unguarded pathname chmod at this point re-opens the symlink hole: a
+    // link to an UNREADABLE file skipped the descriptor path entirely and got
+    // its target chmodded to 0o700. Proven with a live attack against the
+    // built helper during review, not hypothesized. lstat separates the two
+    // cases; the remaining lstat→chmod race is confined to unreadable real
+    // directories inside the user's own home.
+    const entry = await lstat(path);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new Error(`managed path is not a directory: ${path}`);
+    }
+    await chmod(path, MANAGED_DIR_MODE);
     return;
   }
   try {
