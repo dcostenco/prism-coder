@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -160,6 +160,94 @@ describe("subscription-tier skill manifest sync", () => {
       }
       await expect(readFile(join(nativeRoot, "current-staging-acceptance", "SKILL.md"), "utf8"))
         .rejects.toMatchObject({ code: "ENOENT" });
+    }
+  });
+
+  it("repairs an unusable managed directory to 0o700 without widening access", async () => {
+    // Repairing must restore the creation intent, not merely unblock the run.
+    // An earlier version of this fix OR-ed the owner bits onto whatever mode was
+    // there, so 0o606 became 0o706 and the skills root — entitled, paid-tier
+    // content — stayed world-readable on a shared machine. The observed outage
+    // was 0o600, where both forms yield 0o700, so only a mode carrying group or
+    // other bits distinguishes them.
+    const agentsSkillsDir = await root();
+    const transactionBase = join(dirname(agentsSkillsDir), ".prism-skill-transactions");
+    await mkdir(transactionBase, { recursive: true, mode: 0o700 });
+    await chmod(transactionBase, 0o606);          // owner rw, NO owner-x, other rw
+
+    // The base is deleted once it drains, so the mode has to be observed while
+    // the transaction is still open.
+    let modeDuringRun = -1;
+    const result = await synchronizeSkillManifest({
+      agentsSkillsDir, claudeCodeSkillsDir: false, cursorSkillsDir: false,
+      applyManifest: vi.fn(async () => undefined),
+      fetchImpl: vi.fn(() => jsonResponse(manifest("enterprise", ["enterprise-skill"]))) as unknown as typeof fetch,
+      beforeNativeCommit: async () => { modeDuringRun = (await lstat(transactionBase)).mode & 0o777; },
+      ...paidAuth,
+    });
+
+    expect(result.status).toBe("applied");
+    expect(modeDuringRun).toBe(0o700);
+    expect(await readFile(join(agentsSkillsDir, "prism-startup", "SKILL.md"), "utf8"))
+      .toContain("name: prism-startup");
+  });
+
+  it("materializes when the skills root itself cannot be entered", async () => {
+    // Found reviewing the transaction-directory fix: the root was guarded by a
+    // plain mkdir (a no-op on an existing directory) plus a symlink check, so a
+    // root left without owner rwx failed at the first readdir and nothing ever
+    // repaired it — the same permanent-silent-failure shape, one level up.
+    const agentsSkillsDir = await root();
+    await chmod(agentsSkillsDir, 0o606);
+
+    const result = await synchronizeSkillManifest({
+      agentsSkillsDir, claudeCodeSkillsDir: false, cursorSkillsDir: false,
+      applyManifest: vi.fn(async () => undefined),
+      fetchImpl: vi.fn(() => jsonResponse(manifest("enterprise", ["enterprise-skill"]))) as unknown as typeof fetch,
+      ...paidAuth,
+    });
+
+    expect(result.status).toBe("applied");
+    expect((await lstat(agentsSkillsDir)).mode & 0o777).toBe(0o700);
+    expect(await readFile(join(agentsSkillsDir, "prism-startup", "SKILL.md"), "utf8"))
+      .toContain("name: prism-startup");
+  });
+
+  it("materializes through a pre-existing transaction directory that cannot be entered", async () => {
+    // The 2026-08-10 outage, reproduced. mkdir's mode is masked by the creating
+    // process's umask, so a umask carrying the owner-execute bit leaves the
+    // transaction base at drw------- : readable, writable, impossible to enter.
+    // Every mkdtemp inside it then throws EACCES.
+    //
+    // The damage was silent because the halves of a sync commit independently:
+    // the config DB recorded the new generation and per-skill digests while no
+    // file was ever written, so the client reported itself current for nine
+    // days while every managed root stayed frozen at older content. A guard
+    // that asks "is this a real directory" and not "can I use it" cannot
+    // recover, because nothing in the loop repairs the mode.
+    const agentsSkillsDir = await root();
+    const claudeCodeSkillsDir = join(dirname(agentsSkillsDir), ".claude", "skills");
+    const cursorSkillsDir = join(dirname(agentsSkillsDir), ".cursor", "skills");
+    const transactionBase = join(dirname(agentsSkillsDir), ".prism-skill-transactions");
+    await mkdir(transactionBase, { recursive: true, mode: 0o700 });
+    await chmod(transactionBase, 0o600);
+    expect((await lstat(transactionBase)).mode & 0o700).not.toBe(0o700);
+
+    const snapshot = manifest("enterprise", ["enterprise-skill"]);
+    const result = await synchronizeSkillManifest({
+      agentsSkillsDir, claudeCodeSkillsDir, cursorSkillsDir,
+      applyManifest: vi.fn(async () => undefined),
+      fetchImpl: vi.fn(() => jsonResponse(snapshot)) as unknown as typeof fetch,
+      ...paidAuth,
+    });
+
+    // Without the repair this is "partial" with an EACCES mkdtemp error and no
+    // skill reaches disk, which is precisely how the outage presented.
+    expect(result.status).toBe("applied");
+    expect(result.error).toBeFalsy();
+    for (const nativeRoot of [agentsSkillsDir, claudeCodeSkillsDir, cursorSkillsDir]) {
+      expect(await readFile(join(nativeRoot, "prism-startup", "SKILL.md"), "utf8"))
+        .toContain("name: prism-startup");
     }
   });
 
