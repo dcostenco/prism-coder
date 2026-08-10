@@ -16,6 +16,7 @@ import {
 } from "./agentManifestSync.js";
 import { FREE_NATIVE_SKILL_NAMES, REQUIRED_NATIVE_SKILL_NAMES } from "./tools/skillRouting.js";
 import { getSynaluxJwt, invalidateSynaluxJwt } from "./utils/synaluxJwt.js";
+import { mkdirUsable, repairOwnerAccess } from "./utils/usableDirectory.js";
 
 const OWNER = "prism-skill-sync-v1";
 const MARKER = ".prism-managed.json";
@@ -388,59 +389,7 @@ type NativeOperation =
   | { type: "update"; name: string; target: string; backup: string }
   | { type: "prune"; name: string; target: string; backup: string };
 
-/**
- * Restore owner rwx on a managed directory that exists but cannot be entered.
- *
- * Restores 0o700 EXACTLY rather than OR-ing owner bits onto whatever is there.
- * These directories stage entitled skill content and pre-rollback backups, and
- * every creation site already asks for 0o700; repairing 0o066 to 0o766 would
- * "fix" an outage by leaving the staging area group- and world-accessible. It
- * only fires on a directory already missing owner rwx — broken by definition —
- * so no deliberate sharing mode is overridden.
- *
- * POSIX only. On Windows chmod maps to the read-only attribute alone and lstat
- * reports 0o666 for every writable directory, so the condition can never be
- * satisfied: without this guard the repair would fire on every call, chmod
- * pointlessly, and still read back 0o666. The failure being repaired — a umask
- * clearing the owner-execute bit — has no Windows analogue.
- */
-async function repairOwnerAccess(path: string, mode: number): Promise<void> {
-  if (process.platform === "win32") return;
-  if ((mode & 0o700) !== 0o700) await chmod(path, 0o700);
-}
 
-/**
- * Create a directory, and any missing ancestors, that the owner can enter.
- *
- * mkdir's mode is masked by the process umask, and `recursive: true` applies
- * that same masked mode to every level it creates. Under a umask carrying the
- * owner-execute bit the FIRST created ancestor is already untraversable, so the
- * recursive call fails partway with EACCES before anything can repair it. Node
- * exposes no per-call umask, so creating level by level and repairing what we
- * just made is the only portable defeat.
- *
- * Repairs ONLY directories this call creates. A pre-existing ancestor -- $HOME
- * and everything above it -- keeps exactly the mode the user configured;
- * silently widening those would be a worse bug than the one being fixed.
- */
-async function mkdirUsable(target: string): Promise<void> {
-  if (process.platform === "win32") {
-    await mkdir(target, { recursive: true, mode: 0o700 });
-    return;
-  }
-  const segments = target.split(sep).filter(Boolean);
-  let current = isAbsolute(target) ? "" : ".";
-  for (const segment of segments) {
-    current = current === "" ? `${sep}${segment}` : `${current}${sep}${segment}`;
-    try {
-      await mkdir(current, { mode: 0o700 });
-    } catch (error) {
-      if (isErrno(error, "EEXIST")) continue;   // not ours -- do not touch its mode
-      throw error;
-    }
-    await chmod(current, 0o700);
-  }
-}
 
 async function ensureRealDirectory(path: string): Promise<void> {
   if (!(await exists(path))) await mkdirUsable(path);

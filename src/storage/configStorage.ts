@@ -1,7 +1,8 @@
 import { createClient } from "@libsql/client";
 import { resolve, dirname } from "path";
 import { homedir } from "os";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync } from "fs";
+import { mkdirUsableSync } from "../utils/usableDirectory.js";
 
 const PROTO_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
@@ -38,7 +39,10 @@ function getClient() {
     // and libSQL throws SQLITE_CANTOPEN (error 14) without it.
     const dir = dirname(CONFIG_PATH);
     if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
+      // Not plain mkdirSync: recursive creation is umask-masked at every level,
+      // and this directory holds the entitlement snapshot, so it must be private
+      // and enterable regardless of the umask Prism happens to inherit.
+      mkdirUsableSync(dir);
     }
     configClient = createClient({
       url: `file:${CONFIG_PATH}`,

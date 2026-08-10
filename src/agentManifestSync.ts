@@ -21,6 +21,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import { mkdirUsable, repairOwnerAccess } from "./utils/usableDirectory.js";
 import { link, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -359,11 +360,14 @@ export async function materializeAgentDefinitions(
   targetDir: string,
   render: AgentRenderer = renderClaudeAgent,
 ): Promise<AgentSyncOutcome> {
-  await mkdir(targetDir, { recursive: true, mode: 0o700 });
+  // Same umask trap as the skill roots: a masked mkdir leaves a directory
+  // nothing can enter, and every write below it then fails.
+  await mkdirUsable(targetDir);
   const rootStat = await lstat(targetDir);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
     throw new Error("agent root must be a real directory");
   }
+  await repairOwnerAccess(targetDir, rootStat.mode);
   const indexPath = join(targetDir, INDEX);
   const index = await readIndex(indexPath);
   const owned = index?.files ?? {};
