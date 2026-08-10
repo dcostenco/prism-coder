@@ -163,7 +163,36 @@ describe("subscription-tier skill manifest sync", () => {
     }
   });
 
-    // POSIX-only: Windows chmod maps to the read-only attribute alone and lstat
+    // POSIX-only. Found by adversarial review of the FIRST fix: repairing a
+  // pre-existing directory does nothing about a umask that is STILL restrictive,
+  // because mkdtemp and every nested mkdir then create fresh untraversable
+  // directories. The reviewer reproduced the original split-commit against the
+  // rebuilt dist -- DB committed, disk ENOENT -- through a repaired transaction
+  // base containing a brand-new unusable txn-* directory.
+  it.skipIf(process.platform === "win32")("materializes under a persistent umask that strips owner-execute", async () => {
+    // The temp base is made BEFORE the umask changes: root() is harness, not the
+    // code under test. Everything below it is created by the sync itself while
+    // the restrictive umask is active, which is the real scenario.
+    const base = await root();
+    const previous = process.umask(0o177);   // every mkdir/mkdtemp lands 0o600
+    try {
+      const agentsSkillsDir = join(base, "nested", "skills");   // ancestors must be created too
+      const result = await synchronizeSkillManifest({
+        agentsSkillsDir, claudeCodeSkillsDir: false, cursorSkillsDir: false,
+        applyManifest: vi.fn(async () => undefined),
+        fetchImpl: vi.fn(() => jsonResponse(manifest("enterprise", ["enterprise-skill"]))) as unknown as typeof fetch,
+        ...paidAuth,
+      });
+      expect(result.error).toBeFalsy();
+      expect(result.status).toBe("applied");
+      expect(await readFile(join(agentsSkillsDir, "prism-startup", "SKILL.md"), "utf8"))
+        .toContain("name: prism-startup");
+    } finally {
+      process.umask(previous);
+    }
+  });
+
+  // POSIX-only: Windows chmod maps to the read-only attribute alone and lstat
   // reports 0o666 for every writable directory, so a directory that cannot be
   // entered has no Windows analogue and the mode assertion is meaningless
   // there. Ran red on windows-latest with "expected 438 to be 448" before this.

@@ -369,12 +369,12 @@ async function matchesIncomingSkill(path: string, skill: ManifestSkill): Promise
 
 async function stageSkill(root: string, skill: ManifestSkill, generation: string): Promise<string> {
   const target = join(root, skill.name);
-  await mkdir(target, { recursive: true, mode: 0o700 });
+  await mkdirUsable(target);
   const digests: Record<string, string> = Object.create(null);
   for (const [file, encoded] of Object.entries(skill.files)) {
     const path = resolve(target, file);
     if (!path.startsWith(`${target}${sep}`)) throw new Error(`unsafe resolved path: ${file}`);
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await mkdirUsable(dirname(path));
     await writeFile(path, decodeFile(encoded), { mode: 0o600 });
     digests[file] = encoded.digest;
   }
@@ -409,8 +409,41 @@ async function repairOwnerAccess(path: string, mode: number): Promise<void> {
   if ((mode & 0o700) !== 0o700) await chmod(path, 0o700);
 }
 
+/**
+ * Create a directory, and any missing ancestors, that the owner can enter.
+ *
+ * mkdir's mode is masked by the process umask, and `recursive: true` applies
+ * that same masked mode to every level it creates. Under a umask carrying the
+ * owner-execute bit the FIRST created ancestor is already untraversable, so the
+ * recursive call fails partway with EACCES before anything can repair it. Node
+ * exposes no per-call umask, so creating level by level and repairing what we
+ * just made is the only portable defeat.
+ *
+ * Repairs ONLY directories this call creates. A pre-existing ancestor -- $HOME
+ * and everything above it -- keeps exactly the mode the user configured;
+ * silently widening those would be a worse bug than the one being fixed.
+ */
+async function mkdirUsable(target: string): Promise<void> {
+  if (process.platform === "win32") {
+    await mkdir(target, { recursive: true, mode: 0o700 });
+    return;
+  }
+  const segments = target.split(sep).filter(Boolean);
+  let current = isAbsolute(target) ? "" : ".";
+  for (const segment of segments) {
+    current = current === "" ? `${sep}${segment}` : `${current}${sep}${segment}`;
+    try {
+      await mkdir(current, { mode: 0o700 });
+    } catch (error) {
+      if (isErrno(error, "EEXIST")) continue;   // not ours -- do not touch its mode
+      throw error;
+    }
+    await chmod(current, 0o700);
+  }
+}
+
 async function ensureRealDirectory(path: string): Promise<void> {
-  if (!(await exists(path))) await mkdir(path, { recursive: true, mode: 0o700 });
+  if (!(await exists(path))) await mkdirUsable(path);
   const stat = await lstat(path);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`managed path must be a real directory: ${path}`);
   // Existing-but-unusable is the failure this repairs. mkdir's mode is masked
@@ -653,7 +686,7 @@ async function materializeNative(
   agentsSkillsDir: string,
   hooks: Pick<SkillSyncOptions, "afterNativePrune" | "beforeNativeStage" | "beforeNativeCommit" | "beforeNativeCleanup">,
 ): Promise<Pick<SkillSyncResult, "installed" | "updated" | "pruned" | "conflicts">> {
-  await mkdir(agentsSkillsDir, { recursive: true, mode: 0o700 });
+  await mkdirUsable(agentsSkillsDir);
   const rootStat = await lstat(agentsSkillsDir);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("native skills root must be a real directory");
   // The readdir immediately below is the first thing an unusable root breaks.
@@ -666,6 +699,10 @@ async function materializeNative(
   await ensureRealDirectory(transactionBase);
   await removeExpiredTransactions(transactionBase);
   const transactionRoot = await mkdtemp(join(transactionBase, "txn-"));
+  // mkdtemp is umask-masked too, and nothing else revisits this path. A
+  // persistent restrictive umask therefore produced a REPAIRED base holding a
+  // brand-new unusable txn-* directory -- the original outage one level deeper.
+  await repairOwnerAccess(transactionRoot, (await lstat(transactionRoot)).mode);
   const stageRoot = join(transactionRoot, "stage");
   const backupRoot = join(transactionRoot, "backup");
   await ensureRealDirectory(stageRoot);
@@ -882,7 +919,7 @@ async function fetchManifest(options: SkillSyncOptions): Promise<SkillManifest> 
 }
 
 async function acquireSyncLock(agentsSkillsDir: string, waitMs = LOCK_WAIT_MS): Promise<() => Promise<void>> {
-  await mkdir(agentsSkillsDir, { recursive: true, mode: 0o700 });
+  await mkdirUsable(agentsSkillsDir);
   const rootStat = await lstat(agentsSkillsDir);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("native skills root must be a real directory");
   // Same repair as ensureRealDirectory. This site takes the lock before any
