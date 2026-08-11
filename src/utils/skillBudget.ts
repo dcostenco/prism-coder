@@ -109,14 +109,30 @@ export function assembleSkillBlock(
     const unbudgeted = !Number.isFinite(budgetChars) || budgetChars <= 0;
 
     let block = "";
+    let unprotectedChars = 0;
     const inlined: string[] = [];
     const overflow: string[] = [];
 
     for (const e of ordered) {
         const piece = render(e);
-        // Protected always inline; others only while they fit.
-        if (unbudgeted || e.protected || block.length + piece.length <= budgetChars) {
+        // Protected always inline and NEVER debit the budget: the tranche is
+        // documented as ADDITIVE on top of the floor. The previous check
+        // compared block.length — which the floor had already filled — so with
+        // a ~46KB floor against 2-16KB tranches, NO unprotected skill ever
+        // inlined at any normal budget. Rank was irrelevant; the budget was
+        // pre-spent. Found 2026-08-11 tracing why a prompt-matched
+        // verified-shipping still sat in overflow while an agent shipped
+        // unverified UI claims; the 2026-08-03 note ("no unprotected universal
+        // was ever inlined") had recorded this symptom and it was treated by
+        // protecting one skill instead of fixing the accounting.
+        if (unbudgeted || e.protected) {
             block += piece;
+            inlined.push(e.name);
+            continue;
+        }
+        if (unprotectedChars + piece.length <= budgetChars) {
+            block += piece;
+            unprotectedChars += piece.length;
             inlined.push(e.name);
         } else {
             overflow.push(e.name);
