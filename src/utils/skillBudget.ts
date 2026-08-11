@@ -127,7 +127,13 @@ export function assembleSkillBlock(
         block +=
             `\n\n[📦 SKILLS NOT INLINED — max_tokens budget reached]\n` +
             `${overflow.join(", ")}\n` +
-            `To inline them, re-call session_load_context with a higher max_tokens.`;
+            `These are RULES YOU ARE BOUND BY, not optional reading — only their text ` +
+            `was withheld for budget. Before acting on work a listed skill governs ` +
+            `(e.g. verified-shipping before any completion claim, push, or PR), load ` +
+            `its body first: invoke it via the host's Skill tool, read it from the ` +
+            `skills directory, or re-call session_load_context with a higher ` +
+            `max_tokens. Claiming done without consulting the governing skill is the ` +
+            `exact failure this list exists to prevent.`;
     }
 
     return { block, inlined, overflow };

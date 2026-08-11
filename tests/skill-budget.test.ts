@@ -62,6 +62,14 @@ describe('assembleSkillBlock', () => {
       entry({ name: 'skipped-two', content: K(1000) }),
     ], 200);
     expect(r.block).toContain('SKILLS NOT INLINED');
+    // The overflow manifest is an INSTRUCTION, not metadata. The 2026-08-11
+    // incident: verified-shipping sat name-only in this list while an agent
+    // claimed UI fixes it never rendered — the passive wording invited
+    // skipping. The message must bind the agent to consult the governing
+    // skill before completion claims, and must name the mechanism.
+    expect(r.block).toContain('RULES YOU ARE BOUND BY');
+    expect(r.block).toContain('before any completion claim');
+    expect(r.block).toContain('Skill tool');
     expect(r.block).toContain('skipped-one, skipped-two');
     expect(r.block).toContain('re-call session_load_context with a higher max_tokens');
   });
