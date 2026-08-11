@@ -1038,6 +1038,52 @@ describe("ledgerHandlers", () => {
       else process.env.PRISM_DASHBOARD_PORT = savedDashboardPort;
     });
 
+    it("renders the STALE warning under the header when a committed generation never materialized", async () => {
+      // The 2026-08-10 outage's visibility fix. Two properties, both learned
+      // the hard way in the live simulation:
+      //  - it must FIRE on divergence (DB committed generation A, files only
+      //    ever reached B), because "unchanged" syncs kept that state
+      //    invisible for nine days;
+      //  - it must sit directly UNDER the header, because
+      //    capNativeStartupText keeps the head and cuts the tail, and the
+      //    first version appended it at the tail -- line 19 of 20 -- exactly
+      //    where capped depths truncate first.
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        "skill_manifest:tier": "enterprise",
+        "skill_manifest:names": JSON.stringify(["aba-precision-protocol"]),
+        "skill_manifest:generation": "a".repeat(64),
+        "skill_manifest:materialized_generation": "b".repeat(64),
+      }[key] ?? fallback));
+
+      const result = await sessionBootstrapHandler({});
+      const text = result.content[0].text as string;
+      const lines = text.split("\n");
+      const ready = lines.findIndex((line) => line.includes("Prism System Ready"));
+      const stale = lines.findIndex((line) => line.includes("Skill files are STALE"));
+      expect(stale).toBeGreaterThan(-1);
+      expect(ready).toBeGreaterThan(-1);
+      expect(stale).toBeLessThanOrEqual(ready + 2);
+      expect(text).toContain("aaaaaaaaaaaa…");
+    });
+
+    it("stays silent when generations match and when the marker was never recorded", async () => {
+      // Convergence = healthy. Empty marker = pre-marker install or an offline
+      // failed fetch on upgrade day -- warning must NOT fire, because a false
+      // alarm trains people to ignore the line that matters.
+      for (const materialized of ["a".repeat(64), ""]) {
+        mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+          "skill_manifest:tier": "enterprise",
+          "skill_manifest:names": JSON.stringify(["aba-precision-protocol"]),
+          "skill_manifest:generation": "a".repeat(64),
+          "skill_manifest:materialized_generation": materialized,
+        }[key] ?? fallback));
+
+        const result = await sessionBootstrapHandler({});
+        const text = result.content[0].text as string;
+        expect(text, `materialized=${JSON.stringify(materialized)}`).not.toContain("Skill files are STALE");
+      }
+    });
+
     it("greets a first run with actions and the paid CTA, never with absence", async () => {
       // First run = dashboard never touched: no agent identity, no projects,
       // no prior bootstrap marker.

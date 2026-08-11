@@ -398,6 +398,12 @@ async function buildNativeSystemReadyBlock(
   // frozen from an earlier failed materialization. This line is the difference
   // between that outage being visible on the next startup and it running for
   // nine days.
+  //
+  // Rendered directly UNDER the header, never appended at the tail:
+  // capNativeStartupText keeps the head and cuts the tail, so a tail-placed
+  // warning is the first thing truncated at capped depths -- observed live in
+  // the divergence simulation (STALE was line 19 of 20). The most important
+  // line goes where truncation cannot reach it.
   const undeliveredWarning = snapshot.undeliveredGeneration
     ? `\n> - ⚠️ **Skill files are STALE:** the entitlement DB is at generation ` +
       `\`${snapshot.undeliveredGeneration.slice(0, 12)}…\` but its files never finished ` +
@@ -405,7 +411,7 @@ async function buildNativeSystemReadyBlock(
       `(restart the host or \`prism connect\`) and report this if it persists.`
     : "";
   if (snapshot.source === "validated-partial") {
-    return `> **Prism System Ready**\n>\n` +
+    return `> **Prism System Ready**\n>` + undeliveredWarning + `\n` +
       `> - 🪪 **Subscription tier:** ${snapshot.tier}\n` +
       `> - 📦 **Entitled skills (materialization incomplete):** ${snapshot.names.length}\n` +
       `> - 📚 **Core/protected entitlements:** ${formatBoundedSkillNames(coreSkills, "entitled")}\n` +
@@ -413,19 +419,19 @@ async function buildNativeSystemReadyBlock(
       `> - 🛠️ **Other tier entitlements:** ${formatBoundedSkillNames(otherTierSkills, "entitled")}\n` +
       `> - 🧠 **Context depth:** ${depth}\n` +
       `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · native materialization incomplete${conflictSuffix}` +
-      conflictWarning + undeliveredWarning +
+      conflictWarning +
       freeTierUpgradeLine(snapshot.tier);
   }
   if (snapshot.source === "tier-fallback") {
-    return `> **Prism System Ready**\n>\n` +
+    return `> **Prism System Ready**\n>` + undeliveredWarning + `\n` +
       `> - 🪪 **Subscription tier:** ${snapshot.tier}\n` +
       `> - 🛡️ **Fallback skill names:** ${formatBoundedSkillNames(snapshot.names, "fallback")}\n` +
       `> - 🧠 **Context depth:** ${depth}\n` +
       `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · no committed manifest${conflictSuffix}` +
-      conflictWarning + undeliveredWarning +
+      conflictWarning +
       freeTierUpgradeLine(snapshot.tier);
   }
-  return `> **Prism System Ready**\n>\n` +
+  return `> **Prism System Ready**\n>` + undeliveredWarning + `\n` +
     `> - 🪪 **Subscription tier:** ${snapshot.tier}\n` +
     `> - 📦 **Provisioned skills:** ${snapshot.names.length}\n` +
     `> - 📚 **Core/protected skills provisioned:** ${formatBoundedSkillNames(coreSkills, "provisioned")}\n` +
@@ -433,7 +439,7 @@ async function buildNativeSystemReadyBlock(
     `> - 🛠️ **Other tier skills provisioned:** ${formatBoundedSkillNames(otherTierSkills, "provisioned")}\n` +
     `> - 🧠 **Context depth:** ${depth}\n` +
     `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · committed manifest${conflictSuffix}` +
-    conflictWarning + undeliveredWarning +
+    conflictWarning +
     freeTierUpgradeLine(snapshot.tier);
 }
 
