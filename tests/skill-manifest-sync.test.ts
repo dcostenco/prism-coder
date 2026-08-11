@@ -163,7 +163,58 @@ describe("subscription-tier skill manifest sync", () => {
     }
   });
 
-    it.skipIf(process.platform === "win32")("advances the materialized generation only when files actually land", async () => {
+    it("COMPAT: deployed validators accept scoped native skills on PAID tiers and REJECT them on free", async () => {
+    // Written as an every-tier proof; the validator refuted it twice and the
+    // server contract is what the failures dictated:
+    //   1. native-category skills REQUIRE a paid minimum_plan
+    //      ("native skill requires a paid minimum_plan")
+    //   2. free manifests must contain EXACTLY the public startup package
+    //      ("free manifest must contain exactly the public startup package")
+    // So scoped skills ship paid-tiers-only, tagged minimum_plan standard, and
+    // the free half of this test pins the REJECTION that forces that rule —
+    // a server serving scoped skills to free would not degrade old clients,
+    // it would brick their entire skill sync.
+    for (const tier of ["standard", "enterprise"] as const) {
+      const snapshot = manifest(tier, [`${tier}-skill`]);
+      const content = "---\nname: my-scoped-skill\ndescription: scoped\n---\n# mine\n";
+      snapshot.skills.push({
+        name: "my-scoped-skill", content, digest: digest(content), version: 3,
+        // minimum_plan 'standard' is CLIENT BOOKKEEPING here, not a tier gate:
+        // deployed validators REQUIRE a paid minimum_plan on native-category
+        // skills (this test failed with "native skill requires a paid
+        // minimum_plan" without it) and apply no tier-vs-plan filtering, so a
+        // free-tier manifest carrying it still validates and materializes. The
+        // SERVER decides delivery; this field just keeps old clients green.
+        source: "database", metadata: { protected: false, priority: 500, categories: ["native"], minimum_plan: "standard" },
+        files: { "SKILL.md": { content, digest: digest(content), encoding: "utf8" } },
+      } as never);
+      snapshot.generation = computeSkillManifestGeneration(snapshot);
+      expect(() => validateSkillManifest(snapshot)).not.toThrow();
+
+      const agentsSkillsDir = await root();
+      const result = await synchronizeSkillManifest({
+        agentsSkillsDir, claudeCodeSkillsDir: false, cursorSkillsDir: false,
+        applyManifest: vi.fn(async () => undefined),
+        fetchImpl: vi.fn(() => jsonResponse(snapshot)) as unknown as typeof fetch,
+        ...paidAuth,
+      });
+      expect(result.status, tier).toBe("applied");
+      expect(await readFile(join(agentsSkillsDir, "my-scoped-skill", "SKILL.md"), "utf8"), tier)
+        .toContain("my-scoped-skill");
+      _resetSkillManifestSyncForTest();
+    }
+    const freeSnapshot = manifest("free", []);
+    const freeContent = "---\nname: my-scoped-skill\ndescription: scoped\n---\n# mine\n";
+    freeSnapshot.skills.push({
+      name: "my-scoped-skill", content: freeContent, digest: digest(freeContent), version: 1,
+      source: "database", metadata: { protected: false, priority: 500, categories: ["native"], minimum_plan: "standard" },
+      files: { "SKILL.md": { content: freeContent, digest: digest(freeContent), encoding: "utf8" } },
+    } as never);
+    freeSnapshot.generation = computeSkillManifestGeneration(freeSnapshot);
+    expect(() => validateSkillManifest(freeSnapshot)).toThrow(/free manifest must contain exactly/);
+  });
+
+  it.skipIf(process.platform === "win32")("advances the materialized generation only when files actually land", async () => {
     // THE CLASS, not a cause: the DB half commits before the file half by
     // design (committed names drive offline pruning after a crash), so any
     // materialization failure leaves the DB claiming a generation no file

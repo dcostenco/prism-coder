@@ -88,6 +88,7 @@ import type { SyncBus, SyncEvent } from "./sync/index.js";
 import { startDashboardServer } from "./dashboard/server.js";
 import { acquireLock, registerShutdownHandlers } from "./lifecycle.js";
 import { verifyBehaviorHandler } from "./tools/behavioralVerifierHandler.js";
+import { SKILL_SAVE_TOOL, SKILL_MANAGE_TOOL, skillSaveHandler, skillManageHandler } from "./tools/skillScopeHandlers.js";
 
 // ─── v2.3.6 FIX: Use Storage Abstraction for Prompts/Resources ───
 // CRITICAL FIX: Previously imported supabaseRpc/supabaseGet directly,
@@ -284,6 +285,8 @@ const BASE_TOOLS: Tool[] = [
 function buildSessionMemoryTools(): Tool[] {
   return [
     SESSION_BOOTSTRAP_TOOL,      // session_bootstrap — hook-free configured first-turn greeting + context
+    SKILL_SAVE_TOOL,             // skill_save — save a skill at local/user/team scope
+    SKILL_MANAGE_TOOL,           // skill_manage — list/delete scoped skills, release/restore platform skills
     SESSION_SAVE_LEDGER_TOOL,    // session_save_ledger — append immutable session log
     SESSION_SAVE_HANDOFF_TOOL,   // session_save_handoff — upsert latest project state (now with OCC)
     SESSION_LOAD_CONTEXT_TOOL,   // session_load_context — explicit project reload / legacy fallback
@@ -895,6 +898,12 @@ export function createServer() {
             contextLoadedByClient = true;  // v5.2.1: suppress deferred auto-push
             result = await sessionLoadContextHandler(args); break;
 
+          case "skill_save":
+            result = await skillSaveHandler(args);
+            break;
+          case "skill_manage":
+            result = await skillManageHandler(args);
+            break;
           case "session_bootstrap":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
             contextLoadedByClient = true;
