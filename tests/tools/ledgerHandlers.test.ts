@@ -47,6 +47,11 @@ vi.mock("../../src/storage/configStorage.js", () => ({
 }));
 
 vi.mock("../../src/skillManifestSync.js", () => ({
+  // The handler imports this constant as a VALUE. A mock that omits it hands
+  // the display code `undefined` as its settings key, which silently disables
+  // the STALE warning in every test — 69 failures traced to exactly that when
+  // the import changed from type-only to value.
+  MATERIALIZED_GENERATION_KEY: "skill_manifest:materialized_generation",
   awaitSkillManifestSync: vi.fn(() => Promise.resolve({
     status: "unchanged",
     installed: [],

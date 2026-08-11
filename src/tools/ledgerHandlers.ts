@@ -32,7 +32,7 @@ import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
 import { getCurrentGitState, getGitDrift } from "../utils/git.js";
 import { getSetting, setSetting, getAllSettings, refreshConfigStorageCache } from "../storage/configStorage.js";
-import type { SkillSyncResult } from "../skillManifestSync.js";
+import { MATERIALIZED_GENERATION_KEY, type SkillSyncResult } from "../skillManifestSync.js";
 import { mergeHandoff, dbToHandoffSchema, sanitizeForMerge } from "../utils/crdtMerge.js";
 import { resolveProject } from "../utils/projectResolver.js";
 import type { StorageBackend } from "../storage/interface.js";
@@ -281,7 +281,11 @@ async function resolveNativeSkillManifestSnapshot(
       getSetting("skill_manifest:names", "[]"),
       getSetting("skill_manifest:tier", ""),
       getSetting("skill_manifest:generation", ""),
-      getSetting("skill_manifest:materialized_generation", ""),
+      // The exported constant, not a copied literal: a key rename on either
+      // side would otherwise leave this read returning "" forever -- warning
+      // permanently silent -- with both sides' tests still green, because each
+      // asserts against its own copy of the string.
+      getSetting(MATERIALIZED_GENERATION_KEY, ""),
     ]);
   // The DB half of a sync commits before files are written, by design: the
   // committed names are what let a crashed run prune obsolete skills offline on
