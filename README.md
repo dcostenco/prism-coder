@@ -1,5 +1,7 @@
 # Prism Coder
 
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.dcostenco%2Fprism-mcp.svg)](https://mcptoplist.com/server/io.github.dcostenco%2Fprism-mcp)
+
 **Give your AI agent memory that lasts.** Persistent sessions, knowledge graphs, and offline tool-routing — fully local and free.
 
 [![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm)](https://www.npmjs.com/package/prism-mcp-server)
