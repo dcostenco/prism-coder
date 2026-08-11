@@ -47,6 +47,26 @@ function getClient() {
     configClient = createClient({
       url: `file:${CONFIG_PATH}`,
     });
+    // Multi-session machines share this one SQLite file across every host
+    // window's server process. libsql's default busy timeout is ZERO, so a
+    // writer meeting another writer fails instantly with SQLITE_BUSY instead
+    // of waiting its turn. Measured 2026-08-11: applying a new skill-manifest
+    // snapshot lost that race 10 consecutive times against ~7 live sessions'
+    // routine setting writes, leaving the sync permanently "partial" on a busy
+    // machine. Five seconds is far beyond any real transaction here and turns
+    // contention back into queueing. Fire-and-forget: a failure to set the
+    // pragma must never block storage init, and the first real query would
+    // surface a genuinely broken database anyway.
+    void configClient.execute("PRAGMA busy_timeout = 5000").catch(() => {});
+    // WAL is the half that actually ends the starvation: in the default
+    // rollback-journal mode every reader blocks the writer, and a machine
+    // running many host windows reads this file near-continuously (settings,
+    // drift reminders), so a manifest-apply transaction can wait out ANY
+    // timeout and still lose. WAL lets readers and the single writer proceed
+    // concurrently. The pragma is persistent per-database; issuing it on every
+    // init is an idempotent no-op that also upgrades databases created before
+    // this change.
+    void configClient.execute("PRAGMA journal_mode = WAL").catch(() => {});
   }
   return configClient;
 }

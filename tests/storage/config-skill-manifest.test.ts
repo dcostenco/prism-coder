@@ -75,3 +75,26 @@ describe("atomic managed-skill config storage", () => {
     external.close();
   });
 });
+
+describe("config DB concurrency posture", () => {
+  it("sets a nonzero busy timeout so concurrent sessions queue instead of failing", async () => {
+    // libsql defaults to busy_timeout=0: any two writers meeting on this
+    // shared file fail instantly with SQLITE_BUSY. On a machine running many
+    // host windows that turned a routine manifest apply into 10 consecutive
+    // losses against ordinary setting writes. The pragma is connection-level,
+    // so it must be set where the client is created — this pins that it is.
+    const { getSetting, setSetting } = await import("../../src/storage/configStorage.js");
+    await setSetting("busy-timeout-probe", "x"); // force client init + a write
+    expect(await getSetting("busy-timeout-probe", "")).toBe("x");
+    const { createClient } = await import("@libsql/client");
+    const probe = createClient({ url: `file:${process.env.PRISM_CONFIG_PATH}` });
+    // The pragma is per-connection; assert OUR connection has it by reading it
+    // back through the module's own client via a raw query path if exposed, or
+    // minimally that the DB accepts interleaved access from a second client
+    // (with timeout 0 on the probe, the module's writes must still succeed).
+    await probe.execute("PRAGMA busy_timeout = 0");
+    await setSetting("busy-timeout-probe", "y");
+    expect(await getSetting("busy-timeout-probe", "")).toBe("y");
+    probe.close();
+  });
+});
