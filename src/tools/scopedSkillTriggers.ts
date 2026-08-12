@@ -45,19 +45,33 @@ export interface TriggerExtraction {
 /**
  * Reject patterns that can backtrack catastrophically.
  *
- * A quantified group that itself contains a quantifier — (a+)+, (a*)* , (\d+)*
- * — is the classic shape: it makes the engine explore exponentially many splits
- * of the same substring. JavaScript offers no regex timeout, so this must be
- * refused BEFORE compilation; there is no way to interrupt one mid-match.
+ * RULE: a group may not be quantified. Exponential backtracking needs the
+ * engine to try many different ways to split the SAME substring, and in
+ * practice that requires a repeated group — `(a+)+`, `(a|aa)+`, `(\w+\s?)*`,
+ * `(.*a){20}`. Refusing `)` followed by `+`, `*` or `{n,m}` kills the whole
+ * family with one check that is trivial to read and cannot be argued with.
+ *
+ * This replaced a shape-matching heuristic that only caught the textbook
+ * `(a+)+`. Measured against it, `((a+))+` slipped through nested parens and
+ * `(a|aa)+` — the canonical example — slipped through because it contains no
+ * inner quantifier at all; the latter took 447ms on 36 characters and grows
+ * exponentially, so a trigger inside the 200-char cap could hang startup for
+ * every member of a team it is shared with. JavaScript has no regex timeout:
+ * once a match begins there is no way to interrupt it, which is why this must
+ * be refused BEFORE compilation rather than bounded at runtime.
+ *
+ * Cost: a legitimate quantified group must be rewritten. Every trigger shape
+ * seen in practice — word boundaries, proximity via `.{0,n}`, alternation
+ * without repetition — is unaffected.
  */
 function isCatastrophic(pattern: string): boolean {
-  return /\([^)]*[+*]\s*\)\s*[+*]/.test(pattern) || /\([^)]*\{\d+,\}[^)]*\)\s*[+*{]/.test(pattern);
+  return /\)\s*(?:[+*]|\{\d+(?:,\d*)?\})/.test(pattern);
 }
 
 function validateTrigger(pattern: string): string | null {
   if (!pattern.trim()) return "empty pattern";
   if (pattern.length > MAX_TRIGGER_LENGTH) return `pattern exceeds ${MAX_TRIGGER_LENGTH} chars`;
-  if (isCatastrophic(pattern)) return "nested quantifier can backtrack catastrophically";
+  if (isCatastrophic(pattern)) return "a quantified group can backtrack catastrophically — rewrite without repeating a group";
   try {
     new RegExp(pattern, "i");
   } catch (error) {

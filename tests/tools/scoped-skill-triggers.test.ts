@@ -73,13 +73,44 @@ describe("extractSkillTriggers — frontmatter shapes", () => {
 });
 
 describe("safety — user-authored patterns run on the startup path", () => {
+  it("REFUSES every catastrophic family, not just the textbook one", () => {
+    // The first heuristic here only caught (a+)+. Adversarial review found it
+    // accepted 5 of 6 real bypasses, including (a|aa)+ — the canonical ReDoS
+    // example, which has no inner quantifier at all and took 447ms on 36 chars,
+    // growing exponentially. A trigger inside the length cap could therefore
+    // hang startup for every member of a team it is shared with.
+    const attacks = ["(a+)+$", "((a+))+$", "(a|aa)+$", "(\\w+\\s?)*$", "(.*a){20}$", "(?:ab|a)+$"];
+    for (const attack of attacks) {
+      const { triggers, errors } = extractSkillTriggers("evil", skill(`prompt_triggers:\n  - "${attack}"`, "evil"));
+      expect(triggers, `must refuse ${attack}`).toEqual({});
+      expect(errors[0].reason).toMatch(/quantified group|backtrack/i);
+    }
+  });
+
+  it("still ALLOWS the pattern shapes real triggers use", () => {
+    // A safety rule that blocks legitimate use gets disabled. These must pass.
+    const legitimate = [
+      "\\binvoice\\b",
+      "\\bledger\\b.{0,20}\\binvoice\\b",
+      "quarterly close",
+      "(alpha|beta)",
+      "^fix .*(ui|css)$",
+      "a{2,5}",
+    ];
+    for (const pattern of legitimate) {
+      const { triggers, errors } = extractSkillTriggers("ok", skill(`prompt_triggers:\n  - "${pattern}"`, "ok"));
+      expect(errors, `must allow ${pattern}`).toEqual([]);
+      expect(Object.keys(triggers)).toHaveLength(1);
+    }
+  });
+
   it("REFUSES a catastrophically backtracking pattern before compiling it", () => {
     // JavaScript has no regex timeout: once (a+)+ starts on a hostile input
     // there is no way to interrupt it, so it must never be compiled. A team
     // skill carrying one would hang startup for every member.
     const { triggers, errors } = extractSkillTriggers("evil", skill('prompt_triggers:\n  - "(a+)+$"', "evil"));
     expect(triggers).toEqual({});
-    expect(errors[0].reason).toMatch(/backtrack/i);
+    expect(errors[0].reason).toMatch(/quantified group|backtrack/i);
   });
 
   it("refuses an invalid regex rather than throwing during startup", () => {
