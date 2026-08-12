@@ -52,6 +52,9 @@ vi.mock("../../src/skillManifestSync.js", () => ({
   // the STALE warning in every test — 69 failures traced to exactly that when
   // the import changed from type-only to value.
   MATERIALIZED_GENERATION_KEY: "skill_manifest:materialized_generation",
+  // Real export: bootstrap resolves the local skills root through it rather
+  // than hardcoding a path (enforced by the skill-routing architecture guard).
+  resolveCanonicalSkillsDir: () => "/nonexistent-skills-root",
   awaitSkillManifestSync: vi.fn(() => Promise.resolve({
     status: "unchanged",
     installed: [],

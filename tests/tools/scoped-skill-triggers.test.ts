@@ -16,6 +16,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractSkillTriggers,
   collectScopedTriggers,
+  collectLocalSkillTriggers,
   MAX_TRIGGERS_PER_SKILL,
   MAX_TRIGGER_LENGTH,
 } from "../../src/tools/scopedSkillTriggers.js";
@@ -171,5 +172,69 @@ describe("routing — matched scoped skills join the prompt category", () => {
     for (const prompt of everything) {
       expect(_applyPromptRouting([], prompt, triggers).map((s) => s.name)).not.toContain("plain-skill");
     }
+  });
+});
+
+describe("local-scope skills — written to disk, never in the settings cache", () => {
+  // scope:"local" writes SKILL.md straight to the host skill roots and never
+  // populates skill:<name>, so a trigger declared in a local skill was read by
+  // nothing. The author saw exactly the "configured and inert" behaviour this
+  // feature removes — the claim that it "worked for local too" was wrong.
+  const fakeFs = (files: Record<string, string>) => ({
+    readdir: async (path: string) => {
+      const names = Object.keys(files)
+        .filter((f) => f.startsWith(path + "/"))
+        .map((f) => f.slice(path.length + 1).split("/")[0]);
+      if (names.length === 0) throw new Error("ENOENT");
+      return [...new Set(names)];
+    },
+    stat: async (path: string) => {
+      if (!(path in files)) throw new Error("ENOENT");
+      return { size: files[path].length };
+    },
+    readFile: async (path: string) => files[path],
+  });
+  const join = (...parts: string[]) => parts.join("/");
+
+  it("reads triggers from a local skill and reports its name for the entitlement bypass", async () => {
+    const result = await collectLocalSkillTriggers(
+      ["/root/.agents/skills"],
+      fakeFs({
+        "/root/.agents/skills/my-local/SKILL.md":
+          `---\nname: my-local\ndescription: d\nprompt_triggers:\n  - "\\bpayroll\\b"\n---\n# my-local`,
+      }),
+      join,
+    );
+    expect(Object.keys(result.triggers)).toEqual(["\\bpayroll\\b"]);
+    // Without the name the caller's entitlement filter would drop the match,
+    // since a local file is not in the delivery manifest.
+    expect(result.names).toEqual(["my-local"]);
+  });
+
+  it("ignores skills without triggers, missing roots, and oversized files", async () => {
+    const result = await collectLocalSkillTriggers(
+      ["/root/.agents/skills", "/root/does-not-exist"],
+      fakeFs({
+        "/root/.agents/skills/plain/SKILL.md": `---\nname: plain\ndescription: d\n---\n# plain`,
+        "/root/.agents/skills/huge/SKILL.md": `prompt_triggers:\n  - "x"` + "y".repeat(70_000),
+      }),
+      join,
+    );
+    expect(result.triggers).toEqual({});
+    expect(result.names).toEqual([]);
+  });
+
+  it("does not count the same skill twice when both host roots mirror it", async () => {
+    const body = `---\nname: dup\ndescription: d\nprompt_triggers:\n  - "\\bdup\\b"\n---\n# dup`;
+    const result = await collectLocalSkillTriggers(
+      ["/root/.agents/skills", "/root/.claude/skills"],
+      fakeFs({
+        "/root/.agents/skills/dup/SKILL.md": body,
+        "/root/.claude/skills/dup/SKILL.md": body,
+      }),
+      join,
+    );
+    expect(result.triggers["\\bdup\\b"]).toEqual(["dup"]);
+    expect(result.names).toEqual(["dup"]);
   });
 });

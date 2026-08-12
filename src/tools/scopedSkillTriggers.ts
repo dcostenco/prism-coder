@@ -162,6 +162,66 @@ export function extractSkillTriggers(skillName: string, content: string): Trigge
  * injection, so this covers exactly the entitled set: anything routable here is
  * something the caller is allowed to inline, and nothing else.
  */
+/**
+ * Read triggers from LOCAL skill files (`~/.agents/skills`, `~/.claude/skills`).
+ *
+ * Local is a first-class scope in skill_save, but local skills are written
+ * straight to disk and never enter the `skill:<name>` settings cache, so a
+ * trigger declared in one would have been read by nothing — the author gets the
+ * same "configured and inert" experience this whole feature exists to remove.
+ *
+ * Bounded deliberately: this runs on the startup path. Files are skipped above
+ * MAX_LOCAL_FILE_BYTES, at most MAX_LOCAL_SKILLS directories are considered, and
+ * every error is swallowed per-entry — an unreadable skill directory must not be
+ * able to fail a session.
+ */
+const MAX_LOCAL_SKILLS = 300;
+const MAX_LOCAL_FILE_BYTES = 64 * 1024;
+
+export async function collectLocalSkillTriggers(
+  roots: string[],
+  fs: {
+    readdir: (path: string) => Promise<string[]>;
+    stat: (path: string) => Promise<{ size: number }>;
+    readFile: (path: string) => Promise<string>;
+  },
+  join: (...parts: string[]) => string,
+): Promise<TriggerExtraction & { names: string[] }> {
+  const merged: TriggerExtraction & { names: string[] } = { triggers: {}, errors: [], names: [] };
+  let budget = MAX_LOCAL_SKILLS;
+  const seen = new Set<string>();
+
+  for (const root of roots) {
+    let entries: string[];
+    try {
+      entries = await fs.readdir(root);
+    } catch {
+      continue;                                  // root absent — normal
+    }
+    for (const name of entries) {
+      if (budget-- <= 0) break;
+      if (seen.has(name)) continue;              // same skill mirrored in both roots
+      const path = join(root, name, "SKILL.md");
+      try {
+        const info = await fs.stat(path);
+        if (info.size > MAX_LOCAL_FILE_BYTES) continue;
+        const content = await fs.readFile(path);
+        if (!content.includes("prompt_triggers")) continue;
+        seen.add(name);
+        const extracted = extractSkillTriggers(name, content);
+        if (Object.keys(extracted.triggers).length > 0) merged.names.push(name);
+        for (const [pattern, names] of Object.entries(extracted.triggers)) {
+          (merged.triggers[pattern] ||= []).push(...names);
+        }
+        merged.errors.push(...extracted.errors);
+      } catch {
+        continue;                                // not a skill dir, or unreadable
+      }
+    }
+  }
+  return merged;
+}
+
 export function collectScopedTriggers(skills: Iterable<[string, string]>): TriggerExtraction {
   const merged: TriggerExtraction = { triggers: {}, errors: [] };
   for (const [name, content] of skills) {

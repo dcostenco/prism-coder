@@ -1641,12 +1641,12 @@ export async function sessionLoadContextHandler(
         // file is the leak this feature exists to avoid — so they declare
         // `prompt_triggers` in their own frontmatter and are matched here, on
         // device, from bodies already cached for injection.
-        const scopedTriggers = await collectScopedTriggersFromCache();
+        const scoped = await collectSkillTriggersOnThisMachine();
         const matched = (await resolvePromptSkillNames(
           prompt,
           Number.isFinite(manifestVersion) && manifestVersion > 0 ? manifestVersion : undefined,
-          scopedTriggers,
-        )).filter((name) => entitledSkillNames.has(name));
+          scoped?.triggers,
+        )).filter((name) => entitledSkillNames.has(name) || scoped?.localNames.has(name));
         if (matched.length > 0) {
           const shown = matched.slice(0, MAX_SYMPTOM_SKILLS);
           const overflow = matched.length - shown.length;
@@ -2086,30 +2086,79 @@ export function buildSessionFactsLine(facts: Record<string, string | number | bo
 }
 
 /**
- * Prompt triggers declared by delivered skills, read from the same
- * `skill:<name>` cache that backs body injection.
+ * Prompt triggers declared by skills on this machine.
  *
- * Using that cache (rather than scanning disk) keeps routing and injection on
- * one source of truth: anything matched here is something the caller is already
- * entitled to inline. Failures are swallowed — a broken trigger must degrade to
- * "the public table only", never take down startup.
+ * Two sources, because a skill can reach a machine two ways:
+ *   - the `skill:<name>` settings cache, which backs body injection for every
+ *     DELIVERED skill (platform, account, team); and
+ *   - local skill directories, for skills saved with scope "local", which are
+ *     written straight to disk and never enter that cache.
+ *
+ * Missing the second source made `prompt_triggers` silently do nothing for
+ * local skills — the same "configured and inert" experience the feature exists
+ * to remove. Local skill NAMES are returned too: the caller filters matches by
+ * entitlement, and a local skill is not in the entitlement manifest, so without
+ * this it would match and then be discarded. A file the user wrote on their own
+ * machine needs no entitlement.
+ *
+ * Failures are swallowed — a broken trigger degrades to "the public table
+ * only", never takes down startup.
  */
-async function collectScopedTriggersFromCache(): Promise<Record<string, string[]> | undefined> {
+async function collectSkillTriggersOnThisMachine(): Promise<
+  { triggers: Record<string, string[]>; localNames: Set<string> } | undefined
+> {
   try {
-    const { collectScopedTriggers } = await import("./scopedSkillTriggers.js");
+    const { collectScopedTriggers, collectLocalSkillTriggers } = await import("./scopedSkillTriggers.js");
+    const merged: Record<string, string[]> = {};
+    const localNames = new Set<string>();
+    const errors: Array<{ skill: string; reason: string }> = [];
+
     const settings = await getAllSettings();
     const bodies: Array<[string, string]> = [];
     for (const [key, value] of Object.entries(settings)) {
       if (key.startsWith("skill:") && value) bodies.push([key.slice("skill:".length), value]);
     }
-    if (bodies.length === 0) return undefined;
-    const { triggers, errors } = collectScopedTriggers(bodies);
+    if (bodies.length > 0) {
+      const delivered = collectScopedTriggers(bodies);
+      for (const [pattern, names] of Object.entries(delivered.triggers)) {
+        (merged[pattern] ||= []).push(...names);
+      }
+      errors.push(...delivered.errors);
+    }
+
+    // Isolated: a disk problem (or a host without the local root) must not cost
+    // us the DELIVERED skills' triggers, which are already in hand.
+    try {
+      const { readdir, stat, readFile } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      // The skills root is overridable per caller and per home; skillManifestSync
+      // owns it. Scanning the canonical root alone is sufficient because
+      // skill_save writes every local skill there before mirroring.
+      const { resolveCanonicalSkillsDir } = await import("../skillManifestSync.js");
+      const local = await collectLocalSkillTriggers(
+        [resolveCanonicalSkillsDir()],
+        {
+          readdir: (path) => readdir(path),
+          stat: async (path) => ({ size: (await stat(path)).size }),
+          readFile: (path) => readFile(path, "utf8"),
+        },
+        join,
+      );
+      for (const [pattern, names] of Object.entries(local.triggers)) {
+        (merged[pattern] ||= []).push(...names);
+      }
+      for (const name of local.names) localNames.add(name);
+      errors.push(...local.errors);
+    } catch (error) {
+      debugLog(`[skill-triggers] local scan skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
     for (const error of errors) {
       // Loud, not silent: a rejected trigger looks exactly like the defect this
       // feature fixes — a skill that is installed and never fires.
       debugLog(`[skill-triggers] ignored trigger in "${error.skill}": ${error.reason}`);
     }
-    return Object.keys(triggers).length > 0 ? triggers : undefined;
+    return Object.keys(merged).length > 0 ? { triggers: merged, localNames } : undefined;
   } catch (error) {
     debugLog(`[skill-triggers] collection failed: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
