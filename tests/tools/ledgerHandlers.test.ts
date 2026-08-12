@@ -1085,12 +1085,13 @@ describe("ledgerHandlers", () => {
       expect(text).toMatch(/Prism System Ready|Welcome back|No Auto-Load Projects/);
     });
 
-    it("keeps the skill block intact under budget pressure — the facts line must never displace it", async () => {
-      // The near-miss during this fix: appending the facts line and then
-      // capping the assembled text truncates from the TAIL, and the skill block
-      // IS the tail — the cure would have re-created the disease. Budget for
-      // the facts line is reserved from the PROJECT share instead, so a
-      // pathologically large project payload starves projects, never skills.
+    it("delivers skills AND the facts line together when a project payload is huge", async () => {
+      // Asserts co-existence under pressure, not anti-truncation: the allocator
+      // reserves both systemReadyBlock and SESSION_FACTS_RESERVE out of the
+      // PROJECT share, so an oversized project payload starves projects and
+      // leaves both intact. (Tail-capping the assembled text was considered and
+      // rejected — it cuts the tail, where the skill block lives — but that path
+      // is unreachable while the reserve holds, so no test can discriminate it.)
       mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
         autoload_projects: "alpha,beta",
         default_context_depth: "standard",
