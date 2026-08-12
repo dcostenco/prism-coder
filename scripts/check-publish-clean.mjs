@@ -42,6 +42,35 @@ const VERSIONED_MANIFESTS = [
   "plugins/prism/.claude-plugin/plugin.json",
 ];
 
+/**
+ * package-lock.json states the package version TWICE and neither field is
+ * updated by editing package.json. Found 2026-08-11 by an external review:
+ * the lockfile had said 20.8.1 across three shipped releases (20.8.2, 20.9.0,
+ * 20.9.1) because nothing checked it. Harmless to the published tarball —
+ * npm rewrites the version on pack — but it makes the lockfile lie to every
+ * contributor, to `npm ci` provenance, and to anyone diffing a release. Same
+ * failure the manifest guard above already exists for, one file wider.
+ */
+function checkLockfileVersion(repoRoot, expected) {
+  let raw;
+  try {
+    raw = readFileSync(join(repoRoot, "package-lock.json"), "utf8");
+  } catch (error) {
+    if (error && error.code === "ENOENT") return [];
+    throw error;
+  }
+  const lock = JSON.parse(raw);
+  const problems = [];
+  if (lock.version !== expected) {
+    problems.push(`package-lock.json version is ${lock.version}, expected ${expected}`);
+  }
+  const rootPackage = lock.packages?.[""];
+  if (rootPackage && rootPackage.version !== expected) {
+    problems.push(`package-lock.json packages[""].version is ${rootPackage.version}, expected ${expected}`);
+  }
+  return problems;
+}
+
 function checkVersionedManifests(repoRoot, expected) {
   const problems = [];
   for (const relative of VERSIONED_MANIFESTS) {
@@ -79,6 +108,7 @@ function checkManifestVersions(repoRoot) {
   return [
     ...serverManifestVersionMismatches(packageJson, serverJson),
     ...checkVersionedManifests(repoRoot, packageJson.version),
+    ...checkLockfileVersion(repoRoot, packageJson.version),
     ...serverDescriptionTooLong(serverJson),
   ];
 }

@@ -6,6 +6,23 @@ import {
 } from "../../src/tools/prismInferHandler.js";
 import type { PrismEntitlements } from "../../src/utils/entitlements.js";
 
+import { spawnSync } from "node:child_process";
+
+/**
+ * The coding gate detects Python syntax errors by shelling out to python3/python
+ * with a 2s budget; when no interpreter starts in time it reports "no syntax
+ * failure" and the repair loop takes a different path with an extra model call.
+ * Tests that assert the interpreter-backed path must therefore state that
+ * dependency instead of inheriting it silently — on Windows CI a cold spawn
+ * exceeded the budget and the two-response mock returned undefined, surfacing
+ * as "Cannot read properties of undefined (reading 'ok')" (4 rerun cycles,
+ * 2026-08-11) rather than as the missing-interpreter fact it was.
+ */
+const PYTHON_AVAILABLE = ["python3", "python"].some((command) => {
+    const probe = spawnSync(command, ["-c", "print(1)"], { encoding: "utf8", timeout: 5_000, windowsHide: true });
+    return !probe.error && probe.status === 0;
+});
+
 const GB = 1024 ** 3;
 const INSTALLED = new Set(["prism-coder:9b"]);
 const ENTITLEMENTS: PrismEntitlements = {
@@ -98,11 +115,17 @@ describe("prism_infer coding quality gate", () => {
         });
     });
 
-    it("can repair a syntax defect and then a newly exposed structural defect", async () => {
+    it.skipIf(!PYTHON_AVAILABLE)("can repair a syntax defect and then a newly exposed structural defect", async () => {
         const callLocal = vi
             .fn()
             .mockResolvedValueOnce({ ok: true as const, text: SYNTAX_BAD_DRAFT })
-            .mockResolvedValueOnce({ ok: true as const, text: STATIC_BAD_DRAFT });
+            .mockResolvedValueOnce({ ok: true as const, text: STATIC_BAD_DRAFT })
+            // A third call means the gate took a path this test does not model.
+            // Without this the mock returns undefined and the failure surfaces
+            // as an unreadable property deref instead of naming what happened.
+            .mockImplementation(async () => {
+                throw new Error("callLocal invoked a 3rd time: the repair loop took an unmodelled path (interpreter-backed syntax gate likely inactive)");
+            });
         const result = await runInfer(args(), deps({ callLocal }));
 
         expect(callLocal).toHaveBeenCalledTimes(2);

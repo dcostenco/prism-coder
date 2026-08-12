@@ -1615,7 +1615,12 @@ describe("prism connect", () => {
     expect(existsSync(join(homeDir, ".gemini", "settings.json"))).toBe(false);
   });
 
-  it("reports the Claude project migration on default and refresh dry runs only after registration can succeed", () => {
+  // 3 full CLI subprocess boots. Windows spawn is several times slower than
+// macOS/Linux, so vitest's 10s default is not a budget this test can meet on
+// that platform under CI load — it timed out there while passing everywhere
+// else (2 rerun cycles, 2026-08-11). The work is legitimate; the budget was
+// wrong. Timeout is per-test and explicit, not a global loosening.
+it("reports the Claude project migration on default and refresh dry runs only after registration can succeed", { timeout: 60_000 }, () => {
     const homeDir = makeHome();
     const cwd = join(homeDir, "work", "project");
     const projectConfigPath = join(homeDir, ".mcp.json");
