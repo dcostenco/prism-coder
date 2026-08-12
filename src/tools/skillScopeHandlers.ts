@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { getSetting } from "../storage/configStorage.js";
 import { getSynaluxJwt } from "../utils/synaluxJwt.js";
+import { extractSkillTriggers } from "./scopedSkillTriggers.js";
 import { triggerSkillManifestSync } from "../skillManifestSync.js";
 import { mkdirUsable } from "../utils/usableDirectory.js";
 
@@ -80,6 +81,23 @@ function frontmatterProblems(name: string, content: string): string | null {
   return null;
 }
 
+/**
+ * Refuse a bad `prompt_triggers` entry at SAVE time.
+ *
+ * The on-device collector already skips invalid patterns, so nothing unsafe can
+ * reach the matcher either way — but a silently skipped trigger is exactly the
+ * symptom this feature was built to remove: a skill that looks configured and
+ * never fires. Failing the save is the only point where the author is present
+ * to read the reason.
+ */
+function triggerProblems(name: string, content: string): string | null {
+  const { errors } = extractSkillTriggers(name, content);
+  if (errors.length === 0) return null;
+  const first = errors[0];
+  return `prompt_triggers rejected ("${first.pattern}"): ${first.reason}. ` +
+    `A trigger that cannot compile would leave this skill installed but never activated.`;
+}
+
 function validateSkillInput(name: unknown, content: unknown): string | null {
   if (typeof name !== "string" || !STRICT_SKILL_NAME.test(name)) {
     return "invalid skill name: lowercase letters, digits, - and _ only (max 128 chars)";
@@ -88,7 +106,9 @@ function validateSkillInput(name: unknown, content: unknown): string | null {
   if (Buffer.byteLength(content, "utf8") > MAX_CONTENT_BYTES) {
     return `content exceeds the ${MAX_CONTENT_BYTES}-byte context-fit limit shared by every delivered skill; move reference material out or split it`;
   }
-  return frontmatterProblems(name as string, content as string);
+  const frontmatter = frontmatterProblems(name as string, content as string);
+  if (frontmatter) return frontmatter;
+  return triggerProblems(name as string, content as string);
 }
 
 /** Local skill roots that hosts read natively. Never Prism-managed dirs. */
@@ -169,7 +189,11 @@ export const SKILL_SAVE_TOOL = {
     "Save a skill at one of three scopes: local (this machine only, works signed out), " +
     "user (your account — follows you to every machine), or team (a workspace — delivered to its members; " +
     "owner/admin only, optionally targeted with assign_to). Default when signed in is USER; team is never " +
-    "a default. Content must be a SKILL.md body with frontmatter (name, description).",
+    "a default. Content must be a SKILL.md body with frontmatter (name, description). " +
+    "To make the skill load automatically when a prompt matches, add prompt_triggers to the " +
+    "frontmatter — a list of up to 5 case-insensitive regexes. They stay as private as the skill " +
+    "itself (matching happens on-device; scoped skills cannot use the public routing table):\n" +
+    "  prompt_triggers:\n    - \"\\\\binvoice\\\\b.{0,20}\\\\bsubmit\\\\b\"",
   inputSchema: {
     type: "object" as const,
     properties: {

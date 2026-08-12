@@ -122,6 +122,25 @@ describe("skill_save — signed in", () => {
     expect(result.content[0].text).toContain("delivered to this machine now");
   });
 
+  it("refuses a prompt_trigger that would never compile, naming the consequence", async () => {
+    // Save time is the only moment the author is present to fix it. The
+    // collector would otherwise skip the pattern on device and the skill would
+    // sit installed and silent — the very defect prompt_triggers fixes.
+    const withEvilTrigger = `---\nname: my-notes\ndescription: d\nprompt_triggers:\n  - "(a+)+$"\n---\n# my-notes`;
+    const result = await skillSaveHandler({ name: "my-notes", content: withEvilTrigger });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/prompt_triggers rejected/);
+    expect(result.content[0].text).toMatch(/never activated/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("accepts a well-formed prompt_trigger", async () => {
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({ status: "ok", version: 1 }), { status: 200 }));
+    const good = `---\nname: my-notes\ndescription: d\nprompt_triggers:\n  - "\\bquarterly close\\b"\n---\n# my-notes`;
+    const result = await skillSaveHandler({ name: "my-notes", content: good, scope: "local" });
+    expect(result.isError).toBeFalsy();
+  });
+
   it("client-side validation refuses before any network: oversize, bad name, missing frontmatter", async () => {
     expect((await skillSaveHandler({ name: "my-notes", content: body("my-notes") + "x".repeat(26_000) })).isError).toBe(true);
     expect((await skillSaveHandler({ name: "Bad Name", content: body("Bad Name") })).isError).toBe(true);

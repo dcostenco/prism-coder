@@ -358,11 +358,22 @@ export function _applyPromptRouting(
 export async function resolvePromptSkillNames(
   prompt: string,
   expectVersion?: number,
+  scopedTriggers?: Record<string, string[]>,
 ): Promise<string[]> {
   if (!prompt) return [];
   const kw = await fetchKeywordTable(expectVersion);
-  if (!kw) return [];
-  return _applyPromptRouting([], prompt, kw.prompt_keywords).map((s) => s.name);
+  // Scoped triggers must still route when the PUBLIC table is unavailable:
+  // they are declared in skill bodies already on this machine and owe nothing
+  // to a network fetch. Returning [] here would make a private skill's routing
+  // depend on a public file it can never appear in.
+  const publicKeywords = kw?.prompt_keywords ?? {};
+  if (!kw && !scopedTriggers) return [];
+
+  const combined: Record<string, string[]> = { ...publicKeywords };
+  for (const [pattern, names] of Object.entries(scopedTriggers ?? {})) {
+    combined[pattern] = [...(combined[pattern] ?? []), ...names];
+  }
+  return _applyPromptRouting([], prompt, combined).map((s) => s.name);
 }
 
 /**

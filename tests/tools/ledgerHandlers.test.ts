@@ -1085,6 +1085,45 @@ describe("ledgerHandlers", () => {
       expect(text).toMatch(/Prism System Ready|Welcome back|No Auto-Load Projects/);
     });
 
+    it("surfaces a SCOPED skill whose own frontmatter declares a matching trigger", async () => {
+      // The 2026-08-11 defect: account/team skills were delivered and then
+      // never routed, because prompt matching consults only the PUBLIC table
+      // and a private skill can never be listed there. Triggers now ride in the
+      // skill body. Note the public table is unavailable in this test (no fetch
+      // mock) — proving scoped routing does not depend on a public file the
+      // skill can never appear in.
+      const scoped = [
+        "---",
+        "name: acme-billing",
+        "description: scoped skill",
+        "prompt_triggers:",
+        '  - "\\bNorthwind Payments\\b"',
+        "---",
+        "# acme-billing",
+      ].join("\n");
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "alpha",
+        default_context_depth: "standard",
+        agent_name: "Dmitri",
+        "skill_manifest:tier": "enterprise",
+        "skill_manifest:names": JSON.stringify(["acme-billing"]),
+        "skill:acme-billing": scoped,
+      }[key] ?? fallback));
+      mockGetAllSettings.mockResolvedValue({ "skill:acme-billing": scoped });
+      const storage = makeStorageStub();
+      storage.loadContext.mockResolvedValue({ last_summary: "ctx", version: 1 });
+      vi.mocked(getStorage).mockResolvedValue(storage as never);
+
+      const hit = (await sessionBootstrapHandler({ prompt: "how do I submit the Northwind Payments invoice?" }))
+        .content[0].text as string;
+      expect(hit).toContain("Symptom-triggered skills:");
+      expect(hit).toContain("acme-billing");
+
+      const miss = (await sessionBootstrapHandler({ prompt: "fix the failing payment test" }))
+        .content[0].text as string;
+      expect(miss).not.toContain("Symptom-triggered skills:");
+    });
+
     it("delivers skills AND the facts line together when a project payload is huge", async () => {
       // Asserts co-existence under pressure, not anti-truncation: the allocator
       // reserves both systemReadyBlock and SESSION_FACTS_RESERVE out of the

@@ -1636,9 +1636,16 @@ export async function sessionLoadContextHandler(
         // here; without it a stale cached table would never be detected on
         // this path, since there is no portal response to compare against.
         const manifestVersion = Number(await getSetting("skill_manifest:routing_version", ""));
+        // Account/team skills can never appear in the PUBLIC routing table —
+        // listing a private skill's name and trigger words in a world-readable
+        // file is the leak this feature exists to avoid — so they declare
+        // `prompt_triggers` in their own frontmatter and are matched here, on
+        // device, from bodies already cached for injection.
+        const scopedTriggers = await collectScopedTriggersFromCache();
         const matched = (await resolvePromptSkillNames(
           prompt,
           Number.isFinite(manifestVersion) && manifestVersion > 0 ? manifestVersion : undefined,
+          scopedTriggers,
         )).filter((name) => entitledSkillNames.has(name));
         if (matched.length > 0) {
           const shown = matched.slice(0, MAX_SYMPTOM_SKILLS);
@@ -2076,6 +2083,37 @@ export function buildSessionFactsLine(facts: Record<string, string | number | bo
     .map(([key, value]) => `${key}="${safe(String(Array.isArray(value) ? value.join(",") : value))}"`)
     .join(" ");
   return `<prism_session ${attrs} />`;
+}
+
+/**
+ * Prompt triggers declared by delivered skills, read from the same
+ * `skill:<name>` cache that backs body injection.
+ *
+ * Using that cache (rather than scanning disk) keeps routing and injection on
+ * one source of truth: anything matched here is something the caller is already
+ * entitled to inline. Failures are swallowed — a broken trigger must degrade to
+ * "the public table only", never take down startup.
+ */
+async function collectScopedTriggersFromCache(): Promise<Record<string, string[]> | undefined> {
+  try {
+    const { collectScopedTriggers } = await import("./scopedSkillTriggers.js");
+    const settings = await getAllSettings();
+    const bodies: Array<[string, string]> = [];
+    for (const [key, value] of Object.entries(settings)) {
+      if (key.startsWith("skill:") && value) bodies.push([key.slice("skill:".length), value]);
+    }
+    if (bodies.length === 0) return undefined;
+    const { triggers, errors } = collectScopedTriggers(bodies);
+    for (const error of errors) {
+      // Loud, not silent: a rejected trigger looks exactly like the defect this
+      // feature fixes — a skill that is installed and never fires.
+      debugLog(`[skill-triggers] ignored trigger in "${error.skill}": ${error.reason}`);
+    }
+    return Object.keys(triggers).length > 0 ? triggers : undefined;
+  } catch (error) {
+    debugLog(`[skill-triggers] collection failed: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
 }
 
 export async function sessionBootstrapHandler(
