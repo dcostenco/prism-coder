@@ -36,11 +36,21 @@ const API_PATH = "/api/v1/prism/user-skills";
 interface ToolResult {
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
-  structuredContent?: Record<string, unknown>;
 }
 
+/**
+ * Structured data is SERIALIZED INTO the text, never returned as
+ * `structuredContent`. A host may surface structuredContent and drop the text
+ * block — Claude Code does — which silently discarded every explanation this
+ * tool produced ("saved as YOUR account skill", the floor-guard refusal, the
+ * how-to-share hint), leaving raw JSON. See buildSessionFactsLine in
+ * ledgerHandlers.ts for the measurements behind this rule.
+ */
 function text(message: string, extra?: Record<string, unknown>, isError = false): ToolResult {
-  return { content: [{ type: "text", text: message }], ...(isError ? { isError } : {}), ...(extra ? { structuredContent: extra } : {}) };
+  const body = extra
+    ? `${message}\n\n\`\`\`json\n${JSON.stringify(extra, null, 2)}\n\`\`\``
+    : message;
+  return { content: [{ type: "text", text: body }], ...(isError ? { isError } : {}) };
 }
 
 async function synaluxBaseUrl(): Promise<string> {

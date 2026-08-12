@@ -197,6 +197,16 @@ function stripSkillFrontmatter(raw: string | null): string {
   return text.slice(text.indexOf("\n", end + 1) + 1).trim();
 }
 
+/**
+ * Room reserved for the trailing <prism_session /> facts line so it never
+ * competes with the skill block. The allocator below already subtracts
+ * systemReadyBlock.length — skills are protected and PROJECTS absorb budget
+ * pressure — so the facts line is reserved the same way rather than capping
+ * the assembled text, which truncates from the TAIL and would eat the very
+ * skill block this whole fix exists to deliver.
+ */
+const SESSION_FACTS_RESERVE = 256;
+
 const NATIVE_STARTUP_MAX_CHARS: Record<NativeContextDepth, number> = {
   quick: 4_000,
   standard: 8_000,
@@ -2039,6 +2049,35 @@ export async function seedAndRecallDemoMemory(conversationId: string): Promise<s
   }
 }
 
+/**
+ * Machine-readable session facts, carried INSIDE the text block.
+ *
+ * Why not `structuredContent`: a tool result may carry both a text block and
+ * `structuredContent`, and a host is free to surface only the latter — Claude
+ * Code does exactly that, so from 2026-07-22 (when structuredContent was added
+ * here) until this fix, every Claude Code session received these 129 bytes of
+ * JSON and NONE of the ~7KB startup text: no memory context, no protected
+ * skill floor, no symptom-triggered skills. Measured three ways: a text-only
+ * tool (session_health_check) arrived intact, this one and skill_manage did
+ * not, and Claude Code v2.1.212 delivered the full text before the change and
+ * 129 bytes after it — same host version, so the regression was ours.
+ *
+ * MCP pairs `structuredContent` with an `outputSchema`; Prism declares none,
+ * so emitting it was out of spec and a host preferring it is reasonable. The
+ * facts now ride in the text, which every host renders.
+ */
+export function buildSessionFactsLine(facts: Record<string, string | number | boolean | string[]>): string {
+  // Attribute-safe, NOT markdown-escaped: escapeNativeMarkdown backslashes
+  // hyphens, which corrupts every UUID it touches (`conv-abc` → `conv\-abc`)
+  // and would make the id unusable by the caller it exists for. Strip only
+  // what can break out of the attribute or the line.
+  const safe = (value: string) => value.replace(/[\u0000-\u001f\u007f"<>]+/g, " ").trim();
+  const attrs = Object.entries(facts)
+    .map(([key, value]) => `${key}="${safe(String(Array.isArray(value) ? value.join(",") : value))}"`)
+    .join(" ");
+  return `<prism_session ${attrs} />`;
+}
+
 export async function sessionBootstrapHandler(
   args: unknown = {},
   options: SessionBootstrapOptions = {},
@@ -2131,10 +2170,10 @@ export async function sessionBootstrapHandler(
       return {
         content: [{
           type: "text",
-          text: capNativeStartupText(firstRunText, depth),
+          text: capNativeStartupText(firstRunText, depth, undefined,
+            `\n\n${buildSessionFactsLine({ conversation_id: conversationId, projects: "", depth, first_run: true })}`),
         }],
         isError: false,
-        structuredContent: { conversation_id: conversationId, projects: [], depth, first_run: true },
       };
     }
     const unconfiguredState = (depth === "quick" ? "" : `\n- 📝 **Last Session Summary:** Not loaded`) +
@@ -2145,10 +2184,10 @@ export async function sessionBootstrapHandler(
     return {
       content: [{
         type: "text",
-        text: capNativeStartupText(noProjectsText, depth),
+        text: capNativeStartupText(noProjectsText, depth, undefined,
+          `\n\n${buildSessionFactsLine({ conversation_id: conversationId, projects: "", depth })}`),
       }],
       isError: false,
-      structuredContent: { conversation_id: conversationId, projects: [], depth },
     };
   }
 
@@ -2165,7 +2204,7 @@ export async function sessionBootstrapHandler(
     const separatorsLength = Math.max(0, renderedProjectCount - 1) * 2;
     perProjectMaxChars = Math.floor(
       (startupMaxChars - startupHeader.length - systemReadyBlock.length - LOCAL_STARTUP_FALLBACK_NOTICE.length -
-        6 - omissionLength - separatorsLength) /
+        SESSION_FACTS_RESERVE - 6 - omissionLength - separatorsLength) /
         renderedProjectCount,
     );
     if (perProjectMaxChars >= 512 || renderedProjectCount === 1) break;
@@ -2226,15 +2265,17 @@ export async function sessionBootstrapHandler(
       type: "text",
       text: `${startupHeader}\n\n${fallbackNotice}${startupContext.loaded.join("\n\n")}` +
         (omittedProjectsText ? `\n\n${omittedProjectsText}` : "") +
-        `\n\n${systemReadyBlock}`,
+        `\n\n${systemReadyBlock}` +
+        // Appended, not capped: SESSION_FACTS_RESERVE already bought this room
+        // out of the PROJECT budget, so nothing here can displace the skills.
+        `\n\n${buildSessionFactsLine({
+          conversation_id: conversationId,
+          projects: compactWithOmissionCount(renderedProjects.join(","), 120),
+          depth,
+          context_source: usedLocalFallback ? "local-last-good" : activeStorageBackend,
+        })}`,
     }],
     isError: startupContext.hadError,
-    structuredContent: {
-      conversation_id: conversationId,
-      projects: renderedProjects,
-      depth,
-      context_source: usedLocalFallback ? "local-last-good" : activeStorageBackend,
-    },
   };
 }
 

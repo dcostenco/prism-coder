@@ -130,6 +130,28 @@ describe("skill_save — signed in", () => {
   });
 });
 
+describe("host delivery — structuredContent must never be used", () => {
+  // Same 2026-08-11 defect as session_bootstrap: a result carrying both text
+  // and structuredContent lets a host surface only the JSON, which silently
+  // discarded every explanation these tools produce — the scope classification,
+  // the floor-guard refusal, the how-to-share hint. Data now rides in the text.
+  it("skill_manage list returns no structuredContent and serializes the data into the text", async () => {
+    mocks.getSynaluxJwt.mockResolvedValue("jwt");
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({ status: "ok", user_skills: [{ name: "my-notes", version: 1 }], team_skills: [], memberships: [] }), { status: 200 }));
+    const result = await skillManageHandler({ action: "list" });
+    expect(result).not.toHaveProperty("structuredContent");
+    expect(result.content[0].text).toContain("my-notes");
+  });
+
+  it("skill_save returns no structuredContent, so its guidance survives", async () => {
+    mocks.getSynaluxJwt.mockResolvedValue("jwt");
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({ status: "ok", version: 1 }), { status: 200 }));
+    const result = await skillSaveHandler({ name: "my-notes", content: body("my-notes") });
+    expect(result).not.toHaveProperty("structuredContent");
+    expect(result.content[0].text).toContain("YOUR account skill");
+  });
+});
+
 describe("skill_manage — recall paths", () => {
   it("deletes a local skill only after archiving its final content", async () => {
     await skillSaveHandler({ name: "doomed", content: body("doomed", "precious body\n") });

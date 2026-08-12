@@ -186,7 +186,7 @@ export const SESSION_BOOTSTRAP_TOOL: Tool = {
     "verbatim as the entire first-turn startup display, before any optional answer. Do not summarize, paraphrase, rename " +
     "headings, reformat, or omit any returned section. Preserve its order and line content. For a greeting-only prompt, " +
     "stop after the verbatim startup display. Do not guess or pass a project or depth. Prism returns a stable " +
-    "conversation_id in structuredContent; reuse it for session_save_ledger, session_save_handoff, and " +
+    "conversation_id on the trailing <prism_session /> line; reuse it for session_save_ledger, session_save_handoff, and " +
     "session_detect_drift throughout this conversation without adding it to the visible greeting.",
   annotations: {
     readOnlyHint: true,
@@ -199,7 +199,7 @@ export const SESSION_BOOTSTRAP_TOOL: Tool = {
     properties: {
       conversation_id: {
         type: "string",
-        description: "Optional stable key for this conversation. When omitted, Prism generates one and returns it in structuredContent.",
+        description: "Optional stable key for this conversation. When omitted, Prism generates one and returns it on the trailing <prism_session /> line.",
       },
       prompt: {
         type: "string",

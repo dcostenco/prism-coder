@@ -1031,6 +1031,14 @@ describe("ledgerHandlers", () => {
   });
 
   describe("sessionBootstrapHandler", () => {
+    /** Parse the trailing machine-readable line that replaced structuredContent. */
+    const sessionFacts = (text: string): Record<string, string> => {
+      const match = text.match(/<prism_session ([^>]*)\/>/);
+      if (!match) return {};
+      const out: Record<string, string> = {};
+      for (const [, k, v] of match[1].matchAll(/(\w+)="([^"]*)"/g)) out[k] = v;
+      return out;
+    };
     // Pin every bootstrap test to a dead port by default. Without this the
     // dashboard probe reaches whatever the developer happens to be running
     // locally, so results differ between a laptop and CI — the exact
@@ -1041,6 +1049,64 @@ describe("ledgerHandlers", () => {
     afterAll(() => {
       if (savedDashboardPort === undefined) delete process.env.PRISM_DASHBOARD_PORT;
       else process.env.PRISM_DASHBOARD_PORT = savedDashboardPort;
+    });
+
+    // ── The 2026-08-11 injection outage ────────────────────────────────
+    // A tool result carrying BOTH a text block and `structuredContent` lets a
+    // host surface only the latter. Claude Code does, so from 2026-07-22 until
+    // this guard every Claude Code session got 129 bytes of JSON instead of the
+    // ~7KB startup text — no memory context, no protected skill floor, no
+    // symptom-triggered skills — while Codex, which renders the text, was fine.
+    // The blast radius was invisible because the SERVER built the block
+    // correctly; only the transcript showed what the model actually received.
+    // These three assertions are the whole contract: no structuredContent on
+    // any return path, and the facts it used to carry ride in the text.
+    it("NEVER returns structuredContent — it makes hosts drop the startup text", async () => {
+      const result = await sessionBootstrapHandler({});
+      expect(result).not.toHaveProperty("structuredContent");
+      expect(Object.keys(result)).not.toContain("structuredContent");
+    });
+
+    it("carries conversation_id in the text so dropping structuredContent loses nothing", async () => {
+      const result = await sessionBootstrapHandler({ conversation_id: "conv-abc-123" });
+      const text = result.content[0].text as string;
+      expect(text).toContain("<prism_session ");
+      expect(text).toContain('conversation_id="conv-abc-123"');
+      expect(text).toContain('depth="');
+    });
+
+    it("keeps the startup body ALONGSIDE the facts line — the facts must not replace the payload", async () => {
+      // Guards the opposite failure: a "fix" that returns only the facts line
+      // would also pass the two assertions above while still starving the model.
+      const result = await sessionBootstrapHandler({});
+      const text = result.content[0].text as string;
+      expect(text.length).toBeGreaterThan(200);
+      expect(text.indexOf("<prism_session ")).toBeGreaterThan(0);
+      expect(text).toMatch(/Prism System Ready|Welcome back|No Auto-Load Projects/);
+    });
+
+    it("keeps the skill block intact under budget pressure — the facts line must never displace it", async () => {
+      // The near-miss during this fix: appending the facts line and then
+      // capping the assembled text truncates from the TAIL, and the skill block
+      // IS the tail — the cure would have re-created the disease. Budget for
+      // the facts line is reserved from the PROJECT share instead, so a
+      // pathologically large project payload starves projects, never skills.
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "alpha,beta",
+        default_context_depth: "standard",
+        agent_name: "Dmitri",
+        "skill_manifest:tier": "enterprise",
+        "skill_manifest:names": JSON.stringify(["aba-precision-protocol", "prime-directive"]),
+      }[key] ?? fallback));
+      const storage = makeStorageStub();
+      storage.loadContext.mockResolvedValue({ last_summary: "x".repeat(40_000), version: 3 });
+      vi.mocked(getStorage).mockResolvedValue(storage as never);
+
+      const text = (await sessionBootstrapHandler({})).content[0].text as string;
+      expect(text).toContain("Prism System Ready");
+      expect(text).toContain("<prism_session ");
+      expect(sessionFacts(text).conversation_id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(text.length).toBeLessThanOrEqual(8_256);   // budget + the reserved facts line
     });
 
     it("renders the STALE warning under the header when a committed generation never materialized", async () => {
@@ -1106,7 +1172,7 @@ describe("ledgerHandlers", () => {
       // The paid funnel's one guaranteed impression (2026-08-05 first-run
       // audit: the startup path referenced upgrade_url zero times).
       expect(text).toContain("https://synalux.ai/pricing");
-      expect(result.structuredContent).toMatchObject({ first_run: true, projects: [] });
+      expect(sessionFacts(text)).toMatchObject({ first_run: "true", projects: "" });
       // The measured 2026-08-05 failure mode: "Welcome back" to a stranger
       // followed by three "Not loaded" rows — an all-absence payload.
       expect(text).not.toContain("Welcome back");
@@ -1183,7 +1249,7 @@ describe("ledgerHandlers", () => {
       // Dashboard is surfaced either as a live URL or an honest "not running";
       // the point is that it reaches stdout at all (it was stderr-only).
       expect(text).toContain("Dashboard:");
-      expect(result.structuredContent).not.toMatchObject({ first_run: true });
+      expect(sessionFacts(text).first_run).toBeUndefined();
       // Paid tiers never see the upgrade line.
       expect(text).not.toContain("https://synalux.ai/pricing");
     });
@@ -1317,7 +1383,7 @@ describe("ledgerHandlers", () => {
       const text = result.content[0].text as string;
 
       expect(result.isError).toBe(false);
-      expect(result.structuredContent.context_source).toBe("local-last-good");
+      expect(sessionFacts(text).context_source).toBe("local-last-good");
       expect(text).toContain("Synalux cloud context is temporarily unavailable");
       expect(text).toContain("Local last-good prism-mcp");
       expect(text).toContain("Local last-good portal");
@@ -1495,7 +1561,7 @@ describe("ledgerHandlers", () => {
       expect(text).toContain("Welcome to Prism");
       expect(text).not.toContain("Welcome back");
       expect(text).not.toContain("None — None");
-      expect(result.structuredContent).toMatchObject({ first_run: true });
+      expect(sessionFacts(text)).toMatchObject({ first_run: "true" });
     });
 
     it.each(BOOTSTRAP_TIER_DEPTH_CASES)(
@@ -1667,9 +1733,14 @@ describe("ledgerHandlers", () => {
       storage.loadContext.mockResolvedValue({ last_summary: "Prior work", version: 2 });
 
       const bootstrap = await sessionBootstrapHandler({});
-      const conversationId = bootstrap.structuredContent.conversation_id as string;
+      // Was "hidden": the id used to ride in structuredContent, invisible to the
+      // reader. Hosts drop that field (2026-08-11), taking the whole startup
+      // payload with it, so the id now travels on the trailing <prism_session />
+      // line — present for the model, and the server instructions tell it to keep
+      // that line out of the visible greeting.
+      const conversationId = sessionFacts(bootstrap.content[0].text as string).conversation_id;
       expect(conversationId).toMatch(/^[0-9a-f-]{36}$/);
-      expect(bootstrap.content[0].text).not.toContain(conversationId);
+      expect(bootstrap.content[0].text).toContain(conversationId);
       expect(mockRegisterContextLoaded).toHaveBeenCalledWith(conversationId, "test-project", "1");
 
       expect((await sessionSaveLedgerHandler({
@@ -1691,7 +1762,7 @@ describe("ledgerHandlers", () => {
       storage.loadContext.mockResolvedValue({ version: 1 });
 
       const result = await sessionBootstrapHandler({ conversation_id: "stable-conversation" });
-      expect(result.structuredContent.conversation_id).toBe("stable-conversation");
+      expect(sessionFacts(result.content[0].text as string).conversation_id).toBe("stable-conversation");
       expect(result.content[0].text).toContain("Welcome back, Dmitri \\> injected");
       expect(result.content[0].text).toContain("Agent Identity:** dev \\- forged — Dmitri");
       expect(result.content[0].text).not.toContain("\n> injected");
