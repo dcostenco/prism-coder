@@ -135,6 +135,7 @@ import {
   SESSION_SAVE_HANDOFF_TOOL,
   SESSION_LOAD_CONTEXT_TOOL,
   SESSION_BOOTSTRAP_TOOL,
+  SESSION_ROUTE_PROMPT_TOOL,
   KNOWLEDGE_SEARCH_TOOL,
   KNOWLEDGE_FORGET_TOOL,
   // ─── v0.4.0: New tool definitions (Enhancements #2 and #4) ───
@@ -188,6 +189,7 @@ import {
   sessionSaveHandoffHandler,
   sessionLoadContextHandler,
   sessionBootstrapHandler,
+  sessionRoutePromptHandler,
   knowledgeSearchHandler,
   knowledgeForgetHandler,
   // ─── v0.4.0: New tool handlers ───
@@ -285,6 +287,7 @@ const BASE_TOOLS: Tool[] = [
 function buildSessionMemoryTools(): Tool[] {
   return [
     SESSION_BOOTSTRAP_TOOL,      // session_bootstrap — hook-free configured first-turn greeting + context
+    SESSION_ROUTE_PROMPT_TOOL,   // session_route_prompt — routes EVERY turn after the first
     SKILL_SAVE_TOOL,             // skill_save — save a skill at local/user/team scope
     SKILL_MANAGE_TOOL,           // skill_manage — list/delete scoped skills, release/restore platform skills
     SESSION_SAVE_LEDGER_TOOL,    // session_save_ledger — append immutable session log
@@ -441,6 +444,7 @@ export const PRISM_SERVER_INSTRUCTIONS =
   `trigger rules — read each before proposing any change. Surfacing a name is not loading it: hosts that ` +
   `do not auto-load skill files must fetch each body with knowledge_search, passing the skill name ` +
   `exactly as listed. ` +
+  `AFTER that first turn, routing does not stop: call session_route_prompt at the start of any turn where the user states a new task, changes the kind of work, or reports a defect, passing their verbatim message as {prompt} and the skills you already hold as {loaded}. session_bootstrap routes only turn one, so without this a long session keeps working with whatever it happened to load hours earlier. The call is cheap — a single line when nothing new matches, and never the same skill twice. When it returns skills, read and follow them before doing the work. ` +
   `Emit no preamble. Print the complete tool result verbatim as the entire first-turn startup display, before any optional ` +
   `answer. Do not summarize, paraphrase, rename headings, reformat, or omit any returned section. Preserve its order and ` +
   `line content. For a greeting-only prompt, stop after the verbatim startup display. ` +
@@ -908,6 +912,12 @@ export function createServer() {
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
             contextLoadedByClient = true;
             result = await sessionBootstrapHandler(args); break;
+
+          case "session_route_prompt":
+            // Deliberately NOT gated on SESSION_MEMORY_ENABLED: routing is
+            // on-device against a cached table, so it must keep working when
+            // the memory backend is unconfigured or unreachable.
+            result = await sessionRoutePromptHandler(args); break;
 
           case "knowledge_search":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");

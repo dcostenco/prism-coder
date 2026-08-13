@@ -2165,6 +2165,53 @@ async function collectSkillTriggersOnThisMachine(): Promise<
   }
 }
 
+/**
+ * session_route_prompt — the mid-session half of skill routing.
+ *
+ * Everything here is deliberately borrowed from the first-turn path rather
+ * than reimplemented: the same on-device matcher, the same scoped-frontmatter
+ * triggers, the same entitlement set and the same local-skill bypass. A second
+ * implementation would drift, and a routing table that behaves differently at
+ * turn 500 than at turn 1 is worse than no routing at all.
+ */
+export async function sessionRoutePromptHandler(
+  args: unknown,
+): Promise<{ content: Array<{ type: "text"; text: string }> }> {
+  const input = (typeof args === "object" && args !== null && !Array.isArray(args) ? args : {}) as {
+    prompt?: unknown; loaded?: unknown; project?: unknown;
+  };
+  const prompt = typeof input.prompt === "string" ? input.prompt : "";
+  const loaded = Array.isArray(input.loaded)
+    ? input.loaded.filter((n): n is string => typeof n === "string")
+    : [];
+
+  const { routePrompt } = await import("./promptRouteHandler.js");
+  const { resolvePromptSkillNames } = await import("./skillRouting.js");
+
+  const result = await routePrompt(prompt, loaded, {
+    resolvePromptSkillNames,
+    collectTriggers: collectSkillTriggersOnThisMachine,
+    entitledNames: async () => {
+      // Reuse the manifest already synced for this session. Passing the cached
+      // sync result keeps this off the network: a per-turn tool must not make
+      // a portal round-trip.
+      const { awaitSkillManifestSync } = await import("../skillManifestSync.js");
+      const snapshot = await resolveNativeSkillManifestSnapshot(await awaitSkillManifestSync());
+      return new Set(snapshot.names);
+    },
+    getBody: (name: string) => getSetting(`skill:${name}`, ""),
+    manifestVersion: async () => {
+      const v = Number(await getSetting("skill_manifest:routing_version", ""));
+      return Number.isFinite(v) && v > 0 ? v : undefined;
+    },
+  });
+
+  // Text only, never structuredContent. A result carrying both lets a host
+  // surface just the structured half — which is exactly how Claude Code
+  // silently dropped the bootstrap payload for three weeks.
+  return { content: [{ type: "text", text: result.text }] };
+}
+
 export async function sessionBootstrapHandler(
   args: unknown = {},
   options: SessionBootstrapOptions = {},

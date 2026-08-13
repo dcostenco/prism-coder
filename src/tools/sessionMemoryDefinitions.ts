@@ -172,6 +172,53 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
 
 // ─── Hook-free Session Bootstrap ──────────────────────────────
 
+/**
+ * Mid-session counterpart to session_bootstrap.
+ *
+ * session_bootstrap routes the FIRST prompt. This routes every prompt after
+ * it, which is where long sessions actually do their work — the 2026-08-12
+ * incident asked for a UI/UX review at turn ~530 and no skill could reach it.
+ */
+export const SESSION_ROUTE_PROMPT_TOOL: Tool = {
+  name: "session_route_prompt",
+  description:
+    "Call this at the START of any turn where the user states a NEW task, changes the kind of work, or reports a " +
+    "defect \u2014 passing their verbatim message as {prompt: \"...\"} and the skills you already have as {loaded: [...]}. " +
+    "session_bootstrap routes only the first turn of a conversation; this routes every turn after it, so a long " +
+    "session still picks up the skills its current work requires. The prompt is matched ON-DEVICE against the same " +
+    "table and the same account-scoped frontmatter triggers; it never leaves the machine. Calling it is cheap: when " +
+    "nothing new matches it returns a single line, and anything named in `loaded` is never returned again. When it " +
+    "does return skills, read and follow them before doing the work \u2014 they are the rules for the task at hand, " +
+    "not background. Skip it only for follow-ups within work you have already routed.",
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  inputSchema: {
+    type: "object",
+    properties: {
+      prompt: {
+        type: "string",
+        description: "The user's verbatim message for this turn. Matched on-device; never transmitted.",
+      },
+      loaded: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Skill names already active in this conversation, including those from the first-turn startup display. " +
+          "Anything listed here is never returned again, which is what keeps repeat calls free.",
+      },
+      project: {
+        type: "string",
+        description: "Optional project override. Omit to use the session's project.",
+      },
+    },
+    required: ["prompt"],
+  },
+};
+
 export const SESSION_BOOTSTRAP_TOOL: Tool = {
   name: "session_bootstrap",
   description:
