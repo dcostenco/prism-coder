@@ -2,7 +2,8 @@
 
 import { Command } from 'commander';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, readdirSync, statSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { SqliteStorage } from './storage/sqlite.js';
 import { handleVerifyStatus, handleGenerateHarness } from './verification/cliHandler.js';
 import * as path from 'path';
@@ -486,6 +487,31 @@ program
 // Claude Code and Codex, so the contract is: always exit 0, always print one
 // JSON object, and stay off the network (cached settings DB only). A hook
 // that can fail a turn gets uninstalled; a hook that is slow gets noticed.
+
+/** Deliberate offload for payloads over the host inline cap. The host's own
+ *  overflow path swaps the payload for a 2KB preview with no instruction to
+ *  read the rest; this file plus the inline pointer is the recoverable form. */
+function writeRouteOffload(fullText: string): string | undefined {
+  try {
+    const dir = path.join(homedir(), '.prism-mcp', 'route-context');
+    mkdirSync(dir, { recursive: true });
+    try {
+      // Best-effort prune: one file per over-budget routed prompt, kept a week.
+      for (const f of readdirSync(dir)) {
+        const p = path.join(dir, f);
+        try {
+          if (Date.now() - statSync(p).mtimeMs > 7 * 86_400_000) rmSync(p);
+        } catch { /* skip unstat-able entries */ }
+      }
+    } catch { /* prune failure never blocks the write */ }
+    const target = path.join(dir, `route-${Date.now()}-${process.pid}.md`);
+    writeFileSync(target, fullText);
+    return target;
+  } catch {
+    return undefined; // reshape degrades to the loud in-band fallback
+  }
+}
+
 program
   .command('route-prompt')
   .description('Match a prompt (stdin) against skill triggers; prints {names, text} JSON. Used by the prism-route host hook.')
@@ -502,8 +528,15 @@ program
         .map((n) => n.trim())
         .filter(Boolean);
       const { runPromptRouteFromCache } = await import('./tools/ledgerHandlers.js');
+      const { reshapeForInlineBudget, HOOK_INLINE_SAFE_CHARS } = await import('./tools/promptRouteHandler.js');
       const result = await runPromptRouteFromCache(prompt, loaded);
-      const payload = JSON.stringify({ names: result.names, text: result.names.length > 0 ? result.text : '' });
+      // The hook path must fit the host's inline cap; the MCP tool path
+      // (session_route_prompt) keeps the full 30k — tool results inline far
+      // higher than hook context does.
+      const shaped = result.names.length > 0
+        ? reshapeForInlineBudget(result, HOOK_INLINE_SAFE_CHARS, writeRouteOffload)
+        : { text: '' };
+      const payload = JSON.stringify({ names: result.names, text: result.names.length > 0 ? shaped.text : '' });
       await new Promise<void>((resolveWrite) => process.stdout.write(payload + '\n', () => resolveWrite()));
     } catch {
       // Never break the hook: an empty result is a routing miss, not an error.

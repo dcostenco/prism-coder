@@ -7,7 +7,13 @@
  * as the injection path itself.
  */
 import { describe, it, expect } from "vitest";
-import { routePrompt, MAX_ROUTED_SKILLS, MAX_ROUTED_CHARS } from "../../src/tools/promptRouteHandler.js";
+import {
+  routePrompt,
+  reshapeForInlineBudget,
+  MAX_ROUTED_SKILLS,
+  MAX_ROUTED_CHARS,
+  HOOK_INLINE_SAFE_CHARS,
+} from "../../src/tools/promptRouteHandler.js";
 
 const BODIES: Record<string, string> = {
   "visual-screenshot-verification": "# visual\nRender it and look at it.",
@@ -102,6 +108,69 @@ describe("injection", () => {
     }));
     expect(r.names).toEqual(["ghost"]);
     expect(r.text).toMatch(/no content on this machine/i);
+  });
+});
+
+describe("host inline budget — hosts hard-cap hook context (Claude Code 10k chars, Codex ~2.5k tokens)", () => {
+  // Three live instances on 2026-08-13: 13.2KB/18KB/18.9KB injections were
+  // offloaded by Claude Code to a file the model never read past a 2KB
+  // preview. The full payload must therefore be OUR offload, with an
+  // imperative pointer that survives any preview window.
+  const SIX_K = "R".repeat(6_000);
+  const threeBigSkills = () => deps({
+    resolvePromptSkillNames: async () => ["alpha", "beta", "gamma"],
+    entitledNames: async () => new Set(["alpha", "beta", "gamma"]),
+    getBody: async (n: string) => `# ${n}\n${SIX_K}`,
+  });
+
+  it("pins the budget under Claude Code's documented 10,000-char hook cap", () => {
+    expect(HOOK_INLINE_SAFE_CHARS).toBeLessThan(10_000);
+    expect(HOOK_INLINE_SAFE_CHARS).toBeGreaterThan(8_000);
+  });
+
+  it("over budget: inline fits the cap, the file gets the FULL text, and the Read pointer sits in the first 2KB", async () => {
+    const r = await routePrompt("ui/ux", [], threeBigSkills());
+    expect(r.text.length).toBeGreaterThan(HOOK_INLINE_SAFE_CHARS); // precondition: this IS the failing payload
+    let written: string | undefined;
+    const shaped = reshapeForInlineBudget(r, HOOK_INLINE_SAFE_CHARS, (full) => {
+      written = full;
+      return "/tmp/prism-test/route-1.md";
+    });
+    expect(shaped.offloaded).toBe(true);
+    expect(shaped.text.length).toBeLessThanOrEqual(HOOK_INLINE_SAFE_CHARS);
+    expect(written).toBe(r.text); // byte-complete: the file is the payload, not a summary
+    const preview = shaped.text.slice(0, 2_048); // what Claude Code's preview would show
+    expect(preview).toContain("/tmp/prism-test/route-1.md");
+    expect(preview).toMatch(/Read that file now/i);
+    expect(preview).toContain("**Skills now active for this task:** alpha, beta, gamma");
+  });
+
+  it("inlines whole priority bodies that still fit under the budget", async () => {
+    const r = await routePrompt("ui/ux", [], threeBigSkills());
+    const shaped = reshapeForInlineBudget(r, HOOK_INLINE_SAFE_CHARS, () => "/tmp/p.md");
+    // 6k bodies: the first fits under 9.8k alongside header+pointer, the rest must not.
+    expect(shaped.text).toContain("### alpha");
+    expect(shaped.text).not.toContain("### gamma");
+  });
+
+  it("under budget: text passes through untouched and nothing is written", async () => {
+    const r = await routePrompt("make a UI/UX review", [], deps());
+    let calls = 0;
+    const shaped = reshapeForInlineBudget(r, HOOK_INLINE_SAFE_CHARS, () => {
+      calls += 1;
+      return "/tmp/never.md";
+    });
+    expect(shaped.offloaded).toBe(false);
+    expect(shaped.text).toBe(r.text);
+    expect(calls).toBe(0);
+  });
+
+  it("offload write failure degrades LOUDLY: skipped skills are named with a fetch instruction", async () => {
+    const r = await routePrompt("ui/ux", [], threeBigSkills());
+    const shaped = reshapeForInlineBudget(r, HOOK_INLINE_SAFE_CHARS, () => undefined);
+    expect(shaped.text.length).toBeLessThanOrEqual(HOOK_INLINE_SAFE_CHARS);
+    expect(shaped.text).toMatch(/knowledge_search/);
+    expect(shaped.text).toContain("gamma"); // the dropped skill is named, not silently gone
   });
 });
 

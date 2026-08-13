@@ -327,7 +327,14 @@ function ensureScript(hookDir: string): "installed" | "refreshed" | "unchanged" 
   return scriptExists ? "refreshed" : "installed";
 }
 
-function ensureRegistered(configPath: string, scriptPath: string): "registered" | "updated" | "unchanged" {
+function ensureRegistered(configPath: string, scriptPath: string, host: "claude" | "codex"): "registered" | "updated" | "unchanged" {
+  // Codex truncates hook additionalContext at ~2,500 tokens by default —
+  // a head-and-tail preview of our payload, which defeats the injection.
+  // additionalContextLimit: 0 passes the full context through; the payload is
+  // already bounded by HOOK_INLINE_SAFE_CHARS on the emitting side, so the
+  // pass-through is not unbounded. Claude Code has no such field (its 10k-char
+  // cap is not configurable) — never write unknown keys into settings.json.
+  const wantsLimit = host === "codex";
   let config: Record<string, unknown> = {};
   let originalText: string | undefined;
   try {
@@ -358,18 +365,20 @@ function ensureRegistered(configPath: string, scriptPath: string): "registered" 
       // would re-register a duplicate entry.
       const command = String((h as { command?: unknown }).command ?? "");
       if (!command.replace(/\\/g, "/").includes(COMMAND_SIGNATURE)) continue;
-      if (command === wanted) return "unchanged";
-      // Same hook, older version: UPDATE the definition in place. This is
-      // what makes a script refresh visible to Codex's definition-hash —
-      // and on Claude it is a harmless argv change.
+      const limitCurrent = !wantsLimit || (h as { additionalContextLimit?: unknown }).additionalContextLimit === 0;
+      if (command === wanted && limitCurrent) return "unchanged";
+      // Same hook, older definition: UPDATE it in place. This is what makes a
+      // refresh visible to Codex's definition-hash — and on Claude it is a
+      // harmless argv change.
       (h as { command: string }).command = wanted;
+      if (wantsLimit) (h as { additionalContextLimit?: number }).additionalContextLimit = 0;
       stale = true;
     }
   }
   if (!stale) {
     entries.push({
       matcher: "*",
-      hooks: [{ type: "command", command: wanted, timeout: 15 }],
+      hooks: [{ type: "command", command: wanted, timeout: 15, ...(wantsLimit ? { additionalContextLimit: 0 } : {}) }],
     });
   }
   hooks.UserPromptSubmit = entries;
@@ -397,7 +406,7 @@ export function ensurePromptRouteHook(options: EnsureHookOptions = {}): EnsureHo
       const hookDir = join(spec.root, "hooks", HOOK_DIR);
       const script = ensureScript(hookDir);
       if (script === "disabled") continue; // operator opt-out — do not re-register either
-      const config = ensureRegistered(spec.configPath, join(hookDir, SCRIPT_FILE));
+      const config = ensureRegistered(spec.configPath, join(hookDir, SCRIPT_FILE), spec.host);
       const result: EnsureHookHostResult = { host: spec.host, script, config, scriptPath: join(hookDir, SCRIPT_FILE), configPath: spec.configPath };
       if (spec.host === "codex") {
         // Never report a green "registered" as if it were active: Codex

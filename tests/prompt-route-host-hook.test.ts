@@ -96,6 +96,35 @@ describe("install", () => {
     expect(cmds[0]).toContain(`--v${PROMPT_ROUTE_HOOK_VERSION}`);
   });
 
+  it("codex registration carries additionalContextLimit: 0 — the default (~2,500 tokens) truncates our payload to a preview", () => {
+    ensurePromptRouteHook({ homeDir: home, env: {} });
+    const entry = codexConfig().hooks.UserPromptSubmit.find((e: unknown) => JSON.stringify(e).includes("prism-route"));
+    expect(entry.hooks[0].additionalContextLimit).toBe(0);
+  });
+
+  it("claude registration does NOT carry the codex-only field — no unknown keys in settings.json", () => {
+    ensurePromptRouteHook({ homeDir: home, env: {} });
+    const entry = claudeConfig().hooks.UserPromptSubmit.find((e: unknown) => JSON.stringify(e).includes("prism-route"));
+    expect("additionalContextLimit" in entry.hooks[0]).toBe(false);
+  });
+
+  it("a codex entry missing the field is CONVERGED in place — no duplicate entry", () => {
+    // The state every machine registered before this fix is in right now.
+    ensurePromptRouteHook({ homeDir: home, env: {} });
+    const cfgPath = join(home, ".codex", "hooks.json");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    delete cfg.hooks.UserPromptSubmit[0].hooks[0].additionalContextLimit;
+    writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+
+    const results = ensurePromptRouteHook({ homeDir: home, env: {} });
+    expect(results.find((r) => r.host === "codex")?.config).toBe("updated");
+    const after = JSON.parse(readFileSync(cfgPath, "utf8"));
+    const ours = after.hooks.UserPromptSubmit.flatMap((e: { hooks: Array<{ command: string }> }) => e.hooks)
+      .filter((h: { command: string }) => h.command.includes("prism-route"));
+    expect(ours).toHaveLength(1); // converged, not appended
+    expect((ours[0] as { additionalContextLimit?: number }).additionalContextLimit).toBe(0);
+  });
+
   it("codex results carry the approval hint — registered is NOT active", () => {
     const results = ensurePromptRouteHook({ homeDir: home, env: {} });
     expect(results.find((r) => r.host === "codex")?.codexApproval).toBe("pending-or-unknown");

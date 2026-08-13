@@ -37,6 +37,14 @@ export const MAX_ROUTED_SKILLS = 3;
  *  reported "matched, not injected" on the first UI turn of a live session.
  *  A cap that trims the bundle it was built for is mis-sized. */
 export const MAX_ROUTED_CHARS = 30_000;
+/** What a HOST will actually hand the model inline from a hook. Claude Code
+ *  hard-caps hook additionalContext at 10,000 chars — over that, the full text
+ *  goes to a file and the model gets a 2KB preview (three live instances
+ *  observed 2026-08-13: 13.2/18/18.9KB injections, all offloaded). Codex
+ *  truncates at ~2,500 tokens by default. MAX_ROUTED_CHARS bounds the PAYLOAD;
+ *  this bounds what may ride INLINE through a hook — anything larger must be
+ *  our own offload file with an imperative pointer, not the host's silent one. */
+export const HOOK_INLINE_SAFE_CHARS = 9_800;
 
 export interface PromptRouteDeps {
   /** On-device matcher — same one session_bootstrap uses. */
@@ -66,6 +74,10 @@ export interface PromptRouteResult {
   alreadyLoaded: string[];
   /** Matched but dropped by the per-call cap. */
   overflow: string[];
+  /** Imperative header, kept separate so hook callers can re-budget inline text. */
+  header?: string;
+  /** One `### name\nbody` block per delivered skill, in priority order. */
+  blocks?: string[];
 }
 
 /**
@@ -149,5 +161,70 @@ export async function routePrompt(
     `These apply to the work you are about to do. Read and follow them before proceeding.` +
     (overflow.length > 0 ? `\n\nAlso matched, not injected: ${overflow.join(", ")}.` : "");
 
-  return { names: delivered, alreadyLoaded, overflow, text: `${header}\n\n${blocks.join("\n\n")}` };
+  return { names: delivered, alreadyLoaded, overflow, header, blocks, text: `${header}\n\n${blocks.join("\n\n")}` };
+}
+
+export interface InlineShaped {
+  /** What the hook should emit as additionalContext. */
+  text: string;
+  /** True when the full payload did not fit inline. */
+  offloaded: boolean;
+  /** Where the full payload was written, when the writer succeeded. */
+  offloadPath?: string;
+}
+
+/**
+ * Fit a routed payload under a host's inline hook cap.
+ *
+ * The host's own overflow handling is the failure mode, not the fallback:
+ * Claude Code silently swaps anything over 10k chars for a 2KB preview, and
+ * nothing tells the model to go read the rest. So when the payload is over
+ * budget WE offload it — to a file we name, behind an imperative that sits in
+ * the first 2KB where every host preview window can still deliver it — and
+ * inline as many whole priority bodies as fit.
+ *
+ * Pure over its writer so tests exercise the real budgeting.
+ */
+export function reshapeForInlineBudget(
+  result: PromptRouteResult,
+  budgetChars: number,
+  writeOffload: (fullText: string) => string | undefined,
+): InlineShaped {
+  const full = result.text;
+  if (full.length <= budgetChars || !result.header || !result.blocks || result.blocks.length === 0) {
+    return { text: full, offloaded: false };
+  }
+
+  let offloadPath: string | undefined;
+  try {
+    offloadPath = writeOffload(full);
+  } catch {
+    offloadPath = undefined;
+  }
+
+  const pieces: string[] = [result.header];
+  if (offloadPath) {
+    pieces.push(
+      `**Host hook context is size-capped — the full text of all ${result.names.length} skill(s) is saved at: ${offloadPath}**\n` +
+        `**Read that file now and follow those skills before proceeding. If the host shows "Full output saved to" with another path above, Read that file instead.**`,
+    );
+  }
+
+  // Reserve room for the loud-failure footer when there is no offload file to
+  // point at — a silently dropped skill is the defect this feature exists for.
+  const reserve = offloadPath ? 0 : 300;
+  let inline = pieces.join("\n\n");
+  const skipped: string[] = [];
+  for (let i = 0; i < result.blocks.length; i++) {
+    const candidate = `${inline}\n\n${result.blocks[i]}`;
+    if (candidate.length <= budgetChars - reserve) {
+      inline = candidate;
+    } else {
+      skipped.push(result.names[i] ?? `skill ${i + 1}`);
+    }
+  }
+  if (!offloadPath && skipped.length > 0) {
+    inline += `\n\n**Not inlined (host size cap, offload unavailable): ${skipped.join(", ")} — fetch each with knowledge_search and follow it before proceeding.**`;
+  }
+  return { text: inline, offloaded: true, offloadPath };
 }
