@@ -81,6 +81,11 @@ describe("first-run experience (E2E over stdio)", { timeout: 60_000 }, () => {
         HOME: scrubHome,
         USERPROFILE: scrubHome, // Windows equivalent of HOME
         PRISM_SKILL_SYNC_DISABLED: "true",
+        // The spawned server does not inherit VITEST/NODE_ENV, so the hook
+        // self-heal timer would fire inside this child. It is a no-op on a
+        // scrubbed HOME, but a test must not depend on that: disable it
+        // explicitly rather than rely on the absence of host roots.
+        PRISM_DISABLE_HOOK_AUTOINSTALL: "1",
         PRISM_DASHBOARD_PORT: String(foreignPort),
       },
     });
