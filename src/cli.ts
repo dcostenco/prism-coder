@@ -231,7 +231,7 @@ program
       if (options.selfUpdate !== false && !options.dryRun) {
         const { maybeSelfUpdate } = await import('./selfUpdate.js');
         const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
-        const upd = maybeSelfUpdate({ currentVersion: pkg.version, log: (l) => console.log(l) });
+        const upd = maybeSelfUpdate({ currentVersion: pkg.version, invokedFrom: process.argv[1], log: (l) => console.log(l) });
         if (upd.action === 'updated') {
           console.log(`✓ prism updated to ${upd.latest}; re-running connect with the new version`);
           const rerun = spawnSync(process.execPath, [process.argv[1], 'connect', ...process.argv.slice(3), '--no-self-update'], { stdio: 'inherit' });
@@ -356,10 +356,17 @@ program
                 const { ensurePromptRouteHook } = await import('./promptRouteHostHook.js');
                 for (const r of ensurePromptRouteHook({ hosts: hookHosts, mode: 'explicit' })) {
                   const state = r.script === 'unchanged' && r.config === 'unchanged' ? 'up to date' : 'installed';
-                  if (r.host === 'codex' && r.codexApproval !== 'detected') {
+                  if (r.host === 'codex' && r.codexApproval === 'pending-or-unknown') {
                     // Codex silently skips untrusted hooks — a green "installed"
                     // here would be the "configured and inert" lie.
                     console.log(`⚠ codex: prism-route hook ${state}, AWAITING TRUST — run codex, then /hooks, and trust the entry ending prism-route/on_prompt.py`);
+                  } else if (r.host === 'codex' && r.codexApproval === 'state-present-unverifiable') {
+                    // Approvals are keyed by definition hash, whose algorithm is
+                    // not public — once ANY trust state exists we cannot tell
+                    // ours apart from here. Say exactly that; asserting AWAITING
+                    // after the operator pressed t reads as "the trust didn't
+                    // take", which is a false alarm against their own action.
+                    console.log(`− codex: prism-route hook ${state}; trust state exists but is not verifiable from here — confirm once in /hooks`);
                   } else {
                     console.log(`✓ ${r.host}: prism-route prompt hook ${state} (${r.scriptPath})`);
                   }

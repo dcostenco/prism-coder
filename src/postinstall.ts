@@ -20,7 +20,7 @@ try {
   // approval impossible to miss. Approval is per hook-version, not per
   // release: it recurs only when the hook script itself changes.
   const codex = results.find((r) => r.host === "codex");
-  if (codex && codex.codexApproval !== "detected") {
+  if (codex && codex.codexApproval === "pending-or-unknown") {
     console.error(
       "\n[prism] Codex hook installed but NOT yet trusted — Codex silently skips it until you approve it once:\n" +
       "[prism]   codex  ->  /hooks  ->  entry ending prism-route/on_prompt.py  ->  press t\n",

@@ -216,7 +216,7 @@ export interface EnsureHookHostResult {
   /** Codex only: its trust gate silently skips unapproved hooks. We can
    *  DETECT approval only coarsely (a [hooks.state] section naming our hook);
    *  "pending-or-unknown" means the operator must run /hooks and trust it. */
-  codexApproval?: "detected" | "pending-or-unknown";
+  codexApproval?: "detected" | "pending-or-unknown" | "state-present-unverifiable";
   scriptPath: string;
   configPath: string;
 }
@@ -278,11 +278,17 @@ function hostSpecs(homeDir: string, env: NodeJS.ProcessEnv): HostSpec[] {
  * exists and mentions our hook path" (detected) or anything else
  * (pending-or-unknown). Never treat unknown as approved.
  */
-function detectCodexApproval(codexRoot: string): "detected" | "pending-or-unknown" {
+function detectCodexApproval(codexRoot: string): "detected" | "pending-or-unknown" | "state-present-unverifiable" {
   try {
     const toml = readFileSync(join(codexRoot, "config.toml"), "utf8");
-    if (/\[hooks\.state/.test(toml) && toml.includes(COMMAND_SIGNATURE)) return "detected";
-  } catch { /* unreadable = unknown */ }
+    const hasState = /\[hooks\.state/.test(toml);
+    if (hasState && toml.includes(COMMAND_SIGNATURE)) return "detected";
+    // Approvals are keyed by definition hash (algorithm not public). Once ANY
+    // trust state exists we cannot distinguish ours from here — and claiming
+    // AWAITING TRUST after the operator pressed t would be a false alarm
+    // against their own action. Distinct state, distinct wording.
+    if (hasState) return "state-present-unverifiable";
+  } catch { /* unreadable = no evidence */ }
   return "pending-or-unknown";
 }
 

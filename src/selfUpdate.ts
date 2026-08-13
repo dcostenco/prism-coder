@@ -18,10 +18,13 @@
  * execution is not in that set.
  */
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 
 export interface SelfUpdateDeps {
   /** Currently running version (package.json). */
   currentVersion: string;
+  /** Path of the running CLI script (process.argv[1]). */
+  invokedFrom?: string;
   /** Fetch the latest published version; throws on network failure. */
   fetchLatest?: () => string;
   /** Run the global install; throws on failure. */
@@ -85,6 +88,21 @@ export function maybeSelfUpdate(deps: SelfUpdateDeps): SelfUpdateResult {
   // intent. Converging dev builds is the developer's call, not ours.
   if (deps.currentVersion.includes("-")) {
     return { action: "skipped", detail: `dev build ${deps.currentVersion} — not touching it` };
+  }
+  // A CLI running from a source checkout (repo dist, not node_modules) must
+  // never self-update: `npm i -g` would update the GLOBAL install while the
+  // re-exec re-ran THIS checkout's old code under a "updated" banner — the
+  // exact stale-code-fresh-claim confusion connect exists to end.
+  if (deps.invokedFrom) {
+    // argv[1] for a global install is the BIN SYMLINK (~/.npm-global/bin/prism),
+    // whose path contains no node_modules — judging the raw path would disable
+    // self-update for every normal install (caught empirically in review).
+    // The realpath resolves through the symlink into lib/node_modules/…
+    let resolved = deps.invokedFrom;
+    try { resolved = realpathSync(deps.invokedFrom); } catch { /* keep raw */ }
+    if (!resolved.includes("node_modules")) {
+      return { action: "skipped", detail: `running from a checkout (${resolved}) — update the checkout with git, not npm` };
+    }
   }
 
   let latest: string;

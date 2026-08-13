@@ -7,7 +7,14 @@
  * hand-installed build to an older registry release, teaches people to stop
  * running it.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdirSync, writeFileSync, symlinkSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+let tmp: string;
+beforeEach(() => { tmp = mkdtempSync(join(tmpdir(), "selfupd-")); });
+afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 import { maybeSelfUpdate, isNewer } from "../src/selfUpdate.js";
 
 const noEnv = {}; // deliberately NOT process.env — vitest sets VITEST there
@@ -22,6 +29,32 @@ describe("version comparison", () => {
     ["20.10.0", "3.9.9", false],
   ])("%s -> %s newer=%s", (a, b, want) => {
     expect(isNewer(a, b)).toBe(want);
+  });
+});
+
+describe("invocation-path guard", () => {
+  it("a checkout path skips — npm would update the global while re-exec ran old code", () => {
+    const r = maybeSelfUpdate({
+      currentVersion: "20.10.0", env: noEnv, invokedFrom: "/Users/dev/prism/dist/cli.js",
+      fetchLatest: () => { throw new Error("must not fetch"); },
+      install: () => { throw new Error("must not install"); },
+    });
+    expect(r.action).toBe("skipped");
+    expect(r.detail).toContain("checkout");
+  });
+
+  it("a global BIN SYMLINK does NOT skip — argv[1] has no node_modules but its realpath does", () => {
+    // The empirical case that broke the first version of this guard.
+    const bin = join(tmp, "bin"); const lib = join(tmp, "lib", "node_modules", "pkg", "dist");
+    mkdirSync(bin, { recursive: true }); mkdirSync(lib, { recursive: true });
+    writeFileSync(join(lib, "cli.js"), "");
+    symlinkSync(join("..", "lib", "node_modules", "pkg", "dist", "cli.js"), join(bin, "prism"));
+    const r = maybeSelfUpdate({
+      currentVersion: "20.10.0", env: noEnv, invokedFrom: join(bin, "prism"),
+      fetchLatest: () => "20.10.0", // current → clean stop after passing the guard
+      install: () => { throw new Error("must not install"); },
+    });
+    expect(r.action).toBe("current");
   });
 });
 
