@@ -2044,14 +2044,22 @@ export async function seedAndRecallDemoMemory(conversationId: string): Promise<s
       limit: "1",
     })) as Array<{ summary?: string; todos?: string[] }>;
     const recalled = rows[0];
-    if (!recalled?.summary) return null;
+    if (!recalled?.summary) {
+      debugLog(`[first-run-demo] read-back returned ${Array.isArray(rows) ? rows.length : "non-array"} rows — seed row not visible`);
+      return null;
+    }
     const todo = Array.isArray(recalled.todos) && recalled.todos[0] ? `\n  - TODO it carried: ${recalled.todos[0]}` : "";
     return (
       `- 🧠 **Watch this — Prism just saved a memory and recalled it from disk:**\n` +
       `  - "${recalled.summary}"${todo}\n` +
       `  - This round-trip is what every future session gets: your decisions, TODOs, and changed files, back the moment you return. (Demo lives in the \`${DEMO_PROJECT}\` project — delete it anytime.)`
     );
-  } catch {
+  } catch (error) {
+    // Still swallow — a first run must never break on a demo — but say WHY on
+    // stderr. This block went missing intermittently on one CI leg
+    // (ubuntu/node 20) and the silent catch made every investigation start
+    // from nothing: the failure was only ever visible as an ABSENT paragraph.
+    debugLog(`[first-run-demo] seed/recall failed: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`);
     return null;
   }
 }
