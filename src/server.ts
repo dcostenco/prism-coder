@@ -373,7 +373,7 @@ let contextLoadedByClient = false;
 if (process.env.PRISM_DISABLE_HOOK_AUTOINSTALL !== "1") {
   setTimeout(() => {
     import("./promptRouteHostHook.js")
-      .then((m) => m.ensurePromptRouteHook())
+      .then((m) => m.ensurePromptRouteHook({ mode: "auto" }))
       .catch(() => { /* never disturb the server */ });
   }, 5000).unref();
 }

@@ -321,6 +321,25 @@ program
         if (skillSync.status !== 'disabled') {
           const changed = skillSync.installed.length + skillSync.updated.length + skillSync.pruned.length;
           console.log(`✓ Synalux skills: ${skillSync.tier || 'free'} tier (${changed} changed)`);
+          // prism-route hook: AFTER sync success on purpose — a connect that
+          // fails must leave the machine untouched (pinned by the
+          // "keeps legacy Claude hooks when the snapshot fails" test).
+          {
+            const hookHosts: Array<'claude' | 'codex'> = [];
+            if (summary.results.some((r) => (r.host === 'claude-code' || r.host === 'claude-desktop') && r.status !== 'error')) hookHosts.push('claude');
+            if (summary.results.some((r) => r.host === 'codex' && r.status !== 'error')) hookHosts.push('codex');
+            if (hookHosts.length > 0) {
+              try {
+                const { ensurePromptRouteHook } = await import('./promptRouteHostHook.js');
+                for (const r of ensurePromptRouteHook({ hosts: hookHosts, mode: 'explicit' })) {
+                  const state = r.script === 'unchanged' && r.config === 'unchanged' ? 'up to date' : 'installed';
+                  console.log(`✓ ${r.host}: prism-route prompt hook ${state} (${r.scriptPath})`);
+                }
+              } catch {
+                console.error('⚠ prism-route hook installation failed — skills still route at session start');
+              }
+            }
+          }
           if (skillSync.conflicts.length > 0) {
             console.error(`⚠ Preserved locally modified skill conflicts: ${skillSync.conflicts.join(', ')}`);
           }
@@ -446,10 +465,11 @@ program
         .filter(Boolean);
       const { runPromptRouteFromCache } = await import('./tools/ledgerHandlers.js');
       const result = await runPromptRouteFromCache(prompt, loaded);
-      console.log(JSON.stringify({ names: result.names, text: result.names.length > 0 ? result.text : '' }));
+      const payload = JSON.stringify({ names: result.names, text: result.names.length > 0 ? result.text : '' });
+      await new Promise<void>((resolveWrite) => process.stdout.write(payload + '\n', () => resolveWrite()));
     } catch {
       // Never break the hook: an empty result is a routing miss, not an error.
-      console.log(JSON.stringify({ names: [], text: '' }));
+      await new Promise<void>((resolveWrite) => process.stdout.write('{"names":[],"text":""}\n', () => resolveWrite()));
     } finally {
       try { await closeStorage(); } catch { /* exit anyway */ }
       process.exit(0);

@@ -1931,7 +1931,23 @@ it("reports the Claude project migration on default and refresh dry runs only af
           : join(xdgConfigHome, "Claude", "skills");
       expect(existsSync(claudeDesktopSkillsDir)).toBe(false);
 
-      expect(readConfig(claudeSettings).hooks).toEqual({ SessionStart: ["user-owned-claude-hook"] });
+      expect(readConfig(claudeSettings).hooks).toEqual({
+        SessionStart: ["user-owned-claude-hook"],
+        // Installed by connect AFTER a successful sync — the prism-route
+        // mid-session routing hook. A failed or disabled sync must NOT
+        // produce this entry; the two tests above pin that.
+        UserPromptSubmit: [{
+          matcher: "*",
+          hooks: [{
+            type: "command",
+            command: `python3 ${join(homeDir, ".claude", "hooks", "prism-route", "on_prompt.py")}`,
+            timeout: 15,
+          }],
+        }],
+      });
+      expect(result.stdout).toContain("prism-route prompt hook installed");
+      // Codex gets the same hook in its own hooks.json (CODEX_HOME-aware).
+      expect(readFileSync(join(codexHome, "hooks.json"), "utf8")).toContain("prism-route/on_prompt.py");
       expect(readConfig(claudeSettings).env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("sonnet");
       expect(readConfig(claudeProjectMcp)).toEqual({
         projectSetting: "keep-me",

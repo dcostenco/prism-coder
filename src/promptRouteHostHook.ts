@@ -29,7 +29,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 /** Bump to force the on-disk script to be rewritten on the next ensure. */
-export const PROMPT_ROUTE_HOOK_VERSION = "1";
+export const PROMPT_ROUTE_HOOK_VERSION = "2";
 
 const MARKER_FILE = ".prism-managed.json";
 const SCRIPT_FILE = "on_prompt.py";
@@ -119,7 +119,7 @@ def main():
         or payload.get("conversation_id")
         or "default"
     )
-    session = re.sub(r"[^A-Za-z0-9._-]", "_", session)[:80] or "default"
+    session = re.sub(r"[^A-Za-z0-9._-]", "_", session).lstrip(".")[:80] or "default"
 
     state_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state")
     state_path = os.path.join(state_dir, session + ".json")
@@ -198,6 +198,31 @@ export interface EnsureHookOptions {
   /** Only ensure for hosts whose root directory already exists (default true
    *  — a machine without ~/.codex should not grow one). */
   onlyExistingRoots?: boolean;
+  /**
+   * "explicit" — the user ran `prism connect`; that command IS the consent
+   *   to manage host configuration, so install unconditionally.
+   * "auto" (postinstall, server startup) — this package is PUBLIC npm, and
+   *   silently rewriting a stranger's ~/.claude/settings.json because they
+   *   installed an MCP server is consent they never gave. Auto paths
+   *   therefore only act on hosts that show PRIOR prism integration: our
+   *   own managed marker (upgrade/refresh) or a prism MCP registration in
+   *   that host's config (the machine was connected at some point).
+   */
+  mode?: "explicit" | "auto";
+}
+
+/** Evidence that this host was already prism-integrated by explicit action. */
+function hostShowsPriorConsent(spec: HostSpec, homeDir: string): boolean {
+  if (existsSync(join(spec.root, "hooks", HOOK_DIR, MARKER_FILE))) return true;
+  const evidenceFiles = spec.host === "claude"
+    ? [join(homeDir, ".claude.json"), spec.configPath]
+    : [join(spec.root, "config.toml"), spec.configPath];
+  for (const file of evidenceFiles) {
+    try {
+      if (/prism/i.test(readFileSync(file, "utf8"))) return true;
+    } catch { /* unreadable = no evidence */ }
+  }
+  return false;
 }
 
 interface HostSpec {
@@ -297,6 +322,7 @@ export function ensurePromptRouteHook(options: EnsureHookOptions = {}): EnsureHo
   for (const spec of hostSpecs(homeDir, env)) {
     if (!wanted.has(spec.host)) continue;
     if (onlyExisting && !existsSync(spec.root)) continue;
+    if ((options.mode ?? "explicit") === "auto" && !hostShowsPriorConsent(spec, homeDir)) continue;
     try {
       const hookDir = join(spec.root, "hooks", HOOK_DIR);
       const script = ensureScript(hookDir);

@@ -99,6 +99,38 @@ describe("install", () => {
   });
 });
 
+describe("consent — auto paths must not touch a stranger's machine", () => {
+  // prism-mcp-server is PUBLIC npm. postinstall and server-start run on every
+  // machine that installs it, including people who never ran `prism connect`.
+  // Rewriting their ~/.claude/settings.json would be consent they never gave.
+  it("auto mode installs NOTHING on a host with no prior prism integration", () => {
+    const results = ensurePromptRouteHook({ homeDir: home, env: {}, mode: "auto" });
+    expect(results).toEqual([]);
+    expect(existsSync(join(home, ".claude", "hooks", "prism-route"))).toBe(false);
+    expect(existsSync(join(home, ".claude", "settings.json"))).toBe(false);
+  });
+
+  it("auto mode installs when the host's MCP config references prism — the machine was connected", () => {
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: { "prism-mcp": { command: "node" } } }));
+    writeFileSync(join(home, ".codex", "config.toml"), "[mcp_servers.prism]\ncommand = \"prism-coder\"\n");
+    const results = ensurePromptRouteHook({ homeDir: home, env: {}, mode: "auto" });
+    expect(results.map((r) => r.host).sort()).toEqual(["claude", "codex"]);
+  });
+
+  it("auto mode refreshes an existing managed install — the upgrade path stays alive", () => {
+    ensurePromptRouteHook({ homeDir: home, env: {} }); // explicit first install
+    const marker = join(home, ".claude", "hooks", "prism-route", ".prism-managed.json");
+    writeFileSync(marker, JSON.stringify({ managedBy: "prism", version: "0" }));
+    const results = ensurePromptRouteHook({ homeDir: home, env: {}, mode: "auto" });
+    expect(results.find((r) => r.host === "claude")?.script).toBe("refreshed");
+  });
+
+  it("explicit mode (prism connect) needs no prior evidence — connect IS the consent", () => {
+    const results = ensurePromptRouteHook({ homeDir: home, env: {}, mode: "explicit" });
+    expect(results).toHaveLength(2);
+  });
+});
+
 describe("the hook script — never breaks the turn", () => {
   // Run the ACTUAL script under python3 with a stub CLI, exactly as a host
   // would: JSON on stdin, JSON on stdout.

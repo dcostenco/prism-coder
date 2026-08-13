@@ -8,7 +8,7 @@
 import { ensurePromptRouteHook } from "./promptRouteHostHook.js";
 
 try {
-  const results = ensurePromptRouteHook();
+  const results = ensurePromptRouteHook({ mode: "auto" });
   if (process.env.PRISM_DEBUG) {
     for (const r of results) console.error(`[prism postinstall] ${r.host}: script=${r.script} config=${r.config}`);
   }
