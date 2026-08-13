@@ -29,8 +29,14 @@ import { debugLog } from "../utils/logger.js";
 
 /** Never return more than this many bodies in one call. */
 export const MAX_ROUTED_SKILLS = 3;
-/** Hard ceiling on returned characters, so one call cannot flood the window. */
-export const MAX_ROUTED_CHARS = 24_000;
+/** Hard ceiling on returned characters, so one call cannot flood the window.
+ *  Sized from measurement, not taste: the UI-review bundle
+ *  (visual-screenshot-verification + playwright-screenshot-discipline +
+ *  verified-shipping) is ~24.5k, and at 24k the third — the EVIDENCE-CLAIM
+ *  rules, arguably the one that matters most at the merge moment — was
+ *  reported "matched, not injected" on the first UI turn of a live session.
+ *  A cap that trims the bundle it was built for is mis-sized. */
+export const MAX_ROUTED_CHARS = 30_000;
 
 export interface PromptRouteDeps {
   /** On-device matcher — same one session_bootstrap uses. */

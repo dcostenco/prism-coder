@@ -333,7 +333,13 @@ program
                 const { ensurePromptRouteHook } = await import('./promptRouteHostHook.js');
                 for (const r of ensurePromptRouteHook({ hosts: hookHosts, mode: 'explicit' })) {
                   const state = r.script === 'unchanged' && r.config === 'unchanged' ? 'up to date' : 'installed';
-                  console.log(`✓ ${r.host}: prism-route prompt hook ${state} (${r.scriptPath})`);
+                  if (r.host === 'codex' && r.codexApproval !== 'detected') {
+                    // Codex silently skips untrusted hooks — a green "installed"
+                    // here would be the "configured and inert" lie.
+                    console.log(`⚠ codex: prism-route hook ${state}, AWAITING TRUST — run codex, then /hooks, and trust the entry ending prism-route/on_prompt.py`);
+                  } else {
+                    console.log(`✓ ${r.host}: prism-route prompt hook ${state} (${r.scriptPath})`);
+                  }
                 }
               } catch {
                 console.error('⚠ prism-route hook installation failed — skills still route at session start');

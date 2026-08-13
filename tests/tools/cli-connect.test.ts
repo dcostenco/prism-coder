@@ -50,6 +50,7 @@ import {
   computeSkillManifestGeneration,
   type SkillManifest,
 } from "../../src/skillManifestSync.js";
+import { PROMPT_ROUTE_HOOK_VERSION } from "../../src/promptRouteHostHook.js";
 import { FREE_NATIVE_SKILL_NAMES } from "../../src/tools/skillRouting.js";
 
 const tempHomes: string[] = [];
@@ -1940,7 +1941,7 @@ it("reports the Claude project migration on default and refresh dry runs only af
           matcher: "*",
           hooks: [{
             type: "command",
-            command: `python3 ${join(homeDir, ".claude", "hooks", "prism-route", "on_prompt.py")}`,
+            command: `python3 ${join(homeDir, ".claude", "hooks", "prism-route", "on_prompt.py")} --v${PROMPT_ROUTE_HOOK_VERSION}`,
             timeout: 15,
           }],
         }],

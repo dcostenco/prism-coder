@@ -38,7 +38,10 @@ describe("install", () => {
     for (const cfg of [claudeConfig(), codexConfig()]) {
       // JSON.stringify doubles backslashes on Windows; normalize before matching.
       const cmds = JSON.stringify(cfg.hooks.UserPromptSubmit).replace(/\\+/g, "/");
-      expect(cmds).toContain("prism-route/on_prompt.py");
+      // The version rides in the CONFIGURED COMMAND: Codex's trust hash covers
+      // the definition, not the script file, so a version-refreshed script
+      // behind a stable command would silently change trusted content.
+      expect(cmds).toContain(`prism-route/on_prompt.py --v${PROMPT_ROUTE_HOOK_VERSION}`);
     }
     expect(existsSync(join(home, ".claude", "hooks", "prism-route", "on_prompt.py"))).toBe(true);
     expect(existsSync(join(home, ".codex", "hooks", "prism-route", "state"))).toBe(true);
@@ -71,6 +74,32 @@ describe("install", () => {
     expect(cfg.hooks.PreToolUse).toHaveLength(1);
     expect(cfg.hooks.UserPromptSubmit).toHaveLength(2);
     expect(JSON.stringify(cfg.hooks.UserPromptSubmit[0])).toContain("screenshot-first");
+  });
+
+  it("a version bump UPDATES the registered command in place — no duplicate, new trust hash", () => {
+    ensurePromptRouteHook({ homeDir: home, env: {} });
+    // Simulate a previous release: old marker AND an old-style command.
+    const cfgPath = join(home, ".codex", "hooks.json");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    const hook = cfg.hooks.UserPromptSubmit[0].hooks[0];
+    hook.command = hook.command.replace(/ --v\d+$/, " --v0");
+    writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    writeFileSync(join(home, ".codex", "hooks", "prism-route", ".prism-managed.json"),
+      JSON.stringify({ managedBy: "prism", version: "0" }));
+
+    const results = ensurePromptRouteHook({ homeDir: home, env: {} });
+    const codex = results.find((r) => r.host === "codex");
+    expect(codex?.config).toBe("updated");
+    const after = JSON.parse(readFileSync(cfgPath, "utf8"));
+    const cmds = after.hooks.UserPromptSubmit.flatMap((e: { hooks: Array<{ command: string }> }) => e.hooks.map((h) => h.command));
+    expect(cmds.filter((c: string) => c.includes("prism-route"))).toHaveLength(1); // replaced, not appended
+    expect(cmds[0]).toContain(`--v${PROMPT_ROUTE_HOOK_VERSION}`);
+  });
+
+  it("codex results carry the approval hint — registered is NOT active", () => {
+    const results = ensurePromptRouteHook({ homeDir: home, env: {} });
+    expect(results.find((r) => r.host === "codex")?.codexApproval).toBe("pending-or-unknown");
+    expect(results.find((r) => r.host === "claude")?.codexApproval).toBeUndefined();
   });
 
   it("refreshes the script when the version marker is older", () => {
