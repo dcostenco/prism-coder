@@ -184,7 +184,7 @@ if __name__ == "__main__":
 
 export interface EnsureHookHostResult {
   host: "claude" | "codex";
-  script: "installed" | "refreshed" | "unchanged";
+  script: "installed" | "refreshed" | "unchanged" | "disabled";
   config: "registered" | "unchanged";
   scriptPath: string;
   configPath: string;
@@ -247,12 +247,17 @@ function writeAtomically(path: string, content: string): void {
   renameSync(tmp, path);
 }
 
-function ensureScript(hookDir: string): "installed" | "refreshed" | "unchanged" {
+function ensureScript(hookDir: string): "installed" | "refreshed" | "unchanged" | "disabled" {
   const markerPath = join(hookDir, MARKER_FILE);
   const scriptPath = join(hookDir, SCRIPT_FILE);
   let existingVersion: string | undefined;
   try {
-    const marker = JSON.parse(readFileSync(markerPath, "utf8")) as { version?: string };
+    const marker = JSON.parse(readFileSync(markerPath, "utf8")) as { version?: string; disabled?: boolean };
+    // The durable off switch. Without it, an operator who deletes the entry
+    // or edits the script gets silently re-enabled by the next upgrade —
+    // self-healing becomes self-reinfecting. {"disabled": true} in the
+    // marker survives every ensure path, including version bumps.
+    if (marker.disabled === true) return "disabled";
     existingVersion = marker.version;
   } catch {
     /* no marker — install */
@@ -331,6 +336,7 @@ export function ensurePromptRouteHook(options: EnsureHookOptions = {}): EnsureHo
     try {
       const hookDir = join(spec.root, "hooks", HOOK_DIR);
       const script = ensureScript(hookDir);
+      if (script === "disabled") continue; // operator opt-out — do not re-register either
       const config = ensureRegistered(spec.configPath, join(hookDir, SCRIPT_FILE));
       results.push({ host: spec.host, script, config, scriptPath: join(hookDir, SCRIPT_FILE), configPath: spec.configPath });
     } catch {

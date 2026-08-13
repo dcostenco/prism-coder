@@ -458,7 +458,9 @@ program
     try {
       const chunks: Buffer[] = [];
       for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-      const prompt = Buffer.concat(chunks).toString('utf8');
+      // A pasted log can be megabytes; triggers live in the first human-sized
+      // stretch of a prompt, and unbounded input is regex food.
+      const prompt = Buffer.concat(chunks).toString('utf8').slice(0, 100_000);
       const loaded = (options.loaded ?? '')
         .split(',')
         .map((n) => n.trim())

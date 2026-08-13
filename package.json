@@ -33,7 +33,7 @@
     "test:routing:models": "npm run build && node scripts/prism-infer-live-test.mjs --infer",
     "test:mcp": "node ./test_cross_mcp.js",
     "import": "node dist/utils/universalImporter.js",
-    "postinstall": "node dist/postinstall.js >/dev/null 2>&1 || true"
+    "postinstall": "node -e \"import('./dist/postinstall.js').catch(()=>{})\""
   },
   "keywords": [
     "mcp-server",

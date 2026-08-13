@@ -100,6 +100,27 @@ describe("install", () => {
   });
 });
 
+describe("opt-out — disabled marker survives upgrades", () => {
+  it("a marker with disabled:true blocks reinstall AND re-registration on every path", () => {
+    ensurePromptRouteHook({ homeDir: home, env: {} });
+    const hookDir = join(home, ".claude", "hooks", "prism-route");
+    // Operator turns it off: marks disabled, removes the registration.
+    writeFileSync(join(hookDir, ".prism-managed.json"), JSON.stringify({ managedBy: "prism", disabled: true }));
+    const cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+    cfg.hooks.UserPromptSubmit = [];
+    writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(cfg, null, 2));
+
+    // Upgrade paths must NOT resurrect it — self-healing must not be
+    // self-reinfecting.
+    for (const mode of ["explicit", "auto"] as const) {
+      const results = ensurePromptRouteHook({ homeDir: home, env: {}, mode });
+      expect(results.find((r) => r.host === "claude")).toBeUndefined();
+    }
+    const after = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+    expect(after.hooks.UserPromptSubmit).toEqual([]);
+  });
+});
+
 describe("consent — auto paths must not touch a stranger's machine", () => {
   // prism-mcp-server is PUBLIC npm. postinstall and server-start run on every
   // machine that installs it, including people who never ran `prism connect`.
