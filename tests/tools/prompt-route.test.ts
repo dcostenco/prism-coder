@@ -172,6 +172,39 @@ describe("host inline budget — hosts hard-cap hook context (Claude Code 10k ch
     expect(shaped.text).toMatch(/knowledge_search/);
     expect(shaped.text).toContain("gamma"); // the dropped skill is named, not silently gone
   });
+
+  it("a 400-skill match cannot blow the budget through the overflow header, and the pointer stays in the first 2KB", async () => {
+    // Adversarial review measured the unbounded overflow list at 12,950 header
+    // chars for 400 matched skills — over the host cap before any body, with
+    // the pointer pushed past every preview window. The cap must hold by
+    // construction, not because the catalog happens to be small.
+    const many = Array.from({ length: 400 }, (_, i) => `team-scoped-skill-with-a-long-name-${String(i).padStart(3, "0")}`);
+    const r = await routePrompt("ui/ux", [], deps({
+      resolvePromptSkillNames: async () => many,
+      entitledNames: async () => new Set(many),
+      getBody: async () => `# body\n${"x".repeat(6_000)}`,
+    }));
+    const shaped = reshapeForInlineBudget(r, HOOK_INLINE_SAFE_CHARS, () => "/tmp/prism-test/route-400.md");
+    expect(shaped.text.length).toBeLessThanOrEqual(HOOK_INLINE_SAFE_CHARS);
+    expect(shaped.text.slice(0, 2_048)).toContain("/tmp/prism-test/route-400.md");
+    expect(shaped.text).toContain("+"); // capped overflow list says "+N more" instead of listing 397 names
+  });
+
+  it("writer failure with long skill names cannot overrun the budget — the footer reserve is computed, not guessed", async () => {
+    // Measured pre-fix: fixed reserve of 300 emitted 9,899 > 9,800 with two
+    // ~148-char skipped names.
+    const longNames = ["a".repeat(148), "b".repeat(148), "c".repeat(148)];
+    const r = await routePrompt("ui/ux", [], deps({
+      resolvePromptSkillNames: async () => longNames,
+      entitledNames: async () => new Set(longNames),
+      // Sized so the first body lands just under the old fixed reserve's fill
+      // line (budget−300) while the real footer for the two skipped 148-char
+      // names is ~417 chars — the geometry the review measured overrunning.
+      getBody: async () => `# body\n${"x".repeat(8_700)}`,
+    }));
+    const shaped = reshapeForInlineBudget(r, HOOK_INLINE_SAFE_CHARS, () => undefined);
+    expect(shaped.text.length).toBeLessThanOrEqual(HOOK_INLINE_SAFE_CHARS);
+  });
 });
 
 describe("entitlement and privacy", () => {

@@ -156,10 +156,21 @@ export async function routePrompt(
 
   // Imperative, not a label. A bare list is decorative; nothing else in this
   // path tells the agent these rules bind the work it is about to do.
+  //
+  // The overflow list is CAPPED: the header feeds reshapeForInlineBudget's
+  // base text, whose budget guarantee (and the pointer's first-2KB placement)
+  // holds only if the header is bounded. An unbounded list of matched names
+  // was measured at 12,950 chars for a 400-skill match — over the host cap
+  // before a single body was added.
+  const overflowShown = overflow.slice(0, 8);
+  const overflowNote =
+    overflow.length > 0
+      ? `\n\nAlso matched, not injected: ${overflowShown.join(", ")}${overflow.length > overflowShown.length ? ` (+${overflow.length - overflowShown.length} more)` : ""}.`
+      : "";
   const header =
     `**Skills now active for this task:** ${delivered.join(", ")}\n\n` +
     `These apply to the work you are about to do. Read and follow them before proceeding.` +
-    (overflow.length > 0 ? `\n\nAlso matched, not injected: ${overflow.join(", ")}.` : "");
+    overflowNote;
 
   return { names: delivered, alreadyLoaded, overflow, header, blocks, text: `${header}\n\n${blocks.join("\n\n")}` };
 }
@@ -212,7 +223,12 @@ export function reshapeForInlineBudget(
 
   // Reserve room for the loud-failure footer when there is no offload file to
   // point at — a silently dropped skill is the defect this feature exists for.
-  const reserve = offloadPath ? 0 : 300;
+  // COMPUTED from the worst-case footer (every delivered name skipped), not a
+  // guessed constant: a fixed 300 was measured overrunning the budget by 99
+  // chars with two long-named skills.
+  const footerFor = (names: string[]) =>
+    `\n\n**Not inlined (host size cap, offload unavailable): ${names.join(", ")} — fetch each with knowledge_search and follow it before proceeding.**`;
+  const reserve = offloadPath ? 0 : footerFor(result.names).length;
   let inline = pieces.join("\n\n");
   const skipped: string[] = [];
   for (let i = 0; i < result.blocks.length; i++) {
@@ -224,7 +240,14 @@ export function reshapeForInlineBudget(
     }
   }
   if (!offloadPath && skipped.length > 0) {
-    inline += `\n\n**Not inlined (host size cap, offload unavailable): ${skipped.join(", ")} — fetch each with knowledge_search and follow it before proceeding.**`;
+    inline += footerFor(skipped);
+  }
+  // Belt over the construction: the budget is a HOST hard cap, and "the data
+  // stayed small" is not an invariant. If a pathological header ever pushes
+  // the base past it, keep the first budgetChars — the names line and pointer
+  // sit at the front by construction, so what survives is the recoverable part.
+  if (inline.length > budgetChars) {
+    inline = inline.slice(0, budgetChars);
   }
   return { text: inline, offloaded: true, offloadPath };
 }

@@ -330,10 +330,16 @@ function ensureScript(hookDir: string): "installed" | "refreshed" | "unchanged" 
 function ensureRegistered(configPath: string, scriptPath: string, host: "claude" | "codex"): "registered" | "updated" | "unchanged" {
   // Codex truncates hook additionalContext at ~2,500 tokens by default —
   // a head-and-tail preview of our payload, which defeats the injection.
-  // additionalContextLimit: 0 passes the full context through; the payload is
-  // already bounded by HOOK_INLINE_SAFE_CHARS on the emitting side, so the
-  // pass-through is not unbounded. Claude Code has no such field (its 10k-char
-  // cap is not configurable) — never write unknown keys into settings.json.
+  // additionalContextLimit: 0 passes the full context through — per the Codex
+  // hooks reference (learn.chatgpt.com/docs/hooks, verified 2026-08-13):
+  // "Setting to 0 passes full context directly to the model". NOT an in-repo
+  // guarantee: if Codex ever re-reads 0 as a literal zero cap, injection dies
+  // silently there — re-verify with a live codex probe after any Codex
+  // upgrade. The payload is already bounded by HOOK_INLINE_SAFE_CHARS on the
+  // emitting side, so the pass-through is not unbounded. Claude Code has no
+  // such field (its 10k-char cap is not configurable) — never write unknown
+  // keys into settings.json (a manually-added stray field there is left
+  // alone, not stripped).
   const wantsLimit = host === "codex";
   let config: Record<string, unknown> = {};
   let originalText: string | undefined;
