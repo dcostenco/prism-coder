@@ -36,7 +36,8 @@ describe("install", () => {
       "codex:installed:registered",
     ]);
     for (const cfg of [claudeConfig(), codexConfig()]) {
-      const cmds = JSON.stringify(cfg.hooks.UserPromptSubmit);
+      // JSON.stringify doubles backslashes on Windows; normalize before matching.
+      const cmds = JSON.stringify(cfg.hooks.UserPromptSubmit).replace(/\\+/g, "/");
       expect(cmds).toContain("prism-route/on_prompt.py");
     }
     expect(existsSync(join(home, ".claude", "hooks", "prism-route", "on_prompt.py"))).toBe(true);
@@ -131,7 +132,10 @@ describe("consent — auto paths must not touch a stranger's machine", () => {
   });
 });
 
-describe("the hook script — never breaks the turn", () => {
+// The script itself is exercised with a bash stub CLI and POSIX chmod; the
+// hosts this hook serves on Windows execute the same python, but the harness
+// is POSIX-only, so the behaviour suite runs on POSIX runners.
+describe.skipIf(process.platform === "win32")("the hook script — never breaks the turn", () => {
   // Run the ACTUAL script under python3 with a stub CLI, exactly as a host
   // would: JSON on stdin, JSON on stdout.
   let hookDir: string;

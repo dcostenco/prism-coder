@@ -292,9 +292,14 @@ function ensureRegistered(configPath: string, scriptPath: string): "registered" 
     if (!entry || typeof entry !== "object") return false;
     const inner = (entry as { hooks?: unknown }).hooks;
     if (!Array.isArray(inner)) return false;
-    return inner.some(
-      (h) => h && typeof h === "object" && String((h as { command?: unknown }).command ?? "").includes(COMMAND_SIGNATURE),
-    );
+    return inner.some((h) => {
+      if (!h || typeof h !== "object") return false;
+      // Normalize separators: on Windows join() registers a backslash path,
+      // and a forward-slash signature would never match — so every ensure
+      // would re-register a duplicate entry.
+      const command = String((h as { command?: unknown }).command ?? "").replace(/\\/g, "/");
+      return command.includes(COMMAND_SIGNATURE);
+    });
   });
   if (present) return "unchanged";
 

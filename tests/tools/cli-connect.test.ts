@@ -1947,7 +1947,7 @@ it("reports the Claude project migration on default and refresh dry runs only af
       });
       expect(result.stdout).toContain("prism-route prompt hook installed");
       // Codex gets the same hook in its own hooks.json (CODEX_HOME-aware).
-      expect(readFileSync(join(codexHome, "hooks.json"), "utf8")).toContain("prism-route/on_prompt.py");
+      expect(readFileSync(join(codexHome, "hooks.json"), "utf8").replace(/\\+/g, "/")).toContain("prism-route/on_prompt.py");
       expect(readConfig(claudeSettings).env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("sonnet");
       expect(readConfig(claudeProjectMcp)).toEqual({
         projectSetting: "keep-me",
