@@ -37,6 +37,7 @@ export {
   sessionLoadContextHandler,
   sessionBootstrapHandler,
   sessionRoutePromptHandler,
+  runPromptRouteFromCache,
   sessionSaveExperienceHandler,
   sessionSaveImageHandler,
   sessionViewImageHandler,

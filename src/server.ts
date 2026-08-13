@@ -365,6 +365,19 @@ let storageIsReady = false;
 // native host complies with the hook-free first-turn instruction.
 let contextLoadedByClient = false;
 
+// ─── prism-route hook self-heal ──────────────────────────────
+// The safety net of the three install paths (connect, postinstall, here):
+// covers installs that skipped npm scripts and machines that never re-ran
+// connect. Idempotent and version-marked, so the steady-state cost is two
+// stat calls a few seconds after boot. Opt out: PRISM_DISABLE_HOOK_AUTOINSTALL=1.
+if (process.env.PRISM_DISABLE_HOOK_AUTOINSTALL !== "1") {
+  setTimeout(() => {
+    import("./promptRouteHostHook.js")
+      .then((m) => m.ensurePromptRouteHook())
+      .catch(() => { /* never disturb the server */ });
+  }, 5000).unref();
+}
+
 /**
  * Notifies subscribed clients that a resource has changed.
  *

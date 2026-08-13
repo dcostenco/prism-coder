@@ -16,6 +16,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
+import { ensurePromptRouteHook } from "./promptRouteHostHook.js";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 as win32Path } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -367,6 +368,14 @@ export function connectHosts(options: ConnectOptions = {}): ConnectSummary {
   } else {
     selected = definitions.filter((definition) => isHostDetected(definition, platform, pathEnv));
   }
+
+  // prism-route hook: automatic mid-session skill routing for Claude Code
+  // and Codex. Ensured here (the explicit path), from npm postinstall (the
+  // upgrade path) and from server startup (the safety net) — idempotent in
+  // all three, so no machine can end up with the server but not the hook.
+  try {
+    ensurePromptRouteHook({ homeDir, env });
+  } catch { /* hook provisioning must never fail connect */ }
 
   const entry = buildMcpEntry(nodePath, serverPath, env);
   const results = selected.map((definition) => registerHost(
