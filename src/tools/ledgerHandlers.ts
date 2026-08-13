@@ -2186,7 +2186,15 @@ export async function collectSkillTriggersOnThisMachine(): Promise<
  */
 export async function runPromptRouteFromCache(prompt: string, loaded: string[]) {
   const { routePrompt } = await import("./promptRouteHandler.js");
-  const { resolvePromptSkillNames } = await import("./skillRouting.js");
+  const { resolvePromptSkillNames, _setStorage } = await import("./skillRouting.js");
+  // The CLI is a fresh process per prompt: without storage wiring the keyword
+  // table can neither be read from disk (offline = dead routing) nor
+  // persisted after a fetch (every prompt = a network GET). The server paths
+  // wire this at bootstrap; the CLI must do it itself.
+  _setStorage(
+    async (key, value) => { await setSetting(key, value); },
+    async (key) => getSetting(key, ""),
+  );
   return routePrompt(prompt, loaded, {
     resolvePromptSkillNames,
     collectTriggers: collectSkillTriggersOnThisMachine,

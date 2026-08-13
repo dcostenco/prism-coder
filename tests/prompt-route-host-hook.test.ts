@@ -225,6 +225,16 @@ if [ "$3" = "" ]; then echo '{"names":["visual-screenshot-verification"],"text":
     expect(out).toEqual({ continue: true, suppressOutput: true });
   });
 
+  it("survives stdout pollution from node wrappers (dotenv banners etc.)", () => {
+    writeFileSync(stub, `#!/bin/bash
+echo "[dotenv] injected env (10) from .env"
+echo '{"names":["visual-screenshot-verification"],"text":"BODY"}'
+`);
+    chmodSync(stub, 0o755);
+    const out = run({ prompt: "the totals are not sticky", session_id: "s9" });
+    expect(out.hookSpecificOutput?.additionalContext).toBe("BODY");
+  });
+
   it("passes through on garbage stdin", () => {
     const out = JSON.parse(
       execFileSync("python3", [script], {

@@ -29,7 +29,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 /** Bump to force the on-disk script to be rewritten on the next ensure. */
-export const PROMPT_ROUTE_HOOK_VERSION = "2";
+export const PROMPT_ROUTE_HOOK_VERSION = "3";
 
 const MARKER_FILE = ".prism-managed.json";
 const SCRIPT_FILE = "on_prompt.py";
@@ -112,6 +112,9 @@ def main():
     if len(prompt) < 6 or prompt.startswith("/"):
         emit()
         return
+    # A pasted log can be megabytes; triggers live in the first human-sized
+    # stretch, and the CLI caps identically on its side.
+    prompt = prompt[:100_000]
 
     session = str(
         payload.get("session_id")
@@ -152,9 +155,19 @@ def main():
         emit()
         return
 
-    try:
-        data = json.loads(result.stdout.strip() or "{}")
-    except Exception:
+    # Parse the LAST line that is JSON: wrappers hooked into node via
+    # NODE_OPTIONS (dotenv banners and the like) print to stdout BEFORE the
+    # CLI's own output, and one polluted line must not kill routing.
+    data = None
+    for line in reversed(result.stdout.strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                data = json.loads(line)
+                break
+            except Exception:
+                continue
+    if not isinstance(data, dict):
         emit()
         return
     names = [n for n in (data.get("names") or []) if isinstance(n, str)]

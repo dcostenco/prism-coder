@@ -741,3 +741,26 @@ describe('emitted startup text carries no strippable placeholders', () => {
     // (retrieval-call assertion removed: the body is inlined, not fetched)
   });
 });
+
+describe("keyword table — persisted-first (the route-prompt CLI is a fresh process per prompt)", () => {
+  // Found in review round 4: the in-memory table cache is per-process, so the
+  // hook CLI fetched the PUBLIC routing table over the network on EVERY user
+  // prompt — measured 5.5s per prompt on a black-holed network, and zero
+  // routing offline because no storage was wired. A persisted table whose
+  // version equals the manifest-synced expectation must satisfy the resolver
+  // with no network at all.
+  it("routes offline from the persisted table when versions match", async () => {
+    const { _setStorage, resolvePromptSkillNames } = await import("../src/tools/skillRouting.js");
+    const table = JSON.stringify({ version: 99, prompt_keywords: { "\\bnot sticky\\b": ["visual-screenshot-verification"] } });
+    _setStorage(async () => {}, async (key) => (key === "routing_keywords" ? table : ""));
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (() => { throw new Error("network must not be touched"); }) as never;
+    try {
+      const names = await resolvePromptSkillNames("the totals are not sticky", 99);
+      expect(names).toContain("visual-screenshot-verification");
+    } finally {
+      globalThis.fetch = realFetch;
+      _setStorage(null as never, null as never);
+    }
+  });
+});
