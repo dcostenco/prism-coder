@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { SqliteStorage } from './storage/sqlite.js';
 import { handleVerifyStatus, handleGenerateHarness } from './verification/cliHandler.js';
 import * as path from 'path';
@@ -217,8 +219,29 @@ program
   .option('--all', 'Target all supported hosts instead of auto-detecting installed hosts')
   .option('--dry-run', 'Preview configuration changes without writing files')
   .option('--refresh', 'Refresh only entries previously created by Prism; custom entries stay untouched')
-  .action(async (options: { host?: string; all?: boolean; dryRun?: boolean; refresh?: boolean }) => {
+  .option('--no-self-update', 'Skip the npm self-update check; configure with the currently installed version')
+  .action(async (options: { host?: string; all?: boolean; dryRun?: boolean; refresh?: boolean; selfUpdate?: boolean }) => {
     try {
+      // ── Converge the PACKAGE first, then the configs ──────────────
+      // connect is the one command the operator runs to make a machine
+      // current; leaving it configuring with stale code produced the
+      // "fresh hook, stale CLI" state observed live on 2026-08-13. After a
+      // successful update we RE-EXEC the new binary so the remainder of
+      // connect runs the code it just installed. Dry runs never update.
+      if (options.selfUpdate !== false && !options.dryRun) {
+        const { maybeSelfUpdate } = await import('./selfUpdate.js');
+        const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
+        const upd = maybeSelfUpdate({ currentVersion: pkg.version, log: (l) => console.log(l) });
+        if (upd.action === 'updated') {
+          console.log(`✓ prism updated to ${upd.latest}; re-running connect with the new version`);
+          const rerun = spawnSync(process.execPath, [process.argv[1], 'connect', ...process.argv.slice(3), '--no-self-update'], { stdio: 'inherit' });
+          process.exit(rerun.status ?? 0);
+        } else if (upd.action === 'failed') {
+          console.log(`⚠ self-update: ${upd.detail}`);
+        } else if (upd.action === 'skipped') {
+          console.log(`− self-update skipped: ${upd.detail}`);
+        }
+      }
       if (!options.dryRun) {
         console.log('Close target MCP hosts before registration so they cannot edit configuration concurrently.');
       }
