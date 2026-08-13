@@ -370,7 +370,14 @@ let contextLoadedByClient = false;
 // covers installs that skipped npm scripts and machines that never re-ran
 // connect. Idempotent and version-marked, so the steady-state cost is two
 // stat calls a few seconds after boot. Opt out: PRISM_DISABLE_HOOK_AUTOINSTALL=1.
-if (process.env.PRISM_DISABLE_HOOK_AUTOINSTALL !== "1") {
+// Guarded against test runners: five suites import this module, and a
+// module-scope timer would otherwise rewrite the DEVELOPER'S real host
+// configs five seconds into every vitest run.
+if (
+  process.env.PRISM_DISABLE_HOOK_AUTOINSTALL !== "1" &&
+  !process.env.VITEST &&
+  process.env.NODE_ENV !== "test"
+) {
   setTimeout(() => {
     import("./promptRouteHostHook.js")
       .then((m) => m.ensurePromptRouteHook({ mode: "auto" }))
