@@ -204,6 +204,66 @@ describe("host inline budget — hosts hard-cap hook context (Claude Code 10k ch
     }));
     const shaped = reshapeForInlineBudget(r, HOOK_INLINE_SAFE_CHARS, () => undefined);
     expect(shaped.text.length).toBeLessThanOrEqual(HOOK_INLINE_SAFE_CHARS);
+    // The footer must arrive INTACT — a guessed reserve plus the final clamp
+    // would slice its tail off, which the length assertion alone cannot see.
+    // (This is the mutation-killing check for the computed reserve.)
+    expect(shaped.text.endsWith("before proceeding.**")).toBe(true);
+  });
+
+  it("giant delivered names cannot destroy the pointer — it leads the text, so even the clamp preserves it", async () => {
+    // Round-2 review: with the pointer AFTER the header, 4,000-char names put
+    // the header at 12,127 chars and the clamp sliced the pointer off
+    // entirely — an offload file on disk that nothing tells the model to
+    // read. Skill names have no enforced bound anywhere (portal manifest).
+    const giants = ["G".repeat(4_000), "H".repeat(4_000), "I".repeat(4_000)];
+    const r = await routePrompt("ui/ux", [], deps({
+      resolvePromptSkillNames: async () => giants,
+      entitledNames: async () => new Set(giants),
+      getBody: async () => `# body\n${"x".repeat(6_000)}`,
+    }));
+    const shaped = reshapeForInlineBudget(r, HOOK_INLINE_SAFE_CHARS, () => "/tmp/prism-test/route-giant.md");
+    expect(shaped.text.length).toBeLessThanOrEqual(HOOK_INLINE_SAFE_CHARS); // kills clamp deletion
+    expect(shaped.text.slice(0, 2_048)).toContain("/tmp/prism-test/route-giant.md"); // kills pointer-after-header
+    expect(shaped.text.slice(0, 2_048)).toMatch(/Read that file now/i);
+  });
+
+  it("moderately long names cannot push the pointer past the 2KB preview window", async () => {
+    // The more reachable round-2 regime: 200-char names (within NAME_MAX),
+    // header 2,372 chars, clamp never fires — yet the trailing pointer sat at
+    // offset ~2,374, past every preview window.
+    const mediums = Array.from({ length: 11 }, (_, i) => `${"m".repeat(196)}${String(i).padStart(3, "0")}`);
+    const r = await routePrompt("ui/ux", [], deps({
+      resolvePromptSkillNames: async () => mediums,
+      entitledNames: async () => new Set(mediums),
+      getBody: async () => `# body\n${"x".repeat(6_000)}`,
+    }));
+    const shaped = reshapeForInlineBudget(r, HOOK_INLINE_SAFE_CHARS, () => "/tmp/prism-test/route-med.md");
+    expect(shaped.text.slice(0, 2_048)).toContain("/tmp/prism-test/route-med.md");
+  });
+
+  it("the exact-fixpoint reserve does not skip a body that fits — no over-reservation regression", async () => {
+    // Round-2 finding 3: reserving for ALL delivered names (instead of the
+    // actually-skipped set) skipped a body that previously inlined. Geometry:
+    // three long-named skills, third body huge (skipped either way). The
+    // fixpoint reserves only for the ONE skipped name (~263 chars), so the
+    // second body fits; an all-names reserve (~563) would skip it too.
+    const names = [`A${"a".repeat(147)}`, `B${"b".repeat(147)}`, `C${"c".repeat(147)}`];
+    const bodies: Record<string, string> = {
+      [names[0]]: `#1\n${"x".repeat(4_000)}`,
+      [names[1]]: `#2\n${"y".repeat(4_512)}`,
+      [names[2]]: `#3\n${"z".repeat(6_000)}`,
+    };
+    const r = await routePrompt("ui/ux", [], deps({
+      resolvePromptSkillNames: async () => names,
+      entitledNames: async () => new Set(names),
+      getBody: async (n: string) => bodies[n] ?? "",
+    }));
+    const shaped = reshapeForInlineBudget(r, HOOK_INLINE_SAFE_CHARS, () => undefined);
+    expect(shaped.text.length).toBeLessThanOrEqual(HOOK_INLINE_SAFE_CHARS);
+    expect(shaped.text).toContain("y".repeat(100)); // second body INLINED — kills the all-names reserve
+    expect(shaped.text).toContain(`### ${names[1]}`);
+    expect(shaped.text).toMatch(/Not inlined .*C/s); // the huge third is named, not silently gone
+    expect(shaped.text.endsWith("before proceeding.**")).toBe(true); // footer intact under the clamp
   });
 });
 

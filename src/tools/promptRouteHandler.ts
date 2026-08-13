@@ -213,39 +213,62 @@ export function reshapeForInlineBudget(
     offloadPath = undefined;
   }
 
-  const pieces: string[] = [result.header];
+  // POINTER FIRST. Recoverability outranks prose order: skill names are
+  // unbounded (portal manifest, unvalidated), so any text placed before the
+  // pointer can push it past the ~2KB preview a host shows for offloaded
+  // context — or under the final clamp, slice it off entirely. Round-2 review
+  // measured both: 200-char names put the pointer at offset ~2,374 with the
+  // clamp never firing. With the pointer leading, its path sits within the
+  // first ~120 chars no matter what the header does.
+  const pieces: string[] = [];
   if (offloadPath) {
     pieces.push(
       `**Host hook context is size-capped — the full text of all ${result.names.length} skill(s) is saved at: ${offloadPath}**\n` +
         `**Read that file now and follow those skills before proceeding. If the host shows "Full output saved to" with another path above, Read that file instead.**`,
     );
   }
+  pieces.push(result.header);
 
-  // Reserve room for the loud-failure footer when there is no offload file to
-  // point at — a silently dropped skill is the defect this feature exists for.
-  // COMPUTED from the worst-case footer (every delivered name skipped), not a
-  // guessed constant: a fixed 300 was measured overrunning the budget by 99
-  // chars with two long-named skills.
+  // Loud-failure footer when there is no offload file to point at — a
+  // silently dropped skill is the defect this feature exists for. The reserve
+  // is an EXACT FIXPOINT over the skipped set, not a bound: reserving for all
+  // delivered names was measured skipping a body that previously fit (188
+  // wasted chars), and a guessed constant was measured overrunning by 99.
+  // The skipped set only grows as the reserve grows, so this converges in at
+  // most blocks+1 rounds.
   const footerFor = (names: string[]) =>
     `\n\n**Not inlined (host size cap, offload unavailable): ${names.join(", ")} — fetch each with knowledge_search and follow it before proceeding.**`;
-  const reserve = offloadPath ? 0 : footerFor(result.names).length;
-  let inline = pieces.join("\n\n");
-  const skipped: string[] = [];
-  for (let i = 0; i < result.blocks.length; i++) {
-    const candidate = `${inline}\n\n${result.blocks[i]}`;
-    if (candidate.length <= budgetChars - reserve) {
-      inline = candidate;
-    } else {
-      skipped.push(result.names[i] ?? `skill ${i + 1}`);
+  const base = pieces.join("\n\n");
+  const blocks = result.blocks; // narrowed once — the closure below defeats TS narrowing on result
+  const fill = (reserve: number) => {
+    let filled = base;
+    const skipped: string[] = [];
+    for (let i = 0; i < blocks.length; i++) {
+      const candidate = `${filled}\n\n${blocks[i]}`;
+      if (candidate.length <= budgetChars - reserve) {
+        filled = candidate;
+      } else {
+        skipped.push(result.names[i] ?? `skill ${i + 1}`);
+      }
+    }
+    return { filled, skipped };
+  };
+  let attempt = fill(0);
+  if (!offloadPath) {
+    for (let round = 0; round <= blocks.length && attempt.skipped.length > 0; round++) {
+      const next = fill(footerFor(attempt.skipped).length);
+      const converged = next.skipped.length === attempt.skipped.length;
+      attempt = next;
+      if (converged) break;
     }
   }
-  if (!offloadPath && skipped.length > 0) {
-    inline += footerFor(skipped);
+  let inline = attempt.filled;
+  if (!offloadPath && attempt.skipped.length > 0) {
+    inline += footerFor(attempt.skipped);
   }
   // Belt over the construction: the budget is a HOST hard cap, and "the data
-  // stayed small" is not an invariant. If a pathological header ever pushes
-  // the base past it, keep the first budgetChars — the names line and pointer
-  // sit at the front by construction, so what survives is the recoverable part.
+  // stayed small" is not an invariant. The pointer leads, so a slice keeps
+  // the recoverable part.
   if (inline.length > budgetChars) {
     inline = inline.slice(0, budgetChars);
   }
