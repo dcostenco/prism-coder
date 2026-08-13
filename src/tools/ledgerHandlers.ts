@@ -593,26 +593,19 @@ export async function sessionSaveLedgerHandler(args: unknown) {
 
   const storage = await getStorage();
 
-  // ─── Project mismatch validation (v13 — hard-rejects on mismatch) ───
-  // Replaces the old soft-warning behavior that allowed cross-project
-  // writes. See projectResolver.ts for the lookup logic.
+  // ─── Project validation (v14 — warns, NEVER refuses the write) ───
+  // v13 hard-rejected on mismatch, trusting auto-created registry rows that
+  // turned out to be junk on a live machine (home-dir and relative-path
+  // entries) — agents got contradictory rejections and sessions ended
+  // UNSAVED. A memory product must not drop data to enforce taxonomy.
   let resolverNote = "";
   const resolved = await resolveProject(project, files_changed);
-  if (!resolved.ok) {
-    return {
-      content: [{
-        type: "text",
-        text:
-          `❌ ${resolved.error}\n` +
-          (resolved.hint ? `Hint: ${resolved.hint}\n` : "") +
-          `\nNo ledger entry was written. Re-issue the call with the correct project.`,
-      }],
-      isError: true,
-    };
-  }
   project = resolved.project;
+  if (resolved.warning) {
+    resolverNote = `\n⚠️ ${resolved.warning}`;
+  }
   if (resolved.autoCreated) {
-    resolverNote = `\n📝 Auto-registered project "${project}" with repo_path derived from files_changed.`;
+    resolverNote += `\n📝 Auto-registered project "${project}" with repo_path derived from files_changed.`;
   }
 
   debugLog(`[session_save_ledger] Saving ledger entry for project="${project}"`);

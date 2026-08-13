@@ -24,15 +24,14 @@ export interface ResolveOk {
   ok: true;
   project: string;
   autoCreated?: boolean;
+  /** Set when the registry disagrees with the declaration. Advisory only —
+   *  the write proceeds under the DECLARED project. */
+  warning?: string;
 }
 
-export interface ResolveErr {
-  ok: false;
-  error: string;
-  hint?: string;
-}
-
-export type ResolveResult = ResolveOk | ResolveErr;
+/** The resolver never refuses a write (see 2026-08-13 note below); the
+ *  error shape exists only for source compatibility and is never returned. */
+export type ResolveResult = ResolveOk;
 
 const REPO_PATH_PREFIX = "repo_path:";
 
@@ -113,14 +112,23 @@ export async function resolveProject(
   const registry = await loadRegistry();
   const derivedProject = pickFromRegistry(registry, filesChanged);
 
+  // 2026-08-13: this used to HARD-REJECT on mismatch — and the registry it
+  // trusted was auto-created junk (a live machine carried a repo_path entry
+  // pointing at the HOME DIRECTORY, which contains every absolute path, plus
+  // five relative-path rows). Agents got contradictory rejections, ping-ponged
+  // by the hint, and sessions ended UNSAVED — a memory product dropping data to
+  // enforce taxonomy. The declaration now always wins; the derivation is an
+  // advisory warning. (The wrong-project class this gate was built for —
+  // a 2026-04-30 memory-loss incident — is still surfaced, as a warning
+  // the agent sees at save time instead of a refusal the user never does.)
   if (derivedProject && derivedProject !== declaredProject) {
     return {
-      ok: false,
-      error:
-        `Project mismatch: declared "${declaredProject}" but files_changed indicate "${derivedProject}".`,
-      hint:
-        `Re-issue the request with project="${derivedProject}". ` +
-        `If you genuinely intended "${declaredProject}", first add it to the registry with a non-overlapping repo_path.`,
+      ok: true,
+      project: declaredProject,
+      warning:
+        `Registry suggests these files belong to "${derivedProject}", but the entry was saved under ` +
+        `"${declaredProject}" as declared. If "${derivedProject}" is correct, re-save with that project; ` +
+        `if the registry is wrong, its repo_path for "${derivedProject}" needs repair.`,
     };
   }
 
@@ -133,7 +141,7 @@ export async function resolveProject(
   }
 
   const prefix = commonPathPrefix(filesChanged);
-  if (prefix) {
+  if (prefix && isRegistrablePrefix(prefix, registry)) {
     try {
       await setSetting(`${REPO_PATH_PREFIX}${declaredProject}`, prefix);
       debugLog(
@@ -148,4 +156,25 @@ export async function resolveProject(
   }
 
   return { ok: true, project: declaredProject };
+}
+
+/**
+ * Auto-create hygiene, added 2026-08-13. Every class rejected here was FOUND
+ * in a live registry, where it poisoned later saves:
+ *  - relative prefixes ("Tests/UITests") match or miss depending on the path
+ *    style a later save happens to use;
+ *  - short prefixes (a 2-segment home directory) contain every absolute
+ *    path on the machine;
+ *  - an ancestor of an existing entry re-creates the same containment bomb
+ *    one level down.
+ * Refusing to register is safe: the save proceeds either way, and the next
+ * save with a cleaner file list can still register the project.
+ */
+function isRegistrablePrefix(prefix: string, registry: RegistryEntry[]): boolean {
+  if (!prefix.startsWith("/")) return false;
+  if (prefix.split("/").filter(Boolean).length < 3) return false;
+  for (const entry of registry) {
+    if (isUnder(entry.repo_path, prefix)) return false; // ancestor of an existing entry
+  }
+  return true;
 }
