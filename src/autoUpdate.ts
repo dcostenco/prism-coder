@@ -175,8 +175,28 @@ export function autoupdatePlistPath(): string {
   return join(homedir(), "Library", "LaunchAgents", `${AUTOUPDATE_LABEL}.plist`);
 }
 
+function xmlEscape(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/** The PATH a scheduled run needs. launchd hands an agent a minimal
+ *  PATH (/usr/bin:/bin:/usr/sbin:/sbin) that excludes /usr/local/bin and
+ *  /opt/homebrew/bin — where node and npm live on a standard macOS install.
+ *  Measured 2026-08-14: without this the agent died at `env: node: No such
+ *  file or directory` before running a single line of Prism. The directory
+ *  of the interpreter running this code leads, because that is provably the
+ *  node the operator uses. */
+export function schedulerPath(execPath: string = process.execPath): string {
+  const nodeDir = execPath.slice(0, execPath.lastIndexOf("/")) || "/usr/local/bin";
+  const defaults = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+  return [nodeDir, ...defaults.filter((dir) => dir !== nodeDir)].join(":");
+}
+
 /** Daily 03:30 local, catch-up on wake (LaunchAgents coalesce missed runs). */
-export function buildAutoupdatePlist(prismBin: string): string {
+export function buildAutoupdatePlist(prismBin: string, pathEnv: string = schedulerPath()): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -184,10 +204,14 @@ export function buildAutoupdatePlist(prismBin: string): string {
   <key>Label</key><string>${AUTOUPDATE_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${prismBin}</string>
+    <string>${xmlEscape(prismBin)}</string>
     <string>update</string>
     <string>--if-idle</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>${xmlEscape(pathEnv)}</string>
+  </dict>
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key><integer>3</integer>
@@ -213,27 +237,72 @@ export function autoupdateStatus(): AutoupdateStatus {
     return { supported: false, enabled: false, plistPath, detail: "scheduled updates are macOS-only for now (LaunchAgent)" };
   }
   const enabled = existsSync(plistPath);
+  if (!enabled) {
+    return { supported: true, enabled, plistPath, detail: "disabled" };
+  }
+  // 20.12.0 wrote a plist with no PATH. launchd hands an agent
+  // /usr/bin:/bin:/usr/sbin:/sbin, which excludes the directories holding node
+  // and npm on a standard macOS install, so that generation could never run —
+  // and it failed into a log file nobody reads. Say so instead of reporting a
+  // confident "enabled".
+  let healthy = false;
+  try {
+    healthy = readFileSync(plistPath, "utf8").includes("<key>PATH</key>");
+  } catch { /* unreadable — treat as needing repair */ }
   return {
     supported: true,
     enabled,
     plistPath,
-    detail: enabled ? `enabled — daily 03:30, log: /tmp/${AUTOUPDATE_LABEL}.log` : "disabled",
+    detail: healthy
+      ? `enabled — daily 03:30, log: /tmp/${AUTOUPDATE_LABEL}.log`
+      : "enabled but CANNOT RUN (agent has no PATH; node/npm are not on launchd's default) — re-run `prism autoupdate enable` to repair",
   };
 }
 
-/** Resolve the `prism` bin the LaunchAgent should run. Warns (does not
- *  refuse) when it resolves outside node_modules — a checkout CLI still
- *  updates the global package, but the operator should know which code
- *  their scheduler runs. */
-export function resolvePrismBin(log: (line: string) => void): string {
-  const bin = execFileSync("which", ["prism"], { encoding: "utf8", timeout: 5_000 }).trim();
-  if (!bin) throw new Error("`prism` not found on PATH — install with: npm install -g prism-mcp-server");
+/** Resolve the `prism` the scheduler should run.
+ *
+ *  Prefers the npm global bin over `which prism`: the scheduled job must run
+ *  the INSTALLED CLI deterministically, and an interactive PATH can front it
+ *  with a wrapper. On the machine this was written for, `which prism` returns
+ *  a hand-written bash shim that execs the real bin — harmless, but resolving
+ *  it with readlink returns the shim itself, which an earlier version of this
+ *  code then mislabeled "a source checkout". Only a path that positively
+ *  looks like a repo checkout (a dist/ sibling of a package.json, outside
+ *  node_modules) earns the warning now, and it is a warning, never a refusal. */
+export interface BinResolutionDeps {
+  npmPrefix?: () => string;
+  whichPrism?: () => string;
+  readlink?: (path: string) => string;
+  exists?: (path: string) => boolean;
+}
+
+export function resolvePrismBin(log: (line: string) => void, deps: BinResolutionDeps = {}): string {
+  const exists = deps.exists ?? existsSync;
+  let globalBin: string | undefined;
   try {
-    const real = execFileSync("readlink", ["-f", bin], { encoding: "utf8", timeout: 5_000 }).trim();
-    if (real && !real.includes("node_modules")) {
-      log(`⚠ ${bin} resolves to a source checkout (${real}); the scheduled update will run that CLI (it still updates only the global package)`);
+    const prefix = (deps.npmPrefix ?? (() =>
+      execFileSync("npm", ["prefix", "-g"], { encoding: "utf8", timeout: 15_000 })))().trim();
+    if (prefix) {
+      const candidate = join(prefix, "bin", "prism");
+      if (exists(candidate)) globalBin = candidate;
     }
-  } catch { /* readlink unavailable — proceed with the raw path */ }
+  } catch { /* npm unavailable — fall back to PATH lookup */ }
+  if (globalBin) return globalBin;
+
+  let bin = "";
+  try {
+    bin = (deps.whichPrism ?? (() =>
+      execFileSync("which", ["prism"], { encoding: "utf8", timeout: 5_000 })))().trim();
+  } catch { /* not on PATH */ }
+  if (!bin) throw new Error("`prism` not found — install it with: npm install -g prism-mcp-server");
+  let real = bin;
+  try {
+    real = (deps.readlink ?? ((p: string) =>
+      execFileSync("readlink", ["-f", p], { encoding: "utf8", timeout: 5_000 })))(bin).trim() || bin;
+  } catch { /* keep bin */ }
+  if (!real.includes("node_modules") && /\/dist\/[^/]+$/.test(real)) {
+    log(`⚠ ${bin} resolves to a source checkout (${real}); the scheduled job will run that CLI — it still updates only the global package`);
+  }
   return bin;
 }
 

@@ -29,6 +29,7 @@ import {
   migrateLegacyClaudeInstructions,
   migrateLegacyClaudeManagedStartup,
   migrateLegacyClaudeProjectMcp,
+  connectResultLine,
   normalizeHostName,
 } from './connect.js';
 import { runBrowserCli } from './browserCli.js';
@@ -306,19 +307,11 @@ program
       }
 
       for (const result of summary.results) {
-        if (result.status === 'registered') {
-          console.log(`✓ ${result.label}: registered (${result.path})`);
-        } else if (result.status === 'would-register') {
-          console.log(`• ${result.label}: would register (${result.path})`);
-        } else if (result.status === 'refreshed') {
-          console.log(`✓ ${result.label}: Prism-managed entry refreshed (${result.path})`);
-        } else if (result.status === 'would-refresh') {
-          console.log(`• ${result.label}: would refresh Prism-managed entry (${result.path})`);
-        } else if (result.status === 'existing') {
-          console.log(`− ${result.label}: already registered — untouched (${result.path})`);
-        } else {
-          console.error(`✗ ${result.label}: ${result.message || 'registration failed'} (${result.path})`);
+        if (result.status === 'error') {
+          console.error(connectResultLine(result));
           process.exitCode = 1;
+        } else {
+          console.log(connectResultLine(result));
         }
       }
       const connectedClaude = summary.results.some((result) =>

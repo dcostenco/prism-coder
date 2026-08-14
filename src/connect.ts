@@ -1509,25 +1509,19 @@ function registerJsonHost(
       ? "prism"
       : undefined;
 
-  if (existingKey) {
-    const existingEntry = mcpServers[existingKey];
-    const startupCompatible = existingKey === "prism-mcp"
-      && isManagedPrismEntry(existingEntry)
-      && isDeepStrictEqual(refreshManagedEntry(existingEntry, entry), existingEntry);
-    if (!refresh || existingKey !== "prism-mcp" || !isManagedPrismEntry(existingEntry)) {
-      return result(definition, "existing", "Prism is already registered; existing entry left untouched", startupCompatible);
-    }
-
-    const refreshedEntry = refreshManagedEntry(existingEntry, entry);
-    if (JSON.stringify(refreshedEntry) === JSON.stringify(existingEntry)) {
-      return result(definition, "existing", "Prism-managed entry is already current", true);
-    }
-    if (dryRun) {
-      return result(definition, "would-refresh", undefined, true);
-    }
-
-    mcpServers[existingKey] = refreshedEntry;
-    config.mcpServers = mcpServers;
+  // Claude Code keeps ADDITIONAL, directory-scoped registrations under
+  // projects["<dir>"].mcpServers, and the scoped one wins for sessions started
+  // in that directory. Refreshing only the top-level entry left those pinned to
+  // a stale server path forever — measured live 2026-08-14 on a machine
+  // carrying three registrations, where `--refresh` converged exactly one and
+  // two directories kept launching an old build indefinitely. Only entries
+  // Prism itself created are eligible, and only under --refresh, so this
+  // cannot reach a hand-rolled entry. Hosts without a `projects` map are
+  // unaffected: the collector returns nothing.
+  const pendingProjects = refresh ? collectProjectScopedRefreshes(config, entry) : [];
+  const scopedCount = pendingProjects.length;
+  const scopedNoun = `${scopedCount} project-scoped ${scopedCount === 1 ? "entry" : "entries"}`;
+  const writeConfig = (status: ConnectStatus, message: string | undefined, compatible: boolean): ConnectResult => {
     try {
       writeTextAtomically(
         writePath,
@@ -1536,18 +1530,52 @@ function registerJsonHost(
         beforeCommit,
         symlinkPath,
       );
-      return result(definition, "refreshed", undefined, true);
+      return result(definition, status, message, compatible);
     } catch (error) {
       return result(definition, "error", error instanceof Error ? error.message : String(error));
     }
+  };
+
+  if (existingKey) {
+    const existingEntry = mcpServers[existingKey];
+    const startupCompatible = existingKey === "prism-mcp"
+      && isManagedPrismEntry(existingEntry)
+      && isDeepStrictEqual(refreshManagedEntry(existingEntry, entry), existingEntry);
+    if (!refresh || existingKey !== "prism-mcp" || !isManagedPrismEntry(existingEntry)) {
+      if (scopedCount === 0) {
+        return result(definition, "existing", "Prism is already registered; existing entry left untouched", startupCompatible);
+      }
+      if (dryRun) {
+        return result(definition, "would-refresh", `top-level entry left untouched; would refresh ${scopedNoun}`, startupCompatible);
+      }
+      applyProjectScopedRefreshes(config, pendingProjects);
+      return writeConfig("refreshed", `top-level entry left untouched; refreshed ${scopedNoun}`, startupCompatible);
+    }
+
+    const refreshedEntry = refreshManagedEntry(existingEntry, entry);
+    const topLevelStale = JSON.stringify(refreshedEntry) !== JSON.stringify(existingEntry);
+    if (!topLevelStale && scopedCount === 0) {
+      return result(definition, "existing", "Prism-managed entry is already current", true);
+    }
+    if (dryRun) {
+      return result(definition, "would-refresh", scopedCount > 0 ? `also ${scopedNoun}` : undefined, true);
+    }
+
+    if (topLevelStale) {
+      mcpServers[existingKey] = refreshedEntry;
+      config.mcpServers = mcpServers;
+    }
+    applyProjectScopedRefreshes(config, pendingProjects);
+    return writeConfig("refreshed", scopedCount > 0 ? `also refreshed ${scopedNoun}` : undefined, true);
   }
 
   if (dryRun) {
-    return result(definition, "would-register", undefined, true);
+    return result(definition, "would-register", scopedCount > 0 ? `also ${scopedNoun}` : undefined, true);
   }
 
   mcpServers["prism-mcp"] = entry;
   config.mcpServers = mcpServers;
+  applyProjectScopedRefreshes(config, pendingProjects);
 
   try {
     writeTextAtomically(
@@ -1903,6 +1931,23 @@ function result(
   };
 }
 
+/** One operator-facing line per host result.
+ *  The `message` a host writer attaches (e.g. "also refreshed 2 project-scoped
+ *  entries") MUST survive to stdout: the earlier printer used canned per-status
+ *  text and dropped it, so a converged directory-scoped registration was
+ *  invisible to the person who asked for it. */
+export function connectResultLine(result: ConnectResult): string {
+  const detail = result.message ? ` — ${result.message}` : "";
+  switch (result.status) {
+    case "registered":     return `✓ ${result.label}: registered${detail} (${result.path})`;
+    case "would-register": return `• ${result.label}: would register${detail} (${result.path})`;
+    case "refreshed":      return `✓ ${result.label}: Prism-managed entry refreshed${detail} (${result.path})`;
+    case "would-refresh":  return `• ${result.label}: would refresh Prism-managed entry${detail} (${result.path})`;
+    case "existing":       return `− ${result.label}: already registered — untouched (${result.path})`;
+    default:               return `✗ ${result.label}: ${result.message || "registration failed"} (${result.path})`;
+  }
+}
+
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -1917,6 +1962,45 @@ function isManagedPrismEntry(value: unknown): value is JsonObject {
   return isJsonObject(value)
     && isJsonObject(value.env)
     && value.env.PRISM_INSTANCE === "prism-mcp";
+}
+
+interface PendingProjectRefresh {
+  project: string;
+  entry: JsonObject;
+}
+
+/** Prism-managed, directory-scoped registrations that are out of date.
+ *  Claude Code stores these under projects["<dir>"].mcpServers; other hosts
+ *  have no `projects` map, so this returns nothing for them. */
+function collectProjectScopedRefreshes(config: JsonObject, desired: JsonObject): PendingProjectRefresh[] {
+  const projects = config.projects;
+  if (!isJsonObject(projects)) return [];
+  const pending: PendingProjectRefresh[] = [];
+  for (const [project, projectConfig] of Object.entries(projects)) {
+    if (!isJsonObject(projectConfig)) continue;
+    const servers = projectConfig.mcpServers;
+    if (!isJsonObject(servers)) continue;
+    const existing = servers["prism-mcp"];
+    if (!isManagedPrismEntry(existing)) continue;   // hand-rolled entries stay untouched
+    const refreshed = refreshManagedEntry(existing, desired);
+    if (JSON.stringify(refreshed) !== JSON.stringify(existing)) {
+      pending.push({ project, entry: refreshed });
+    }
+  }
+  return pending;
+}
+
+function applyProjectScopedRefreshes(config: JsonObject, pending: PendingProjectRefresh[]): void {
+  if (pending.length === 0) return;
+  const projects = config.projects;
+  if (!isJsonObject(projects)) return;
+  for (const { project, entry } of pending) {
+    const projectConfig = projects[project];
+    if (!isJsonObject(projectConfig)) continue;
+    const servers = projectConfig.mcpServers;
+    if (!isJsonObject(servers)) continue;
+    servers["prism-mcp"] = entry;
+  }
 }
 
 function refreshManagedEntry(existing: JsonObject, desired: JsonObject): JsonObject {

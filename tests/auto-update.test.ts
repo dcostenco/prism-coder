@@ -12,7 +12,10 @@
  *     code path to them — asserted here by the deps surface)
  */
 import { describe, it, expect, vi } from "vitest";
-import { runPackageUpdate, buildAutoupdatePlist, AUTOUPDATE_LABEL } from "../src/autoUpdate.js";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runPackageUpdate, buildAutoupdatePlist, resolvePrismBin, schedulerPath, AUTOUPDATE_LABEL } from "../src/autoUpdate.js";
 
 const base = () => ({
   currentVersion: "20.11.1",
@@ -112,12 +115,106 @@ describe("runPackageUpdate", () => {
 
 describe("buildAutoupdatePlist", () => {
   it("schedules `prism update --if-idle` — never connect, never host config", () => {
-    const plist = buildAutoupdatePlist("/usr/local/bin/prism");
+    const plist = buildAutoupdatePlist("/usr/local/bin/prism", "/usr/local/bin:/usr/bin:/bin");
     expect(plist).toContain(AUTOUPDATE_LABEL);
     expect(plist).toContain("<string>/usr/local/bin/prism</string>");
     expect(plist).toContain("<string>update</string>");
     expect(plist).toContain("<string>--if-idle</string>");
     expect(plist).not.toContain("connect");
     expect(plist).toContain("StartCalendarInterval");
+  });
+
+  // Measured 2026-08-14, simulating launchd's environment:
+  //   env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin prism update --if-idle
+  //   -> env: node: No such file or directory
+  // launchd gives an agent a minimal PATH that excludes /usr/local/bin, where
+  // node and npm live on a standard macOS install. Without an explicit PATH
+  // the scheduled updater could never start, and would have failed silently
+  // into a log file nobody reads. The plist must carry a PATH that contains
+  // the interpreter running this code.
+  it("carries a PATH that includes the running node's directory", () => {
+    const plist = buildAutoupdatePlist("/usr/local/bin/prism", "/opt/homebrew/bin:/usr/bin:/bin");
+    expect(plist).toContain("EnvironmentVariables");
+    const pathValue = plist.split("<key>PATH</key>")[1]?.split("</string>")[0] ?? "";
+    expect(pathValue).toContain("/opt/homebrew/bin");
+  });
+
+  it("escapes XML metacharacters so a path with & or < cannot corrupt the plist", () => {
+    const plist = buildAutoupdatePlist("/opt/a&b/prism", "/opt/a&b:/usr/bin");
+    expect(plist).not.toMatch(/[^&]&[^ag]/);   // no bare ampersands
+    expect(plist).toContain("&amp;");
+  });
+});
+
+describe("resolvePrismBin — which CLI the scheduler runs", () => {
+  it("prefers the npm global bin over whatever PATH resolves", () => {
+    const warnings: string[] = [];
+    const bin = resolvePrismBin((l) => warnings.push(l), {
+      npmPrefix: () => "/Users/dev/.npm-global\n",
+      whichPrism: () => "/Users/dev/bin/prism\n",
+      exists: () => true,
+    });
+    expect(bin).toBe("/Users/dev/.npm-global/bin/prism");
+    expect(warnings).toEqual([]);
+  });
+
+  it("does NOT call a PATH shim a source checkout (the 20.12.0 false positive)", () => {
+    // Live shape: /Users/dev/bin/prism is a two-line bash script that execs the
+    // real bin. readlink -f on a regular file returns the file itself, and the
+    // first version of this code read "not under node_modules" as "checkout".
+    const warnings: string[] = [];
+    const bin = resolvePrismBin((l) => warnings.push(l), {
+      npmPrefix: () => "",
+      whichPrism: () => "/Users/dev/bin/prism\n",
+      readlink: () => "/Users/dev/bin/prism\n",
+      exists: () => false,
+    });
+    expect(bin).toBe("/Users/dev/bin/prism");
+    expect(warnings).toEqual([]);
+  });
+
+  it("still warns for a genuine source checkout", () => {
+    const warnings: string[] = [];
+    resolvePrismBin((l) => warnings.push(l), {
+      npmPrefix: () => "",
+      whichPrism: () => "/Users/dev/prism/dist/cli.js\n",
+      readlink: () => "/Users/dev/prism/dist/cli.js\n",
+      exists: () => false,
+    });
+    expect(warnings.join(" ")).toMatch(/source checkout/);
+  });
+});
+
+describe("schedulerPath", () => {
+  it("leads with the running interpreter's directory and keeps launchd's defaults", () => {
+    const path = schedulerPath("/usr/local/bin/node");
+    expect(path.startsWith("/usr/local/bin:")).toBe(true);
+    expect(path).toContain("/usr/bin");
+    expect(path.split(":").filter((d) => d === "/usr/local/bin")).toHaveLength(1); // no duplicate
+  });
+
+  it("covers a Homebrew-ARM node too", () => {
+    expect(schedulerPath("/opt/homebrew/bin/node").startsWith("/opt/homebrew/bin:")).toBe(true);
+  });
+});
+
+describe("autoupdateStatus — a plist that cannot run must not report a clean 'enabled'", () => {
+  it("flags a 20.12.0-era PATH-less plist as needing repair", async () => {
+    const { autoupdateStatus } = await import("../src/autoUpdate.js");
+    const fakeHome = mkdtempSync(join(tmpdir(), "prism-agent-"));
+    mkdirSync(join(fakeHome, "Library", "LaunchAgents"), { recursive: true });
+    const prev = process.env.HOME;
+    process.env.HOME = fakeHome;
+    try {
+      const { autoupdatePlistPath } = await import("../src/autoUpdate.js");
+      // Only meaningful on darwin; elsewhere status reports unsupported.
+      if (process.platform !== "darwin") return;
+      writeFileSync(autoupdatePlistPath(), "<plist><dict><key>Label</key></dict></plist>");
+      const status = autoupdateStatus();
+      expect(status.enabled).toBe(true);
+      expect(status.detail).toMatch(/CANNOT RUN|repair/);
+    } finally {
+      if (prev === undefined) delete process.env.HOME; else process.env.HOME = prev;
+    }
   });
 });

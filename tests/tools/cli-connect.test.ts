@@ -37,6 +37,7 @@ import {
   configureGeminiAgentPolicy,
   configureGeminiNativeStartup,
   connectHosts,
+  connectResultLine,
   migrateLegacyClaudeProjectMcp,
   migrateLegacyClaudeHooks,
   migrateLegacyClaudeInstructions,
@@ -2096,6 +2097,138 @@ describe("prism connect — economy subagent policy", () => {
     const block = src.split("CODEX_LOCAL_FIRST_POLICY = {")[1]?.slice(0, 600) ?? "";
     expect(block).toMatch(/max_threads:\s*1/);   // "at most one"
     expect(block).toMatch(/max_depth:\s*1/);     // "no nesting"
+  });
+
+
+  // ── Project-scoped Claude registrations (2026-08-14) ─────────────
+  // Found live: ~/.claude.json carried THREE prism-mcp registrations — the
+  // top-level one plus project-scoped entries under projects["<dir>"].
+  // `--refresh` converged only the top-level one, so sessions started in
+  // those directories kept launching a stale server path forever. Measured
+  // in an isolated HOME against a copy of the real config: top-level moved
+  // to the installed package, both project entries stayed on the old path.
+  describe("project-scoped Claude entries", () => {
+    function seedThreeRegistrations(homeDir: string, stalePath: string) {
+      const path = configPath(homeDir, "claude-code");
+      const managed = (extra: Record<string, unknown> = {}) => ({
+        command: "/old/node",
+        args: [stalePath],
+        env: { PRISM_INSTANCE: "prism-mcp", PRISM_STORAGE: "auto" },
+        ...extra,
+      });
+      writeFileSync(path, JSON.stringify({
+        mcpServers: { "prism-mcp": managed({ type: "stdio" }) },
+        projects: {
+          "/Users/dev": { mcpServers: { "prism-mcp": managed({ autoSearch: true }) } },
+          "/Users/dev/Scripts": { mcpServers: { "prism-mcp": managed() } },
+          "/Users/dev/other": { mcpServers: { custom: { command: "x" } } },
+        },
+      }, null, 2));
+      return path;
+    }
+
+    const base = (homeDir: string) => ({
+      hosts: ["claude-code"] as ConnectHostName[],
+      homeDir,
+      platform: "darwin" as const,
+      serverPath: "/pkg/dist/server.js",
+      nodePath: "/usr/bin/node",
+      env: {},
+    });
+
+    it("--refresh converges EVERY Prism-managed registration, not just the top-level one", () => {
+      const homeDir = makeHome();
+      const path = seedThreeRegistrations(homeDir, "/stale/dist/server.js");
+
+      const result = connectHosts({ ...base(homeDir), refresh: true });
+
+      expect(result.results[0].status).toBe("refreshed");
+      const config = readConfig(path);
+      expect(config.mcpServers["prism-mcp"].args).toEqual(["/pkg/dist/server.js"]);
+      expect(config.projects["/Users/dev"].mcpServers["prism-mcp"].args).toEqual(["/pkg/dist/server.js"]);
+      expect(config.projects["/Users/dev/Scripts"].mcpServers["prism-mcp"].args).toEqual(["/pkg/dist/server.js"]);
+      // Per-entry extras survive the refresh.
+      expect(config.projects["/Users/dev"].mcpServers["prism-mcp"].autoSearch).toBe(true);
+    });
+
+    it("refreshes project entries even when the top-level entry is already current", () => {
+      const homeDir = makeHome();
+      const path = configPath(homeDir, "claude-code");
+      connectHosts(base(homeDir));                       // writes a current top-level entry
+      const current = readConfig(path);
+      current.projects = {
+        "/Users/dev": {
+          mcpServers: {
+            "prism-mcp": {
+              command: "/old/node",
+              args: ["/stale/dist/server.js"],
+              env: { PRISM_INSTANCE: "prism-mcp" },
+            },
+          },
+        },
+      };
+      writeFileSync(path, JSON.stringify(current, null, 2));
+
+      const result = connectHosts({ ...base(homeDir), refresh: true });
+
+      expect(result.results[0].status).toBe("refreshed");
+      expect(readConfig(path).projects["/Users/dev"].mcpServers["prism-mcp"].args)
+        .toEqual(["/pkg/dist/server.js"]);
+    });
+
+    it("never touches a project entry that Prism did not create", () => {
+      const homeDir = makeHome();
+      const path = configPath(homeDir, "claude-code");
+      writeFileSync(path, JSON.stringify({
+        mcpServers: { "prism-mcp": { command: "/old/node", args: ["/stale/dist/server.js"], env: { PRISM_INSTANCE: "prism-mcp" } } },
+        projects: {
+          "/Users/dev": { mcpServers: { "prism-mcp": { command: "hand-rolled", args: ["/my/server.js"] } } },
+        },
+      }, null, 2));
+
+      connectHosts({ ...base(homeDir), refresh: true });
+
+      const entry = readConfig(path).projects["/Users/dev"].mcpServers["prism-mcp"];
+      expect(entry.command).toBe("hand-rolled");
+      expect(entry.args).toEqual(["/my/server.js"]);
+    });
+
+    it("dry run reports the project entries and writes nothing", () => {
+      const homeDir = makeHome();
+      const path = seedThreeRegistrations(homeDir, "/stale/dist/server.js");
+      const before = readFileSync(path, "utf8");
+
+      const preview = connectHosts({ ...base(homeDir), refresh: true, dryRun: true });
+
+      expect(preview.results[0].status).toBe("would-refresh");
+      expect(preview.results[0].message ?? "").toMatch(/2 project-scoped/);
+      expect(readFileSync(path, "utf8")).toBe(before);
+    });
+
+
+    it("the operator SEES the project-scoped detail — the message must reach stdout", () => {
+      // Caught in pre-merge review: the writer reported "also refreshed 2
+      // project-scoped entries" on the result while the CLI printed canned
+      // per-status text, so the convergence this change exists to perform was
+      // invisible to the person running the command.
+      const line = connectResultLine({
+        host: "claude-code", label: "Claude Code", path: "/home/.claude.json",
+        status: "refreshed", startupCompatible: true,
+        message: "also refreshed 2 project-scoped entries",
+      } as any);
+      expect(line).toContain("2 project-scoped entries");
+      expect(line).toContain("Claude Code");
+    });
+
+    it("without --refresh, project entries are left alone", () => {
+      const homeDir = makeHome();
+      const path = seedThreeRegistrations(homeDir, "/stale/dist/server.js");
+      const before = readFileSync(path, "utf8");
+
+      connectHosts(base(homeDir));
+
+      expect(readFileSync(path, "utf8")).toBe(before);
+    });
   });
 
   it("validates the Codex write against the declaration, not a literal", () => {
