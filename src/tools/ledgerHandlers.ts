@@ -35,7 +35,21 @@ import { getSetting, setSetting, getAllSettings, refreshConfigStorageCache } fro
 import { MATERIALIZED_GENERATION_KEY, type SkillSyncResult } from "../skillManifestSync.js";
 import { mergeHandoff, dbToHandoffSchema, sanitizeForMerge } from "../utils/crdtMerge.js";
 import { resolveProject } from "../utils/projectResolver.js";
+import { getUpdateNotice } from "../updateNotice.js";
 import type { StorageBackend } from "../storage/interface.js";
+
+// The running server's own version, for the update-available notice. A read
+// failure must never affect startup: an empty string fails the notice's
+// semver gate, so no notice renders rather than a bogus "running 0.0.0".
+const SERVER_PACKAGE_VERSION: string = (() => {
+  try {
+    return JSON.parse(
+      fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+    ).version ?? "";
+  } catch {
+    return "";
+  }
+})();
 import {
   isRecoverableStartupStorageError,
   LOCAL_STARTUP_FALLBACK_NOTICE,
@@ -2298,7 +2312,17 @@ export async function sessionBootstrapHandler(
     ? `👋 Welcome to Prism — first run detected. Let's get you productive in a few minutes.`
     : `👋 Welcome back, ${greetingName}. Prism is loading ${depth} context.`;
   const identityBlock = `- 🤖 **Agent Identity:** ${escapeNativeMarkdown(compactWithOmissionCount(role, 80))} — ${greetingName}`;
-  const startupHeader = isFirstRun ? greeting : `${greeting}\n\n${identityBlock}`;
+  // Cache-only by contract: server startup refreshes the cache asynchronously;
+  // this call never touches the npm registry. First run skips the notice — a
+  // just-installed machine is current, and that screen is action-first.
+  const updateNotice = isFirstRun ? "" : await getUpdateNotice({
+    currentVersion: SERVER_PACKAGE_VERSION,
+    getSetting,
+    runningFrom: process.argv[1],
+  });
+  const startupHeader = isFirstRun
+    ? greeting
+    : `${greeting}\n\n${identityBlock}${updateNotice ? `\n${updateNotice}` : ""}`;
 
   if (projects.length === 0) {
     const dashboardUrl = await readDashboardUrl();

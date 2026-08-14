@@ -1452,6 +1452,16 @@ export async function startServer() {
   const skillManifestRefresh = setInterval(runSkillManifestSync, 5 * 60 * 1000);
   skillManifestRefresh.unref();
 
+  // Update-check refresh: fire-and-forget AFTER the transport is up, so the
+  // registry ping is never on the prompt-critical path. session_bootstrap
+  // renders from the persisted cache only; the 24h TTL inside refresh keeps
+  // short-lived spawns (codex exec) from pinging npm per run.
+  void (async () => {
+    const { refreshUpdateCache } = await import("./updateNotice.js");
+    const { getSetting, setSetting } = await import("./storage/configStorage.js");
+    await refreshUpdateCache({ getSetting, setSetting });
+  })().catch(() => { /* offline is silent by contract */ });
+
   // Register graceful shutdown handlers (SIGTERM, SIGINT, SIGHUP, stdin close).
   // The stdin close handler is critical — when MCP clients disconnect, they
   // often just close the pipe without sending a signal, leaving zombie processes.

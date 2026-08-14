@@ -208,6 +208,51 @@ program
   .command('browser')
   .description('Run the packaged local Prism Browser automation CLI');
 
+// ─── prism update / prism autoupdate ──────────────────────────
+// Unattended-safe package updates. Deliberately NOT connect-on-a-timer:
+// connect writes host configuration and expects hosts to be closed, which
+// a scheduler cannot guarantee. `update` touches only the global npm
+// package; running servers pick the release up on their next start.
+
+program
+  .command('update')
+  .description('Update the global prism-mcp-server package (never touches host configuration)')
+  .option('--if-idle', 'Only update while no Prism MCP server process is running (scheduler-safe)')
+  .action(async (options: { ifIdle?: boolean }) => {
+    const { runPackageUpdate } = await import('./autoUpdate.js');
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
+    const result = runPackageUpdate({
+      currentVersion: pkg.version,
+      ifIdle: options.ifIdle,
+      log: (l) => console.log(l),
+    });
+    console.log(`${result.action}: ${result.detail}`);
+    process.exit(result.action === 'failed' ? 1 : 0);
+  });
+
+program
+  .command('autoupdate <action>')
+  .description('Scheduled daily `prism update --if-idle` — enable | disable | status (opt-in, macOS)')
+  .action(async (action: string) => {
+    const { enableAutoupdate, disableAutoupdate, autoupdateStatus } = await import('./autoUpdate.js');
+    const log = (l: string) => console.log(l);
+    let status;
+    if (action === 'enable') status = enableAutoupdate(log);
+    else if (action === 'disable') status = disableAutoupdate();
+    else if (action === 'status') status = autoupdateStatus();
+    else {
+      console.error(`unknown action "${action}" — use enable, disable, or status`);
+      process.exit(1);
+    }
+    if (!status.supported) {
+      console.log(`− ${status.detail}`);
+      process.exit(action === 'status' ? 0 : 1);
+    }
+    console.log(status.enabled
+      ? `✓ autoupdate ${status.detail}\n  agent: ${status.plistPath}`
+      : `− autoupdate ${status.detail}`);
+  });
+
 // ─── prism connect ────────────────────────────────────────────
 // Registers this installed package with supported MCP hosts. The
 // merge is additive: an existing `prism` or `prism-mcp` entry is
