@@ -190,7 +190,8 @@ function xmlEscape(value: string): string {
  *  of the interpreter running this code leads, because that is provably the
  *  node the operator uses. */
 export function schedulerPath(execPath: string = process.execPath): string {
-  const nodeDir = execPath.slice(0, execPath.lastIndexOf("/")) || "/usr/local/bin";
+  const lastSlash = execPath.lastIndexOf("/");
+  const nodeDir = lastSlash > 0 ? execPath.slice(0, lastSlash) : "/usr/local/bin";
   const defaults = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
   return [nodeDir, ...defaults.filter((dir) => dir !== nodeDir)].join(":");
 }

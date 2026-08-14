@@ -196,6 +196,16 @@ describe("schedulerPath", () => {
   it("covers a Homebrew-ARM node too", () => {
     expect(schedulerPath("/opt/homebrew/bin/node").startsWith("/opt/homebrew/bin:")).toBe(true);
   });
+
+  it("never derives a garbage directory from a slashless interpreter path", () => {
+    // Review catch: lastIndexOf("/") === -1 made slice(0, -1) chop the last
+    // character, so a bare "node" yielded the directory "nod" — a truthy value
+    // that skipped the fallback and put a nonexistent dir at the FRONT of the
+    // scheduler PATH. Unreachable with a real process.execPath, which is
+    // absolute; a PATH built from a lie is still a PATH that can misresolve.
+    expect(schedulerPath("node").split(":")[0]).toBe("/usr/local/bin");
+    expect(schedulerPath("").split(":")[0]).toBe("/usr/local/bin");
+  });
 });
 
 describe("autoupdateStatus — a plist that cannot run must not report a clean 'enabled'", () => {
