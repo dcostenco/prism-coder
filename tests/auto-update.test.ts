@@ -42,15 +42,20 @@ describe("runPackageUpdate", () => {
   });
 
   it("--if-idle DEFERS while any Prism MCP process runs — never installs under a live server", () => {
+    const installedVersion = vi.fn(() => "20.11.1");
     const deps = {
       ...base(),
       ifIdle: true,
+      installedVersion,
       listPrismProcesses: vi.fn(() => ["1234 node /x/prism-mcp-server/dist/server.js"]),
     };
     const result = runPackageUpdate(deps);
     expect(result.action).toBe("deferred");
     expect(deps.install).not.toHaveBeenCalled();
     expect(deps.fetchLatest).not.toHaveBeenCalled(); // no work at all while busy
+    // Ordering matters for a scheduled run: deciding to defer must not shell
+    // out to npm at all (the installed-version probe runs `npm prefix -g`).
+    expect(installedVersion).not.toHaveBeenCalled();
   });
 
   it("without --if-idle, running servers do not block (explicit foreground update)", () => {

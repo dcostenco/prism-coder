@@ -140,6 +140,24 @@ export function runPackageUpdate(deps: PackageUpdateDeps): PackageUpdateResult {
   if ((env.VITEST || env.NODE_ENV === "test") && !deps.fetchLatest) {
     return { action: "skipped", detail: "test environment" };
   }
+  if (deps.ifIdle) {
+    let running: string[];
+    try {
+      running = (deps.listPrismProcesses ?? defaultListPrismProcesses)();
+    } catch (error) {
+      return {
+        action: "deferred",
+        detail: `cannot verify idleness (${error instanceof Error ? error.message.split("\n")[0] : String(error)}) — deferring`,
+      };
+    }
+    if (running.length > 0) {
+      return {
+        action: "deferred",
+        detail: `${running.length} Prism MCP process(es) running — deferred until idle`,
+      };
+    }
+  }
+
   // The version that matters is the INSTALLED one; the running CLI may be a
   // checkout, a shim, or an older global. Probing shells out to npm, so tests
   // reach it only through an injected dep.
@@ -161,24 +179,6 @@ export function runPackageUpdate(deps: PackageUpdateDeps): PackageUpdateResult {
   }
   if (targetVersion.includes("-")) {
     return { action: "skipped", detail: `dev build ${targetVersion} — not touching it` };
-  }
-
-  if (deps.ifIdle) {
-    let running: string[];
-    try {
-      running = (deps.listPrismProcesses ?? defaultListPrismProcesses)();
-    } catch (error) {
-      return {
-        action: "deferred",
-        detail: `cannot verify idleness (${error instanceof Error ? error.message.split("\n")[0] : String(error)}) — deferring`,
-      };
-    }
-    if (running.length > 0) {
-      return {
-        action: "deferred",
-        detail: `${running.length} Prism MCP process(es) running — deferred until idle`,
-      };
-    }
   }
 
   const release = (deps.acquireLock ?? defaultAcquireLock)();
