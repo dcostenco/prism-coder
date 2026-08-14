@@ -24,7 +24,7 @@
 import { readFileSync, writeFileSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, extname, sep } from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 
 // ── env ──────────────────────────────────────────────────────────────────────
 const envPath = join(homedir(), "prism", ".env");
@@ -438,7 +438,15 @@ export function shellRunTool(command) {
   // Block remaining shell metacharacters (defense-in-depth; execSync still invokes a shell)
   if (/[;&|`$(){}[\]<>\\]/.test(trimmed)) return "[shell_run error: shell metacharacters not allowed]";
   try {
-    const output = execSync(trimmed, { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
+    // No shell. The filters above are defence in depth, but execSync spawns a
+    // shell, so the injection class exists by construction (CodeQL
+    // js/command-line-injection, critical). Splitting into argv and using
+    // execFileSync removes the interpreter entirely: metacharacters, globs and
+    // expansions cannot be interpreted because nothing is there to interpret
+    // them. Safe to split on whitespace here — newlines are rejected above and
+    // every allowlist entry is whitespace-delimited.
+    const [file, ...argv] = trimmed.split(/\s+/);
+    const output = execFileSync(file, argv, { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
     return output.trim() || "(no output)";
   } catch (err) {
     return `[shell_run error: ${err.message.split("\n")[0]}]`;
