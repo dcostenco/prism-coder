@@ -549,12 +549,20 @@ export async function prepareImages(images: string[]): Promise<string[]> {
         if (looksLikePath) {
             try {
                 const resolved = entry.replace(/^~/, process.env.HOME ?? "~");
-                const stat = await fs.stat(resolved);
-                if (stat.size > MAX_IMAGE_BYTES) {
-                    throw new Error(`image too large: ${(stat.size / 1024 / 1024).toFixed(1)}MB > ${MAX_IMAGE_BYTES / 1024 / 1024}MB`);
+                // Single handle: stat-then-read lets the path be swapped between
+                // check and use (CodeQL js/file-system-race). Size is checked on
+                // the SAME handle that is read.
+                const handle = await fs.open(resolved, "r");
+                try {
+                    const stat = await handle.stat();
+                    if (stat.size > MAX_IMAGE_BYTES) {
+                        throw new Error(`image too large: ${(stat.size / 1024 / 1024).toFixed(1)}MB > ${MAX_IMAGE_BYTES / 1024 / 1024}MB`);
+                    }
+                    const buf = await handle.readFile();
+                    out.push(buf.toString("base64"));
+                } finally {
+                    await handle.close();
                 }
-                const buf = await fs.readFile(resolved);
-                out.push(buf.toString("base64"));
             } catch (err) {
                 throw new Error(`prism_infer: image path not readable: ${entry} (${err instanceof Error ? err.message : String(err)})`);
             }
@@ -1484,6 +1492,18 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // ── Local exhausted. Optional synalux fallback. ──
     if (allowCloud) {
         const cloudTimeout = args.timeout_ms ?? 90_000;
+        // Images never leave the device: callCloud has no image channel, so a
+        // cloud fallback would send "describe this screenshot" WITHOUT the
+        // screenshot and get a confident answer about an image the model never
+        // saw — the same failure the vision tier gate prevents locally. Refuse
+        // instead, and keep screenshot bytes on-device by construction.
+        if (args.images?.length) {
+            attempts.push({ tier: "synalux", reason: "cloud_fallback_refused_images_stay_local" });
+            throw new Error(
+                `prism_infer: no local vision tier could serve this image request, and cloud fallback is refused ` +
+                `for image inputs (screenshots stay on this device). attempts=${JSON.stringify(attempts)}`
+            );
+        }
         const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout);
         if (cloud.ok && cloud.output) {
             return await applyVerification(cloud.output, gatedArgs, deps, {

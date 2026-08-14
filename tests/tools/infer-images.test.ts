@@ -179,3 +179,27 @@ describe("round-2 review findings", () => {
     await expect(prepareImages(["C:\\Users\\dev\\shot.png"])).rejects.toThrow(/not readable|ENOENT/i);
   });
 });
+
+describe("round-3 review: security + privacy", () => {
+  it("reads the image through a single handle (no stat/read TOCTOU)", async () => {
+    // CodeQL js/file-system-race (high): stat() then readFile() lets the path
+    // be swapped between check and use. The size check must apply to the SAME
+    // open handle that is read.
+    const src = await import("node:fs").then(fs =>
+      fs.readFileSync("src/tools/prismInferHandler.ts", "utf8"));
+    expect(src).toMatch(/fs\.open\(/);
+    expect(src).not.toMatch(/await fs\.stat\(resolved\)/);
+  });
+
+  it("REFUSES cloud fallback when images are present — never sends a screenshot prompt without the screenshot", async () => {
+    let cloudCalls = 0;
+    await expect(runInfer(
+      { prompt: "what is occluded?", images: [B64], mode: "chat", task_complexity: 5, cloud_fallback: true },
+      deps({
+        probeVision: async () => true,
+        callLocal: async () => ({ ok: false as const, reason: "all_local_failed" }),
+        callCloud: async () => { cloudCalls++; return { ok: true as const, text: "cloud answer", backend: "gemini" } as any; },
+      }))).rejects.toThrow();
+    expect(cloudCalls).toBe(0);   // image content stays on-device AND no blind answer
+  });
+});
