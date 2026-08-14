@@ -1452,15 +1452,21 @@ export async function startServer() {
   const skillManifestRefresh = setInterval(runSkillManifestSync, 5 * 60 * 1000);
   skillManifestRefresh.unref();
 
-  // Update-check refresh: fire-and-forget AFTER the transport is up, so the
-  // registry ping is never on the prompt-critical path. session_bootstrap
-  // renders from the persisted cache only; the 24h TTL inside refresh keeps
-  // short-lived spawns (codex exec) from pinging npm per run.
-  void (async () => {
-    const { refreshUpdateCache } = await import("./updateNotice.js");
-    const { getSetting, setSetting } = await import("./storage/configStorage.js");
-    await refreshUpdateCache({ getSetting, setSetting });
-  })().catch(() => { /* offline is silent by contract */ });
+  // Update-check refresh: 30s AFTER startup on an unref'd timer, so the
+  // registry ping is never on the prompt-critical path and never interleaves
+  // with first-boot storage initialization (a boot-time kick raced the
+  // first-run demo seed on CI — same-instant sqlite init from two paths).
+  // Short-lived spawns (codex exec) exit before the timer fires and never
+  // ping npm; long-lived hosts refresh 30s in, ample for a 24h TTL.
+  // session_bootstrap renders from the persisted cache only.
+  const updateCheckTimer = setTimeout(() => {
+    void (async () => {
+      const { refreshUpdateCache } = await import("./updateNotice.js");
+      const { getSetting, setSetting } = await import("./storage/configStorage.js");
+      await refreshUpdateCache({ getSetting, setSetting });
+    })().catch(() => { /* offline is silent by contract */ });
+  }, 30_000);
+  updateCheckTimer.unref();
 
   // Register graceful shutdown handlers (SIGTERM, SIGINT, SIGHUP, stdin close).
   // The stdin close handler is critical — when MCP clients disconnect, they
