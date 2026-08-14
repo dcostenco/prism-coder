@@ -93,6 +93,23 @@ const MAX_ROUTE_TOOLS = 64;
 
 // ─── Tool Definition ────────────────────────────────────────────
 
+export const MAX_INFER_IMAGES = 8;
+/** Bytes per supplied image. Beyond this the base64 blows request memory and
+ *  the tier timeout before the model ever sees it. */
+export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+/** Aggregate cap across all images in one call. The per-image limit alone
+ *  still allows 8 x 12MB = 96MB of base64 in memory for a single request. */
+export const MAX_IMAGE_BYTES_TOTAL = 24 * 1024 * 1024;
+/** Prompt-token cost of ONE image. Measured live 2026-08-14: a 1206x2622
+ *  screenshot produced tokens=3156in against a ~30-token prompt. The 9b/27b
+ *  tiers advertise ctxTokens 4_096, so this MUST be charged to the context
+ *  gate — counting only the text prompt let two images silently overflow. */
+export const IMAGE_TOKEN_ESTIMATE = 3_000;
+
+export function estimateImageTokens(count: number): number {
+    return Math.max(0, count) * IMAGE_TOKEN_ESTIMATE;
+}
+
 export const PRISM_INFER_TOOL: Tool = {
     name: "prism_infer",
     description:
@@ -112,7 +129,7 @@ export const PRISM_INFER_TOOL: Tool = {
             images: {
                 type: "array",
                 items: { type: "string" },
-                maxItems: 8,
+                maxItems: MAX_INFER_IMAGES,
                 description:
                     "Screenshots or frames to analyse. Each entry is an absolute file path " +
                     "or raw base64. Requires a vision-capable tier; tiers without vision are " +
@@ -519,19 +536,6 @@ interface OllamaChatResp {
     eval_count?: number;
 }
 
-export const MAX_INFER_IMAGES = 8;
-/** Bytes per supplied image. Beyond this the base64 blows request memory and
- *  the tier timeout before the model ever sees it. */
-export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
-/** Prompt-token cost of ONE image. Measured live 2026-08-14: a 1206x2622
- *  screenshot produced tokens=3156in against a ~30-token prompt. The 9b/27b
- *  tiers advertise ctxTokens 4_096, so this MUST be charged to the context
- *  gate — counting only the text prompt let two images silently overflow. */
-export const IMAGE_TOKEN_ESTIMATE = 3_000;
-
-export function estimateImageTokens(count: number): number {
-    return Math.max(0, count) * IMAGE_TOKEN_ESTIMATE;
-}
 
 /** Resolve caller-supplied images to raw base64.
  *  A filesystem path is read and encoded; anything else is assumed to be
@@ -541,6 +545,7 @@ export function estimateImageTokens(count: number): number {
 export async function prepareImages(images: string[]): Promise<string[]> {
     const fs = await import("node:fs/promises");
     const out: string[] = [];
+    let totalBytes = 0;
     for (const entry of images) {
         // Windows drive paths (C:\\...) and UNC (\\\\server\\share) are paths too;
         // treating them as base64 sends a filename as image bytes.
@@ -559,6 +564,10 @@ export async function prepareImages(images: string[]): Promise<string[]> {
                         throw new Error(`image too large: ${(stat.size / 1024 / 1024).toFixed(1)}MB > ${MAX_IMAGE_BYTES / 1024 / 1024}MB`);
                     }
                     const buf = await handle.readFile();
+                    totalBytes += stat.size;
+                    if (totalBytes > MAX_IMAGE_BYTES_TOTAL) {
+                        throw new Error(`images too large in aggregate: > ${MAX_IMAGE_BYTES_TOTAL / 1024 / 1024}MB across ${images.length} images`);
+                    }
                     out.push(buf.toString("base64"));
                 } finally {
                     await handle.close();
@@ -1120,6 +1129,30 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     if (installed && !layer1RecursionGuard) {
         const l1fn = deps.callLayer1 ?? defaultCallLayer1;
         const l1Model = resolveOllamaName("prism-coder:4b", installed);
+        // The classifier must be able to SEE what it is classifying. Ollama
+        // accepts `images` on a text-only model and silently ignores them
+        // (measured 2026-08-14), so passing them is not enough — a blind
+        // classifier would return a confident verdict about a screenshot it
+        // never received. Verify capability; refuse rather than pretend.
+        if (resolvedImages?.length) {
+            let classifierSees = false;
+            try {
+                classifierSees = l1Model ? await (deps.probeVision ?? probeVision)(deps.ollamaUrl, l1Model) : false;
+            } catch {
+                classifierSees = false;   // unprobeable → treat as blind
+            }
+            if (!classifierSees) {
+                attempts.push({ tier: "layer1", reason: "layer1_classifier_no_vision" });
+                // Same contract as every other safety refusal here: report mode
+                // returns a structured outcome instead of throwing.
+                if (wantReport) return refusedResult("layer1_classifier_no_vision");
+                throw new Error(
+                    `prism_infer: the Layer 1 classifier (${l1Model ?? "prism-coder:4b"}) cannot process images, ` +
+                    `so image content cannot be safety-classified. Refusing rather than classifying the prompt alone. ` +
+                    `Rebuild the classifier with a vision tower to enable image requests.`
+                );
+            }
+        }
         // 4th arg is fetchImpl (default), 5th is the images the classifier must see.
         const l1 = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
         if (l1 === "OBVIOUS_RESERVED" || l1 === "UNCERTAIN") {

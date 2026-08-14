@@ -130,7 +130,9 @@ describe("infer chain with screenshots", () => {
     const r = await runInfer(
       { prompt: "what is occluded?", images: [B64], mode: "chat", task_complexity: 5 },
       deps({
-        probeVision: async (_u, m) => m.includes("9b"),
+        // The 4b classifier must see too — Layer 1 now refuses to classify an
+        // image it cannot look at, so a happy-path mock has to grant it vision.
+        probeVision: async () => true,
         callLocal: async (_u, _m, _p, _s, _mt, _t, _to, _th, images) => {
           seen.push(images);
           return { ok: true as const, text: "YES — Sources & Citations", doneReason: "stop" };
@@ -201,5 +203,32 @@ describe("round-3 review: security + privacy", () => {
         callCloud: async () => { cloudCalls++; return { ok: true as const, text: "cloud answer", backend: "gemini" } as any; },
       }))).rejects.toThrow();
     expect(cloudCalls).toBe(0);   // image content stays on-device AND no blind answer
+  });
+});
+
+describe("round-5 review findings", () => {
+  it("caps images in AGGREGATE, not just per image", async () => {
+    const { prepareImages, MAX_IMAGE_BYTES_TOTAL } = await import("../../src/tools/prismInferHandler.js");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "infer-agg-"));
+    // Each file is under the per-image cap; together they exceed the total.
+    const paths: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const p = join(dir, `a${i}.png`);
+      writeFileSync(p, Buffer.alloc(8 * 1024 * 1024));
+      paths.push(p);
+    }
+    expect(4 * 8 * 1024 * 1024).toBeGreaterThan(MAX_IMAGE_BYTES_TOTAL);
+    await expect(prepareImages(paths)).rejects.toThrow(/aggregate/i);
+  });
+
+  it("derives the schema's maxItems from the constant so they cannot drift", async () => {
+    const { MAX_INFER_IMAGES } = await import("../../src/tools/prismInferHandler.js");
+    const src = await import("node:fs").then(fs =>
+      fs.readFileSync("src/tools/prismInferHandler.ts", "utf8"));
+    expect(src).toMatch(/maxItems: MAX_INFER_IMAGES/);
+    expect(MAX_INFER_IMAGES).toBe(8);
   });
 });

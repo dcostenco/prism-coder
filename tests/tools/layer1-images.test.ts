@@ -81,3 +81,109 @@ describe("handler wiring: the gate receives what the model receives", () => {
     expect(sawImages).toEqual([B64]);   // the gate saw the screenshot
   });
 });
+
+describe("round-1 review: the classifier must actually be able to see", () => {
+  it("a TEXT-ONLY classifier + images = UNCERTAIN, never a text-only verdict", async () => {
+    // Measured 2026-08-14: ollama accepts `images` on a text-only model and
+    // silently ignores them — no error. So on any machine whose 4b has not
+    // been rebuilt with a vision tower, Layer 1 would classify the PROMPT and
+    // report a confident verdict about a screenshot it never saw. Passing the
+    // images is not enough; the classifier's capability must be verified.
+    const { runInfer } = await import("../../src/tools/prismInferHandler.js");
+    const { _setCacheForTest, _resetEntitlementsForTest } = await import("../../src/utils/entitlements.js");
+    const ENT: any = {
+      plan: "enterprise", model_ceiling: "27b", daily_infer_limit: 1e5, max_tokens: 4096, max_seats: 25,
+      features: { cloud_fallback: false, grounding_verifier: false, route_guard: false,
+                  knowledge_search_unlimited: true, session_memory_unlimited: true, analytics_dashboard: false },
+      upgrade_url: "https://synalux.ai/pricing",
+    };
+    _setCacheForTest(ENT, 60_000);
+    let l1Called = false;
+    try {
+      const run = runInfer(
+        { prompt: "what is on this screen?", images: [B64], mode: "chat", task_complexity: 5 },
+        {
+          freemem: () => 30 * 1024 ** 3,
+          listTags: async () => new Set(["prism-coder:9b", "prism-coder:4b"]),
+          listLoaded: async () => new Set<string>(),
+          callLocal: async () => ({ ok: true as const, text: "a screen", doneReason: "stop" }),
+          callCloud: async () => ({ ok: false as const, reason: "off" }),
+          ollamaUrl: "http://x",
+          // 9b can see; the CLASSIFIER (4b) cannot.
+          probeVision: async (_u: string, m: string) => !m.includes("4b"),
+          callLayer1: async () => { l1Called = true; return "OBVIOUS_NOT_RESERVED"; },
+        } as any);
+      await expect(run).rejects.toThrow(/classifier|vision|reserved/i);
+    } finally { _resetEntitlementsForTest(); }
+    expect(l1Called).toBe(false);   // never trusted a blind classifier
+  });
+});
+
+describe("round-3 review: safety refusals honour escalation:'report'", () => {
+  it("returns a structured refusal instead of throwing when report mode is on", async () => {
+    // Every other safety refusal in this handler returns refusedResult() under
+    // escalation:'report'. The blind-classifier refusal threw, breaking that
+    // contract for callers that opted into structured outcomes.
+    const { runInfer } = await import("../../src/tools/prismInferHandler.js");
+    const { _setCacheForTest, _resetEntitlementsForTest } = await import("../../src/utils/entitlements.js");
+    const ENT: any = {
+      plan: "enterprise", model_ceiling: "27b", daily_infer_limit: 1e5, max_tokens: 4096, max_seats: 25,
+      features: { cloud_fallback: false, grounding_verifier: false, route_guard: false,
+                  knowledge_search_unlimited: true, session_memory_unlimited: true, analytics_dashboard: false },
+      upgrade_url: "https://synalux.ai/pricing",
+    };
+    _setCacheForTest(ENT, 60_000);
+    try {
+      const r: any = await runInfer(
+        { prompt: "what is on this screen?", images: [B64], mode: "chat", task_complexity: 5, escalation: "report" },
+        {
+          freemem: () => 30 * 1024 ** 3,
+          listTags: async () => new Set(["prism-coder:9b", "prism-coder:4b"]),
+          listLoaded: async () => new Set<string>(),
+          callLocal: async () => ({ ok: true as const, text: "x", doneReason: "stop" }),
+          callCloud: async () => ({ ok: false as const, reason: "off" }),
+          ollamaUrl: "http://x",
+          probeVision: async (_u: string, m: string) => !m.includes("4b"),
+          callLayer1: async () => "OBVIOUS_NOT_RESERVED",
+        } as any);
+      // Structured refusal lives on gate_outcome, matching every other
+      // safety refusal in this handler.
+      expect(r.gate_outcome?.status).toBe("refused");
+      expect(r.gate_outcome?.reason).toBe("layer1_classifier_no_vision");
+      expect(r.output).toBe("");
+    } finally { _resetEntitlementsForTest(); }
+  });
+});
+
+describe("round-4 review: an unprobeable classifier is blind, not trusted", () => {
+  it("refuses when the vision probe itself fails", async () => {
+    // Mutation testing found this path untested: flipping the catch to
+    // `classifierSees = true` (fail open) kept every test green. If we cannot
+    // establish that the classifier can see, we must not let the image past.
+    const { runInfer } = await import("../../src/tools/prismInferHandler.js");
+    const { _setCacheForTest, _resetEntitlementsForTest } = await import("../../src/utils/entitlements.js");
+    const ENT: any = {
+      plan: "enterprise", model_ceiling: "27b", daily_infer_limit: 1e5, max_tokens: 4096, max_seats: 25,
+      features: { cloud_fallback: false, grounding_verifier: false, route_guard: false,
+                  knowledge_search_unlimited: true, session_memory_unlimited: true, analytics_dashboard: false },
+      upgrade_url: "https://synalux.ai/pricing",
+    };
+    _setCacheForTest(ENT, 60_000);
+    try {
+      const r: any = await runInfer(
+        { prompt: "what is on this screen?", images: [B64], mode: "chat", task_complexity: 5, escalation: "report" },
+        {
+          freemem: () => 30 * 1024 ** 3,
+          listTags: async () => new Set(["prism-coder:9b", "prism-coder:4b"]),
+          listLoaded: async () => new Set<string>(),
+          callLocal: async () => ({ ok: true as const, text: "x", doneReason: "stop" }),
+          callCloud: async () => ({ ok: false as const, reason: "off" }),
+          ollamaUrl: "http://x",
+          probeVision: async () => { throw new Error("ollama unreachable"); },
+          callLayer1: async () => "OBVIOUS_NOT_RESERVED",
+        } as any);
+      expect(r.gate_outcome?.status).toBe("refused");
+      expect(r.gate_outcome?.reason).toBe("layer1_classifier_no_vision");
+    } finally { _resetEntitlementsForTest(); }
+  });
+});
