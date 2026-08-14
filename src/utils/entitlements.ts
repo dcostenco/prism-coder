@@ -109,7 +109,18 @@ export function clampCeiling(
     const reqIdx = TIER_ORDER.indexOf(requested);
     const planIdx = TIER_ORDER.indexOf(planCeiling);
     if (reqIdx === -1) return planCeiling;
-    if (planIdx === -1) return requested;
+    // An entitlement the client cannot parse must never grant MORE than the
+    // free floor. This previously returned `requested`, so while the portal
+    // shipped retired tiers ('14b' standard, '32b' advanced/enterprise) the
+    // plan gate evaporated and every paid caller chose its own ceiling
+    // (measured 2026-08-14). Fail closed, and say so.
+    if (planIdx === -1) {
+        debugLog(
+            `[entitlements] unrecognised plan ceiling "${planCeiling}" — ` +
+            `clamping to the free floor "${FREE_ENTITLEMENTS.model_ceiling}" instead of honouring "${requested}"`,
+        );
+        return FREE_ENTITLEMENTS.model_ceiling;
+    }
     return TIER_ORDER[Math.min(reqIdx, planIdx)];
 }
 
