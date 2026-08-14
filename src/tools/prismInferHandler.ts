@@ -929,7 +929,7 @@ export interface InferDeps {
     /** Injectable vision probe for testing. Defaults to probeVision (/api/show). */
     probeVision?: (url: string, model: string) => Promise<boolean>;
     /** Injectable Layer 1 classifier for testing. Defaults to callLayer1 from layer1.ts. */
-    callLayer1?: (userPrompt: string, ollamaUrl: string, model: string) => Promise<Layer1Verdict>;
+    callLayer1?: (userPrompt: string, ollamaUrl: string, model: string, fetchImpl?: typeof fetch, images?: string[]) => Promise<Layer1Verdict>;
 }
 
 /**
@@ -1112,10 +1112,16 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // Recursion guard: skip when this call IS the Layer 1 classification
     // (mode="route" + max_tokens<=16 is the Layer 1 call signature).
     const layer1RecursionGuard = mode === "route" && maxTokens <= 16;
+    // Resolved BEFORE Layer 1: the classifier must see the same images the
+    // model will. Classifying only the text prompt let a screenshot of
+    // clinical material through a gate that never looked at it.
+    const resolvedImages: string[] | undefined =
+        args.images?.length ? await prepareImages(args.images) : undefined;
     if (installed && !layer1RecursionGuard) {
         const l1fn = deps.callLayer1 ?? defaultCallLayer1;
         const l1Model = resolveOllamaName("prism-coder:4b", installed);
-        const l1 = await l1fn(args.prompt, deps.ollamaUrl, l1Model);
+        // 4th arg is fetchImpl (default), 5th is the images the classifier must see.
+        const l1 = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
         if (l1 === "OBVIOUS_RESERVED" || l1 === "UNCERTAIN") {
             debugLog(`[prism_infer] Layer 1 verdict=${l1} — reserved content detected`);
             attempts.push({ tier: "layer1", reason: `layer1_${l1.toLowerCase()}` });
@@ -1277,14 +1283,12 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
         }
 
-        // Images: resolve once, then restrict the ladder to tiers that actually
-        // declare vision. A text-only model handed a prompt about "this
-        // screenshot" answers confidently about an image it never received —
-        // so an unprobeable or text-only tier is skipped, not silently used.
-        let resolvedImages: string[] | undefined;
+        // Restrict the ladder to tiers that actually declare vision. A text-only
+        // model handed a prompt about "this screenshot" answers confidently
+        // about an image it never received — so an unprobeable or text-only
+        // tier is skipped, not silently used.
         let visionOk: Set<string> | undefined;
         if (args.images?.length) {
-            resolvedImages = await prepareImages(args.images);
             const candidates = MODEL_TIERS.slice(ceilStart)
                 .map(t => resolveOllamaName(t.tag, installed))
                 .filter((n): n is string => !!n);

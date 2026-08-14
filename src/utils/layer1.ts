@@ -196,6 +196,10 @@ export function classifyDeterministicLayer1(userPrompt: string): Layer1Verdict |
 }
 
 const LAYER1_TIMEOUT_MS = 1_500;
+/** Image classify budget. A vision pass carries ~3,000 image tokens; the
+ *  1.5s text budget would time out every call and make the gate useless —
+ *  a gate that always errors is a gate that never gates. */
+export const LAYER1_IMAGE_TIMEOUT_MS = 10_000;
 const LAYER1_RETRY_TIMEOUT_MS = 5_000;
 
 // Deterministic reserved-vocabulary backstop for the ERROR path.
@@ -265,6 +269,10 @@ export async function callLayer1(
     ollamaUrl: string,
     model: string,
     fetchImpl: typeof fetch = fetch,
+    /** Images accompanying the request. The classifier MUST see them: a
+     *  screenshot of clinical material would otherwise pass a gate that only
+     *  ever read the text prompt. */
+    images?: string[],
 ): Promise<Layer1Verdict> {
     if (!userPrompt || !userPrompt.trim()) return "ERROR";
 
@@ -290,7 +298,11 @@ export async function callLayer1(
                 body: JSON.stringify({
                     model,
                     messages: [
-                        { role: "user", content: LAYER1_PROMPT.replace("{prompt}", classifierInput) },
+                        {
+                            role: "user",
+                            content: LAYER1_PROMPT.replace("{prompt}", classifierInput),
+                            ...(images?.length ? { images } : {}),
+                        },
                     ],
                     stream: false,
                     think: false,
@@ -316,8 +328,17 @@ export async function callLayer1(
         return parseLayer1(text);
     };
 
-    const first = await classify(LAYER1_TIMEOUT_MS);
-    const verdict = first !== "ERROR" ? first : await classify(LAYER1_RETRY_TIMEOUT_MS);
+    // Image requests get the vision budget on both attempts, and an ERROR is
+    // mapped to UNCERTAIN: with text, ERROR falls through to a keyword backstop
+    // that can still read the prompt; with an image there is NOTHING to fall
+    // back on — the gate saw nothing — so unclassifiable image content must be
+    // treated as reserved-handling, never silently allowed.
+    const hasImages = !!images?.length;
+    const firstBudget = hasImages ? LAYER1_IMAGE_TIMEOUT_MS : LAYER1_TIMEOUT_MS;
+    const retryBudget = hasImages ? LAYER1_IMAGE_TIMEOUT_MS : LAYER1_RETRY_TIMEOUT_MS;
+    const first = await classify(firstBudget);
+    const settled = first !== "ERROR" ? first : await classify(retryBudget);
+    const verdict: Layer1Verdict = (hasImages && settled === "ERROR") ? "UNCERTAIN" : settled;
 
     if (!oversize) return verdict;
 
