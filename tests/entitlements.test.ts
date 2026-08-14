@@ -93,8 +93,14 @@ describe("clampCeiling", () => {
         expect(clampCeiling("unknown", "4b")).toBe("4b");
     });
 
-    it("returns requested for unknown plan ceiling", () => {
-        expect(clampCeiling("9b", "unknown")).toBe("9b");
+    it("FAILS CLOSED for an unknown plan ceiling (was: returned the request)", () => {
+        // Contract changed 2026-08-14. This test previously pinned the leak:
+        // an unparseable plan ceiling let the CALLER pick its own tier. The
+        // portal was shipping retired tiers ('14b' standard, '32b' advanced),
+        // so the gate was off for every paid plan. An entitlement the client
+        // cannot parse must never grant more than the free floor.
+        expect(clampCeiling("9b", "unknown")).toBe(FREE_ENTITLEMENTS.model_ceiling);
+        expect(clampCeiling("27b", "14b")).toBe(FREE_ENTITLEMENTS.model_ceiling);
     });
 
     // Critical: free tier can never get above 4b
