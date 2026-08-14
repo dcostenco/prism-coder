@@ -109,6 +109,15 @@ export const PRISM_INFER_TOOL: Tool = {
     inputSchema: {
         type: "object",
         properties: {
+            images: {
+                type: "array",
+                items: { type: "string" },
+                maxItems: 8,
+                description:
+                    "Screenshots or frames to analyse. Each entry is an absolute file path " +
+                    "or raw base64. Requires a vision-capable tier; tiers without vision are " +
+                    "skipped rather than shown the prompt without the image.",
+            },
             prompt: {
                 type: "string",
                 description: "The user prompt. Required.",
@@ -265,6 +274,11 @@ export const PRISM_INFER_TOOL: Tool = {
 export interface PrismInferArgs {
     prompt: string;
     system?: string;
+    /** Screenshots/frames for a vision-capable tier. Each entry is either raw
+     *  base64 or an absolute filesystem path (read and encoded here). Capped at
+     *  8: images are the dominant context cost and an unbounded list silently
+     *  blows the tier context budget. */
+    images?: string[];
     max_tokens?: number;
     temperature?: number;
     model_ceiling?: "27b" | "9b" | "4b" | "2b";
@@ -314,6 +328,10 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     const a = args as Record<string, unknown>;
     if (typeof a.prompt !== "string" || !a.prompt.trim()) return false;
     if (a.system !== undefined && typeof a.system !== "string") return false;
+    if (a.images !== undefined) {
+        if (!Array.isArray(a.images) || a.images.length > MAX_INFER_IMAGES) return false;
+        if (a.images.some((i: unknown) => typeof i !== "string" || !i.trim())) return false;
+    }
     if (a.max_tokens !== undefined && typeof a.max_tokens !== "number") return false;
     if (a.temperature !== undefined && typeof a.temperature !== "number") return false;
     if (a.cloud_fallback !== undefined && typeof a.cloud_fallback !== "boolean") return false;
@@ -501,6 +519,85 @@ interface OllamaChatResp {
     eval_count?: number;
 }
 
+export const MAX_INFER_IMAGES = 8;
+/** Bytes per supplied image. Beyond this the base64 blows request memory and
+ *  the tier timeout before the model ever sees it. */
+export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+/** Prompt-token cost of ONE image. Measured live 2026-08-14: a 1206x2622
+ *  screenshot produced tokens=3156in against a ~30-token prompt. The 9b/27b
+ *  tiers advertise ctxTokens 4_096, so this MUST be charged to the context
+ *  gate — counting only the text prompt let two images silently overflow. */
+export const IMAGE_TOKEN_ESTIMATE = 3_000;
+
+export function estimateImageTokens(count: number): number {
+    return Math.max(0, count) * IMAGE_TOKEN_ESTIMATE;
+}
+
+/** Resolve caller-supplied images to raw base64.
+ *  A filesystem path is read and encoded; anything else is assumed to be
+ *  base64 already. A path that cannot be read THROWS rather than being passed
+ *  through — sending a filename as if it were image bytes produces a
+ *  confidently wrong answer about an image the model never saw. */
+export async function prepareImages(images: string[]): Promise<string[]> {
+    const fs = await import("node:fs/promises");
+    const out: string[] = [];
+    for (const entry of images) {
+        // Windows drive paths (C:\\...) and UNC (\\\\server\\share) are paths too;
+        // treating them as base64 sends a filename as image bytes.
+        const looksLikePath = entry.startsWith("/") || entry.startsWith("./") || entry.startsWith("~")
+            || /^[A-Za-z]:[\\/]/.test(entry) || entry.startsWith("\\\\");
+        if (looksLikePath) {
+            try {
+                const resolved = entry.replace(/^~/, process.env.HOME ?? "~");
+                const stat = await fs.stat(resolved);
+                if (stat.size > MAX_IMAGE_BYTES) {
+                    throw new Error(`image too large: ${(stat.size / 1024 / 1024).toFixed(1)}MB > ${MAX_IMAGE_BYTES / 1024 / 1024}MB`);
+                }
+                const buf = await fs.readFile(resolved);
+                out.push(buf.toString("base64"));
+            } catch (err) {
+                throw new Error(`prism_infer: image path not readable: ${entry} (${err instanceof Error ? err.message : String(err)})`);
+            }
+        } else {
+            out.push(entry);
+        }
+    }
+    return out;
+}
+
+/** Ask Ollama which of these models actually declare vision.
+ *  Fail-safe: a model we cannot probe is treated as NOT vision-capable, so an
+ *  image request degrades to "no viable tier" instead of being silently sent
+ *  to a text-only model that will hallucinate a description. */
+export async function tiersSupportingVision(
+    url: string,
+    models: string[],
+    probe: (url: string, model: string) => Promise<boolean>,
+): Promise<string[]> {
+    const keep: string[] = [];
+    for (const m of models) {
+        try {
+            if (await probe(url, m)) keep.push(m);
+        } catch {
+            // unprobeable → excluded
+        }
+    }
+    return keep;
+}
+
+/** Default vision probe: /api/show reports capabilities for the local model. */
+export async function probeVision(url: string, model: string): Promise<boolean> {
+    const res = await fetch(`${url}/api/show`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+        signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) throw new Error(`show_http_${res.status}`);
+    const data = (await res.json()) as { capabilities?: string[] };
+    return Array.isArray(data.capabilities) && data.capabilities.includes("vision");
+}
+
 async function callOllamaGenerate(
     url: string,
     model: string,
@@ -510,11 +607,12 @@ async function callOllamaGenerate(
     temperature: number,
     timeoutMs: number,
     think?: boolean,
+    images?: string[],
 ): Promise<{ ok: true; text: string; doneReason?: string; promptTokens?: number; completionTokens?: number } | { ok: false; reason: string }> {
     try {
-        const messages: Array<{ role: string; content: string }> = [];
+        const messages: Array<{ role: string; content: string; images?: string[] }> = [];
         if (system) messages.push({ role: "system", content: system });
-        messages.push({ role: "user", content: prompt });
+        messages.push({ role: "user", content: prompt, ...(images?.length ? { images } : {}) });
         const body = {
             model,
             messages,
@@ -807,7 +905,7 @@ export interface InferDeps {
     freemem: () => number;
     listTags: () => Promise<Set<string> | null>;
     listLoaded: () => Promise<Set<string>>;
-    callLocal: (url: string, model: string, prompt: string, system: string | undefined, maxTokens: number, temperature: number, timeoutMs: number, think?: boolean) => ReturnType<typeof callOllamaGenerate>;
+    callLocal: (url: string, model: string, prompt: string, system: string | undefined, maxTokens: number, temperature: number, timeoutMs: number, think?: boolean, images?: string[]) => ReturnType<typeof callOllamaGenerate>;
     callCloud: typeof callSynaluxInference;
     ollamaUrl: string;
     /** Injectable verifier for testing. When omitted, verification is skipped (portal-side). */
@@ -820,6 +918,8 @@ export interface InferDeps {
     }) => Promise<RouteGuardOutcome>;
     /** Injectable entitlements for testing. When omitted, fetched live. */
     entitlements?: PrismEntitlements;
+    /** Injectable vision probe for testing. Defaults to probeVision (/api/show). */
+    probeVision?: (url: string, model: string) => Promise<boolean>;
     /** Injectable Layer 1 classifier for testing. Defaults to callLayer1 from layer1.ts. */
     callLayer1?: (userPrompt: string, ollamaUrl: string, model: string) => Promise<Layer1Verdict>;
 }
@@ -1169,6 +1269,20 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
         }
 
+        // Images: resolve once, then restrict the ladder to tiers that actually
+        // declare vision. A text-only model handed a prompt about "this
+        // screenshot" answers confidently about an image it never received —
+        // so an unprobeable or text-only tier is skipped, not silently used.
+        let resolvedImages: string[] | undefined;
+        let visionOk: Set<string> | undefined;
+        if (args.images?.length) {
+            resolvedImages = await prepareImages(args.images);
+            const candidates = MODEL_TIERS.slice(ceilStart)
+                .map(t => resolveOllamaName(t.tag, installed))
+                .filter((n): n is string => !!n);
+            visionOk = new Set(await tiersSupportingVision(deps.ollamaUrl, candidates, deps.probeVision ?? probeVision));
+        }
+
         let anyViable = false;
 
         for (let i = ceilStart; i < MODEL_TIERS.length; i++) {
@@ -1199,18 +1313,22 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // unroutable to the 4096-ctx tiers even for tiny prompts.
             // ctxTokens mirrors the live Modelfile values (see MODEL_TIERS).
             const CTX_TEMPLATE_MARGIN = 64;
-            const promptTokensEst = estimateTokens(args.prompt)
+            const promptTokensEst = estimateImageTokens(resolvedImages?.length ?? 0) + estimateTokens(args.prompt)
                 + (args.system ? estimateTokens(args.system) : 0)
                 + CTX_TEMPLATE_MARGIN;
             if (promptTokensEst > tier.ctxTokens) {
                 attempts.push({ tier: tier.tag, reason: "ctx_insufficient" });
                 continue;
             }
+            if (visionOk && !visionOk.has(ollamaName)) {
+                attempts.push({ tier: tier.tag, reason: "no_vision" });
+                continue;
+            }
             anyViable = true;
             const timeout = args.timeout_ms ?? DEFAULT_TIMEOUTS[tier.tag] ?? 60_000;
             const enableThink = resolveThinkingMode(args, mode);
             let result = await deps.callLocal(
-                deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout, enableThink,
+                deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout, enableThink, resolvedImages,
             );
             // Think-only retry: model burned all tokens on <think>, empty content.
             // Retry same model with think=false rather than falling to a smaller tier.
@@ -1219,7 +1337,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 debugLog(`[prism_infer] ${tier.tag} returned think-only — retrying with think=false`);
                 recordThinkOnlyRetry();
                 result = await deps.callLocal(
-                    deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout, false,
+                    deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout, false, resolvedImages,
                 );
             }
             if (result.ok) {

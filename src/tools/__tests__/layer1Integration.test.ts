@@ -462,8 +462,9 @@ describe("Layer 1 handler integration", () => {
         );
 
         expect(callCount).toBe(2);
-        expect(callLocal).toHaveBeenNthCalledWith(1, expect.anything(), expect.anything(), expect.anything(), undefined, expect.anything(), expect.anything(), expect.anything(), true);
-        expect(callLocal).toHaveBeenNthCalledWith(2, expect.anything(), expect.anything(), expect.anything(), undefined, expect.anything(), expect.anything(), expect.anything(), false);
+        // 9th arg = images (undefined for text calls) — added 2026-08-14 when prism_infer gained screenshot support.
+        expect(callLocal).toHaveBeenNthCalledWith(1, expect.anything(), expect.anything(), expect.anything(), undefined, expect.anything(), expect.anything(), expect.anything(), true, undefined);
+        expect(callLocal).toHaveBeenNthCalledWith(2, expect.anything(), expect.anything(), expect.anything(), undefined, expect.anything(), expect.anything(), expect.anything(), false, undefined);
         expect(result.output).toBe("answer without thinking");
         expect(result.used_cloud).toBe(false);
     });
