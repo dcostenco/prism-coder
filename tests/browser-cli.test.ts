@@ -847,3 +847,78 @@ describe.skipIf(!python || !browserRoot || !firstExternalIPv4())(
     }, 70_000);
   },
 );
+
+describe.skipIf(!python)('screenshot cap is viewport-bound, not viewport-normalizing', () => {
+  // Regression, 2026-08-13: `_enforce_max_edge` shelled straight to `sips -Z`,
+  // which resamples in BOTH directions. Every macOS capture came out at exactly
+  // the cap on its long edge — a 1440x900 viewport was written as 1900x1187 —
+  // so a screenshot asserted as viewport-bound was not evidence of what
+  // rendered, and every acceptance gate built on that assertion was reading a
+  // resampled image. The Pillow branch had always guarded correctly; only the
+  // sips branch upscaled.
+  //
+  // These tests probe pixel dimensions through the same path the fix uses, so
+  // they fail on the pre-fix code (which upscales the small PNG to the cap)
+  // and pass after it.
+  function writePng(dir: string, name: string, width: number, height: number): string {
+    const path = join(dir, name);
+    const result = runPython([
+      'from PIL import Image',
+      `Image.new("RGB", (${width}, ${height}), (10, 20, 30)).save(${JSON.stringify(path)})`,
+      'print("ok")',
+    ].join('\n'));
+    if (result.status !== 0) return '';   // Pillow absent — caller skips
+    return path;
+  }
+
+  function dimensions(path: string): [number, number] {
+    const probe = runPython([
+      'from PIL import Image',
+      `im = Image.open(${JSON.stringify(path)})`,
+      'print(json.dumps(list(im.size)))',
+    ].join('\n'));
+    return JSON.parse(probe.stdout.trim()) as [number, number];
+  }
+
+  it('leaves an already-small capture byte-identical', () => {
+    const dir = makeTempDir('prism-capture-small-');
+    const path = writePng(dir, 'small.png', 1440, 900);
+    if (!path) return;                    // no Pillow in this runtime
+
+    const before = statSync(path).size;
+    const run = runPython([
+      `warning = browse._enforce_max_edge(${JSON.stringify(path)}, 2000)`,
+      'print(json.dumps({"warning": warning}))',
+    ].join('\n'));
+    expect(run.status, run.stderr).toBe(0);
+
+    // The assertion that would have caught the original bug: a sub-cap image
+    // must come back untouched, not resampled to the cap.
+    expect(dimensions(path)).toEqual([1440, 900]);
+    expect(statSync(path).size).toBe(before);
+  });
+
+  it('still shrinks a genuinely oversized capture', () => {
+    const dir = makeTempDir('prism-capture-big-');
+    const path = writePng(dir, 'big.png', 1200, 3000);
+    if (!path) return;
+
+    const run = runPython([
+      `warning = browse._enforce_max_edge(${JSON.stringify(path)}, 2000)`,
+      'print(json.dumps({"warning": warning}))',
+    ].join('\n'));
+    expect(run.status, run.stderr).toBe(0);
+
+    const [width, height] = dimensions(path);
+    expect(Math.max(width, height)).toBeLessThanOrEqual(2000);
+    expect(width).toBeLessThan(1200);     // proportional, not cropped
+  });
+
+  it('caps at 2000 so a 1920-wide desktop viewport is never resampled', () => {
+    // 1900 sat just under the standard 1920 desktop width, so the most common
+    // UI-evidence capture was the one guaranteed to be rewritten.
+    const source = readFileSync(scriptPath, 'utf8');
+    expect(source).toMatch(/_enforce_max_edge\(path,\s*2000\)/);
+    expect(source).not.toMatch(/_enforce_max_edge\(path,\s*1900\)/);
+  });
+});

@@ -1259,6 +1259,22 @@ def _enforce_max_edge(path, max_edge):
     try:
         import shutil as _shutil, subprocess as _subprocess
         if _shutil.which("sips"):
+            # `sips -Z` resamples in BOTH directions — it UPSCALES an image that
+            # is already smaller than max_edge. Unguarded, every macOS capture
+            # came out at exactly the cap on its long edge: a 1440x900 viewport
+            # was written as 1900x1187 and a 1920x1280 one as 1900x1266. That is
+            # not evidence of what rendered, and it breaks any acceptance gate
+            # that asserts a capture is viewport-bound. Measure first and only
+            # shrink when the image genuinely exceeds the cap — the Pillow branch
+            # below already guards this way.
+            probe = _subprocess.run(
+                ["sips", "-g", "pixelWidth", "-g", "pixelHeight", str(path)],
+                capture_output=True, timeout=30, text=True)
+            edges = [int(part.split(":")[1].strip())
+                     for part in probe.stdout.splitlines()
+                     if "pixelWidth:" in part or "pixelHeight:" in part]
+            if edges and max(edges) <= max_edge:
+                return None
             _subprocess.run(["sips", "-Z", str(max_edge), str(path)],
                             capture_output=True, timeout=30, check=True)
             return None
@@ -1306,11 +1322,15 @@ def cmd_screenshot(session, output=None, cleanup=False, full_page=True, selector
     # oversized capture early in a session poisons every later attach — the
     # agent that must LOOK at screenshots loses the ability to see them,
     # mid-conversation, permanently. Full-page captures routinely exceed
-    # 2000px in height, so every capture is normalized to a 1900px long edge
-    # here, at the source. sips is macOS-only; elsewhere we fall back to
-    # Pillow if present and otherwise WARN LOUDLY rather than emit poison
-    # silently.
-    _downscale_warning = _enforce_max_edge(path, 1900)
+    # 2000px in height, so oversized captures are shrunk here, at the source.
+    # sips is macOS-only; elsewhere we fall back to Pillow if present and
+    # otherwise WARN LOUDLY rather than emit poison silently.
+    #
+    # 2000, not 1900: the API limit quoted above is 2000px per dimension, and a
+    # 1900 cap sits just under the standard 1920-wide desktop viewport — so the
+    # single most common UI-evidence capture was resampled to 1900x1266 for no
+    # benefit, failing every gate that asserts a capture is viewport-bound.
+    _downscale_warning = _enforce_max_edge(path, 2000)
 
     size = path.stat().st_size
     audit_log("screenshot", str(path), f"size={size},ephemeral={cleanup}")
