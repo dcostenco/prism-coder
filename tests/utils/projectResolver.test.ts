@@ -91,7 +91,7 @@ describe("resolveProject", () => {
     expect(result).toEqual({ ok: true, project: "anything" });
   });
 
-  it("REJECTS the original prism-aac → prism-mcp memory-loss case", async () => {
+  it("WARNS on the original memory-loss case and saves as declared (v14: never refuses)", async () => {
     mockGetAllSettings.mockResolvedValue({
       "repo_path:prism-aac": "/Users/example/prism-aac",
       "repo_path:prism-mcp": "/Users/example/prism",
@@ -102,12 +102,13 @@ describe("resolveProject", () => {
       "/Users/example/prism-aac/services/aiProvider.ts",
     ]);
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('declared "prism-mcp"');
-      expect(result.error).toContain('"prism-aac"');
-      expect(result.hint).toContain('project="prism-aac"');
-    }
+    // 2026-08-13: this used to hard-reject — and live registries turned out to
+    // contain auto-created junk, so the reject was dropping legitimate saves.
+    // The wrong-project signal survives as an advisory warning.
+    expect(result.ok).toBe(true);
+    expect(result.project).toBe("prism-mcp");
+    expect(result.warning).toContain('"prism-aac"');
+    expect(result.warning).toContain('"prism-mcp"');
   });
 
   it("accepts when declared project matches the registry-derived project", async () => {
@@ -176,10 +177,11 @@ describe("resolveProject", () => {
       "/Users/example/prism-aac/src/index.ts",
     ]);
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('"prism-aac"');
-    }
+    // Longest-match derivation is unchanged; since v14 it surfaces as a
+    // warning on the saved-as-declared result instead of a rejection.
+    expect(result.ok).toBe(true);
+    expect(result.project).toBe("monorepo");
+    expect(result.warning).toContain('"prism-aac"');
   });
 
   it("survives setSetting failure during auto-create", async () => {
