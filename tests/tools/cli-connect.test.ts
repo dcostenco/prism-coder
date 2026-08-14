@@ -2206,6 +2206,38 @@ describe("prism connect — economy subagent policy", () => {
     });
 
 
+    it("converges project entries even when the TOP-LEVEL entry is hand-rolled", () => {
+      // Untested branch found in round-4 review: an operator who hand-edited
+      // the top-level entry (no PRISM_INSTANCE, so Prism must not touch it)
+      // could still have Prism-created project entries pinned to a stale path.
+      // Leaving those behind because the top-level is off-limits would strand
+      // exactly the directories this change exists to reach.
+      const homeDir = makeHome();
+      const path = configPath(homeDir, "claude-code");
+      writeFileSync(path, JSON.stringify({
+        mcpServers: { "prism-mcp": { command: "hand-rolled", args: ["/my/server.js"] } },
+        projects: {
+          "/Users/dev": {
+            mcpServers: {
+              "prism-mcp": {
+                command: "/old/node",
+                args: ["/stale/dist/server.js"],
+                env: { PRISM_INSTANCE: "prism-mcp" },
+              },
+            },
+          },
+        },
+      }, null, 2));
+
+      const result = connectHosts({ ...base(homeDir), refresh: true });
+
+      const config = readConfig(path);
+      expect(config.mcpServers["prism-mcp"].command).toBe("hand-rolled");   // untouched
+      expect(config.projects["/Users/dev"].mcpServers["prism-mcp"].args).toEqual(["/pkg/dist/server.js"]);
+      expect(result.results[0].message ?? "").toMatch(/left untouched/);
+      expect(result.results[0].message ?? "").toMatch(/1 project-scoped entry/);
+    });
+
     it("the operator SEES the project-scoped detail — the message must reach stdout", () => {
       // Caught in pre-merge review: the writer reported "also refreshed 2
       // project-scoped entries" on the result while the CLI printed canned

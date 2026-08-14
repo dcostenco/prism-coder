@@ -223,7 +223,10 @@ describe("autoupdateStatus — a plist that cannot run must not report a clean '
       writeFileSync(autoupdatePlistPath(), "<plist><dict><key>Label</key></dict></plist>");
       const status = autoupdateStatus();
       expect(status.enabled).toBe(true);
-      expect(status.detail).toMatch(/CANNOT RUN|repair/);
+      expect(status.detail).toMatch(/may not run/);
+      expect(status.detail).toMatch(/repair/);
+      // Never assert a failure we have not measured on this machine.
+      expect(status.detail).not.toMatch(/CANNOT RUN/);
     } finally {
       if (prev === undefined) delete process.env.HOME; else process.env.HOME = prev;
     }

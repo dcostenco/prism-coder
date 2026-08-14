@@ -256,7 +256,12 @@ export function autoupdateStatus(): AutoupdateStatus {
     plistPath,
     detail: healthy
       ? `enabled — daily 03:30, log: /tmp/${AUTOUPDATE_LABEL}.log`
-      : "enabled but CANNOT RUN (agent has no PATH; node/npm are not on launchd's default) — re-run `prism autoupdate enable` to repair",
+      // Deliberately "may not run", not "cannot": launchd's default PATH does
+      // contain /usr/bin, so an operator whose node lives there is fine. On a
+      // standard install (Homebrew, /usr/local) it never runs. Claiming a
+      // certain failure we have not measured on THIS machine would be the same
+      // overclaim in the other direction.
+      : "enabled, but this agent predates the PATH fix and may not run (launchd's default PATH omits /usr/local/bin and /opt/homebrew/bin) — re-run `prism autoupdate enable` to repair",
   };
 }
 
