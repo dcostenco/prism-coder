@@ -154,7 +154,8 @@ describe("resolvePrismBin — which CLI the scheduler runs", () => {
       whichPrism: () => "/Users/dev/bin/prism\n",
       exists: () => true,
     });
-    expect(bin).toBe("/Users/dev/.npm-global/bin/prism");
+    // join() is platform-native: the Windows runner produces backslashes.
+    expect(bin).toBe(join("/Users/dev/.npm-global", "bin", "prism"));
     expect(warnings).toEqual([]);
   });
 
