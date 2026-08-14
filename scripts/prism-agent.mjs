@@ -28,8 +28,14 @@ import { execSync, execFileSync } from "node:child_process";
 
 // ── env ──────────────────────────────────────────────────────────────────────
 const envPath = join(homedir(), "prism", ".env");
+// Tolerate a missing .env: this module is imported by tests and by tooling on
+// machines that never ran `prism connect`. Throwing at import time made the
+// whole file untestable and crashed any consumer for a file it may not need.
+const envText = (() => {
+  try { return readFileSync(envPath, "utf8"); } catch { return ""; }
+})();
 const env = Object.fromEntries(
-  readFileSync(envPath, "utf8")
+  envText
     .split("\n")
     .filter((l) => l.includes("=") && !l.startsWith("#"))
     .map((l) => {

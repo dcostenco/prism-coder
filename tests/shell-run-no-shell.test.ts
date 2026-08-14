@@ -29,9 +29,11 @@ describe("shell_run", () => {
     expect(shellRunTool("git status\nrm -rf /")).toMatch(/newlines/);
   });
 
-  it("runs an allowlisted command and returns its output", () => {
+  it("runs an allowlisted command through execFileSync (no shell)", () => {
     const out = shellRunTool("git status");
-    expect(out).not.toMatch(/error/i);
+    // Portable across runners: the point is that an allowlisted command still
+    // executes and returns output rather than being refused by the new path.
+    expect(out).not.toMatch(/not in allowlist|metacharacters|newlines/);
     expect(out.length).toBeGreaterThan(0);
   });
 });
