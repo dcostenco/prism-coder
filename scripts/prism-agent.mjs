@@ -435,6 +435,12 @@ const SHELL_ALLOWLIST = [
   /^git\s+(?:log|status|diff|show|branch)(?:\s+\S+)*$/,
 ];
 
+/** Executables shell_run may spawn. Values are literals: the caller's token is
+ *  only ever a KEY into this table, never the path that gets executed. */
+const SHELL_BINARIES = Object.freeze({
+  npm: "npm", npx: "npx", pytest: "pytest", cargo: "cargo", git: "git",
+});
+
 export function shellRunTool(command) {
   const trimmed = command.trim();
   // A4: newlines are shell command separators not caught by regex flags — reject first
@@ -451,7 +457,14 @@ export function shellRunTool(command) {
     // expansions cannot be interpreted because nothing is there to interpret
     // them. Safe to split on whitespace here — newlines are rejected above and
     // every allowlist entry is whitespace-delimited.
-    const [file, ...argv] = trimmed.split(/\s+/);
+    const [requested, ...argv] = trimmed.split(/\s+/);
+    // The EXECUTABLE must never be model-derived. Dropping the shell removed
+    // metacharacter injection, but execFileSync(userString) still let the
+    // caller choose which binary runs (CodeQL js/command-line-injection stayed
+    // critical). The name is used only to look up a LITERAL from this table, so
+    // what reaches execFileSync is always one of these constants.
+    const file = SHELL_BINARIES[requested];
+    if (!file) return `[shell_run error: executable not permitted — ${requested.slice(0, 40)}]`;
     const output = execFileSync(file, argv, { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
     return output.trim() || "(no output)";
   } catch (err) {

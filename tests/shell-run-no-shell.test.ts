@@ -61,3 +61,15 @@ describe("shell_run", () => {
     expect(out.length).toBeGreaterThan(0);
   });
 });
+
+describe("the executable is never model-derived", () => {
+  it("spawns only literals from a fixed table", () => {
+    expect(SRC).toMatch(/const SHELL_BINARIES = Object\.freeze\(/);
+    expect(SRC).toMatch(/const file = SHELL_BINARIES\[requested\]/);
+    expect(SRC).not.toMatch(/execFileSync\(requested/);
+  });
+
+  it("refuses an executable outside the table even if the allowlist regex passed", () => {
+    expect(shellRun("curl --version")).toMatch(/not in allowlist|not permitted/);
+  });
+});
