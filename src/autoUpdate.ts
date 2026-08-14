@@ -28,7 +28,13 @@ const SEMVER = /^\d+\.\d+\.\d+$/;
 export const AUTOUPDATE_LABEL = "com.synalux.prism.autoupdate";
 
 export interface PackageUpdateDeps {
+  /** Version of the CLI process making the request. Used only as a fallback. */
   currentVersion: string;
+  /** Version of the globally INSTALLED package — the artifact this command
+   *  actually updates. Measured 2026-08-14: comparing the running CLI instead
+   *  let `prism update` report "current" from a 20.12.0 checkout while the
+   *  installed package sat at 20.11.1 and never moved. */
+  installedVersion?: () => string;
   /** Fetch the latest published version; throws on network failure. */
   fetchLatest?: () => string;
   /** Run the global install; throws on failure. */
@@ -53,6 +59,22 @@ function defaultFetchLatest(): string {
     encoding: "utf8",
     timeout: 15_000,
   }).trim();
+}
+
+/** Read the version of the globally installed package. npm puts it under
+ *  <prefix>/lib/node_modules on POSIX and <prefix>/node_modules on Windows. */
+function defaultInstalledVersion(): string {
+  const prefix = execFileSync("npm", ["prefix", "-g"], { encoding: "utf8", timeout: 15_000 }).trim();
+  for (const candidate of [
+    join(prefix, "lib", "node_modules", PACKAGE, "package.json"),
+    join(prefix, "node_modules", PACKAGE, "package.json"),
+  ]) {
+    if (existsSync(candidate)) {
+      const version = JSON.parse(readFileSync(candidate, "utf8"))?.version;
+      if (typeof version === "string" && version.trim()) return version.trim();
+    }
+  }
+  return "";
 }
 
 function defaultInstall(version: string): void {
@@ -118,8 +140,27 @@ export function runPackageUpdate(deps: PackageUpdateDeps): PackageUpdateResult {
   if ((env.VITEST || env.NODE_ENV === "test") && !deps.fetchLatest) {
     return { action: "skipped", detail: "test environment" };
   }
-  if (deps.currentVersion.includes("-")) {
-    return { action: "skipped", detail: `dev build ${deps.currentVersion} — not touching it` };
+  // The version that matters is the INSTALLED one; the running CLI may be a
+  // checkout, a shim, or an older global. Probing shells out to npm, so tests
+  // reach it only through an injected dep.
+  let targetVersion = deps.currentVersion;
+  // Test detection must read the REAL process env: suites pass env: {} to
+  // exercise the policy guards, and that would otherwise let this probe shell
+  // out to npm from inside the test run (caught by a 57ms test that suddenly
+  // consulted the machine's actual install).
+  const inTest = Boolean(
+    env.VITEST || env.NODE_ENV === "test" ||
+    process.env.VITEST || process.env.NODE_ENV === "test",
+  );
+  const mayProbe = Boolean(deps.installedVersion) || !inTest;
+  if (mayProbe) {
+    try {
+      const installed = (deps.installedVersion ?? defaultInstalledVersion)().trim();
+      if (installed) targetVersion = installed;
+    } catch { /* not installed / npm unavailable — compare the running version */ }
+  }
+  if (targetVersion.includes("-")) {
+    return { action: "skipped", detail: `dev build ${targetVersion} — not touching it` };
   }
 
   if (deps.ifIdle) {
@@ -154,10 +195,10 @@ export function runPackageUpdate(deps: PackageUpdateDeps): PackageUpdateResult {
     if (!SEMVER.test(latest)) {
       return { action: "failed", detail: `registry returned unexpected version "${latest}"` };
     }
-    if (!isNewer(deps.currentVersion, latest)) {
-      return { action: "current", detail: `${deps.currentVersion} is current`, latest };
+    if (!isNewer(targetVersion, latest)) {
+      return { action: "current", detail: `installed package ${targetVersion} is current`, latest };
     }
-    log(`prism ${deps.currentVersion} → ${latest}: updating the global package …`);
+    log(`prism ${targetVersion} → ${latest}: updating the global package …`);
     try {
       (deps.install ?? defaultInstall)(latest);
     } catch (error) {

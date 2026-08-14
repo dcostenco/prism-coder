@@ -232,3 +232,37 @@ describe("autoupdateStatus — a plist that cannot run must not report a clean '
     }
   });
 });
+
+describe("runPackageUpdate compares the INSTALLED package, not the running CLI", () => {
+  // Measured 2026-08-14 on a real machine: the checkout CLI (20.12.0) reported
+  // "20.12.0 is current" while the globally installed package — the only thing
+  // this command updates — sat at 20.11.1 with 20.12.0 on npm. A command that
+  // reports "current" while the artifact it manages is stale is the same class
+  // of failure this whole feature exists to end.
+  const base = () => ({
+    currentVersion: "20.12.0",          // the CLI you happen to be running
+    installedVersion: () => "20.11.1",  // what is actually installed globally
+    fetchLatest: vi.fn(() => "20.12.0"),
+    install: vi.fn(),
+    acquireLock: vi.fn(() => () => {}),
+    env: {} as NodeJS.ProcessEnv,
+  });
+
+  it("updates when the INSTALLED package is behind, even if the running CLI is current", () => {
+    const deps = base();
+    const result = runPackageUpdate(deps);
+    expect(result.action).toBe("updated");
+    expect(deps.install).toHaveBeenCalledWith("20.12.0");
+  });
+
+  it("falls back to the running version when the installed one cannot be read", () => {
+    const deps = { ...base(), installedVersion: () => { throw new Error("not installed"); } };
+    expect(runPackageUpdate(deps).action).toBe("current");
+  });
+
+  it("applies the dev-build guard to the INSTALLED version", () => {
+    const deps = { ...base(), installedVersion: () => "20.13.0-local.2" };
+    expect(runPackageUpdate(deps).action).toBe("skipped");
+    expect(deps.install).not.toHaveBeenCalled();
+  });
+});
