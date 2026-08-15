@@ -28,7 +28,31 @@ import {
 
 const scriptPath = resolve('scripts/dev/browse.py');
 const python = resolvePythonCommand();
-const playwrightRuntimeAvailable = python ? hasPlaywrightRuntime(python) : false;
+
+// These suites scrub HOME for isolation. On a machine where playwright lives
+// in the USER site-packages (~/Library/Python/.../site-packages), scrubbing
+// HOME also removes it from sys.path, so browse.py died with
+// ModuleNotFoundError while the availability probe — which ran with the REAL
+// process.env — reported the runtime as present. 14 tests failed instead of
+// skipping. Carry the interpreter's user-site directory through explicitly,
+// and probe under the SAME env the runs use.
+const userSitePackages: string = (() => {
+  if (!python) return '';
+  const r = spawnSync(python.executable,
+    [...python.prefixArgs, '-c', 'import site; print(site.getusersitepackages())'],
+    { encoding: 'utf8' });
+  return r.status === 0 ? (r.stdout || '').trim() : '';
+})();
+
+/** Scrubbed HOME that still resolves the Python runtime. */
+function scrubbedEnv(home: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const pythonPath = [userSitePackages, process.env.PYTHONPATH].filter(Boolean).join(':');
+  return { ...process.env, HOME: home, ...(pythonPath ? { PYTHONPATH: pythonPath } : {}), ...extra };
+}
+
+const playwrightRuntimeAvailable = python
+  ? hasPlaywrightRuntime(python, scrubbedEnv(tmpdir()))
+  : false;
 const tempDirs: string[] = [];
 
 function expectPosixMode(path: string, mode: number): void {
@@ -160,7 +184,7 @@ describe.skipIf(!python)('Prism Browser Python safety helpers', () => {
       ' "contact=patient@example.test source=https://example.test/path?code=hidden",',
       ')',
       'print(browse.AUDIT_LOG_PATH)',
-    ].join('\n'), { ...process.env, HOME: home });
+    ].join('\n'), scrubbedEnv(home));
 
     expect(result.status, result.stderr).toBe(0);
     const auditPath = result.stdout.trim();
@@ -205,7 +229,7 @@ describe.skipIf(!python)('Prism Browser Python safety helpers', () => {
 
 const browserRoot = playwrightBrowserRoot();
 
-describe.skipIf(!python || !browserRoot)('Prism Browser real local acceptance', () => {
+describe.skipIf(!python || !browserRoot || !playwrightRuntimeAvailable)('Prism Browser real local acceptance', () => {
   it('reuses a named profile across separate browser launches', async () => {
     const home = makeTempDir('prism-browser-profile-home-');
     const result = runPython([
@@ -217,11 +241,7 @@ describe.skipIf(!python || !browserRoot)('Prism Browser real local acceptance', 
       'with browse.StealthBrowserSession(profile="paid-proof", headless=True, stealth_level="light", local_only=True) as second:',
       ' cookies = second._context.cookies("http://localhost")',
       'print(json.dumps({cookie["name"]: cookie["value"] for cookie in cookies}))',
-    ].join('\n'), {
-      ...process.env,
-      HOME: home,
-      PLAYWRIGHT_BROWSERS_PATH: browserRoot!,
-    });
+    ].join('\n'), scrubbedEnv(home, { PLAYWRIGHT_BROWSERS_PATH: browserRoot! }));
 
     expect(result.signal, result.stderr).toBeNull();
     expect(result.status, result.stderr).toBe(0);
@@ -276,8 +296,7 @@ describe.skipIf(!python || !browserRoot)('Prism Browser real local acceptance', 
       {
         encoding: 'utf8',
         env: {
-          ...process.env,
-          HOME: home,
+          ...scrubbedEnv(home),
           PLAYWRIGHT_BROWSERS_PATH: browserRoot!,
         },
         input,
@@ -349,7 +368,7 @@ function runBrowser(
   options: { home?: string; cwd?: string } = {},
 ): Promise<PipeRun> {
   const home = options.home ?? regressionHome();
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+  const env: NodeJS.ProcessEnv = scrubbedEnv(home);
   if (browserRoot) env.PLAYWRIGHT_BROWSERS_PATH = browserRoot;
   profileCounter += 1;
   return new Promise<PipeRun>((settle) => {
@@ -525,7 +544,7 @@ describe.skipIf(!python)('Prism Browser policy helpers (regression)', () => {
   });
 });
 
-describe.skipIf(!python || !browserRoot)('Prism Browser runtime regression', () => {
+describe.skipIf(!python || !browserRoot || !playwrightRuntimeAvailable)('Prism Browser runtime regression', () => {
   let server: Server | null = null;
   let origin = '';
   const requestLog: Array<{ path: string; headers: Record<string, string | undefined> }> = [];
@@ -790,7 +809,7 @@ describe.skipIf(!python || !browserRoot)('Prism Browser runtime regression', () 
   }, 70_000);
 });
 
-describe.skipIf(!python || !browserRoot || !firstExternalIPv4())(
+describe.skipIf(!python || !browserRoot || !playwrightRuntimeAvailable || !firstExternalIPv4())(
   'Prism Browser --local-only socket boundary',
   () => {
     let listener: TcpServer | null = null;
