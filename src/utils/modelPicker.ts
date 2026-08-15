@@ -12,13 +12,14 @@
  *
  * This saves 11GB+ RAM vs 27b and keeps response times fast.
  *
- *   tag                 weights   need free   ctx     role
- *   prism-coder:27b     ~16 GB    ≥ 20 GB      4K    quality (on-demand, Qwen3.5 DeltaNet, 100% BFCL)
- *   prism-coder:9b      ~ 5.8 GB  ≥  8 GB      4K    default router (Qwen3.5, 100% BFCL)
- *   prism-coder:4b      ~ 3.4 GB  ≥  5 GB     32K    verifier (Qwen3.5, 100%)
- *   prism-coder:2b      ~ 2.3 GB  ≥  3 GB     32K    mobile / iPhone (Qwen3.5, 99.1%)
+ *   tag                 weights    need free   ctx     role
+ *   prism-coder:27b     ~15.7 GiB  ≥ 21 GiB     4K    quality (on-demand, Qwen3.5 DeltaNet)
+ *   prism-coder:9b      ~ 6.3 GiB  ≥  9 GiB     4K    default router (Qwen3.5, +vision)
+ *   prism-coder:4b      ~ 3.3 GiB  ≥  5.2 GiB  32K    verifier (Qwen3.5, +vision)
+ *   prism-coder:2b      ~ 3.1 GiB  ≥  4.5 GiB  32K    mobile / iPhone (Qwen3.5, +vision)
  *
- * Below 3 GB free → no local pick (caller must use cloud).
+ * Below 4.5 GiB free → no local pick (caller must use cloud). The vision
+ * towers pushed 2026-08-14 raised that floor from 3 GiB.
  */
 
 const GB = 1024 ** 3;
@@ -43,17 +44,27 @@ export interface ModelChoice {
  * num_ctx is ever raised, update the row here (a raise is a measured
  * decision with KV-cache RAM costed — plan v2 §5.4).
  */
-// weightsGb tracks what ollama.com actually serves. The 2b/4b/9b tags gained a
-// vision tower on 2026-08-14 (2b 2.3 -> 3.3 GB, 9b 5.8 -> 6.7 GB); leaving the
-// old numbers here made the RAM gate admit models that no longer fit, and the
-// eviction math over-credit the memory a model would return. minFreeGb keeps
-// headroom above the weights for KV cache and activations — an image request
-// also pays for the projector.
+// Both fields are GiB (GB = 1024**3 above), NOT the decimal GB `ollama list`
+// prints — 3.31 GB of manifest layers is 3.09 GiB of RAM. The two fields want
+// OPPOSITE conservatism, so they are not the same number:
+//
+//   weightsGb  is credited as memory RECLAIMED when this tier is evicted
+//              (prismInferHandler eviction math). Overstating it makes the
+//              handler evict warm models on a promise it cannot keep, so this
+//              must never exceed the real size.
+//   minFreeGb  is the admission gate. Understating it admits a model that
+//              cannot fit, so this is deliberately padded above the weights for
+//              KV cache and activations — an image request also pays for the
+//              projector layer.
+//
+// Sizes are the sum of the published manifest layers after the 2026-08-14
+// vision push (2b 2.3 -> 3.09 GiB, 9b 5.8 -> 6.26 GiB), rounded DOWN for
+// weights and up for gates.
 export const MODEL_TIERS: ReadonlyArray<ModelChoice> = [
-    { tag: 'prism-coder:27b',  weightsGb: 17, minFreeGb: 21, ctxTokens: 4_096 },
-    { tag: 'prism-coder:9b',   weightsGb:  6.7, minFreeGb:  9, ctxTokens: 4_096 },
-    { tag: 'prism-coder:4b',   weightsGb:  3.5, minFreeGb:  5.2, ctxTokens: 32_768 },
-    { tag: 'prism-coder:2b',   weightsGb:  3.3, minFreeGb:  4.5, ctxTokens: 32_768 },
+    { tag: 'prism-coder:27b',  weightsGb: 15.6, minFreeGb: 21, ctxTokens: 4_096 },
+    { tag: 'prism-coder:9b',   weightsGb:  6.2, minFreeGb:  9, ctxTokens: 4_096 },
+    { tag: 'prism-coder:4b',   weightsGb:  3.2, minFreeGb:  5.2, ctxTokens: 32_768 },
+    { tag: 'prism-coder:2b',   weightsGb:  3, minFreeGb:  4.5, ctxTokens: 32_768 },
 ];
 
 /**
