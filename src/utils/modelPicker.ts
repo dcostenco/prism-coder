@@ -29,6 +29,19 @@ export interface ModelChoice {
     weightsGb: number;
     minFreeGb: number;
     ctxTokens: number;
+    /**
+     * This tier answers better when allowed to reason first, even for routing.
+     *
+     * Thinking was decided by MODE (`mode !== "route"`), but it is a property of
+     * the WEIGHTS. Measured 2026-08-14 on the 115-case routing suite through the
+     * production /api/chat path: the 9b scores 83.5% with thinking off and 95.7%
+     * with it on, while 2b/4b/27b are 100% either way — so route mode was
+     * forcing the one model that needs to think not to, and paying ~600 tokens
+     * of reasoning on three models that gain nothing from it.
+     */
+    prefersThinking?: boolean;
+    /** Local token floor, so reasoning does not crowd out the answer. */
+    minLocalTokens?: number;
 }
 
 /**
@@ -62,7 +75,11 @@ export interface ModelChoice {
 // weights and up for gates.
 export const MODEL_TIERS: ReadonlyArray<ModelChoice> = [
     { tag: 'prism-coder:27b',  weightsGb: 15.6, minFreeGb: 21, ctxTokens: 4_096 },
-    { tag: 'prism-coder:9b',   weightsGb:  6.2, minFreeGb:  9, ctxTokens: 4_096 },
+    // The only tier that reasons before answering. ~600 tokens go to <think> on
+    // a routing turn, so the local floor must clear that plus the answer or the
+    // hard_truncation retry drops it back to its 83.5% configuration.
+    { tag: 'prism-coder:9b',   weightsGb:  6.2, minFreeGb:  9, ctxTokens: 4_096,
+      prefersThinking: true, minLocalTokens: 2_048 },
     { tag: 'prism-coder:4b',   weightsGb:  3.2, minFreeGb:  5.2, ctxTokens: 32_768 },
     { tag: 'prism-coder:2b',   weightsGb:  3, minFreeGb:  4.5, ctxTokens: 32_768 },
 ];

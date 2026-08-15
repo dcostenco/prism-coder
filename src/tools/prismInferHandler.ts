@@ -951,11 +951,20 @@ export function resolveRequestedModelCeiling(
     return mode === "chat" || mode === "code" ? "27b" : undefined;
 }
 
-function resolveThinkingMode(args: PrismInferArgs, mode: "route" | "chat" | "code"): boolean {
+function resolveThinkingMode(
+    args: PrismInferArgs,
+    mode: "route" | "chat" | "code",
+    tier?: { prefersThinking?: boolean },
+): boolean {
     if (args.think !== undefined) return args.think;
     if (args.task_complexity !== undefined && args.task_complexity <= FAST_TASK_COMPLEXITY_MAX) {
         return false;
     }
+    // A tier that measurably routes better with reasoning gets it even in route
+    // mode. Explicit caller intent and the fast-task shortcut still win — this
+    // only replaces the blanket "route means never think" default, which cost
+    // the 9b 12 points (83.5% -> 95.7%) on the routing suite.
+    if (tier?.prefersThinking) return true;
     return mode !== "route";
 }
 
@@ -1017,8 +1026,24 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     const requestedCeiling = resolveRequestedModelCeiling(args);
     const effectiveCeiling = clampCeiling(requestedCeiling, ent.model_ceiling);
 
-    // Clamp max_tokens to plan limit
-    const maxTokens = Math.min(args.max_tokens ?? 1024, ent.max_tokens, 8192);
+    // Clamp max_tokens to plan limit.
+    //
+    // CLOUD ONLY. This used to be a single budget spent on both backends, which
+    // meant the plan cap throttled the user's OWN hardware: the free tier is
+    // local-only (cloud_fallback: false) and capped at 512, so it clamped
+    // num_predict on a machine Synalux pays nothing to run. Runaway generation
+    // is already bounded by timeout_ms, and loops by the quality gate, so the
+    // cap was buying nothing locally while causing hard_truncation — a 9b chat
+    // turn spends ~600 tokens on <think> alone.
+    const cloudMaxTokens = Math.min(args.max_tokens ?? 1024, ent.max_tokens, 8192);
+
+    // Local budget: the caller's request, bounded only by the absolute ceiling.
+    // Per-tier adjustment happens in the tier loop — a tier that reasons before
+    // answering needs room for the reasoning as well as the answer.
+    const localMaxTokens = Math.min(args.max_tokens ?? 1024, 8192);
+    // Retained for the log line and the layer-1 recursion guard, both of which
+    // describe the request rather than a specific backend.
+    const maxTokens = cloudMaxTokens;
 
     // Cloud fallback only for paid plans
     const allowCloud = args.cloud_fallback === true && ent.features.cloud_fallback;
@@ -1338,9 +1363,15 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
             anyViable = true;
             const timeout = args.timeout_ms ?? DEFAULT_TIMEOUTS[tier.tag] ?? 60_000;
-            const enableThink = resolveThinkingMode(args, mode);
+            const enableThink = resolveThinkingMode(args, mode, tier);
+            // Reasoning must not crowd out the answer: a tier that thinks needs
+            // its own floor, or the hard_truncation retry cuts the thinking back
+            // off and lands on the configuration this tier is worst in.
+            const tierTokens = enableThink && tier.minLocalTokens
+                ? Math.min(Math.max(localMaxTokens, tier.minLocalTokens), 8192)
+                : localMaxTokens;
             let result = await deps.callLocal(
-                deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout, enableThink, resolvedImages,
+                deps.ollamaUrl, ollamaName, args.prompt, args.system, tierTokens, temperature, timeout, enableThink, resolvedImages,
             );
             // Think-only retry: model burned all tokens on <think>, empty content.
             // Retry same model with think=false rather than falling to a smaller tier.
@@ -1349,7 +1380,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 debugLog(`[prism_infer] ${tier.tag} returned think-only — retrying with think=false`);
                 recordThinkOnlyRetry();
                 result = await deps.callLocal(
-                    deps.ollamaUrl, ollamaName, args.prompt, args.system, maxTokens, temperature, timeout, false, resolvedImages,
+                    deps.ollamaUrl, ollamaName, args.prompt, args.system, tierTokens, temperature, timeout, false, resolvedImages,
                 );
             }
             if (result.ok) {
@@ -1360,6 +1391,46 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 let gate = passesQualityGate(output, thinkOnly, result.doneReason, mode);
                 if (gate.pass && mode === "code") {
                     gate = passesCodingQualityGate(args.prompt, output);
+                }
+
+                // Hard-truncation retry: the budget went on <think> and the answer
+                // was cut mid-emission. Previously this only escalated to cloud, or
+                // served the truncated text when no cloud was available — neither
+                // addresses the cause, and the served text can be a half-written
+                // tool call. Suppressing thinking does: measured on prism-coder:4b
+                // at the free tier's 512-token budget, "Search my knowledge base for
+                // ACT-R decay algorithm" spends 2,336 chars on <think> and returns
+                // done_reason=length with EMPTY content, while the same query at
+                // think=false completes in 35 tokens.
+                //
+                // Route mode is unaffected (resolveThinkingMode forces think=false
+                // there); this is chat/code on a small budget. One shot only —
+                // think=false has no reasoning left to cut, so a second retry would
+                // be pure latency.
+                if (!gate.pass && gate.reason === "hard_truncation" && enableThink) {
+                    debugLog(`[prism_infer] ${tier.tag} truncated mid-answer — retrying with think=false`);
+                    attempts.push({ tier: tier.tag, reason: "hard_truncation_retry" });
+                    const retried = await deps.callLocal(
+                        deps.ollamaUrl, ollamaName, args.prompt, args.system, tierTokens, temperature, timeout, false, resolvedImages,
+                    );
+                    if (retried.ok) {
+                        const retriedStrip = stripThink(retried.text);
+                        const retriedGate = passesQualityGate(
+                            retriedStrip.stripped, retriedStrip.thinkOnly, retried.doneReason, mode,
+                        );
+                        // Keep the retry only if it is actually better — a retry that
+                        // truncates too must not overwrite the original with a
+                        // shorter fragment.
+                        if (retriedGate.pass) {
+                            result = retried;
+                            stripped = retriedStrip.stripped;
+                            thinkOnly = retriedStrip.thinkOnly;
+                            output = stripped;
+                            gate = mode === "code"
+                                ? passesCodingQualityGate(args.prompt, output)
+                                : retriedGate;
+                        }
+                    }
                 }
 
                 // High-precision coding failures get bounded same-tier repair

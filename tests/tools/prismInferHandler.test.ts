@@ -1582,7 +1582,9 @@ describe("runInfer — max_tokens clamping", () => {
             },
         });
         await runInfer(args({ max_tokens: 99999 }), deps);
-        expect(capturedMax).toBe(4096);
+        // Was 4096 (the enterprise plan cap). The plan cap is now a CLOUD
+        // budget; local is bounded by the absolute 8192 safety ceiling.
+        expect(capturedMax).toBe(8192);
     });
 
     it("defaults max_tokens to 1024 when not specified", async () => {
@@ -1595,7 +1597,10 @@ describe("runInfer — max_tokens clamping", () => {
             },
         });
         await runInfer(args(), deps);
-        expect(capturedMax).toBe(1024);
+        // 16 GB free reaches the 9b, whose minLocalTokens floor (2048) applies
+        // because it is the one tier that reasons before answering — 1024 would
+        // leave the answer competing with ~600 tokens of <think>.
+        expect(capturedMax).toBe(2048);
     });
 });
 

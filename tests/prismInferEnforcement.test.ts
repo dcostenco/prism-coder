@@ -178,22 +178,27 @@ describe("model ceiling enforcement", () => {
 // ── 2. Max Tokens Enforcement ────────────────────────────────────
 
 describe("max tokens enforcement", () => {
-    it("free user max_tokens capped at 512", async () => {
+    // CONTRACT CHANGE (2026-08-15): the plan cap is a CLOUD budget and no longer
+    // clamps local num_predict. The free tier is local-only, so the old rule
+    // throttled the user's own hardware for no saving, and 512 is below the
+    // ~600 tokens a 9b turn spends on <think> — it manufactured hard_truncation.
+    // Runaway generation stays bounded by timeout_ms and the quality gate.
+    it("free user's LOCAL tokens are not clamped to the plan's 512", async () => {
         const deps = mockDeps({ entitlements: FREE });
-        const result = await runInfer({ ...baseArgs, max_tokens: 4096 }, deps);
+        await runInfer({ ...baseArgs, max_tokens: 4096 }, deps);
 
         const calls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
-        const tokensSent = calls[0][5 - 1]; // maxTokens is 5th positional arg (index 4)
-        expect(tokensSent).toBeLessThanOrEqual(512);
+        const tokensSent = calls[0][4]; // maxTokens is the 5th positional arg
+        expect(tokensSent, "plan cap leaked onto local inference").toBeGreaterThan(512);
     });
 
-    it("standard user max_tokens capped at 1024", async () => {
+    it("standard user's LOCAL tokens are not clamped to the plan's cap", async () => {
         const deps = mockDeps({ entitlements: STANDARD });
-        const result = await runInfer({ ...baseArgs, max_tokens: 4096 }, deps);
+        await runInfer({ ...baseArgs, max_tokens: 4096 }, deps);
 
         const calls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
         const tokensSent = calls[0][4];
-        expect(tokensSent).toBeLessThanOrEqual(1024);
+        expect(tokensSent).toBeGreaterThan(1024);
     });
 
     it("enterprise user gets full 4096 tokens", async () => {
@@ -211,7 +216,10 @@ describe("max tokens enforcement", () => {
 
         const calls = (deps.callLocal as ReturnType<typeof vi.fn>).mock.calls;
         const tokensSent = calls[0][4];
-        expect(tokensSent).toBeLessThanOrEqual(4096);
+        // The plan cap no longer bounds local inference, but the absolute 8192
+        // ceiling still does — that one is a safety limit, not a billing limit.
+        expect(tokensSent).toBeLessThanOrEqual(8192);
+        expect(tokensSent, "global hard cap not applied").toBeLessThan(16384);
     });
 });
 
@@ -381,8 +389,9 @@ describe("combined gate scenarios", () => {
             expect(call[1]).toMatch(/2b|4b/);
         }
 
-        // Tokens: capped at 512
-        expect(localCalls[0][4]).toBeLessThanOrEqual(512);
+        // Tokens: the 512 plan cap binds CLOUD spend, not the user's own GPU.
+        // Cloud clamping has its own test in prismInferBudgetScope.test.ts.
+        expect(localCalls[0][4], "plan cap throttled local inference").toBeGreaterThan(512);
 
         // No verifier
         expect(verifierFn).not.toHaveBeenCalled();
