@@ -694,13 +694,19 @@ for manual configuration and host-specific paths.
 **Optional — local model fleet** for offline tool-routing. Pull whichever fits your hardware:
 
 ```bash
-ollama pull dcostenco/prism-coder:2b    # 2.3 GB · mobile / lightweight (99.1% on our routing suite)
-ollama pull dcostenco/prism-coder:4b    # 3.4 GB · verifier (100% on our routing suite)
-ollama pull dcostenco/prism-coder:9b    # 5.8 GB · default router (100% on our routing suite, Qwen3.5)
-ollama pull dcostenco/prism-coder:27b   # 16 GB  · complex tasks (100% on our routing suite)
+ollama pull dcostenco/prism-coder:2b    # 3.3 GB · mobile / lightweight · sees images (99.1% on our routing suite)
+ollama pull dcostenco/prism-coder:4b    # 3.5 GB · verifier · sees images (100% on our routing suite)
+ollama pull dcostenco/prism-coder:9b    # 6.7 GB · default router · sees images (100% on our routing suite, Qwen3.5)
+ollama pull dcostenco/prism-coder:27b   # 16 GB  · complex tasks · text only (100% on our routing suite)
 ```
 
 Prism detects both the namespaced (`dcostenco/prism-coder:9b`) and bare (`prism-coder:9b`) Ollama tags automatically.
+
+The 2b/4b/9b tiers carry a vision tower and accept screenshots through
+`prism_infer({ images: [...] })` — pass absolute paths or base64. Image
+requests are refused rather than answered blind when no tier (or the Layer 1
+safety classifier) can actually see the image, so a text-only model is never
+handed a prompt about a screenshot it never received. The 27b is text only.
 
 ---
 
