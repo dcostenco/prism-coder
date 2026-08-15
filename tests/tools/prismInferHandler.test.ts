@@ -388,22 +388,25 @@ describe("runInfer — RAM-gated tier selection", () => {
         expect(calls).toEqual(["prism-coder:27b"]);
     });
 
-    it("falls back to 4b when 5GB free (9b needs 8GB)", async () => {
+    // Thresholds moved 2026-08-14 when the vision tower shipped: 9b 8 -> 9 GB,
+    // 4b 5 -> 5.2 GB, 2b 3 -> 4.5 GB. At 5 GB free only the 2b now fits.
+    it("falls back to 2b when 5GB free (9b needs 9GB, 4b needs 5.2GB)", async () => {
         const calls: string[] = [];
         const deps = makeDeps({
             freemem: () => 5 * GB,
             callLocal: async (_url, model) => {
                 calls.push(model);
-                return { ok: true as const, text: "pong-4b" };
+                return { ok: true as const, text: "pong-2b" };
             },
         });
         const r = await runInfer(args(), deps);
-        expect(r.model_picked).toBe("prism-coder:4b");
-        expect(calls).toEqual(["prism-coder:4b"]);
+        expect(r.model_picked).toBe("prism-coder:2b");
+        expect(calls).toEqual(["prism-coder:2b"]);
         expect(r.attempts).toContainEqual({ tier: "prism-coder:9b", reason: "ram_insufficient" });
+        expect(r.attempts).toContainEqual({ tier: "prism-coder:4b", reason: "ram_insufficient" });
     });
 
-    it("falls back to 4b when 6GB free (9b needs 8GB)", async () => {
+    it("falls back to 4b when 6GB free (9b needs 9GB)", async () => {
         const calls: string[] = [];
         const deps = makeDeps({
             freemem: () => 6 * GB,
@@ -419,7 +422,10 @@ describe("runInfer — RAM-gated tier selection", () => {
         expect(r.attempts).toContainEqual({ tier: "prism-coder:9b", reason: "ram_insufficient" });
     });
 
-    it("falls back to 2b when 3GB free (4b needs 4GB)", async () => {
+    // 3 GB free used to reach the 2b. The vision build needs 4.5 GB, so a
+    // machine this constrained now has NO local tier — a real consequence of
+    // shipping vision, surfaced rather than hidden.
+    it("has no viable local tier at 3GB free (smallest tier needs 4.5GB)", async () => {
         const calls: string[] = [];
         const deps = makeDeps({
             freemem: () => 3 * GB,
@@ -428,13 +434,11 @@ describe("runInfer — RAM-gated tier selection", () => {
                 return { ok: true as const, text: "pong-2b" };
             },
         });
-        const r = await runInfer(args(), deps);
-        expect(r.model_picked).toBe("prism-coder:2b");
-        expect(r.backend).toBe("ollama-2b");
-        expect(calls).toEqual(["prism-coder:2b"]);
+        await expect(runInfer(args(), deps)).rejects.toThrow(/no backend produced output/);
+        expect(calls).toEqual([]);                       // nothing was even attempted
     });
 
-    it("returns no viable local when <3GB free (2b needs 3GB), throws without cloud", async () => {
+    it("returns no viable local when <3GB free, throws without cloud", async () => {
         const localMock = vi.fn();
         const deps = makeDeps({
             freemem: () => 2 * GB,

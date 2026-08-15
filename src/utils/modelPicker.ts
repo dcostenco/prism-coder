@@ -43,11 +43,17 @@ export interface ModelChoice {
  * num_ctx is ever raised, update the row here (a raise is a measured
  * decision with KV-cache RAM costed — plan v2 §5.4).
  */
+// weightsGb tracks what ollama.com actually serves. The 2b/4b/9b tags gained a
+// vision tower on 2026-08-14 (2b 2.3 -> 3.3 GB, 9b 5.8 -> 6.7 GB); leaving the
+// old numbers here made the RAM gate admit models that no longer fit, and the
+// eviction math over-credit the memory a model would return. minFreeGb keeps
+// headroom above the weights for KV cache and activations — an image request
+// also pays for the projector.
 export const MODEL_TIERS: ReadonlyArray<ModelChoice> = [
-    { tag: 'prism-coder:27b',  weightsGb: 16, minFreeGb: 20, ctxTokens: 4_096 },
-    { tag: 'prism-coder:9b',   weightsGb:  5.8, minFreeGb:  8, ctxTokens: 4_096 },
-    { tag: 'prism-coder:4b',   weightsGb:  3.4, minFreeGb:  5, ctxTokens: 32_768 },
-    { tag: 'prism-coder:2b',   weightsGb:  2.3, minFreeGb:  3, ctxTokens: 32_768 },
+    { tag: 'prism-coder:27b',  weightsGb: 17, minFreeGb: 21, ctxTokens: 4_096 },
+    { tag: 'prism-coder:9b',   weightsGb:  6.7, minFreeGb:  9, ctxTokens: 4_096 },
+    { tag: 'prism-coder:4b',   weightsGb:  3.5, minFreeGb:  5.2, ctxTokens: 32_768 },
+    { tag: 'prism-coder:2b',   weightsGb:  3.3, minFreeGb:  4.5, ctxTokens: 32_768 },
 ];
 
 /**

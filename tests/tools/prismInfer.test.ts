@@ -114,10 +114,11 @@ describe("runInfer — local-first cascade", () => {
         expect(r.attempts).toContainEqual({ tier: "prism-coder:9b", reason: "not_pulled" });
     });
 
-    it("RAM gate: 5 GB free skips 27B and 9B, picks 4b", async () => {
+    // 6 GB, not 5: the vision push raised the 4b floor to 5.2 GB.
+    it("RAM gate: 6 GB free skips 27B and 9B, picks 4b", async () => {
         const calls: string[] = [];
         const deps = makeDeps({
-            freemem: () => 5 * GB,
+            freemem: () => 6 * GB,
             callLocal: async (_url, model) => {
                 calls.push(model);
                 return { ok: true as const, text: "pong" };

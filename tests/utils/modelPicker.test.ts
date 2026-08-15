@@ -13,23 +13,26 @@ describe("pickLocalModel", () => {
         expect(pickLocalModel(30 * GB, "27b")?.tag).toBe("prism-coder:27b");
     });
 
-    it("picks 9B when 8–23 GB free", () => {
+    // Thresholds moved 2026-08-14 with the vision push: 9b 8 -> 9 GB,
+    // 4b 5 -> 5.2 GB, 2b 3 -> 4.5 GB (the tags themselves grew).
+    it("picks 9B when 9–20 GB free", () => {
         expect(pickLocalModel(12 * GB)?.tag).toBe("prism-coder:9b");
         expect(pickLocalModel(20 * GB)?.tag).toBe("prism-coder:9b");
     });
 
-    it("picks 4B when 5–7 GB free (9B needs 8GB)", () => {
-        expect(pickLocalModel(5 * GB)?.tag).toBe("prism-coder:4b");
+    it("picks 4B when 5.2–8.9 GB free (9B needs 9GB)", () => {
         expect(pickLocalModel(6 * GB)?.tag).toBe("prism-coder:4b");
         expect(pickLocalModel(7 * GB)?.tag).toBe("prism-coder:4b");
+        expect(pickLocalModel(8 * GB)?.tag).toBe("prism-coder:4b");
     });
 
-    it("picks 2B (Qwen3.5-4B Q3_K_M) when 3–4.9 GB free", () => {
-        expect(pickLocalModel(3 * GB)?.tag).toBe("prism-coder:2b");
-        expect(pickLocalModel(4 * GB)?.tag).toBe("prism-coder:2b");
+    it("picks 2B (Qwen3.5-4B Q4_K_S) when 4.5–5.1 GB free", () => {
+        expect(pickLocalModel(4.6 * GB)?.tag).toBe("prism-coder:2b");
+        expect(pickLocalModel(5 * GB)?.tag).toBe("prism-coder:2b");
     });
 
-    it("returns null below 3 GB free", () => {
+    it("returns null below 4.5 GB free — the vision builds raised the floor", () => {
+        expect(pickLocalModel(4 * GB)).toBeNull();
         expect(pickLocalModel(2 * GB)).toBeNull();
         expect(pickLocalModel(0)).toBeNull();
         expect(pickLocalModel(-1)).toBeNull();
@@ -80,7 +83,8 @@ describe("pickLocalModel", () => {
             "someuser/llama3:8b",               // unrelated namespaced
         ]);
         expect(pickLocalModel(30 * GB, undefined, available)?.tag).toBe("prism-coder:9b");
-        expect(pickLocalModel(5 * GB, undefined, available)?.tag).toBe("prism-coder:4b");
+        // 5 GB no longer clears the 4b floor (5.2 GB since the vision push).
+        expect(pickLocalModel(6 * GB, undefined, available)?.tag).toBe("prism-coder:4b");
     });
 
     it("MODEL_TIERS is ordered largest → smallest", () => {
