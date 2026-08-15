@@ -606,7 +606,13 @@ export async function probeVision(url: string, model: string): Promise<boolean> 
     return Array.isArray(data.capabilities) && data.capabilities.includes("vision");
 }
 
-async function callOllamaGenerate(
+/**
+ * Exported so an end-to-end harness can drive the REAL local call rather than
+ * reimplementing it. Every wrong number this eval produced came from a harness
+ * that copied one layer of production and assumed the rest; measuring against a
+ * hand-rolled copy of this function would repeat that.
+ */
+export async function callOllamaGenerate(
     url: string,
     model: string,
     prompt: string,

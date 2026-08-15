@@ -214,13 +214,64 @@ function parseEnvelope(
     return parseToolJson(output.slice(start + startToken.length, end).trim());
 }
 
+/**
+ * Closing markers seen in the wild, in the order they are tried.
+ *
+ * `</|tool_call|>` is not a marker this codebase ever emitted — it is what
+ * prism-coder:9b produces with thinking off, the same way it produces
+ * `</tool_call>` with thinking on. Neither is the canonical partner of the pipe
+ * opener, so a strictly-paired parse rejected both.
+ */
+const END_TOKENS = [PIPE_END, ANGLE_END, "</|tool_call|>"] as const;
+
+/**
+ * Try each known closing marker against a given opener.
+ *
+ * Models mix openers and closers: measured 2026-08-15, prism-coder:9b opens
+ * with `<|tool_call|>` and closes with `</tool_call>`. Requiring the matching
+ * partner classified a CORRECT tool call as malformed, which
+ * applyLocalRouteContract then rewrote to "NO_TOOL" and served. End to end that
+ * cost the 9b 95.7% -> 43.5% on the 115-case routing suite; the whole gap was
+ * this pairing. Only the ENVELOPE is tolerant — the body still has to be a
+ * valid tool call, so a malformed payload is suppressed exactly as before.
+ */
+function parseWithAnyTerminator(trimmed: string, startToken: string): ParsedRouteOutput {
+    let lastResult: ParsedRouteOutput = { kind: "malformed" };
+    for (const endToken of END_TOKENS) {
+        if (!trimmed.includes(endToken)) continue;
+        const parsed = parseEnvelope(trimmed, startToken, endToken);
+        if (parsed.kind === "tool_call") return parsed;
+        lastResult = parsed;
+    }
+    // No terminator at all — measured: the 9b emits
+    // `<|tool_call|> {"name": ..., "arguments": {...}}` with nothing after it.
+    //
+    // Accept ONLY when everything after the opener parses as a COMPLETE tool
+    // call. That is what makes this safe against truncation: a call cut off
+    // mid-emission leaves invalid JSON, which parseToolJson rejects, so a
+    // half-written envelope is still suppressed. Only a whole, well-formed body
+    // that merely lacks its closing marker gets through.
+    if (!END_TOKENS.some(t => trimmed.includes(t))) {
+        const body = trimmed.slice(trimmed.indexOf(startToken) + startToken.length).trim();
+        return parseToolJson(body);
+    }
+    return lastResult;
+}
+
 export function parseRouteOutput(output: string): ParsedRouteOutput {
     if (output.length > MAX_ROUTE_OUTPUT_CHARS) return { kind: "malformed" };
     const trimmed = output.trim();
-    const hasPipeMarker = trimmed.includes(PIPE_START) || trimmed.includes(PIPE_END);
+    // Dispatch on the OPENER. Presence of a closing marker alone no longer
+    // decides the family, because the two families get mixed.
+    if (trimmed.includes(PIPE_START)) return parseWithAnyTerminator(trimmed, PIPE_START);
+    if (trimmed.includes(ANGLE_START)) return parseWithAnyTerminator(trimmed, ANGLE_START);
+
+    // A closing marker with no opener is a truncated or corrupted envelope, not
+    // prose — keep suppressing it.
+    const hasPipeMarker = trimmed.includes(PIPE_END);
     if (hasPipeMarker) return parseEnvelope(trimmed, PIPE_START, PIPE_END);
 
-    const hasAngleMarker = trimmed.includes(ANGLE_START) || trimmed.includes(ANGLE_END);
+    const hasAngleMarker = trimmed.includes(ANGLE_END) || trimmed.includes("</|tool_call|>");
     if (hasAngleMarker) return parseEnvelope(trimmed, ANGLE_START, ANGLE_END);
 
     // A route answer that starts like raw tool JSON is an attempted contract
