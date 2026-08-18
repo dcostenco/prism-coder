@@ -3086,6 +3086,13 @@ export async function sessionExportMemoryHandler(args: unknown) {
         ? await storage.exportLedger(project)
         : await storage.getLedgerEntries({
             project: `eq.${project}`,
+            // R1 adversarial review 2026-08-18: without this filter the
+            // direct/local paths exported TOMBSTONED rows — content the user
+            // had asked session_forget_memory to erase shipped in every
+            // backup (GDPR Art. 17 leak; the portal export always excluded
+            // them, so the two paths also disagreed). Both PostgREST and the
+            // sqlite filter parser support is.null.
+            deleted_at: "is.null",
             order: "created_at.asc",
             limit: "10000",
           })) as Array<{

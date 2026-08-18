@@ -767,13 +767,34 @@ describe("sessionExportMemoryHandler — session_export_memory", () => {
      * - listProjects() — not called when a specific project is given
      */
 
-    it("getLedgerEntries called with PostgREST-style filter, order, and limit", async () => {
+    it("getLedgerEntries excludes tombstones — forgotten content must not ship in a backup", async () => {
+      // R1 adversarial review 2026-08-18: without deleted_at=is.null the
+      // direct/local export included rows the user had asked
+      // session_forget_memory to erase (GDPR Art. 17), and disagreed with
+      // the portal export path, which always excluded them.
       await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
       expect(storage.getLedgerEntries).toHaveBeenCalledWith({
         project: "eq.test-project",
+        deleted_at: "is.null",
         order: "created_at.asc",
         limit: "10000",
       });
+    });
+
+    it("prefers a portal-backed exportLedger when the backend provides one", async () => {
+      // Paid thin-client installs have no SUPABASE_URL; getLedgerEntries
+      // throws there. When the backend exposes exportLedger (SynaluxStorage
+      // → action=export_memory), the handler must use it and must NOT touch
+      // getLedgerEntries.
+      (storage as any).exportLedger = vi.fn().mockResolvedValue([FIXTURE_LEDGER_ENTRY]);
+      try {
+        const result = await sessionExportMemoryHandler({ project: "test-project", format: "json", output_dir: tempDir });
+        expect(result.isError).toBeFalsy();
+        expect((storage as any).exportLedger).toHaveBeenCalledWith("test-project");
+        expect(storage.getLedgerEntries).not.toHaveBeenCalled();
+      } finally {
+        delete (storage as any).exportLedger;
+      }
     });
 
     it("loadContext called with positional (project, 'deep', PRISM_USER_ID)", async () => {

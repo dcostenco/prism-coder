@@ -92,6 +92,17 @@ describe("SynaluxStorage — listProjects (action=list_projects)", () => {
     const s = new SynaluxStorage();
     expect(await s.listProjects()).toEqual(["good", "bare-string"]);
   });
+
+  it("throws on a 200 missing projects[] — drift is not an empty inventory", async () => {
+    // The portal returns projects:[] for genuinely none; a missing field is
+    // a contract change and must not read as "no projects".
+    fetchMock
+      .mockResolvedValueOnce(freshJwtResp())
+      .mockResolvedValueOnce(jsonResponse(200, { status: "success", items: [] }));
+
+    const s = new SynaluxStorage();
+    await expect(s.listProjects()).rejects.toThrow(/contract drift/);
+  });
 });
 
 describe("SynaluxStorage — exportLedger (action=export_memory)", () => {
@@ -143,6 +154,29 @@ describe("SynaluxStorage — exportLedger (action=export_memory)", () => {
     expect(rows).toEqual([{ id: "1" }, { id: "2" }]);
     const second = JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string);
     expect(second.offset).toBe(1000);
+  });
+
+  it("throws on a 200 missing ledger[] — drift must not become an empty backup", async () => {
+    // R1 adversarial review: coercing a renamed/missing field to [] writes
+    // an empty export file that reports ✅ success. For a backup path, that
+    // is strictly worse than an error.
+    fetchMock
+      .mockResolvedValueOnce(freshJwtResp())
+      .mockResolvedValueOnce(jsonResponse(200, { status: "success", rows: [{ id: "1" }] }));
+
+    const s = new SynaluxStorage();
+    await expect(s.exportLedger("demo")).rejects.toThrow(/contract drift/);
+  });
+
+  it("throws on a 200 missing page info — refuses a possibly-truncated export", async () => {
+    // Without page.has_more the client cannot know whether more rows exist;
+    // breaking out silently would ship a partial backup marked complete.
+    fetchMock
+      .mockResolvedValueOnce(freshJwtResp())
+      .mockResolvedValueOnce(jsonResponse(200, { status: "success", ledger: [{ id: "1" }] }));
+
+    const s = new SynaluxStorage();
+    await expect(s.exportLedger("demo")).rejects.toThrow(/possibly-truncated/);
   });
 
   it("caps pagination at 10 pages — a lying has_more cannot loop forever", async () => {
