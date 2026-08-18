@@ -3078,12 +3078,17 @@ export async function sessionExportMemoryHandler(args: unknown) {
         [key: string]: unknown;
       } | null;
 
-      // Fetch full ledger (all non-deleted entries, capped at 10k as OOM guard)
-      const ledger = await storage.getLedgerEntries({
-        project: `eq.${project}`,
-        order: "created_at.asc",
-        limit: "10000",
-      }) as Array<{
+      // Fetch full ledger (all non-deleted entries, capped at 10k as OOM guard).
+      // Portal-backed installs export via action=export_memory (exportLedger);
+      // local/direct backends keep the getLedgerEntries assembly. Without this
+      // branch, paid thin-client installs threw "Supabase not configured" here.
+      const ledger = (typeof storage.exportLedger === "function"
+        ? await storage.exportLedger(project)
+        : await storage.getLedgerEntries({
+            project: `eq.${project}`,
+            order: "created_at.asc",
+            limit: "10000",
+          })) as Array<{
         id?: string;
         created_at?: string;
         event_type?: string;

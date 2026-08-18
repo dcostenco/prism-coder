@@ -29,6 +29,8 @@
  *     - getHistory        → POST /api/v1/prism/memory  action=memory_history
  *     - patchLedger       → POST /api/v1/prism/memory  action=save_embedding
  *     - getEntriesMissingEmbeddings → POST /api/v1/prism/memory  action=list_missing_embeddings
+ *     - listProjects      → POST /api/v1/prism/memory  action=list_projects
+ *     - exportLedger      → POST /api/v1/prism/memory  action=export_memory (paginated)
  *
  *   Methods still falling through to SupabaseStorage (Phase 3 Tier B+):
  *   save_experience direct entrypoint, compactLedger, image ops,
@@ -546,6 +548,44 @@ export class SynaluxStorage extends SupabaseStorage {
     });
     const entries = Array.isArray(result.entries) ? result.entries : [];
     return entries as Array<{ id: string; summary: string; decisions?: string[]; project: string }>;
+  }
+
+  // ─── Project inventory + export ──────────────────────────────
+  // Both portal actions shipped in Phase 3 but the client was never
+  // wired: listProjects and the export path fell through to
+  // SupabaseStorage and threw "Supabase not configured" on every
+  // paid-tier install (2026-08-18 audit).
+
+  async listProjects(): Promise<string[]> {
+    const result = await this.portalPost("/api/v1/prism/memory", {
+      action: "list_projects",
+    });
+    const projects = Array.isArray(result.projects) ? result.projects : [];
+    return projects
+      .map((p: any) => (typeof p === "string" ? p : p?.project))
+      .filter((name: unknown): name is string => typeof name === "string" && name.length > 0);
+  }
+
+  async exportLedger(project: string): Promise<unknown[]> {
+    // action=export_memory is paginated (EXPORT_PAGE_SIZE=1000). Follow
+    // next_offset until has_more is false, capped at 10 pages to match the
+    // local path's 10k-row OOM guard.
+    const rows: unknown[] = [];
+    let offset = 0;
+    for (let page = 0; page < 10; page++) {
+      const result = await this.portalPost("/api/v1/prism/memory", {
+        action: "export_memory",
+        project,
+        offset,
+        limit: 1000,
+      });
+      const ledger = Array.isArray(result.ledger) ? result.ledger : [];
+      rows.push(...ledger);
+      const pageInfo = result.page as { has_more?: boolean; next_offset?: number | null } | undefined;
+      if (!pageInfo?.has_more || typeof pageInfo.next_offset !== "number") break;
+      offset = pageInfo.next_offset;
+    }
+    return rows;
   }
 
   // ─── Time Travel ─────────────────────────────────────────────

@@ -469,6 +469,18 @@ export interface StorageBackend {
    */
   listProjects(): Promise<string[]>;
 
+  /**
+   * OPTIONAL: full ordered ledger for one project, for session_export_memory.
+   * Backends with a portal-mediated export (SynaluxStorage → action
+   * export_memory) implement this so paid thin-client installs export via
+   * the portal instead of falling through to an unconfigured direct-Supabase
+   * getLedgerEntries. Backends without it keep the local assembly path —
+   * deliberately NOT a getLedgerEntries override, because export_memory
+   * supports only project+pagination and would silently mis-serve the other
+   * getLedgerEntries call sites that pass arbitrary PostgREST filters.
+   */
+  exportLedger?(project: string): Promise<unknown[]>;
+
   // ─── v2.2.0 Health Check (fsck) ─────────────────────────────
 
   /**
