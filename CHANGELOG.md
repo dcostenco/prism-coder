@@ -2,6 +2,53 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.18.2 — 2026-09-14
+
+### Regenerable junk no longer freezes a skill out of sync
+
+- Deletes machine-generated artifacts from Prism-owned skill directories before
+  the integrity check reads them. `isPristineMarkedSkill` compares the full
+  recursive file list against the ownership marker, so a single untracked file
+  classified a skill as locally modified and every later sync silently skipped
+  it — the marker was valid and every digest matched.
+- Covers CPython's `__pycache__` and `*.pyc`/`*.pyo`, written beside any skill
+  script that is imported rather than executed, and the file-browser artifacts
+  `.DS_Store`, `Thumbs.db` and `desktop.ini`. On macOS and Windows, opening a
+  managed skill folder in a file browser was enough to stop it updating.
+- Applies at all three sites that consult the pristine check, including
+  `enforceNativeEntitlements`, where the same misread parked a now-unentitled
+  skill in `.prism-skill-quarantine` instead of removing it.
+- Purges rather than exempting these paths from the integrity walk. An ignored
+  `.pyc` is attacker-chosen bytecode that CPython loads in preference to its
+  source whenever the header's recorded source mtime and size match, so
+  skipping it would trade a false conflict for arbitrary code execution.
+  Deleting is also stricter than the previous behaviour, which left a tampered
+  cache on disk and merely froze the skill.
+- Touches nothing Prism does not own, nothing the manifest shipped, and never
+  follows a symlink out of the skill root. Any other untracked file still
+  conflicts and is still preserved. The purge is best effort: a delete that
+  cannot complete conflicts that one skill rather than failing the whole sync.
+
+### The skill-conflict warning names the condition, not a guessed cause
+
+- Replaces "local copy has no Prism ownership marker", which was one of several
+  causes and not the common one, and which routed the operator to
+  `prism connect` — rewriting host MCP configuration, with every host closed —
+  when the repair was deleting a regenerable cache directory.
+- States the procedure that reveals the actual cause instead of enumerating
+  possibilities: compare the directory's file list with the `files` keys in its
+  `.prism-managed.json`. An enumerated draft measured 858 characters, 21% of the
+  entire `quick` startup budget, and this block renders in the head that the
+  display cap keeps while cutting session context.
+
+### Documentation
+
+- Corrects the `config.ts` environment guide, which described a startup exit no
+  key has ever had and marked `BRAVE_API_KEY` required without noting that a
+  configured Synalux account supplies it portal-side instead. Exactly one of the
+  two is needed; the server starts either way and search tools error only when
+  called.
+
 ## 20.18.1 — 2026-09-12
 
 ### Task-skill continuity across compaction and manifest updates
