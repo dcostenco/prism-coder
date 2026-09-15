@@ -161,12 +161,13 @@ describe("everything else the portal says stays inside the privacy boundary", ()
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("a 403 that is not about the plan (MFA challenge) never escapes, key or no key", async () => {
+  it("a 403 that is not about the plan never escapes, key or no key", async () => {
     const braveApi = await load({ braveKey: "own-key" });
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 403,
-      text: async () => JSON.stringify({ status: "error", error: "MFA verification required. Complete MFA at /auth/mfa." }),
+      // No `upgrade_url`, no "plan": the portal is refusing for some other reason.
+      text: async () => JSON.stringify({ status: "error", error: "Forbidden" }),
     });
 
     await expect(braveApi.performWebSearchRaw("private query", 5, 0)).rejects.toThrow("HTTP 403");

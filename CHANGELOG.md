@@ -63,8 +63,8 @@ search, and Web Scholar.
 
 The privacy boundary is otherwise unchanged: an outage (5xx), a quota (429,
 even though it also carries `upgrade_url`), an expired login (401), or a 403
-that is not a plan refusal (the MFA challenge) still never turns into a
-direct provider call with the original query. Without an own key the refusal
+that is not a plan refusal still never turns into a direct provider call with
+the original query. Without an own key the refusal
 propagates as before. Portal HTTP errors are now a typed `PortalHttpError`
 (same message) so the transport can tell these apart without parsing text.
 

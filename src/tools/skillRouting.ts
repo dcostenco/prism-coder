@@ -356,8 +356,8 @@ async function fetchKeywordTable(expectVersion?: number): Promise<KeywordTable |
  * string that happens to appear in material they pasted as evidence. Observed
  * 2026-08-31: a user asked "what's going on with skill loading?" and pasted a
  * startup log; the log listed installed skill names, and the literal token
- * `fusa-bss-billing` inside it satisfied that skill's own trigger
- * `\bfusa\b.{0,20}\b(billing|invoice)\b`. Two unrelated private skills loaded
+ * `acme-xyz-billing` inside it satisfied that skill's own trigger
+ * `\bacme\b.{0,20}\b(billing|invoice)\b`. Two unrelated private skills loaded
  * and were injected as binding rules for a debugging question — pasting a log
  * that NAMES a skill should never activate it.
  *
@@ -365,7 +365,7 @@ async function fetchKeywordTable(expectVersion?: number): Promise<KeywordTable |
  *   1. Fenced code blocks — pasted output, by convention.
  *   2. Hyphenated skill-name tokens (`foo-bar-baz`). A bare skill name is
  *      metadata about the system, not a description of work. Removing only the
- *      NAME SPAN keeps its constituent words available: "fusa billing invoice"
+ *      NAME SPAN keeps its constituent words available: "acme billing invoice"
  *      typed by the user still matches, because that text is not a name token.
  *
  * Deliberately NOT length-capped: a long prompt is not evidence of pasting,
@@ -404,7 +404,7 @@ export function stripQuotedEvidenceForRouting(
   // false positive being fixed. Using the actual routable names is exact.
   //
   // Deliberate consequence, not an oversight: a user who TYPES a skill's name
-  // ("update fusa-bss-billing's invoice rate") no longer trigger-routes that
+  // ("update acme-xyz-billing's invoice rate") no longer trigger-routes that
   // skill. That is acceptable because the agent reads the raw prompt and can
   // invoke a literally-named skill directly — trigger routing exists for
   // SYMPTOM text, where the name is absent. A pasted log naming skills must
@@ -426,7 +426,7 @@ export function stripQuotedEvidenceForRouting(
     // the whole prompt — the sibling _applyPromptRouting swallows bad
     // patterns for the same reason (adversarial review, confirmed).
     // Only IDENTIFIER-SHAPED names are stripped: at least two segments joined
-    // by - or _ (fusa-bss-billing, training-results-gate). Round-3 review
+    // by - or _ (acme-xyz-billing, training-results-gate). Round-3 review
     // proved the unconditional version was self-defeating for skills whose
     // name is an ordinary word: stripping `sentry` from "check sentry for
     // recent errors" killed that skill's OWN trigger (\bsentry\b) — 100% of
@@ -439,7 +439,7 @@ export function stripQuotedEvidenceForRouting(
     // name must not butt directly against a letter/digit, but MAY butt
     // against segment glue (-/_). Round 3's stricter (?<![\w-]) anchors
     // refused to strip the name out of longer compounds — a pasted
-    // `fusa-bss-billing-worker` container name survived intact, and because
+    // `acme-xyz-billing-worker` container name survived intact, and because
     // \b fires at every internal hyphen, the skill's own trigger still
     // matched inside it: the exact incident class this function exists to
     // kill. Alignment on segment edges strips those compounds while still

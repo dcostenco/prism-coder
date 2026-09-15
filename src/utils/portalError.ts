@@ -25,8 +25,8 @@ export class PortalHttpError extends Error {
  * `{ error: "... requires Standard plan or higher.", upgrade_url: "/pricing" }`.
  * Either signal — the word "plan" in the body, or a structured
  * `upgrade_url` — is accepted, so a reworded message does not silently take
- * a free user's own key away again. A 403 with neither (the session-cookie
- * MFA challenge, for example) is not a plan refusal.
+ * a free user's own key away again. A 403 with neither is not a plan
+ * refusal, whatever else it may be.
  */
 export function isPortalPlanRefusal(err: unknown): err is PortalHttpError {
   if (!(err instanceof PortalHttpError) || err.portalStatus !== 403) return false;

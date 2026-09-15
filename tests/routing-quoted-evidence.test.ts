@@ -3,8 +3,8 @@
  *
  * Incident 2026-08-31: the user asked "whats going on with skill loading:" and
  * pasted a Prism startup log as evidence. That log LISTS installed skill names,
- * and the literal token `fusa-bss-billing` in it satisfied that skill's own
- * trigger `\bfusa\b.{0,20}\b(billing|invoice)\b`. Two unrelated private skills
+ * and the literal token `acme-xyz-billing` in it satisfied that skill's own
+ * trigger `\bacme\b.{0,20}\b(billing|invoice)\b`. Two unrelated private skills
  * were loaded and injected as binding rules for a debugging question.
  *
  * The rule this pins: a skill NAME appearing in a prompt is metadata about the
@@ -20,8 +20,8 @@ import {
 
 /** The real triggers from the two skills that misfired. */
 const TRIGGERS: Record<string, string[]> = {
-  '\\bfusa\\b.{0,20}\\b(billing|invoice)\\b': ['fusa-bss-billing'],
-  '\\bbss\\b.{0,20}\\bbilling\\b': ['fusa-bss-billing'],
+  '\\bacme\\b.{0,20}\\b(billing|invoice)\\b': ['acme-xyz-billing'],
+  '\\bxyz\\b.{0,20}\\bbilling\\b': ['acme-xyz-billing'],
   '\\b(training|corpus|bfcl)\\b.{0,24}\\b(score|gate|promote)\\b': ['training-results-gate'],
 };
 
@@ -35,7 +35,7 @@ Prism System Ready
 - Subscription tier: enterprise
 - Provisioned skills: 118
 - Skill sync: automatic from Synalux · current · committed manifest · 1 conflict
-⚠️ SKILLS NOT UPDATING (local copy has no Prism ownership marker): fusa-bss-billing.
+⚠️ SKILLS NOT UPDATING (local copy has no Prism ownership marker): acme-xyz-billing.
 Other tier skills provisioned: execute-method-literally, prompt-fidelity,
 training-results-gate, autonomous-training-protocol, verified-shipping`;
 
@@ -45,35 +45,35 @@ describe('pasted evidence does not activate skills', () => {
   });
 
   it('a bare skill name never triggers its own skill', () => {
-    expect(route('why is fusa-bss-billing frozen?')).toEqual([]);
+    expect(route('why is acme-xyz-billing frozen?')).toEqual([]);
     expect(route('what does training-results-gate do?')).toEqual([]);
   });
 
   it('fenced output is ignored even when it contains trigger words', () => {
-    const prompt = 'why did this fail?\n```\nbss billing invoice submitted\n```';
+    const prompt = 'why did this fail?\n```\nxyz billing invoice submitted\n```';
     expect(route(prompt)).toEqual([]);
   });
 
   it('review: stripping must not BRIDGE unrelated words into a proximity window', () => {
-    // Raw prompt: 'fusa <28-char name token> invoice' — 'fusa' and 'invoice'
-    // are >20 chars apart, so \bfusa\b.{0,20}\b(billing|invoice)\b does NOT
+    // Raw prompt: 'acme <28-char name token> invoice' — 'acme' and 'invoice'
+    // are >20 chars apart, so \bacme\b.{0,20}\b(billing|invoice)\b does NOT
     // match the raw text. Replacing the name with a SPACE brought them within
     // the window and CREATED a match (adversarial review, reproduced). The
     // newline replacement severs the window instead: still no match.
-    const LONG = 'fusa-bss-billing-extra-longer';
-    const triggers = { ...TRIGGERS, ['\\bfusa\\b.{0,20}\\b(billing|invoice)\\b']: ['fusa-bss-billing'] };
-    const prompt = `fusa ${LONG} invoice`;
+    const LONG = 'acme-xyz-billing-extra-longer';
+    const triggers = { ...TRIGGERS, ['\\bacme\\b.{0,20}\\b(billing|invoice)\\b']: ['acme-xyz-billing'] };
+    const prompt = `acme ${LONG} invoice`;
     const withLong = { ...triggers, x: ['x'] } as Record<string, string[]>;
     withLong['zz'] = [LONG]; // make the long token itself routable → stripped
     const names = _applyPromptRouting([], stripQuotedEvidenceForRouting(prompt, withLong), withLong).map(s => s.name);
-    expect(names).not.toContain('fusa-bss-billing');
+    expect(names).not.toContain('acme-xyz-billing');
   });
 
   it('review: two INLINE backtick-triples must not eat user-typed symptom text', () => {
     // Only line-anchored fences are pasted blocks. Inline pairs in prose used
     // to bracket-and-delete everything between them (adversarial review).
-    const prompt = 'my ``` markers ``` are decoration, but my fusa billing invoice is broken';
-    expect(route(prompt)).toContain('fusa-bss-billing');
+    const prompt = 'my ``` markers ``` are decoration, but my acme billing invoice is broken';
+    expect(route(prompt)).toContain('acme-xyz-billing');
   });
 
   it('review: hostile or overlong routable names degrade to not-stripped, never a throw', () => {
@@ -84,15 +84,15 @@ describe('pasted evidence does not activate skills', () => {
     };
     expect(() => stripQuotedEvidenceForRouting('any prompt at all', hostile)).not.toThrow();
     // and routing still works for the legit triggers
-    const names = _applyPromptRouting([], stripQuotedEvidenceForRouting('my fusa billing invoice', hostile), hostile).map(s => s.name);
-    expect(names).toContain('fusa-bss-billing');
+    const names = _applyPromptRouting([], stripQuotedEvidenceForRouting('my acme billing invoice', hostile), hostile).map(s => s.name);
+    expect(names).toContain('acme-xyz-billing');
   });
 });
 
 describe('real symptoms still route — the regression risk of the fix', () => {
   it('user-typed symptom words match, because they are not name tokens', () => {
-    expect(route('I need to submit the fusa billing invoice')).toContain('fusa-bss-billing');
-    expect(route('help me with a bss billing question')).toContain('fusa-bss-billing');
+    expect(route('I need to submit the acme billing invoice')).toContain('acme-xyz-billing');
+    expect(route('help me with a xyz billing question')).toContain('acme-xyz-billing');
     expect(route('did the training corpus score pass the gate?')).toContain('training-results-gate');
   });
 
@@ -102,13 +102,13 @@ describe('real symptoms still route — the regression risk of the fix', () => {
     // name appears. When the user types the literal name, the agent sees it
     // in the raw prompt and can invoke the skill by name — no routing needed.
     // Pasted logs naming skills must not route them; that wins.
-    expect(route('update fusa-bss-billing with the new invoice rate')).toEqual([]);
+    expect(route('update acme-xyz-billing with the new invoice rate')).toEqual([]);
   });
 
   it('stripping removes only the NAME SPAN, leaving its words usable elsewhere', () => {
     // The name is stripped, but the same words typed separately still match.
-    const prompt = 'the fusa-bss-billing skill is stale, but my fusa billing invoice is due';
-    expect(route(prompt)).toContain('fusa-bss-billing');
+    const prompt = 'the acme-xyz-billing skill is stale, but my acme billing invoice is due';
+    expect(route(prompt)).toContain('acme-xyz-billing');
   });
 
   it('ordinary hyphenated English is not mistaken for a skill name', () => {
@@ -118,8 +118,8 @@ describe('real symptoms still route — the regression risk of the fix', () => {
   });
 
   it('does not truncate: a symptom stated late in a long prompt still matches', () => {
-    const prompt = `${'context. '.repeat(400)}now: my fusa billing invoice is wrong`;
-    expect(route(prompt)).toContain('fusa-bss-billing');
+    const prompt = `${'context. '.repeat(400)}now: my acme billing invoice is wrong`;
+    expect(route(prompt)).toContain('acme-xyz-billing');
   });
 });
 
@@ -198,9 +198,9 @@ describe('round-4 review regressions', () => {
     // hyphen, so the trigger matched INSIDE the unstripped compound — the
     // exact incident class this suite exists to prevent. All three repros
     // from the review, end-to-end through the matcher:
-    expect(route('deploy failed for fusa-bss-billing-worker container, see logs')).toEqual([]);
-    expect(route('legacy-fusa-bss-billing schema still referenced in prod')).toEqual([]);
-    expect(route('CrashLoopBackOff: pod fusa-bss-billing-7d8f9c-abcde restarting')).toEqual([]);
+    expect(route('deploy failed for acme-xyz-billing-worker container, see logs')).toEqual([]);
+    expect(route('legacy-acme-xyz-billing schema still referenced in prod')).toEqual([]);
+    expect(route('CrashLoopBackOff: pod acme-xyz-billing-7d8f9c-abcde restarting')).toEqual([]);
   });
 
   it('a mid-token overlap never kills an UNRELATED skill trigger', () => {
@@ -272,7 +272,7 @@ describe('stripQuotedEvidenceForRouting mechanics', () => {
     // pasted blocks.
     expect(stripQuotedEvidenceForRouting('a ```x``` b', TRIGGERS)).toContain('x');
     expect(stripQuotedEvidenceForRouting('before\n```\nBLOCK-CONTENT\n```\nafter', TRIGGERS)).not.toContain('BLOCK-CONTENT');
-    expect(stripQuotedEvidenceForRouting('see fusa-bss-billing here', TRIGGERS)).not.toContain('fusa-bss-billing');
+    expect(stripQuotedEvidenceForRouting('see acme-xyz-billing here', TRIGGERS)).not.toContain('acme-xyz-billing');
     expect(stripQuotedEvidenceForRouting('plain words stay', TRIGGERS)).toBe('plain words stay');
     // A skill name NOT in the table is left alone — we only strip what we route.
     expect(stripQuotedEvidenceForRouting('about some-other-skill', TRIGGERS)).toContain('some-other-skill');
@@ -293,10 +293,10 @@ describe('WIRING — second production call site (toResolvedSkillsWithPrompt)', 
     );
     const resp = { loaded: ['prime-directive'], skipped: [], routing_version: 1, tier: 'paid' } as never;
     const resolved = await toResolvedSkillsWithPrompt(resp, PASTED_LOG, true);
-    expect(resolved.names).not.toContain('fusa-bss-billing');
+    expect(resolved.names).not.toContain('acme-xyz-billing');
     expect(resolved.names).not.toContain('training-results-gate');
-    const typed = await toResolvedSkillsWithPrompt(resp, 'my fusa billing invoice is broken', true);
-    expect(typed.names).toContain('fusa-bss-billing');
+    const typed = await toResolvedSkillsWithPrompt(resp, 'my acme billing invoice is broken', true);
+    expect(typed.names).toContain('acme-xyz-billing');
   });
 });
 
@@ -307,13 +307,13 @@ describe('WIRING — the real routing entry point, not just the helper', () => {
   // (Mutation-verified: reverting either call site reds these.)
   it('the incident prompt resolves to NO skills through the real entry point', async () => {
     const names = await resolvePromptSkillNames(PASTED_LOG, undefined, TRIGGERS);
-    expect(names).not.toContain('fusa-bss-billing');
+    expect(names).not.toContain('acme-xyz-billing');
     expect(names).not.toContain('training-results-gate');
   });
 
   it('a genuinely typed symptom still resolves through the real entry point', async () => {
     const names = await resolvePromptSkillNames(
-      'I need to submit the fusa billing invoice', undefined, TRIGGERS);
-    expect(names).toContain('fusa-bss-billing');
+      'I need to submit the acme billing invoice', undefined, TRIGGERS);
+    expect(names).toContain('acme-xyz-billing');
   });
 });
