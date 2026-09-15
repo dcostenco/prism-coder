@@ -44,10 +44,33 @@ from Scholar, so it had been getting academic results. Scholar now treats a
 failed web search — portal refusal, expired login, rejected Brave key — as a
 reason to continue on the free academic path, never as a reason to end the
 run, and the returned report opens with a note saying which sources it used.
-The stored ledger entry stays clean. It never retries a direct provider with
-the same query: a configured account is a privacy boundary. Three more tests
-pin this (portal 403 → academic results saved; one transport call even with a
-local key present; no note in the ledger).
+The stored ledger entry stays clean. Scholar itself adds no second attempt;
+whether the user's own key may answer a refusal is the transport's decision
+(next section). Three more tests pin this (portal 403 → academic results
+saved; exactly one transport call; no note in the ledger).
+
+### A free account uses its own key when the portal refuses the plan
+
+`SYNALUX_SEARCH_AVAILABLE` is true for every `prism connect` login, and every
+search tool went portal-first with no way back, so a **free** account that had
+configured its own `BRAVE_API_KEY` could never use it while signed in: the
+portal's 403 was the answer. Now, when the portal refuses the *plan* — 403
+with `upgrade_url` or "plan" in the body — and the user configured their own
+key, the same request is made on that key, exactly as it would be for a user
+who never signed in. This applies to `brave_web_search`, `brave_local_search`,
+`brave_answers`, their code-mode variants, `query_memory_natural`'s grounded
+search, and Web Scholar.
+
+The privacy boundary is otherwise unchanged: an outage (5xx), a quota (429,
+even though it also carries `upgrade_url`), an expired login (401), or a 403
+that is not a plan refusal (the MFA challenge) still never turns into a
+direct provider call with the original query. Without an own key the refusal
+propagates as before. Portal HTTP errors are now a typed `PortalHttpError`
+(same message) so the transport can tell these apart without parsing text.
+
+Nine tests pin the matrix in `tests/braveApiPlanRefusal.test.ts`; fail-before
+verified against the previous transport (the four own-key cases reject with
+`HTTP 403`, the five no-escape cases already passed).
 
 The docs had kept describing a client-side auto-scheduler (`Every 5 Minutes`,
 `Web Scholar: 🟢 Enabled (every 5m)`) that was retired in v18.0.0, and a

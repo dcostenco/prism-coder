@@ -30,6 +30,8 @@
  */
 
 import { BRAVE_API_KEY, BRAVE_ANSWERS_API_KEY } from "../config.js";
+import { debugLog } from "./logger.js";
+import { isPortalPlanRefusal } from "./portalError.js";
 import {
   SYNALUX_SEARCH_AVAILABLE,
   synaluxWebSearch,
@@ -48,6 +50,33 @@ const SYNALUX_OFFSET_UNSUPPORTED_ERROR =
 function requireBraveApiKey(): string {
   if (!BRAVE_API_KEY) throw new Error(BRAVE_API_KEY_MISSING_ERROR);
   return BRAVE_API_KEY;
+}
+
+/**
+ * Portal first. A configured Synalux account is a privacy boundary:
+ * provider credentials and query redaction stay portal-side, so an outage,
+ * a quota, or an expired login never turns into a direct provider call
+ * with the original query.
+ *
+ * The one exception is the portal's PLAN refusal (403 on a free plan). That
+ * account is not entitled to portal search at all, so a user who configured
+ * their own key gets it used — the same footing as a user who never signed
+ * in. Without an own key the refusal propagates unchanged.
+ */
+async function portalFirst<T>(
+  viaPortal: () => Promise<T>,
+  ownKey: string | undefined,
+  viaOwnKey: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await viaPortal();
+  } catch (err) {
+    if (ownKey && isPortalPlanRefusal(err)) {
+      debugLog("[braveApi] portal refused this plan; using the locally configured key instead");
+      return viaOwnKey();
+    }
+    throw err;
+  }
 }
 
 // ─── TypeScript Interfaces for Brave API Responses ────────────
@@ -124,13 +153,17 @@ export async function performBraveAnswers(
   query: string,
   model: string = "brave"
 ) {
-  // A configured Synalux account is a privacy boundary: provider
-  // credentials and redaction stay portal-side. Never escape to a direct
-  // provider with the original query when that portal request fails.
   if (SYNALUX_SEARCH_AVAILABLE) {
-    return synaluxBraveAnswers(query, model);
+    return portalFirst(
+      () => synaluxBraveAnswers(query, model),
+      BRAVE_ANSWERS_API_KEY,
+      () => braveAnswersDirect(query, model),
+    );
   }
+  return braveAnswersDirect(query, model);
+}
 
+async function braveAnswersDirect(query: string, model: string): Promise<string> {
   if (!BRAVE_ANSWERS_API_KEY) {
     throw new Error(BRAVE_ANSWERS_API_KEY_MISSING_ERROR);
   }
@@ -178,9 +211,21 @@ export async function performWebSearchRaw(
 ): Promise<string> {
   if (SYNALUX_SEARCH_AVAILABLE) {
     if (offset !== 0) throw new Error(SYNALUX_OFFSET_UNSUPPORTED_ERROR);
-    return synaluxWebSearchRaw(query, count);
+    return portalFirst(
+      () => synaluxWebSearchRaw(query, count),
+      BRAVE_API_KEY,
+      () => braveWebSearchRaw(query, count, offset),
+    );
   }
+  return braveWebSearchRaw(query, count, offset);
+}
 
+// Direct Brave web search on the locally configured key
+async function braveWebSearchRaw(
+  query: string,
+  count: number,
+  offset: number
+): Promise<string> {
   const braveApiKey = requireBraveApiKey();
   const url = new URL("https://api.search.brave.com/res/v1/web/search");
   url.searchParams.set("q", query);
@@ -214,10 +259,22 @@ export async function performWebSearch(
 ) {
   if (SYNALUX_SEARCH_AVAILABLE) {
     if (offset !== 0) throw new Error(SYNALUX_OFFSET_UNSUPPORTED_ERROR);
-    return synaluxWebSearch(query, count);
+    return portalFirst(
+      () => synaluxWebSearch(query, count),
+      BRAVE_API_KEY,
+      () => braveWebSearch(query, count, offset),
+    );
   }
+  return braveWebSearch(query, count, offset);
+}
 
-  const textData = await performWebSearchRaw(query, count, offset);
+// Direct Brave web search, formatted
+async function braveWebSearch(
+  query: string,
+  count: number,
+  offset: number
+): Promise<string> {
+  const textData = await braveWebSearchRaw(query, count, offset);
   const data = JSON.parse(textData) as BraveWeb;
 
   // Extract just web results
@@ -298,9 +355,20 @@ export async function performLocalSearchRaw(
   count: number = 5
 ): Promise<string> {
   if (SYNALUX_SEARCH_AVAILABLE) {
-    return synaluxLocalSearchRaw(query, count);
+    return portalFirst(
+      () => synaluxLocalSearchRaw(query, count),
+      BRAVE_API_KEY,
+      () => braveLocalSearchRaw(query, count),
+    );
   }
+  return braveLocalSearchRaw(query, count);
+}
 
+// Direct Brave local search on the locally configured key
+async function braveLocalSearchRaw(
+  query: string,
+  count: number
+): Promise<string> {
   const braveApiKey = requireBraveApiKey();
   // Initial search to get location IDs
   const webUrl = new URL("https://api.search.brave.com/res/v1/web/search");
@@ -332,7 +400,8 @@ export async function performLocalSearchRaw(
       .map((r) => r.id) || [];
 
   if (locationIds.length === 0) {
-    const fallback = await performWebSearch(query, count);
+    // Already on the direct path: stay on it rather than re-asking the portal.
+    const fallback = await braveWebSearch(query, count, 0);
     return JSON.stringify({
       source: "web_fallback",
       query,
@@ -374,10 +443,18 @@ export async function performLocalSearchRaw(
 // Local search API call with poi details
 export async function performLocalSearch(query: string, count: number = 5) {
   if (SYNALUX_SEARCH_AVAILABLE) {
-    return synaluxLocalSearch(query, count);
+    return portalFirst(
+      () => synaluxLocalSearch(query, count),
+      BRAVE_API_KEY,
+      () => braveLocalSearch(query, count),
+    );
   }
+  return braveLocalSearch(query, count);
+}
 
-  const rawData = await performLocalSearchRaw(query, count);
+// Direct Brave local search, formatted
+async function braveLocalSearch(query: string, count: number): Promise<string> {
+  const rawData = await braveLocalSearchRaw(query, count);
   const parsed = JSON.parse(rawData) as {
     source: "local" | "web_fallback";
     formattedText?: string;

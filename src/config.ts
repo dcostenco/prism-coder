@@ -250,7 +250,7 @@ export const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
 export const PRISM_SCHOLAR_ENABLED = process.env.PRISM_SCHOLAR_ENABLED === "true";
 
 // FIRECRAWL_API_KEY is currently unspent: Web Scholar scrapes with its own
-// local scraper, and since 20.19.0 discovery is selected by whether a web
+// local scraper, and discovery is now selected by whether a web
 // search is possible at all (portal credentials or BRAVE_API_KEY), not by the
 // presence of this key. Kept exported so an existing .env does not break.
 // The warning below is about the key Scholar actually needs.

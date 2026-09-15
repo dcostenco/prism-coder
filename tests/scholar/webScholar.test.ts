@@ -379,13 +379,14 @@ describe("Web Scholar — Discovery Provider Selection", () => {
   });
 
   /**
-   * The fallback must never become an escape hatch. A configured account is
-   * a privacy boundary (braveApi.ts): when the portal refuses, Scholar may
-   * use the free sources it was already on, but must not retry the same
-   * query against a direct provider — even when a local key is sitting
-   * right there. One call to the transport, no second.
+   * Scholar adds no attempt of its own. Whether the user's own key may
+   * answer a refusal is decided inside the transport (braveApi.ts
+   * portalFirst: yes on a plan refusal, never on an expired login or an
+   * outage). Here the login is expired, a local key is present, and the
+   * transport has said no: Scholar makes exactly one transport call and
+   * continues on the free sources.
    */
-  it("never retries a direct provider after a portal refusal, even with a local key present", async () => {
+  it("makes exactly one transport call on a refusal; the own-key decision belongs to the transport", async () => {
     const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
     const { searchYahooFree } = await import("../../src/scholar/freeSearch.js");
     (performWebSearchRaw as any).mockRejectedValueOnce(

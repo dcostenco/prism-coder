@@ -208,7 +208,7 @@ export async function runWebScholar(overrideTopic?: string, overrideProject?: st
     // and a user who set only BRAVE_API_KEY was demoted for want of a Firecrawl
     // key that nothing spends (scraping is always scrapeArticleLocal).
     //
-    // Google Custom Search used to take priority over both; removed in 20.19.0
+    // Google Custom Search used to take priority over both; now removed
     // because Google discontinues that API on 2027-01-01.
     const useWebSearch = SYNALUX_SEARCH_AVAILABLE || !!BRAVE_API_KEY;
 
@@ -243,11 +243,12 @@ export async function runWebScholar(overrideTopic?: string, overrideProject?: st
       } catch (err) {
         // The portal refuses web search for free plans (403) and for stale
         // credentials (401), and a direct Brave key can be bad or rate-limited.
-        // Before 20.19.0 a signed-in free account never reached the portal from
-        // here — the gate looked only for a local key — so it took the free
-        // academic path below. Fall back to exactly that path, and ONLY that
-        // path: a configured account is a privacy boundary (braveApi.ts), so
-        // never retry against a direct provider with the original query.
+        // Before the capability gate above, a signed-in free account never
+        // reached the portal from here — the gate looked only for a local key —
+        // so it took the free academic path below. Fall back to exactly that
+        // path. The transport (braveApi.ts portalFirst) has already applied the
+        // one permitted escape — the user's own key on a plan refusal — so
+        // Scholar adds no second attempt of its own.
         webSearchFailure = err instanceof Error ? err.message : String(err);
         console.error(`[WebScholar] Web search unavailable, continuing on free sources: ${webSearchFailure}`);
       }

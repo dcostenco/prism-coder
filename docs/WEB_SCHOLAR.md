@@ -40,14 +40,15 @@ all — not by whether this machine holds a key:
 | Neither | PubMed + ERIC + Semantic Scholar in parallel, then Yahoo if those return nothing | None needed |
 
 When both are available the portal wins: credentials and query redaction stay
-server-side, and the client never falls back to calling a provider directly with
-your original query.
+server-side. One exception: if the portal refuses your **plan** (a free
+account gets 403 "requires Standard plan or higher") and you configured your
+own `BRAVE_API_KEY`, that key is used — the same footing as a user who never
+signed in. An outage, a quota, or an expired login never turns into a direct
+provider call with your query.
 
-If the web search itself fails — the portal refuses a free plan (403) or an
-expired login (401), or a Brave key is rejected — the run continues on the free
-academic path and says so at the top of its report. It never retries a direct
-provider with your query: a configured account is a privacy boundary. A web
-search that succeeds with zero results ends the run with "No articles found". **Scraping is always the built-in local
+If the web search fails and no own key can answer it, the run continues on the
+free academic path and says so at the top of its report. A web search that
+succeeds with zero results ends the run with "No articles found". **Scraping is always the built-in local
 scraper** — Firecrawl is never called.
 
 Triggering:
@@ -74,7 +75,7 @@ Only the text-provider key is genuinely required:
 >
 > `GOOGLE_API_KEY` above is the **AI Studio** key used for synthesis. It is not
 > a search key. Prism had a separate Google Custom Search discovery path behind
-> `GOOGLE_SEARCH_API_KEY` + `GOOGLE_SEARCH_CX`; it was removed in 20.19.0
+> `GOOGLE_SEARCH_API_KEY` + `GOOGLE_SEARCH_CX`; it has been removed
 > because Google closed that API to new customers in 2025 and discontinues it
 > on 2027-01-01. Do not re-add it.
 

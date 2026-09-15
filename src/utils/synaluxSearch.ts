@@ -18,6 +18,7 @@
  */
 
 import { debugLog } from "./logger.js";
+import { PortalHttpError } from "./portalError.js";
 import { getSynaluxJwt, invalidateSynaluxJwt } from "./synaluxJwt.js";
 import {
   PRISM_SYNALUX_BASE_URL,
@@ -125,7 +126,9 @@ async function portalPost<T>(path: string, body: Record<string, unknown>, timeou
 
   if (!res.ok) {
     const text = await res.text().catch(() => "(no body)");
-    throw new Error(`[synaluxSearch] ${path} HTTP ${res.status}: ${text}`);
+    // Same message as before; the typed error lets braveApi.ts recognise a
+    // plan refusal without parsing the message.
+    throw new PortalHttpError(path, res.status, text);
   }
 
   return (await res.json()) as T;
