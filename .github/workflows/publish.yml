@@ -18,6 +18,22 @@ on:
 
 # Default-deny token; the publish job opts in to id-token below for
 # npm provenance attestation. contents:read is needed for checkout.
+# One run per ref. GitHub delivered TWO runs of every publish workflow for the
+# single v20.19.0 tag push (2026-09-15: same head SHA ffa76fa6, both attempt 1),
+# and the pair raced: each checked "is this version already on npm?" before
+# either had published, both decided to publish, and the loser died with
+#   npm error code E409
+#   409 Conflict - Cannot publish over previously staged version "20.19.0"
+# The publish itself was fine -- both packages went out exactly once -- but the
+# release still sent failed-publish emails. The already-published guard below
+# is the right idea; it just cannot work if its check and the publish it
+# protects are not serialized. Queue rather than cancel: cancelling a run
+# mid-publish is worse than making it wait, and the second run then sees the
+# first one's version and skips cleanly.
+concurrency:
+  group: publish-package-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 

@@ -25,6 +25,19 @@ on:
   # a listing that missed its tag gets caught up.
   workflow_dispatch:
 
+# One run per ref. GitHub delivered TWO runs of every publish workflow for the
+# single v20.19.0 tag push (2026-09-15: same head SHA ffa76fa6, both attempt 1).
+# Here both duplicates were merely wasteful rather than red — each sat through
+# the npm wait below for five minutes, and the second was absorbed by the
+# duplicate-version tolerance in the publish step. The npm workflows were not
+# so lucky: their two runs raced and the loser died on E409. Serializing costs
+# nothing and keeps a second run from burning ten minutes of wait to no end.
+# Queue rather than cancel: cancelling a run mid-publish is worse than making
+# it wait.
+concurrency:
+  group: registry-publish-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   id-token: write # GitHub OIDC login to the MCP registry
   contents: read
