@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 20.19.0 — 2026-09-15
 
 ### Paid users get the search they are paying for
 
