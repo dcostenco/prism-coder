@@ -42,9 +42,6 @@ const { mockConfig, mockStorage, mockFetch } = vi.hoisted(() => {
   const mockConfig = {
     BRAVE_API_KEY: "test-brave-key",
     FIRECRAWL_API_KEY: "test-firecrawl-key",
-    TAVILY_API_KEY: undefined,
-    GOOGLE_SEARCH_API_KEY: undefined,
-    GOOGLE_SEARCH_CX: undefined,
     SEMANTIC_SCHOLAR_API_KEY: undefined,
     PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN: 3,
     // This mock replaces config.js wholesale, so every named export the
@@ -215,8 +212,12 @@ describe("Web Scholar — Reentrancy Guard", () => {
   });
 
   /**
-   * Verifies the pipeline is skipped entirely when API keys are missing.
-   * This tests the fast-exit path before any external calls.
+   * Verifies nothing is saved when no discovery provider yields a URL.
+   *
+   * This is NOT a fast exit before external calls: with Brave's keys absent
+   * the run still walks the free academic path (PubMed + ERIC + Semantic
+   * Scholar, then Yahoo). Those are stubbed empty here, so there is nothing
+   * to scrape and nothing to save — and the lock is still released.
    */
   it("should skip when API keys are missing", async () => {
     mockConfig.BRAVE_API_KEY = "";
@@ -230,6 +231,48 @@ describe("Web Scholar — Reentrancy Guard", () => {
     mockConfig.BRAVE_API_KEY = "test-brave-key";
     mockConfig.FIRECRAWL_API_KEY = "test-firecrawl-key";
     await runWebScholar();
+    expect(mockStorage.saveLedger).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Provider selection, upper branch.
+   *
+   * WHY THIS MATTERS:
+   *   Google Custom Search used to be checked FIRST and silently overrode
+   *   Brave whenever GOOGLE_SEARCH_API_KEY + GOOGLE_SEARCH_CX were set.
+   *   Removing it (Google discontinues that API on 2027-01-01) collapsed a
+   *   three-branch selector to two. Nothing else asserts which provider a
+   *   run actually used, so an inverted condition there would be invisible:
+   *   every branch still produces a report, just from the wrong source.
+   */
+  it("uses Brave for discovery when the BRAVE and FIRECRAWL keys are set", async () => {
+    const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
+
+    await runWebScholar();
+
+    expect(performWebSearchRaw).toHaveBeenCalledTimes(1);
+    expect(mockStorage.saveLedger).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Provider selection, lower branch — pins the selector in both directions.
+   * With no Brave key the free path runs to completion and Brave is never
+   * called (calling it would throw on the missing key, and would bill a key
+   * the operator did not configure for Scholar).
+   */
+  it("uses the free path and never calls Brave when its keys are absent", async () => {
+    const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
+    const { searchYahooFree } = await import("../../src/scholar/freeSearch.js");
+    (searchYahooFree as any).mockResolvedValueOnce([
+      { url: "https://example.org/free-article" },
+    ]);
+
+    mockConfig.BRAVE_API_KEY = "";
+    mockConfig.FIRECRAWL_API_KEY = "";
+
+    await runWebScholar();
+
+    expect(performWebSearchRaw).not.toHaveBeenCalled();
     expect(mockStorage.saveLedger).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,6 +1,5 @@
 import {
-  BRAVE_API_KEY, FIRECRAWL_API_KEY, GOOGLE_SEARCH_API_KEY,
-  GOOGLE_SEARCH_CX, SEMANTIC_SCHOLAR_API_KEY,
+  BRAVE_API_KEY, FIRECRAWL_API_KEY, SEMANTIC_SCHOLAR_API_KEY,
   PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN, PRISM_USER_ID,
   PRISM_SCHOLAR_TOPICS, PRISM_ENABLE_HIVEMIND,
   PRISM_SCHOLAR_SCRAPE_BUDGET_MS,
@@ -13,7 +12,6 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, 
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { performWebSearchRaw } from "../utils/braveApi.js";
-import { performGoogleSearch } from "../utils/googleSearchApi.js";
 import { getTracer } from "../utils/telemetry.js";
 import { searchYahooFree, scrapeArticleLocal } from "./freeSearch.js";
 
@@ -202,9 +200,12 @@ export async function runWebScholar(overrideTopic?: string, overrideProject?: st
   const span = tracer.startSpan("background.web_scholar");
 
   try {
-    const useGoogle = !!(GOOGLE_SEARCH_API_KEY && GOOGLE_SEARCH_CX);
-    const useBraveFirecrawl = !useGoogle && !!(BRAVE_API_KEY && FIRECRAWL_API_KEY);
-    const useFreeFallback = !useGoogle && !useBraveFirecrawl;
+    // Discovery provider. Brave when its key (and the historical Firecrawl
+    // companion key) are present, otherwise the free academic path. Google
+    // Custom Search used to take priority here; it was removed in 20.19.0
+    // because Google closed that API to new customers in 2025 and
+    // discontinues it for everyone on 2027-01-01.
+    const useBraveFirecrawl = !!(BRAVE_API_KEY && FIRECRAWL_API_KEY);
 
     const topic = overrideTopic || await selectTopic();
     const project = overrideProject || SCHOLAR_PROJECT;
@@ -226,10 +227,7 @@ export async function runWebScholar(overrideTopic?: string, overrideProject?: st
     await hivemindHeartbeat(`Searching for: ${topic}`);
     let urls: string[] = [];
 
-    if (useGoogle) {
-      const googleResults = await performGoogleSearch(GOOGLE_SEARCH_API_KEY!, GOOGLE_SEARCH_CX!, topic, PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN);
-      urls = googleResults.map(r => r.url).filter(Boolean);
-    } else if (useBraveFirecrawl) {
+    if (useBraveFirecrawl) {
       const braveResponse = await performWebSearchRaw(topic, PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN);
       const braveData = JSON.parse(braveResponse);
       urls = (braveData.web?.results || []).map((r: any) => r.url).filter(Boolean);

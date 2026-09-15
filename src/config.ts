@@ -85,14 +85,6 @@ if (!BRAVE_ANSWERS_API_KEY && process.env.PRISM_DEBUG_LOGGING === "true") {
 // ─── Optional: Voyage AI Embeddings ──────────────────────────
 // Set embedding_provider=voyage to enable. Requires VOYAGE_API_KEY.
 export const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY; // embedding_provider=voyage
-// ─── Optional: Google Search (Scholar Pipeline Fallback) ──────
-// Used when Brave or Tavily keys are missing.
-// Requires: Google Custom Search API Key + Search Engine ID (CX).
-// Get yours at: https://developers.google.com/custom-search/v1/overview
-
-export const GOOGLE_SEARCH_API_KEY = process.env.GOOGLE_SEARCH_API_KEY;
-export const GOOGLE_SEARCH_CX = process.env.GOOGLE_SEARCH_CX;
-
 // ─── v2.0 / v12.1 / v13: Storage Backend Selection ──────────
 // Three backends are implemented:
 //   "local"    — SQLite, fully offline. Free-tier default.

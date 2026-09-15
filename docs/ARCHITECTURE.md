@@ -752,8 +752,7 @@ The `--storage` flag prevents split-brain when CLI env differs from MCP server c
 | `GOOGLE_API_KEY` | Gemini LLM + embeddings + paper analysis |
 | `VOYAGE_API_KEY` | Voyage AI embeddings (Anthropic-recommended) |
 | `BRAVE_ANSWERS_API_KEY` | Brave Answers AI-grounded tool |
-| `FIRECRAWL_API_KEY` | Web scraping for Scholar pipeline |
-| `TAVILY_API_KEY` | Alternative search for Scholar (replaces Brave + Firecrawl) |
+| `FIRECRAWL_API_KEY` | Companion key that, with `BRAVE_API_KEY`, selects Brave discovery for Scholar |
 
 ### 13.3 Storage
 
