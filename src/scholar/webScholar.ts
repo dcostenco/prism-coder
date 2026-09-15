@@ -1,5 +1,5 @@
 import {
-  BRAVE_API_KEY, FIRECRAWL_API_KEY, SEMANTIC_SCHOLAR_API_KEY,
+  BRAVE_API_KEY, SEMANTIC_SCHOLAR_API_KEY,
   PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN, PRISM_USER_ID,
   PRISM_SCHOLAR_TOPICS, PRISM_ENABLE_HIVEMIND,
   PRISM_SCHOLAR_SCRAPE_BUDGET_MS,
@@ -14,13 +14,10 @@ import { homedir } from "node:os";
 import { performWebSearchRaw } from "../utils/braveApi.js";
 import { getTracer } from "../utils/telemetry.js";
 import { searchYahooFree, scrapeArticleLocal } from "./freeSearch.js";
-
-interface FirecrawlScrapeResponse {
-  success: boolean;
-  data: {
-    markdown?: string;
-  };
-}
+// The same capability flag performWebSearchRaw itself branches on, imported
+// from the same module so the gate and the transport cannot disagree about
+// whether a web search is possible.
+import { SYNALUX_SEARCH_AVAILABLE } from "../utils/synaluxSearch.js";
 
 // ─── Hivemind Integration Helpers ────────────────────────────
 
@@ -200,12 +197,20 @@ export async function runWebScholar(overrideTopic?: string, overrideProject?: st
   const span = tracer.startSpan("background.web_scholar");
 
   try {
-    // Discovery provider. Brave when its key (and the historical Firecrawl
-    // companion key) are present, otherwise the free academic path. Google
-    // Custom Search used to take priority here; it was removed in 20.19.0
-    // because Google closed that API to new customers in 2025 and
-    // discontinues it for everyone on 2027-01-01.
-    const useBraveFirecrawl = !!(BRAVE_API_KEY && FIRECRAWL_API_KEY);
+    // Discovery provider: ask whether a web search is POSSIBLE, not whether
+    // this machine happens to hold a key. performWebSearchRaw serves portal
+    // users from Synalux-side credentials and everyone else from their own
+    // BRAVE_API_KEY, so either one makes web discovery available.
+    //
+    // This used to read `BRAVE_API_KEY && FIRECRAWL_API_KEY`, which was wrong
+    // twice over: a portal-configured user holding no local key was demoted to
+    // the free academic path even though the portal would have served them,
+    // and a user who set only BRAVE_API_KEY was demoted for want of a Firecrawl
+    // key that nothing spends (scraping is always scrapeArticleLocal).
+    //
+    // Google Custom Search used to take priority over both; removed in 20.19.0
+    // because Google discontinues that API on 2027-01-01.
+    const useWebSearch = SYNALUX_SEARCH_AVAILABLE || !!BRAVE_API_KEY;
 
     const topic = overrideTopic || await selectTopic();
     const project = overrideProject || SCHOLAR_PROJECT;
@@ -227,7 +232,7 @@ export async function runWebScholar(overrideTopic?: string, overrideProject?: st
     await hivemindHeartbeat(`Searching for: ${topic}`);
     let urls: string[] = [];
 
-    if (useBraveFirecrawl) {
+    if (useWebSearch) {
       const braveResponse = await performWebSearchRaw(topic, PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN);
       const braveData = JSON.parse(braveResponse);
       urls = (braveData.web?.results || []).map((r: any) => r.url).filter(Boolean);

@@ -406,7 +406,7 @@ return false;}
               firecrawlApiKey: {
                 type: "string",
                 title: "Firecrawl API Key",
-                description: "Optional: API key for Firecrawl (enables Web Scholar pipeline). Get one at https://www.firecrawl.dev/"
+                description: "Optional and currently unused: Web Scholar scrapes locally, and its discovery is selected by BRAVE_API_KEY or a Synalux portal login. Get one at https://www.firecrawl.dev/"
               },
               braveAnswersApiKey: {
                 type: "string",

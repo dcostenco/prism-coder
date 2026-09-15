@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Paid users get the search they are paying for
+
+Web Scholar chose its discovery source by asking whether **this machine held a
+key**, rather than whether a search was possible:
+
+```ts
+const useBraveFirecrawl = !!(BRAVE_API_KEY && FIRECRAWL_API_KEY);
+```
+
+`performWebSearchRaw` already serves portal users from Synalux-side credentials
+and everyone else from their own `BRAVE_API_KEY`. The gate never consulted that,
+so a **portal-configured user holding no local key was silently demoted to the
+free academic path** — paying for web search and getting the free-tier sources.
+A user who set only `BRAVE_API_KEY` was demoted too, for want of a Firecrawl key
+that nothing spends.
+
+The gate now asks the same question the transport answers:
+
+```ts
+const useWebSearch = SYNALUX_SEARCH_AVAILABLE || !!BRAVE_API_KEY;
+```
+
+Which credential is used remains the transport's decision — portal first, so
+credentials and query redaction stay server-side. `FIRECRAWL_API_KEY` is now
+unused everywhere (scraping has always been the local scraper); it stays
+exported so existing `.env` files do not break, and the config warning it drove
+— which claimed Scholar would "fall back to free search" without it — now names
+the credentials Scholar actually needs.
+
+Five tests pin the matrix: portal-only, local-key-only, Brave-without-Firecrawl,
+both, and neither. Fail-before verified — the old gate fails the portal-only and
+Brave-alone cases with "expected to be called 1 times, but got 0 times".
+
 ### Web Scholar drops the search API Google is switching off
 
 - Removes the Google Custom Search discovery path (`GOOGLE_SEARCH_API_KEY` +

@@ -42,6 +42,9 @@ const { mockConfig, mockStorage, mockFetch } = vi.hoisted(() => {
   const mockConfig = {
     BRAVE_API_KEY: "test-brave-key",
     FIRECRAWL_API_KEY: "test-firecrawl-key",
+    // Portal ("paid") credentials. webScholar reads this through
+    // synaluxSearch.js, which is mocked below to track this flag live.
+    SYNALUX_SEARCH_AVAILABLE: false,
     SEMANTIC_SCHOLAR_API_KEY: undefined,
     PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN: 3,
     // This mock replaces config.js wholesale, so every named export the
@@ -92,6 +95,15 @@ vi.mock("../../src/scholar/freeSearch.js", () => ({
 
 vi.mock("../../src/storage/index.js", () => ({
   getStorage: vi.fn().mockResolvedValue(mockStorage),
+}));
+
+// SYNALUX_SEARCH_AVAILABLE is a module-load const in the real module, so it
+// cannot be flipped per test. A getter over the shared mock config lets each
+// case choose whether portal credentials are present.
+vi.mock("../../src/utils/synaluxSearch.js", () => ({
+  get SYNALUX_SEARCH_AVAILABLE() {
+    return mockConfig.SYNALUX_SEARCH_AVAILABLE;
+  },
 }));
 
 vi.mock("../../src/utils/braveApi.js", () => ({
@@ -234,19 +246,58 @@ describe("Web Scholar — Reentrancy Guard", () => {
     expect(mockStorage.saveLedger).toHaveBeenCalledTimes(1);
   });
 
-  /**
-   * Provider selection, upper branch.
-   *
-   * WHY THIS MATTERS:
-   *   Google Custom Search used to be checked FIRST and silently overrode
-   *   Brave whenever GOOGLE_SEARCH_API_KEY + GOOGLE_SEARCH_CX were set.
-   *   Removing it (Google discontinues that API on 2027-01-01) collapsed a
-   *   three-branch selector to two. Nothing else asserts which provider a
-   *   run actually used, so an inverted condition there would be invisible:
-   *   every branch still produces a report, just from the wrong source.
-   */
-  it("uses Brave for discovery when the BRAVE and FIRECRAWL keys are set", async () => {
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 1b. DISCOVERY PROVIDER SELECTION (tier / credential matrix)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Who gets web discovery, and off whose credentials.
+ *
+ * performWebSearchRaw serves portal users from Synalux-side credentials and
+ * everyone else from their own BRAVE_API_KEY. Scholar must therefore gate on
+ * whether a search is POSSIBLE, not on whether this machine holds a key.
+ *
+ * WHY THIS MATTERS:
+ *   The gate used to read `BRAVE_API_KEY && FIRECRAWL_API_KEY`, which was
+ *   wrong twice. A portal-configured user holding no local key was silently
+ *   demoted to the free academic path — paying for search and getting the
+ *   free-tier experience. And a user who set only BRAVE_API_KEY was demoted
+ *   for want of a Firecrawl key that nothing spends, since scraping is always
+ *   the local scraper.
+ *
+ *   Nothing else in the suite asserts WHICH source a run used: every branch
+ *   still produces a report, so a wrong gate is invisible without these.
+ */
+describe("Web Scholar — Discovery Provider Selection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConfig.BRAVE_API_KEY = "test-brave-key";
+    mockConfig.FIRECRAWL_API_KEY = "test-firecrawl-key";
+    mockConfig.SYNALUX_SEARCH_AVAILABLE = false;
+    mockConfig.PRISM_SCHOLAR_TOPICS = ["ai", "agents"];
+    mockConfig.PRISM_ENABLE_HIVEMIND = false;
+  });
+
+  /** Paid tier: portal credentials, no local keys at all. THE REGRESSION. */
+  it("uses web search for a portal user holding no local keys", async () => {
     const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
+    mockConfig.SYNALUX_SEARCH_AVAILABLE = true;
+    mockConfig.BRAVE_API_KEY = "";
+    mockConfig.FIRECRAWL_API_KEY = "";
+
+    await runWebScholar();
+
+    // Before the fix this fell through to the academic path: 0 calls.
+    expect(performWebSearchRaw).toHaveBeenCalledTimes(1);
+    expect(mockStorage.saveLedger).toHaveBeenCalledTimes(1);
+  });
+
+  /** Free tier, own key: the user's BRAVE_API_KEY is what search runs on. */
+  it("uses web search for a non-portal user who supplied their own Brave key", async () => {
+    const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
+    mockConfig.SYNALUX_SEARCH_AVAILABLE = false;
 
     await runWebScholar();
 
@@ -254,19 +305,37 @@ describe("Web Scholar — Reentrancy Guard", () => {
     expect(mockStorage.saveLedger).toHaveBeenCalledTimes(1);
   });
 
-  /**
-   * Provider selection, lower branch — pins the selector in both directions.
-   * With no Brave key the free path runs to completion and Brave is never
-   * called (calling it would throw on the missing key, and would bill a key
-   * the operator did not configure for Scholar).
-   */
-  it("uses the free path and never calls Brave when its keys are absent", async () => {
+  /** A local Brave key alone is enough — Firecrawl gates nothing. */
+  it("uses web search with BRAVE_API_KEY alone, with no Firecrawl key", async () => {
+    const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
+    mockConfig.SYNALUX_SEARCH_AVAILABLE = false;
+    mockConfig.FIRECRAWL_API_KEY = "";
+
+    await runWebScholar();
+
+    expect(performWebSearchRaw).toHaveBeenCalledTimes(1);
+  });
+
+  /** Both available: still one search. Which credential wins is the
+   *  transport's decision (portal-first), deliberately not re-made here. */
+  it("uses web search when both portal and local credentials are present", async () => {
+    const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
+    mockConfig.SYNALUX_SEARCH_AVAILABLE = true;
+
+    await runWebScholar();
+
+    expect(performWebSearchRaw).toHaveBeenCalledTimes(1);
+  });
+
+  /** No credentials anywhere: the free academic path, and Brave is never
+   *  called — calling it would throw on the missing key. */
+  it("uses the free path and never calls Brave when no credentials exist", async () => {
     const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
     const { searchYahooFree } = await import("../../src/scholar/freeSearch.js");
     (searchYahooFree as any).mockResolvedValueOnce([
       { url: "https://example.org/free-article" },
     ]);
-
+    mockConfig.SYNALUX_SEARCH_AVAILABLE = false;
     mockConfig.BRAVE_API_KEY = "";
     mockConfig.FIRECRAWL_API_KEY = "";
 

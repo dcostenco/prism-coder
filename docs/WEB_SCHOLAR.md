@@ -30,17 +30,22 @@ Web Scholar runs as an autonomous pipeline:
 Topics → Discovery → Local Scrape → LLM Synthesis → Ledger Injection → Telepathy Broadcast
 ```
 
-**Discovery** picks exactly one source, by which keys are set:
+**Discovery** picks exactly one source, by whether a web search is possible at
+all — not by whether this machine holds a key:
 
-| Condition | Source |
-|---|---|
-| `BRAVE_API_KEY` **and** `FIRECRAWL_API_KEY` both set | Brave Search |
-| otherwise | PubMed + ERIC + Semantic Scholar in parallel, then Yahoo if those return nothing |
+| Condition | Source | Whose credentials |
+|---|---|---|
+| Signed in to the Synalux portal | Web search | Synalux, server-side |
+| `BRAVE_API_KEY` set locally | Web search | Yours |
+| Neither | PubMed + ERIC + Semantic Scholar in parallel, then Yahoo if those return nothing | None needed |
+
+When both are available the portal wins: credentials and query redaction stay
+server-side, and the client never falls back to calling a provider directly with
+your original query.
 
 There is no cross-provider failover: if the selected source returns no URLs the
 run ends with "No articles found". **Scraping is always the built-in local
-scraper** — Firecrawl is never called; its key only acts as a companion flag
-that selects the Brave branch.
+scraper** — Firecrawl is never called.
 
 Triggering:
 1. **Manual** — the `scholar_research` MCP tool, or the Dashboard "Scholar (Run)" button. This is the only local mode.
@@ -55,13 +60,12 @@ Only the text-provider key is genuinely required:
 | # | Key | Provider | Purpose | Required | Get It |
 |---|-----|----------|---------|----------|--------|
 | 1 | A text provider key | Google AI Studio, OpenAI, or Anthropic | LLM synthesis | ✅ Yes | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| 2 | `BRAVE_API_KEY` | Brave Search | Selects Brave for discovery | ❌ No | [brave.com/search/api](https://brave.com/search/api/) |
-| 3 | `FIRECRAWL_API_KEY` | Firecrawl | Companion flag for the Brave branch — **not used for scraping** | ❌ No | [firecrawl.dev](https://www.firecrawl.dev/) |
+| 2 | `BRAVE_API_KEY` | Brave Search | Web discovery on your own key. Not needed if you are signed in to the Synalux portal, which supplies search server-side | ❌ No | [brave.com/search/api](https://brave.com/search/api/) |
+| 3 | `FIRECRAWL_API_KEY` | Firecrawl | **Currently unused** — kept so existing `.env` files do not break | ❌ No | [firecrawl.dev](https://www.firecrawl.dev/) |
 
 > [!IMPORTANT]
-> Without any search key the pipeline still runs, using the free academic path.
-> Brave requires **both** `BRAVE_API_KEY` and `FIRECRAWL_API_KEY`: setting only
-> one silently leaves you on the free path.
+> Without any search credentials the pipeline still runs, using the free
+> academic path.
 > The text provider can be Gemini (`GOOGLE_API_KEY`), OpenAI (`OPENAI_API_KEY`),
 > or Anthropic (`ANTHROPIC_API_KEY`).
 >
@@ -131,8 +135,8 @@ Web Scholar: 🟢 Enabled (every 5m)
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | Text provider key | ✅ Yes | — | `GOOGLE_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`. Powers LLM synthesis. |
-| `BRAVE_API_KEY` | ❌ No | — | Brave Search Pro API key. With `FIRECRAWL_API_KEY`, selects Brave for discovery; otherwise the free academic path is used. |
-| `FIRECRAWL_API_KEY` | ❌ No | — | Companion flag for the Brave branch. Scraping always uses the built-in local scraper, so this key is never spent. |
+| `BRAVE_API_KEY` | ❌ No | — | Brave Search Pro API key. Enables web discovery on your own key; unnecessary when signed in to the Synalux portal. Without either, the free academic path is used. |
+| `FIRECRAWL_API_KEY` | ❌ No | — | Currently unused. Scraping always uses the built-in local scraper, and discovery no longer consults this key. |
 
 ### Scholar Configuration
 

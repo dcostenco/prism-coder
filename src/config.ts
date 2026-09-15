@@ -248,8 +248,13 @@ export const PRISM_SCHEDULER_INTERVAL_MS = parseInt(
 export const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
 export const PRISM_SCHOLAR_ENABLED = process.env.PRISM_SCHOLAR_ENABLED === "true";
 
-if (PRISM_SCHOLAR_ENABLED && !FIRECRAWL_API_KEY) {
-  console.error("Warning: FIRECRAWL_API_KEY not set. Web Scholar will fall back to free search.");
+// FIRECRAWL_API_KEY is currently unspent: Web Scholar scrapes with its own
+// local scraper, and since 20.19.0 discovery is selected by whether a web
+// search is possible at all (portal credentials or BRAVE_API_KEY), not by the
+// presence of this key. Kept exported so an existing .env does not break.
+// The warning below is about the key Scholar actually needs.
+if (PRISM_SCHOLAR_ENABLED && !BRAVE_API_KEY && !SYNALUX_CONFIGURED) {
+  console.error("Warning: no web search configured (BRAVE_API_KEY or a Synalux portal login). Web Scholar will use the free academic sources.");
 }
 export const PRISM_SCHOLAR_INTERVAL_MS = parseInt(
   process.env.PRISM_SCHOLAR_INTERVAL_MS || "0", 10  // Default manual-only
