@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Web Scholar drops the search API Google is switching off
+
+- Removes the Google Custom Search discovery path (`GOOGLE_SEARCH_API_KEY` +
+  `GOOGLE_SEARCH_CX`). Google closed that API to new customers in 2025 and
+  discontinues it for existing customers on 2027-01-01, and its recommended
+  successor — Vertex AI Search — is site search over up to 50 domains, not full
+  web search. The branch was already unreachable for anyone without a legacy
+  key.
+- **Behaviour change:** a run that set both Google variables now uses Brave, or
+  the free academic path when Brave is unconfigured. The path was opt-in and
+  undocumented; nothing else moves.
+- Removes the Tavily remnants in `.env.example` and `docs/ARCHITECTURE.md`. The
+  Tavily integration itself was deleted long ago (`PROVENANCE.md`), but the docs
+  still advertised it as a Brave+Firecrawl replacement.
+
+### Web Scholar documentation now matches the code
+
+`docs/WEB_SCHOLAR.md` carried three claims the code contradicts:
+
+- *"All three keys are required; if any are missing the pipeline fails silently
+  and the dashboard shows Disabled."* It does not. Missing search keys select
+  the free academic path (PubMed + ERIC + Semantic Scholar, then Yahoo), which
+  needs no key at all. Only a text-provider key is genuinely required.
+- *"Brave Search → Firecrawl Scrape."* Firecrawl is never called; scraping is
+  always the built-in local scraper. `FIRECRAWL_API_KEY` acts only as a
+  companion flag that selects the Brave branch — so setting `BRAVE_API_KEY`
+  alone silently leaves you on the free path, which is now documented.
+- *"Scheduled — runs automatically at a configurable interval."* Not locally:
+  the client-side scheduler was retired in v18.0.0 and `startScholarScheduler()`
+  has no caller, so `PRISM_SCHOLAR_INTERVAL_MS` does nothing on a local install.
+  Scheduled runs happen server-side via portal cron.
+
+Also documents that discovery has no cross-provider failover, and that
+`GOOGLE_API_KEY` is the AI Studio synthesis key rather than a search key.
+
 ## 20.18.2 — 2026-09-14
 
 ### Regenerable junk no longer freezes a skill out of sync

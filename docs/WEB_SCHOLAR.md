@@ -2,7 +2,7 @@
 
 > **Version:** 5.4.0+
 > **Status:** Production Ready
-> **Requires:** Brave API Key, Google API Key, Firecrawl API Key
+> **Requires:** a text-provider key for synthesis. Search keys are optional — without them Scholar runs on the free academic path.
 
 The **Autonomous Web Scholar** is Prism's background research pipeline that automatically discovers, scrapes, synthesizes, and injects knowledge from the web into your agent's memory — without manual intervention.
 
@@ -27,27 +27,49 @@ The **Autonomous Web Scholar** is Prism's background research pipeline that auto
 Web Scholar runs as an autonomous pipeline:
 
 ```
-Topics → Brave Search → Firecrawl Scrape → LLM Synthesis → Ledger Injection → Telepathy Broadcast
+Topics → Discovery → Local Scrape → LLM Synthesis → Ledger Injection → Telepathy Broadcast
 ```
 
-It supports two modes:
-1. **Scheduled** — Runs automatically at a configurable interval (e.g., every 5 minutes)
-2. **Manual** — Triggered on-demand via the Dashboard "Scholar (Run)" button
+**Discovery** picks exactly one source, by which keys are set:
+
+| Condition | Source |
+|---|---|
+| `BRAVE_API_KEY` **and** `FIRECRAWL_API_KEY` both set | Brave Search |
+| otherwise | PubMed + ERIC + Semantic Scholar in parallel, then Yahoo if those return nothing |
+
+There is no cross-provider failover: if the selected source returns no URLs the
+run ends with "No articles found". **Scraping is always the built-in local
+scraper** — Firecrawl is never called; its key only acts as a companion flag
+that selects the Brave branch.
+
+Triggering:
+1. **Manual** — the `scholar_research` MCP tool, or the Dashboard "Scholar (Run)" button. This is the only local mode.
+2. **Scheduled** — server-side only, via portal cron (`/api/v1/cron/scholar`, every 6h). The client-side auto-scheduler was removed in v18.0.0 after parallel MCP instances produced 5,293 garbage entries; `startScholarScheduler()` still exists in `src/backgroundScheduler.ts` but nothing calls it, so `PRISM_SCHOLAR_INTERVAL_MS` has no effect on a local install.
 
 ---
 
 ## Prerequisites
 
-You need **three API keys** to enable Web Scholar:
+Only the text-provider key is genuinely required:
 
-| # | Key | Provider | Purpose | Get It |
-|---|-----|----------|---------|--------|
-| 1 | `BRAVE_API_KEY` | Brave Search | Discovers relevant web articles | [brave.com/search/api](https://brave.com/search/api/) |
-| 2 | A text provider key | Google AI Studio, OpenAI, or Anthropic | LLM synthesis | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| 3 | `FIRECRAWL_API_KEY` | Firecrawl | Scrapes and extracts web content | [firecrawl.dev](https://www.firecrawl.dev/) |
+| # | Key | Provider | Purpose | Required | Get It |
+|---|-----|----------|---------|----------|--------|
+| 1 | A text provider key | Google AI Studio, OpenAI, or Anthropic | LLM synthesis | ✅ Yes | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| 2 | `BRAVE_API_KEY` | Brave Search | Selects Brave for discovery | ❌ No | [brave.com/search/api](https://brave.com/search/api/) |
+| 3 | `FIRECRAWL_API_KEY` | Firecrawl | Companion flag for the Brave branch — **not used for scraping** | ❌ No | [firecrawl.dev](https://www.firecrawl.dev/) |
 
 > [!IMPORTANT]
-> All three are **required**. If any are missing, the Scholar pipeline will fail silently and the dashboard will show "🔴 Disabled". The text provider can be Gemini (`GOOGLE_API_KEY`), OpenAI (`OPENAI_API_KEY`), or Anthropic (`ANTHROPIC_API_KEY`).
+> Without any search key the pipeline still runs, using the free academic path.
+> Brave requires **both** `BRAVE_API_KEY` and `FIRECRAWL_API_KEY`: setting only
+> one silently leaves you on the free path.
+> The text provider can be Gemini (`GOOGLE_API_KEY`), OpenAI (`OPENAI_API_KEY`),
+> or Anthropic (`ANTHROPIC_API_KEY`).
+>
+> `GOOGLE_API_KEY` above is the **AI Studio** key used for synthesis. It is not
+> a search key. Prism had a separate Google Custom Search discovery path behind
+> `GOOGLE_SEARCH_API_KEY` + `GOOGLE_SEARCH_CX`; it was removed in 20.19.0
+> because Google closed that API to new customers in 2025 and discontinues it
+> on 2027-01-01. Do not re-add it.
 
 ---
 
@@ -108,16 +130,16 @@ Web Scholar: 🟢 Enabled (every 5m)
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `BRAVE_API_KEY` | ✅ Yes | — | Brave Search Pro API key. Powers topic discovery. |
 | Text provider key | ✅ Yes | — | `GOOGLE_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`. Powers LLM synthesis. |
-| `FIRECRAWL_API_KEY` | ✅ Yes | — | Firecrawl API key. Powers web page scraping and content extraction. |
+| `BRAVE_API_KEY` | ❌ No | — | Brave Search Pro API key. With `FIRECRAWL_API_KEY`, selects Brave for discovery; otherwise the free academic path is used. |
+| `FIRECRAWL_API_KEY` | ❌ No | — | Companion flag for the Brave branch. Scraping always uses the built-in local scraper, so this key is never spent. |
 
 ### Scholar Configuration
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `PRISM_SCHOLAR_ENABLED` | ❌ No | `false` | Set to `true` to enable the Scholar pipeline. |
-| `PRISM_SCHOLAR_INTERVAL_MS` | ❌ No | `0` (manual only) | Auto-run interval in milliseconds. Set `300000` for every 5 minutes, `600000` for 10 minutes, etc. Set `0` for manual trigger only. |
+| `PRISM_SCHOLAR_INTERVAL_MS` | ❌ No | `0` | **No effect on a local install** — the client-side scheduler that read it was retired in v18.0.0 and `startScholarScheduler()` has no caller. Local runs are manual; scheduled runs happen server-side via portal cron. |
 | `PRISM_SCHOLAR_TOPICS` | ❌ No | `ai,agents` | Comma-separated list of research topics. Example: `ai,agents,security,performance` |
 | `PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN` | ❌ No | `3` | Maximum articles to process per research sweep. Controls API costs. |
 
@@ -160,8 +182,8 @@ This button works **regardless** of whether automatic scheduling is enabled — 
 
 ```mermaid
 flowchart TD
-    A["🎯 Topic Selection<br/><i>configurable, task-aware</i>"] --> B["🔍 Brave Search<br/><i>Pro API</i>"]
-    B --> C["📄 Firecrawl<br/><i>Scrape API, 15K cap</i>"]
+    A["🎯 Topic Selection<br/><i>configurable, task-aware</i>"] --> B["🔍 Discovery<br/><i>Brave, or free academic</i>"]
+    B --> C["📄 Local Scraper<br/><i>built-in, 15K cap</i>"]
     C --> D["🧠 Gemini LLM<br/><i>2.5 Flash</i>"]
     D --> E["💾 Ledger Inject<br/><i>+ Telepathy broadcast</i>"]
 

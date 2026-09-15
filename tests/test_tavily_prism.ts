@@ -2,7 +2,11 @@ import { runWebScholar } from '../src/scholar/webScholar.js';
 import { debugLog, sanitizeForLog } from '../src/utils/logger.js';
 
 async function testPrismScholar() {
-  console.log("🚀 Testing Prism Scholar Pipeline with Tavily...");
+  // Manual smoke script — not picked up by vitest (include: tests/**/*.test.ts).
+  // Makes live network calls. The Tavily integration this was written for was
+  // deleted (see PROVENANCE.md); it now exercises whichever discovery branch
+  // your keys select.
+  console.log("🚀 Testing Prism Scholar Pipeline...");
   
   const topic = "Neurological basis of tactile defensiveness in pediatric ASD";
   
