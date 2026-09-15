@@ -287,7 +287,7 @@ export const SCHOLAR_RESEARCH_TOOL: Tool = {
   name: "scholar_research",
   description:
     "Triggers an autonomous research pipeline on a specific topic. " +
-    "Uses Brave/Firecrawl to discover scientific papers and journals, " +
+    "Discovers scientific papers and journals with web search (Synalux portal or your BRAVE_API_KEY) or free academic sources, " +
     "extracts their content, synthesizes a comprehensive markdown report, " +
     "and saves the result to the Mind Palace ledger. " +
     "Best for deep clinical research, literature reviews, and evidence-based practice updates.",

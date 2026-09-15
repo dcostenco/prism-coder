@@ -534,7 +534,8 @@ Results are accumulated into a `SchedulerSweepResult` and served to the dashboar
 Autonomous research pipeline:
 
 ```
-Pick random topic → Brave Search → Firecrawl scrape
+Pick topic → web search (Synalux portal or own BRAVE_API_KEY) or free academic
+discovery (PubMed + ERIC + Semantic Scholar, then Yahoo) → local scrape
 → Trim to 15K chars → LLM synthesis → Save to ledger (importance: 7)
 ```
 

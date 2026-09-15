@@ -231,12 +231,28 @@ export async function runWebScholar(overrideTopic?: string, overrideProject?: st
 
     await hivemindHeartbeat(`Searching for: ${topic}`);
     let urls: string[] = [];
+    // Set when web search was selected but the request itself failed. The run
+    // then continues on the free path and says so at the top of its report.
+    let webSearchFailure: string | null = null;
 
     if (useWebSearch) {
-      const braveResponse = await performWebSearchRaw(topic, PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN);
-      const braveData = JSON.parse(braveResponse);
-      urls = (braveData.web?.results || []).map((r: any) => r.url).filter(Boolean);
-    } else {
+      try {
+        const braveResponse = await performWebSearchRaw(topic, PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN);
+        const braveData = JSON.parse(braveResponse);
+        urls = (braveData.web?.results || []).map((r: any) => r.url).filter(Boolean);
+      } catch (err) {
+        // The portal refuses web search for free plans (403) and for stale
+        // credentials (401), and a direct Brave key can be bad or rate-limited.
+        // Before 20.19.0 a signed-in free account never reached the portal from
+        // here — the gate looked only for a local key — so it took the free
+        // academic path below. Fall back to exactly that path, and ONLY that
+        // path: a configured account is a privacy boundary (braveApi.ts), so
+        // never retry against a direct provider with the original query.
+        webSearchFailure = err instanceof Error ? err.message : String(err);
+        console.error(`[WebScholar] Web search unavailable, continuing on free sources: ${webSearchFailure}`);
+      }
+    }
+    if (!useWebSearch || webSearchFailure !== null) {
       // Parallel Academic Discovery (PubMed + ERIC + Semantic Scholar)
       const academicCount = Math.ceil(PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN / 2);
       const academicResults = await Promise.all([
@@ -315,6 +331,12 @@ export async function runWebScholar(overrideTopic?: string, overrideProject?: st
     });
 
     await hivemindBroadcast(topic, scrapedTexts.length);
+    // The ledger keeps the clean report; the caller (tool result, dashboard)
+    // is told when the sources were not the ones its credentials implied, so
+    // a paid account's portal outage is never a silent downgrade.
+    if (webSearchFailure !== null) {
+      return `Note: web search was unavailable (${webSearchFailure}); this report used the free academic sources.\n\n${summary}`;
+    }
     return summary;
 
   } catch (err) {

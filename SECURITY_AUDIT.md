@@ -28,7 +28,7 @@ A comprehensive security audit of the Prism Coder server identified 83 findings 
 | C-08 | `src/verification/gatekeeper.ts` | Gatekeeper bypass via crafted tool name containing path separator |
 | C-09 | `src/utils/sanitizer.ts` | Sanitizer did not strip embedded null bytes or Unicode control chars |
 | C-10 | `src/utils/braveApi.ts` | SSRF via unvalidated URL parameter passed to Brave search proxy |
-| C-11 | `src/utils/googleSearchApi.ts` | SSRF via unvalidated URL parameter passed to Google search proxy |
+| C-11 | `src/utils/googleSearchApi.ts` (file removed after 20.18.2 — Google Custom Search is being discontinued) | SSRF via unvalidated URL parameter passed to Google search proxy |
 | C-12 | `src/utils/backup.ts` | Backup path allowed writing outside designated backup directory |
 | C-13 | `src/sync/encryptedSync.ts` | Encryption key derived with insufficient iterations (1,000 PBKDF2) |
 | C-14 | `src/darkfactory/runner.ts` | Darkfactory runner executed shell commands from untrusted input |

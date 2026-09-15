@@ -243,7 +243,8 @@ export const PRISM_SCHEDULER_INTERVAL_MS = parseInt(
 );
 
 // ─── v5.4: Autonomous Web Scholar ─────────────────────────────
-// Background LLM research pipeline powered by Brave Search + Firecrawl.
+// Background LLM research pipeline: web search or free academic discovery,
+// local scrape, LLM synthesis.
 
 export const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
 export const PRISM_SCHOLAR_ENABLED = process.env.PRISM_SCHOLAR_ENABLED === "true";

@@ -22,11 +22,12 @@
  *
  * ISOLATION:
  *   We test using mocked storage and config to avoid real API calls
- *   to Brave Search and Firecrawl. The core logic (topic selection,
- *   reentrancy) is pure business logic that doesn't need network.
+ *   to Brave Search, the portal and the academic sources. The core logic
+ *   (topic selection, reentrancy) is pure business logic that doesn't need
+ *   network.
  *
  * ARCHITECTURE NOTE:
- *   runWebScholar() is integration-heavy (Brave → Firecrawl → LLM → DB),
+ *   runWebScholar() is integration-heavy (search → local scrape → LLM → DB),
  *   so we mock at the module boundary. selectTopic() and the reentrancy
  *   guard are unit-tested directly via module internals.
  * ═══════════════════════════════════════════════════════════════════
@@ -137,7 +138,7 @@ vi.mock("../../src/utils/logger.js", () => ({
   debugLog: vi.fn(),
 }));
 
-// Stub global fetch for Firecrawl
+// Stub global fetch for the academic discovery calls
 vi.stubGlobal("fetch", mockFetch);
 
 // ─── Import after mocks ────────────────────────────────────────
@@ -206,16 +207,16 @@ describe("Web Scholar — Reentrancy Guard", () => {
    * all future Scholar runs until process restart.
    */
   it("should release the lock on pipeline failure", async () => {
-    // Make the first run crash
-    const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
-    (performWebSearchRaw as any)
-      .mockRejectedValueOnce(new Error("Brave API timeout"))
-      .mockResolvedValueOnce(JSON.stringify({
-        web: { results: [{ url: "https://example.com/recovery" }] }
-      }));
+    // Make the first run crash. The crash must come from a stage that still
+    // propagates: a failing web search no longer throws out of the pipeline
+    // (it degrades to the free sources), so a synthesis failure is used here
+    // to keep exercising the finally{} release path.
+    const { getLLMProvider } = await import("../../src/utils/llm/factory.js");
+    (getLLMProvider as any)().generateText.mockRejectedValueOnce(new Error("LLM provider timeout"));
 
     // First run should fail
-    await runWebScholar();
+    const failed = await runWebScholar();
+    expect(failed).toMatch(/^Error:/);
     expect(mockStorage.saveLedger).not.toHaveBeenCalled();
 
     // Second run should succeed (lock was released in finally{})
@@ -343,6 +344,80 @@ describe("Web Scholar — Discovery Provider Selection", () => {
 
     expect(performWebSearchRaw).not.toHaveBeenCalled();
     expect(mockStorage.saveLedger).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * THE REGRESSION the capability gate would otherwise introduce.
+   *
+   * SYNALUX_SEARCH_AVAILABLE is true for every `prism connect` login, free
+   * plans included, and the portal answers a free plan's search with
+   * 403 "Cloud Search requires Standard plan or higher". Before the gate
+   * change such an account never reached the portal from Scholar — it took
+   * the free academic path and got results. Routing it to web search and
+   * letting the 403 end the run would turn a working free tier into
+   * `Error: ...` with no articles.
+   */
+  it("continues on the free path when the portal refuses web search, and says so", async () => {
+    const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
+    const { searchYahooFree } = await import("../../src/scholar/freeSearch.js");
+    (performWebSearchRaw as any).mockRejectedValueOnce(
+      new Error("[synaluxSearch] /api/v1/prism/search HTTP 403: Cloud Search requires Standard plan or higher."),
+    );
+    (searchYahooFree as any).mockResolvedValueOnce([
+      { url: "https://example.org/free-article" },
+    ]);
+    mockConfig.SYNALUX_SEARCH_AVAILABLE = true;
+    mockConfig.BRAVE_API_KEY = "";
+
+    const result = await runWebScholar();
+
+    expect(performWebSearchRaw).toHaveBeenCalledTimes(1);
+    expect(mockStorage.saveLedger).toHaveBeenCalledTimes(1);
+    expect(result).toContain("web search was unavailable");
+    expect(result).toContain("HTTP 403");
+    expect(result).not.toMatch(/^Error:/);
+  });
+
+  /**
+   * The fallback must never become an escape hatch. A configured account is
+   * a privacy boundary (braveApi.ts): when the portal refuses, Scholar may
+   * use the free sources it was already on, but must not retry the same
+   * query against a direct provider — even when a local key is sitting
+   * right there. One call to the transport, no second.
+   */
+  it("never retries a direct provider after a portal refusal, even with a local key present", async () => {
+    const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
+    const { searchYahooFree } = await import("../../src/scholar/freeSearch.js");
+    (performWebSearchRaw as any).mockRejectedValueOnce(
+      new Error("[synaluxSearch] /api/v1/prism/search HTTP 401: JWT re-exchange failed"),
+    );
+    (searchYahooFree as any).mockResolvedValueOnce([
+      { url: "https://example.org/free-article" },
+    ]);
+    mockConfig.SYNALUX_SEARCH_AVAILABLE = true;
+    mockConfig.BRAVE_API_KEY = "test-brave-key";
+
+    const result = await runWebScholar();
+
+    expect(performWebSearchRaw).toHaveBeenCalledTimes(1);
+    expect(mockStorage.saveLedger).toHaveBeenCalledTimes(1);
+    expect(result).toContain("web search was unavailable");
+  });
+
+  /** The ledger gets the clean report; only the caller sees the note. */
+  it("keeps the fallback note out of the stored ledger", async () => {
+    const { performWebSearchRaw } = await import("../../src/utils/braveApi.js");
+    const { searchYahooFree } = await import("../../src/scholar/freeSearch.js");
+    (performWebSearchRaw as any).mockRejectedValueOnce(new Error("HTTP 403"));
+    (searchYahooFree as any).mockResolvedValueOnce([{ url: "https://example.org/free-article" }]);
+    mockConfig.SYNALUX_SEARCH_AVAILABLE = true;
+    mockConfig.BRAVE_API_KEY = "";
+
+    await runWebScholar();
+
+    const saved = mockStorage.saveLedger.mock.calls[0][0];
+    expect(saved.summary).not.toContain("web search was unavailable");
+    expect(saved.summary).toContain("Research:");
   });
 });
 

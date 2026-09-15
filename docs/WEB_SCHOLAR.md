@@ -43,8 +43,11 @@ When both are available the portal wins: credentials and query redaction stay
 server-side, and the client never falls back to calling a provider directly with
 your original query.
 
-There is no cross-provider failover: if the selected source returns no URLs the
-run ends with "No articles found". **Scraping is always the built-in local
+If the web search itself fails — the portal refuses a free plan (403) or an
+expired login (401), or a Brave key is rejected — the run continues on the free
+academic path and says so at the top of its report. It never retries a direct
+provider with your query: a configured account is a privacy boundary. A web
+search that succeeds with zero results ends the run with "No articles found". **Scraping is always the built-in local
 scraper** — Firecrawl is never called.
 
 Triggering:
@@ -84,21 +87,24 @@ Only the text-provider key is genuinely required:
 Add these to your shell profile (`~/.zshrc`, `~/.bashrc`), or `.env` file:
 
 ```bash
-# Required for Prism core features
-export BRAVE_API_KEY="your-brave-search-api-key"
+# Required: a text provider for synthesis (any one of these)
 export GOOGLE_API_KEY="your-google-ai-studio-api-key"
 
-# Required for Web Scholar
-export FIRECRAWL_API_KEY="your-firecrawl-api-key"
+# Optional: your own web-search key. Not needed when you are signed in to the
+# Synalux portal on a plan that includes search, and not needed at all for the
+# free academic path.
+export BRAVE_API_KEY="your-brave-search-api-key"
 ```
 
 ### 2. Enable the Scholar
 
 ```bash
-# Enable Scholar + set a 5-minute research interval
 export PRISM_SCHOLAR_ENABLED=true
-export PRISM_SCHOLAR_INTERVAL_MS=300000
 ```
+
+On a local install runs are started by hand — the dashboard's **Scholar
+(Run)** button or the `scholar_research` tool. `PRISM_SCHOLAR_INTERVAL_MS`
+does not schedule anything here (see the table below).
 
 ### 3. Start the server
 
@@ -110,7 +116,6 @@ node dist/server.js
 PRISM_STORAGE=local \
 PRISM_SCHEDULER_ENABLED=true \
 PRISM_SCHOLAR_ENABLED=true \
-PRISM_SCHOLAR_INTERVAL_MS=300000 \
 PRISM_DASHBOARD_PORT=3333 \
 node dist/server.js
 ```
@@ -118,13 +123,14 @@ node dist/server.js
 ### 4. Verify
 
 Open the Mind Palace Dashboard using the tokenized URL from the startup log
-(e.g. `http://localhost:3333/?token=<random>`) and scroll to the **BACKGROUND SCHEDULER** section. You should see:
+(e.g. `http://localhost:3333/?token=<random>`) and click **Scholar (Run)**.
+When the run finishes, a new ledger entry whose summary starts with
+`Research: <topic>` is saved (event type `learning`, importance 7).
 
-```
-Web Scholar: 🟢 Enabled (every 5m)
-```
-
-![Web Scholar enabled on the dashboard](screenshots/dashboard-scholar-enabled.png)
+The `Web Scholar` line on the **BACKGROUND SCHEDULER** card reads
+`🔴 Disabled` on every local install. It reports the client-side
+auto-scheduler, which was retired in v18.0.0; it does not mean the pipeline
+is off.
 
 ---
 
@@ -142,12 +148,12 @@ Web Scholar: 🟢 Enabled (every 5m)
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `PRISM_SCHOLAR_ENABLED` | ❌ No | `false` | Set to `true` to enable the Scholar pipeline. |
+| `PRISM_SCHOLAR_ENABLED` | ❌ No | `false` | Turns on the startup configuration check. On a local install the pipeline itself runs whenever it is triggered (dashboard button or `scholar_research` tool). |
 | `PRISM_SCHOLAR_INTERVAL_MS` | ❌ No | `0` | **No effect on a local install** — the client-side scheduler that read it was retired in v18.0.0 and `startScholarScheduler()` has no caller. Local runs are manual; scheduled runs happen server-side via portal cron. |
 | `PRISM_SCHOLAR_TOPICS` | ❌ No | `ai,agents` | Comma-separated list of research topics. Example: `ai,agents,security,performance` |
 | `PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN` | ❌ No | `3` | Maximum articles to process per research sweep. Controls API costs. |
 
-### Background Scheduler (required for auto-run)
+### Background Scheduler
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
@@ -155,7 +161,7 @@ Web Scholar: 🟢 Enabled (every 5m)
 | `PRISM_SCHEDULER_INTERVAL_MS` | ❌ No | `43200000` (12h) | Scheduler sweep interval for maintenance tasks. |
 
 > [!NOTE]
-> `PRISM_SCHEDULER_ENABLED` controls the maintenance scheduler. `PRISM_SCHOLAR_ENABLED` controls the research pipeline. Both can be enabled independently, but for fully automated research you want both enabled.
+> `PRISM_SCHEDULER_ENABLED` controls the maintenance scheduler. `PRISM_SCHOLAR_ENABLED` controls the research pipeline. The maintenance scheduler does not run Scholar; scheduled research is the portal cron.
 
 ---
 
@@ -209,41 +215,37 @@ flowchart TD
 
 ## Configuration Examples
 
-### Minimal (Manual Trigger Only)
+### Local install (manual runs)
 
 ```bash
-export BRAVE_API_KEY="..."
-export GOOGLE_API_KEY="..."
-export FIRECRAWL_API_KEY="..."
+export GOOGLE_API_KEY="..."          # or OPENAI_API_KEY / ANTHROPIC_API_KEY
+export BRAVE_API_KEY="..."           # optional: omit when signed in to the portal
 export PRISM_SCHOLAR_ENABLED=true
-# PRISM_SCHOLAR_INTERVAL_MS defaults to 0 (manual only)
-```
-
-Scholar is enabled but only runs when you click "Scholar (Run)" in the dashboard.
-
-### Standard (Auto-Research Every 5 Minutes)
-
-```bash
-export BRAVE_API_KEY="..."
-export GOOGLE_API_KEY="..."
-export FIRECRAWL_API_KEY="..."
-export PRISM_SCHOLAR_ENABLED=true
-export PRISM_SCHOLAR_INTERVAL_MS=300000
 export PRISM_SCHOLAR_TOPICS="ai,agents,typescript,security"
 export PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN=3
-export PRISM_SCHEDULER_ENABLED=true
 ```
 
-### Conservative (Cost-Conscious)
+Runs start from the dashboard's **Scholar (Run)** button or the
+`scholar_research` tool. `PRISM_SCHOLAR_INTERVAL_MS` and
+`PRISM_SCHEDULER_ENABLED` do not schedule Scholar on a local install.
+
+### No search key at all (free academic path)
 
 ```bash
-export BRAVE_API_KEY="..."
 export GOOGLE_API_KEY="..."
-export FIRECRAWL_API_KEY="..."
 export PRISM_SCHOLAR_ENABLED=true
-export PRISM_SCHOLAR_INTERVAL_MS=3600000  # Every 1 hour
+```
+
+Discovery uses PubMed, ERIC and Semantic Scholar, then Yahoo. Nothing else
+changes.
+
+### Cost-conscious (own Brave key)
+
+```bash
+export GOOGLE_API_KEY="..."
+export BRAVE_API_KEY="..."
+export PRISM_SCHOLAR_ENABLED=true
 export PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN=1
-export PRISM_SCHEDULER_ENABLED=true
 ```
 
 ---
@@ -252,30 +254,29 @@ export PRISM_SCHEDULER_ENABLED=true
 
 ### "🔴 Disabled" on Dashboard
 
-**Cause:** One or more of these conditions:
-1. `PRISM_SCHOLAR_ENABLED` is not set to `true`
-2. `PRISM_SCHOLAR_INTERVAL_MS` is `0` or not set (Scholar enabled but no auto-schedule)
-3. The `startScholarScheduler()` function was never called (server not started with scheduler)
+**Cause:** The `Web Scholar` line on the BACKGROUND SCHEDULER card reports the
+client-side auto-scheduler, which was retired in v18.0.0 and is never started.
+It reads Disabled on every local install, whatever the environment says.
 
-**Fix:**
-```bash
-# Ensure all are set:
-export PRISM_SCHOLAR_ENABLED=true
-export PRISM_SCHOLAR_INTERVAL_MS=300000
-export PRISM_SCHEDULER_ENABLED=true
-```
+**Fix:** None needed. Trigger runs with **Scholar (Run)** or the
+`scholar_research` tool; scheduled runs come from the portal cron.
 
 ### Scholar Runs But No Ledger Entries Appear
 
-**Cause:** Missing API keys or API errors. Check the server logs for:
+**Cause:** Discovery found nothing, or a later stage failed. Check the server
+logs for:
+- `[WebScholar] Web search unavailable, continuing on free sources:` — the
+  portal refused the search (free plan, expired login) or the Brave key was
+  rejected. The run went on with the academic sources and its report says so.
 - `[WebScholar] Pipeline failed:` — followed by the specific error
-- `Warning: FIRECRAWL_API_KEY environment variable is missing` — at startup
+- `Warning: no web search configured` — at startup; the free academic path is
+  in use
 
-**Fix:** Verify all three API keys are set and valid:
+**Fix:** Confirm the text-provider key is set, and for web search either a
+portal login on a plan that includes it or your own key:
 ```bash
-echo "BRAVE_API_KEY=${BRAVE_API_KEY:+SET}"
 echo "GOOGLE_API_KEY=${GOOGLE_API_KEY:+SET}"
-echo "FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY:+SET}"
+echo "BRAVE_API_KEY=${BRAVE_API_KEY:+SET}"
 ```
 
 ### "Model not found" / 404 Error
@@ -297,25 +298,20 @@ export DEBUG=true
 
 ### Per Scholar Run (Default: 3 Articles)
 
-| Service | API Calls | Estimated Cost |
-|---------|-----------|----------------|
-| Brave Search | 1 search query | ~$0.005 |
-| Firecrawl | 1-3 scrape calls | ~$0.01-0.03 |
+| Stage | Calls | Estimated Cost |
+|-------|-------|----------------|
+| Web search — Synalux portal | 1 search query | Included with a plan that has search |
+| Web search — own `BRAVE_API_KEY` | 1 search query | ~$0.005 |
+| Free academic path | PubMed + ERIC + Semantic Scholar, then Yahoo | $0 |
+| Local scrape | 1-3 pages | $0 |
 | Gemini 2.5 Flash | 1 synthesis call | ~$0.001 |
-| **Total per run** | | **~$0.02-0.04** |
+| **Total per run** | | **~$0.001-0.006** |
 
 ### Monthly Estimates
 
-| Interval | Runs/Month | Est. Monthly Cost |
-|----------|-----------|-------------------|
-| Every 5 min | ~8,640 | ~$170-345 |
-| Every 30 min | ~1,440 | ~$30-58 |
-| Every 1 hour | ~720 | ~$15-29 |
-| Every 6 hours | ~120 | ~$2.50-5 |
-| Manual only | Variable | Pay per click |
-
-> [!TIP]
-> Start with a longer interval (1 hour+) and monitor your API usage before increasing frequency. For most users, **every 30 minutes to 1 hour** strikes a good balance between freshness and cost.
+Local runs are manual, so the monthly cost is the per-run figure times the
+number of runs you trigger. Scheduled research happens in the portal on
+portal-side credentials; none of the keys above are spent by it.
 
 ---
 

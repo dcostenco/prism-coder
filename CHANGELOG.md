@@ -37,6 +37,24 @@ Five tests pin the matrix: portal-only, local-key-only, Brave-without-Firecrawl,
 both, and neither. Fail-before verified — the old gate fails the portal-only and
 Brave-alone cases with "expected to be called 1 times, but got 0 times".
 
+Routing a signed-in account to web search exposed a second gap: the portal
+answers a **free plan's** search with `403 Cloud Search requires Standard plan
+or higher`, and before this change such an account never reached the portal
+from Scholar, so it had been getting academic results. Scholar now treats a
+failed web search — portal refusal, expired login, rejected Brave key — as a
+reason to continue on the free academic path, never as a reason to end the
+run, and the returned report opens with a note saying which sources it used.
+The stored ledger entry stays clean. It never retries a direct provider with
+the same query: a configured account is a privacy boundary. Three more tests
+pin this (portal 403 → academic results saved; one transport call even with a
+local key present; no note in the ledger).
+
+The docs had kept describing a client-side auto-scheduler (`Every 5 Minutes`,
+`Web Scholar: 🟢 Enabled (every 5m)`) that was retired in v18.0.0, and a
+Firecrawl key that nothing spends. WEB_SCHOLAR.md, ARCHITECTURE.md,
+`.env.example` and the `scholar_research` tool description now describe the
+pipeline that ships.
+
 ### Web Scholar drops the search API Google is switching off
 
 - Removes the Google Custom Search discovery path (`GOOGLE_SEARCH_API_KEY` +
