@@ -1,13 +1,28 @@
 name: MCP Registry Publish
 # Root cause of the 1.5.0→20.6.0 registry drift: publishing was fully manual
-# and nothing ever republished after the initial listing. This workflow makes
-# the registry listing follow main: any change to server.json republishes via
-# GitHub OIDC (no stored secrets — the registry validates namespace ownership
-# against this repository).
+# and nothing ever republished after the initial listing. This workflow keeps
+# the registry listing following releases via GitHub OIDC (no stored secrets —
+# the registry validates namespace ownership against this repository).
+#
+# It runs on the release TAG, not on main. The registry refuses to list a
+# version whose npm package does not exist yet:
+#
+#   registry validation failed for package 0 (prism-mcp-server): NPM package
+#   'prism-mcp-server' exists, but version '20.19.0' was not found (404)
+#
+# The old `push: branches[main], paths[server.json]` trigger fired the moment
+# a release PR merged — always BEFORE publish.yml had run, because that one
+# only fires on `v*`. It therefore could not succeed, and it silently failed
+# that way for 20.18.2 and 20.19.0 while the listing sat two releases behind
+# at 20.18.1: exactly the drift this workflow exists to prevent. The tag is
+# the real release event, and registry versions are immutable anyway, so a
+# metadata-only merge to main had nothing to publish.
 on:
   push:
-    branches: [main]
-    paths: ["server.json"]
+    tags:
+      - "v*"
+  # Recovery path: re-run against main after npm has the version, which is how
+  # a listing that missed its tag gets caught up.
   workflow_dispatch:
 
 permissions:
@@ -37,6 +52,28 @@ jobs:
           echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
           tar xzf mcp-publisher.tar.gz
           sudo mv mcp-publisher /usr/local/bin/
+      # Ordering alone is not enough: publish.yml fires on the same tag push,
+      # so the two jobs start together, and npm needs a moment to serve a
+      # freshly published version. Wait for the exact coordinates the registry
+      # will validate — read from server.json so this can never drift from
+      # what mcp-publisher sends.
+      - name: Wait for npm to serve the version the registry validates
+        run: |
+          pkg=$(node -p "require('./server.json').packages[0].identifier")
+          ver=$(node -p "require('./server.json').packages[0].version")
+          echo "Waiting for ${pkg}@${ver} on npm..."
+          for attempt in $(seq 1 40); do
+            if npm view "${pkg}@${ver}" version >/dev/null 2>&1; then
+              echo "✓ ${pkg}@${ver} is on npm (attempt ${attempt})"
+              exit 0
+            fi
+            echo "  not yet (attempt ${attempt}/40); sleeping 15s"
+            sleep 15
+          done
+          echo "::error::${pkg}@${ver} never appeared on npm after 10 minutes."
+          echo "The registry would reject this listing with a 404. Check the"
+          echo "Publish Package workflow for this tag, then re-run this one."
+          exit 1
       - name: Publish to MCP Registry
         # Registry versions are immutable: a server.json change without a
         # version bump (description edits, metadata) always gets 400

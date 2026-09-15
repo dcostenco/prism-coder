@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### The MCP registry listing can actually publish
+
+`registry-publish.yml` ran on any push to main touching `server.json`, which
+meant it fired the moment a release PR merged. The npm publishes fire only on
+a `v*` tag, and the registry refuses to list a version whose npm package does
+not exist yet:
+
+```
+registry validation failed for package 0 (prism-mcp-server): NPM package
+'prism-mcp-server' exists, but version '20.19.0' was not found (404)
+```
+
+So the job could never succeed on a real release. It failed exactly that way
+for 20.18.2 and 20.19.0 while the public listing sat two releases behind at
+20.18.1 — the drift this workflow was written to prevent.
+
+It now runs on the release tag, and waits for npm to actually serve the
+package coordinates the registry validates (read from `server.json`, so the
+probe cannot drift from what is sent) for up to ten minutes before
+publishing. `workflow_dispatch` stays as the recovery path for a listing that
+missed its tag.
+
 ## 20.19.0 — 2026-09-15
 
 ### Paid users get the search they are paying for
