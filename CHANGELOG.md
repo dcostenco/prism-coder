@@ -1307,6 +1307,7 @@ search result. Upgrade if you use Web Scholar at all.
 ## [Unreleased]
 
 ### Fixed
+- `prism_infer`'s input schema now stays under Codex's 5,000-byte schema-compaction budget (was ~5,800), so Codex sees every parameter description including the `messages` contract; the description no longer claims Codex drops parameter text unconditionally. Regression: `tests/tools/prismInferSchemaBudget.test.ts`.
 - Handoff history snapshots now retain the effective role and active branch,
   and save responses distinguish a durable primary handoff from a failed
   optional time-travel snapshot.

@@ -375,8 +375,9 @@ describe("G. host-facing guidance", () => {
         expect(PRISM_INFER_TOOL.description).toMatch(/FOLLOW-UP to an earlier prism_infer answer, pass the accepted prior turns as `messages`/);
         expect(PRISM_INFER_TOOL.description).toMatch(/fabricates/);
         expect(PRISM_INFER_TOOL.description).toMatch(/`multi_turn`.*`history_turns`/);
-        // Verified with the real Codex CLI 2026-09-15: Codex receives the tool
-        // description but NOT per-parameter descriptions, so the refusal
+        // Verified with the real Codex CLI 2026-09-16: Codex keeps per-parameter
+        // descriptions only for schemas under its 5,000-byte compaction budget
+        // (see prismInferSchemaBudget.test.ts), so the refusal
         // contract must be in the description itself.
         expect(PRISM_INFER_TOOL.description).toMatch(/history_over_plan_cap.*never trimmed/);
         expect(PRISM_INFER_TOOL.description).toMatch(/multi_turn_not_in_plan/);

@@ -269,8 +269,8 @@ export const PRISM_INFER_TOOL: Tool = {
         "(paid plans): without them the worker answers the follow-up from nothing and fabricates. " +
         "Every result reports `multi_turn` (your plan's caps) and `history_turns` (what was sent). " +
         "History over the plan's caps is refused (history_over_plan_cap), never trimmed; a free plan " +
-        "or a host with no portal is refused (multi_turn_not_in_plan). Codex receives only this " +
-        "description, not per-parameter text, so the contract lives here.",
+        "or a host with no portal is refused (multi_turn_not_in_plan). Hosts that compact large " +
+        "schemas may drop parameter text, so the contract lives here.",
     inputSchema: {
         type: "object",
         properties: {
@@ -279,25 +279,22 @@ export const PRISM_INFER_TOOL: Tool = {
                 items: { type: "string" },
                 maxItems: MAX_INFER_IMAGES,
                 description:
-                    "Screenshots or frames to analyse. Each entry is an absolute file path " +
-                    "or raw base64. Requires a vision-capable tier; tiers without vision are " +
-                    "skipped rather than shown the prompt without the image.",
+                    "Screenshots or frames: absolute file paths or raw base64. Needs a vision-capable " +
+                    "tier; tiers without vision are skipped, never shown the prompt without the image.",
             },
             prompt: {
                 type: "string",
-                description: "The user prompt. Required.",
+                description: "The user prompt.",
             },
             messages: {
                 type: "array",
                 description:
-                    "Prior turns of THIS conversation, oldest first, each {role: 'user'|'assistant', content}. " +
-                    "`prompt` stays the current user turn. The host curates: send only turns you accepted, " +
-                    "as a brief, not a transcript. Text only, user and assistant roles only. Multi-turn is a " +
-                    "paid Synalux plan feature: the plan sets the turn and character caps, a free plan or a " +
-                    "host with no portal is refused (multi_turn_not_in_plan), and over-cap or malformed " +
-                    "history is refused with the caps named, never trimmed. Every turn is " +
-                    "safety-screened and counted against the tier's context. History is forwarded to the " +
-                    "cloud on escalation (32 KB cap) and is never stored.",
+                    "Prior turns of THIS conversation, oldest first; `prompt` stays the current turn. " +
+                    "Send only accepted turns, as a brief, not a transcript; text only. A paid Synalux " +
+                    "plan feature: the plan sets turn and character caps; free plan or no portal is " +
+                    "refused (multi_turn_not_in_plan); over-cap or malformed history is refused with " +
+                    "the caps named, never trimmed. Turns are safety-screened, counted against the " +
+                    "tier's context, forwarded to the cloud on escalation (32 KB cap), never stored.",
                 items: {
                     type: "object",
                     properties: {
@@ -309,7 +306,7 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             system: {
                 type: "string",
-                description: "Optional system instruction prepended to the prompt.",
+                description: "System instruction prepended to the prompt.",
             },
             max_tokens: {
                 type: "number",
@@ -318,60 +315,58 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             temperature: {
                 type: "number",
-                description: "Sampling temperature, 0 = deterministic (default 0).",
+                description: "Sampling temperature; default 0 = deterministic.",
                 default: 0,
             },
             model_ceiling: {
                 type: "string",
                 enum: ["27b", "9b", "4b", "2b"],
-                description: "Cap the largest tier the picker may select. e.g. '9b' forbids 27B even if RAM allows.",
+                description: "Largest tier the picker may select; '9b' forbids 27B even if RAM allows.",
             },
             task_complexity: {
                 type: "number",
                 minimum: 1,
                 maximum: 10,
                 description:
-                    "Optional deterministic 1-10 workload hint. prism_infer—not the task router—uses it " +
-                    "to choose the initial local tier and thinking mode. Explicit model_ceiling/think overrides win.",
+                    "1-10 workload hint prism_infer (not the task router) uses to pick the initial " +
+                    "local tier and thinking mode; explicit model_ceiling/think win.",
             },
             project: {
                 type: "string",
                 description:
-                    "Optional Prism project whose dashboard-depth handoff and recent session memory should be supplied " +
-                    "to the local worker as historical data.",
+                    "Prism project whose dashboard-depth handoff and recent session memory go to the " +
+                    "local worker as historical data.",
             },
             context_depth: {
                 type: "string",
                 enum: ["quick", "standard", "deep"],
                 description:
-                    "Project-memory depth. Defaults to the Prism dashboard setting when `project` is provided.",
+                    "Project-memory depth; defaults to the dashboard setting when `project` is given.",
             },
             conversation_id: {
                 type: "string",
-                description:
-                    "Conversation id returned by session_bootstrap. Used for inference telemetry and continuity.",
+                description: "Conversation id from session_bootstrap (telemetry, continuity).",
             },
             cloud_fallback: {
                 type: "boolean",
-                description: "If true, fall through to synalux portal cascade on local fail. Default false — token-saving mode is the point of this tool.",
+                description: "Fall through to the Synalux portal cascade on local failure. Default false: saving tokens is the point.",
                 default: false,
             },
             timeout_ms: {
                 type: "number",
-                description: "Override per-call timeout. Default scales with model size: 27B=120s, 9B=60s, 4B=20s, 2B=15s.",
+                description: "Per-call timeout override. Default by tier: 27B 120s, 9B 60s, 4B 20s, 2B 15s.",
             },
             evidence: {
                 type: "array",
                 description:
-                    "Optional evidence snippets the model output must be grounded in. " +
-                    "When supplied with `verify: true`, every assertive claim in the draft " +
-                    "(numbers, names, dates, codes, $ amounts) must be ENTAILED by one of " +
-                    "these snippets or the draft is refused.",
+                    "Snippets the output must be grounded in. With `verify: true`, every assertive " +
+                    "claim (numbers, names, dates, codes, $ amounts) must be ENTAILED by a snippet " +
+                    "or the draft is refused.",
                 items: {
                     type: "object",
                     properties: {
-                        source: { type: "string", description: "Label for the snippet (e.g. 'tool:knowledge_search#3')." },
-                        content: { type: "string", description: "The evidence text itself." },
+                        source: { type: "string", description: "Snippet label, e.g. 'tool:knowledge_search#3'." },
+                        content: { type: "string", description: "The snippet text." },
                     },
                     required: ["source", "content"],
                 },
@@ -379,28 +374,26 @@ export const PRISM_INFER_TOOL: Tool = {
             verify: {
                 type: "boolean",
                 description:
-                    "Enable the L3 grounding verifier. Default: true when `evidence` is provided, " +
-                    "false otherwise. When enabled, the model's draft is checked by a different model " +
-                    "(qwen3.5:4b by default) against the supplied `evidence`. Drafts with " +
-                    "NEUTRAL or CONTRADICTED claims are refused.",
+                    "L3 grounding verifier; default true when `evidence` is given. A second model " +
+                    "(qwen3.5:4b by default) checks the draft against `evidence`; NEUTRAL or " +
+                    "CONTRADICTED claims are refused.",
             },
             verifier_model: {
                 type: "string",
-                description: "Override the verifier model. Default: qwen3.5:4b.",
+                description: "Verifier model override. Default qwen3.5:4b.",
             },
             verifier_timeout_ms: {
                 type: "number",
-                description: "Override the verifier hard timeout. Default 2000 ms.",
+                description: "Verifier hard timeout override. Default 2000 ms.",
                 default: 2000,
             },
             mode: {
                 type: "string",
                 enum: ["route", "chat", "code"],
                 description:
-                    "Execution mode. 'route' (default) for MCP tool routing — fast, nothink. " +
-                    "'chat' for general conversation — uses thinking, escalates to cloud on failure. " +
-                    "'code' for code generation — uses thinking, larger context. " +
-                    "In chat/code modes, prefers the 27B tier and enables <think> reasoning.",
+                    "'route' (default): MCP tool routing, fast, no thinking. 'chat': conversation, " +
+                    "thinking on, cloud escalation on failure. 'code': code generation, thinking on, " +
+                    "larger context. chat/code prefer the 27B tier.",
                 default: "route",
             },
             allowed_tools: {
@@ -408,45 +401,40 @@ export const PRISM_INFER_TOOL: Tool = {
                 maxItems: MAX_ROUTE_TOOLS,
                 items: { type: "string" },
                 description:
-                    "Tool names actually advertised to the route model. In route mode, " +
-                    "well-formed calls outside this registry are suppressed before return. " +
-                    "Defaults to Prism's seven trained routing tools.",
+                    "Tool names advertised to the route model; well-formed calls outside this list " +
+                    "are suppressed in route mode. Default: Prism's seven trained routing tools.",
             },
             route_guard: {
                 type: "string",
                 enum: ["auto", "local"],
                 description:
-                    "Route-output guard. 'auto' (default) applies the local advertised-tool " +
-                    "contract and, for authenticated paid plans, the private Synalux deterministic " +
-                    "route correction. 'local' keeps the prompt and draft entirely on-device.",
+                    "'auto' (default): local advertised-tool contract plus, on paid plans, the private " +
+                    "Synalux deterministic route correction. 'local': prompt and draft stay on-device.",
                 default: "auto",
             },
             think: {
                 type: "boolean",
                 description:
-                    "Enable thinking mode (<think> blocks). Default: true for chat/code, false for route. " +
-                    "Thinking improves quality on complex tasks but adds latency (~2-5s).",
+                    "<think> reasoning. Default true for chat/code, false for route; better on complex " +
+                    "tasks, adds ~2-5s.",
             },
             strict_entitlements: {
                 type: "boolean",
                 description:
-                    "Fail loud instead of running with ASSUMED free-tier limits (plan v2 §5.5). " +
-                    "When true and entitlement resolution fell back to free because the portal " +
-                    "was unreachable (source='fallback_free'), the call throws instead of " +
-                    "silently applying free clamps. Portal-confirmed free plans and " +
-                    "unconfigured machines are unaffected. Default: false.",
+                    "Fail loud instead of running with ASSUMED free-tier limits: when entitlements " +
+                    "fell back to free because the portal was unreachable (source='fallback_free'), " +
+                    "throw instead of silently applying free clamps. Portal-confirmed free plans and " +
+                    "unconfigured machines are unaffected.",
                 default: false,
             },
             escalation: {
                 type: "string",
                 enum: ["serve", "report"],
                 description:
-                    "Failure contract (plan v2 §5.2). 'serve' (default) keeps legacy behavior: " +
-                    "safety refusals throw, gate-failed output may be served. 'report' returns a " +
-                    "structured gate_outcome on every terminal path — refused results come back as " +
-                    "{status:'refused', output:''} instead of an error, and degraded (gate-failed, " +
-                    "served-anyway) output is explicitly flagged so callers can distinguish " +
-                    "success / degraded / refused.",
+                    "'serve' (default): safety refusals throw, gate-failed output may be served. " +
+                    "'report': every terminal path returns a structured gate_outcome; refused results " +
+                    "come back as {status:'refused', output:''} and degraded (served gate-failed) " +
+                    "output is flagged.",
                 default: "serve",
             },
         },
