@@ -775,7 +775,7 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
             expect(callLayer1.mock.calls.every(c => !/^(User|Assistant): /m.test(String(c[0])))).toBe(true); // the context read was never made
         } finally { _setScreenCallBudgetForTest(null); }
     });
-    it("evicting the oldest turn at the cap costs a few windows, not all of them", async () => {
+    it("evicting the oldest turn costs a few windows, not all of them, when turns are long (~2,900 chars: each window is mostly its own turn)", async () => {
         const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
         const turn = (i: number) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i}: ` + `item ${i} of the reading schedule moved. `.repeat(70) });
         const twelve = Array.from({ length: 12 }, (_, i) => turn(i));
@@ -789,6 +789,21 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
         // shifted first window or two (these turns are ~2,900 chars; short turns shift every window — a cost)
         expect(delta).toBeLessThanOrEqual(9);
         expect(delta).toBeLessThan(first / 2);
+    });
+    it("evicting the oldest of thirty SHORT turns re-reads every context window (each held the evicted turn): the documented cost, not a safety property", async () => {
+        const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
+        const turn = (i: number) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i}: the reading group notes for item ${i} were filed.` });
+        const thirty = Array.from({ length: 30 }, (_, i) => turn(i));
+        _setCacheForTest({ ...ENT, multi_turn: { enabled: true, max_turns: 32, max_chars: 96_000 } }, 60_000);
+        await runInfer(args({ messages: thirty }), deps({ callLayer1 }));
+        const first = callLayer1.mock.calls.length;
+        const next = [...thirty.slice(1), { role: "user" as const, content: "What is my codename?" }, turn(31)];
+        expect(screeningTranscript(args({ prompt: "and after that?", messages: next })).length).toBeLessThan(HISTORY_TURN_WINDOW_CHARS); // every window sees the whole transcript
+        await runInfer(args({ prompt: "and after that?", messages: next }), deps({ callLayer1 }));
+        const delta = callLayer1.mock.calls.length - first;
+        // two new turns alone + the prompt alone + EVERY context window (all shifted by the eviction)
+        expect(delta).toBe(2 + 1 + contextWindows(args({ prompt: "and after that?", messages: next })).length);
+        expect(delta).toBeGreaterThanOrEqual(30);
     });
     it("round 23: intent spread across two user turns, clean apart and reserved together, is caught by the context window ending at the later half even when four benign turns follow", async () => {
         const A = "My student's behaviour plan says that when he starts to escalate, two of us are supposed to guide him to the mat and stay with him until he settles.";

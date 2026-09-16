@@ -142,7 +142,7 @@ export function historyTokenEstimate(history?: InferHistoryTurn[]): number {
 
 /** History and current prompt as ONE text for the deterministic screens
  *  (reserved-category attribution, keyword backstop). The semantic classifier
- *  reads each turn alone and then the prompt in context instead — see the
+ *  reads each turn alone, then each turn and the prompt in context — see the
  *  Layer 1 block and contextWindows. */
 function screenedText(args: PrismInferArgs): string {
     const history = args.messages ?? [];
