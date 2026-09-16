@@ -597,7 +597,7 @@ describe("R14 round thirteen", () => {
         _setCacheForTest({ ...ENT, multi_turn: { enabled: true, max_turns: 49, max_chars: 128_000 } }, 60_000);
         // worst distribution: 48 DISTINCT one-char turns (48 windows, no two
         // alike so none is a cache hit; all assistant, the longer label) + one
-        // turn taking the rest (37 windows) = 86 isolated windows
+        // turn taking the rest (38 windows) = 86 isolated windows
         const minimal = Array.from({ length: 48 }, (_, i) => ({ role: "assistant" as const, content: String.fromCharCode(0x41 + i) }));
         expect(new Set(minimal.map(t => t.content)).size).toBe(48);
         const longTurn = Array.from({ length: 6_000 }, (_, i) => `entry ${i} of the pasted log; `).join("").slice(0, 128_000 - 48);
@@ -623,6 +623,8 @@ describe("R14 round thirteen", () => {
         // exactly every window once (162 misses) plus the prompt's own call — the documented maximum
         expect(callLayer1.mock.calls.length).toBe(isolated + transcript + 1);
         expect(callLayer1.mock.calls.length).toBe(163);
+        // and every input was distinct: 163 calls means 163 cache misses, not a lucky collision count
+        expect(new Set(callLayer1.mock.calls.map(c => String(c[0]))).size).toBe(163);
         expect(163).toBeLessThanOrEqual(LAYER1_SCREEN_CALL_BUDGET);
     });
     it("beyond the budget the screen fails CLOSED as UNCERTAIN, with the attempt named", async () => {
