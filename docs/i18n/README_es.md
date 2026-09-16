@@ -1152,12 +1152,19 @@ check, the local 9B passed 2/3 tasks; the local 27B and Gemini 3.6 Flash each
 passed 3/3. This is a self-published regression signal, not an independent
 leaderboard or a claim of broad model equivalence.
 
-### Cloud Escalation (`cloud_fallback: true`)
+### Cloud Escalation (`cloud_fallback`)
 
 Prism always tries an eligible local model first. If the quality gate detects
-an empty, truncated, think-only, or looping response, paid tiers can retry the
-request through Gemini 3.6 Flash. Free-tier routing stays local and reports the
-quality-gate outcome without making a cloud call.
+an empty, truncated, think-only, or looping response, or the safety screen
+finds the request uncertain or reserved, a paid plan escalates the request
+through Gemini 3.6 Flash. Free-tier routing stays local and reports the
+outcome without making a cloud call.
+
+The flag follows the plan. Leave it unset and your plan decides: paid plans
+escalate, free plans never do. Pass `false` to forbid cloud inference fallback
+for a call, which the clinical delegation rules do for drafting; pass `true`
+to ask for it, which still requires a plan with cloud. A request that carries
+an image is never escalated; screenshots stay on this device.
 
 ---
 

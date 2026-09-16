@@ -9,7 +9,7 @@
  *   1. Probe Ollama, list tags
  *   2. Pick largest viable local tier (pickLocalModel)
  *   3. Call /api/generate locally — return on success
- *   4. On local fail, if cloud_fallback=true:
+ *   4. On local fail, if the plan allows cloud (explicit cloud_fallback:false forbids it):
  *        - exchange synalux_sk_ → JWT (cached)
  *        - POST synalux portal /api/v1/prism/inference
  *        - portal serves Gemini 3.6 Flash according to the user's tier
@@ -298,6 +298,11 @@ async function classifyHistoryWindow(
     // and a classifier that keeps failing is not asked again this request.
     if (budget && budget.consecutiveErrors >= LAYER1_SCREEN_ERROR_BREAKER) { budget.tripped = true; return "UNCERTAIN"; }
     if (budget && ++budget.calls > LAYER1_SCREEN_CALL_BUDGET) { budget.tripped = true; return "UNCERTAIN"; }
+    // deterministic:false is deliberate for a JOINT window and must stay so:
+    // the co-occurrence rules see words from different turns as one clause
+    // (the 2026-09-16 field refusal's joined window fires them; every turn
+    // alone is clean). The rules run per turn in proximity slices upstream;
+    // here only the model reads, and only to RAISE.
     const verdict = await l1fn(window, ollamaUrl, model, undefined, undefined, { deterministic: false });
     if (budget) {
         budget.consecutiveErrors = verdict === "ERROR" ? budget.consecutiveErrors + 1 : 0;
@@ -431,7 +436,7 @@ export const PRISM_INFER_TOOL: Tool = {
         "the caller's `task_complexity`, then validates loaded memory size, model context, " +
         "entitlements, installed models, and free RAM at call time. " +
         "Falls through to the Synalux portal Gemini 3.6 Flash cloud fallback " +
-        "only when local is unviable AND `cloud_fallback=true`. " +
+        "only when local is unviable or refused and the plan allows cloud; `cloud_fallback: false` forbids it. " +
         "When `project` is provided, loads the dashboard-configured quick/standard/deep handoff and bounded history " +
         "as untrusted historical context for a memory-aware local worker. " +
         "Use this for code generation, summarisation, classification, or any synth task you would " +
@@ -521,7 +526,7 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             cloud_fallback: {
                 type: "boolean",
-                description: "Synalux portal cascade when local is unviable or refused. Omitted: the plan decides; false forces local-only.",
+                description: "Synalux portal cascade when local is unviable or refused. Omitted: the plan decides; false forbids it.",
             },
             timeout_ms: {
                 type: "number",
@@ -1428,7 +1433,7 @@ export interface PrismInferResult {
     /** How many prior turns this call carried (a count, never content). */
     history_turns?: number;
     /** Which screen layer decided the call: 'rules' | 'isolated' | 'prompt' |
-     *  'context' | 'budget'. Absent when Layer 1 never raised the verdict. */
+     *  'context' | 'budget' | 'backstop'. Absent when nothing raised the verdict. */
     refusal_layer?: string;
     /** Actual token counts from Ollama, or char/4 estimates for cloud. */
     prompt_tokens?: number;
@@ -1658,8 +1663,10 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
 
     // Cloud fallback is the PLAN's to give. An omitted flag means "whatever my
     // plan entitles me to": paid plans escalate, free plans do not. Explicit
-    // false still forces local-only — the clinical delegation rules and
-    // token-saving callers depend on that — and explicit true still needs a
+    // false still forbids cloud INFERENCE fallback — the clinical delegation
+    // rules and token-saving callers depend on that; the route guard and the
+    // grounding verifier keep their own switches (route_guard, verify) — and
+    // explicit true still needs a
     // plan with cloud. Until 2026-09-16 an omitted flag meant "no cloud", so a
     // paid, portal-ruled entitlement sat unused and an UNCERTAIN verdict
     // dead-ended instead of escalating; measured in production the day
@@ -1886,6 +1893,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         if (!args.messages?.length) {
             // Single turn: the exact call it always was.
             l1 = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
+            if (l1 !== "OBVIOUS_NOT_RESERVED") l1Layer = "prompt";
         } else {
             l1 = "OBVIOUS_NOT_RESERVED";
             // 1. Deterministic floor, per TURN and role-aware, regex only.
@@ -2118,6 +2126,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             debugLog(`[prism_infer] keyword backstop verdict=${backstop}`);
             attempts.push({ tier: "keyword_backstop", reason: `backstop_${backstop.toLowerCase()}` });
             if (backstop === "OBVIOUS_RESERVED") {
+                l1Layer = "backstop";   // the regex net refused, whatever raised the verdict before it
                 if (wantReport) return refusedResult("keyword_backstop_reserved");
                 // Serve-mode backstop refusal previously wrote NO ledger row —
                 // ledger it like every other refusal (no prompt content persisted).
@@ -2125,6 +2134,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     backend: "refused", model: null, used_cloud: false,
                     gate_outcome: "refused",
                     refusal_reason: "keyword_backstop_reserved",
+                    history_turns: args.messages?.length ?? 0,
+                    refusal_layer: "backstop",
                 });
                 throw new Error(
                     `prism_infer: classifier failed + keyword backstop caught reserved content. attempts=${JSON.stringify(attempts)}`

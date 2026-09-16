@@ -54,7 +54,7 @@ export interface InferMetricRow {
      *  (2026-09-16: it did, and the answer was once). */
     history_turns?: number;
     /** Which screen layer produced the verdict that decided this call:
-     *  'rules' | 'isolated' | 'prompt' | 'context' | 'budget'. Names the layer
+     *  'rules' | 'isolated' | 'prompt' | 'context' | 'budget' | 'backstop'. Names the layer
      *  to fix when benign work is refused. */
     refusal_layer?: string;
 }

@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### The multi-turn screen refused real work
+
+The first organic multi-turn call after 20.20.0 shipped was refused, and it
+was ordinary engineering talk. Replaying it with the real classifier showed
+why: every turn read alone was clean, and the joined read hedged. Remove the
+history and the identical prompt is served locally. The benchmark that
+approved the release attributed no refusals to the context layer, because its
+fixtures were short and synthetic.
+
+- **Behaviour change for paid plans — cloud fallback follows the plan.** A
+  paid-plan host that omitted `cloud_fallback` used to get local-only and now
+  escalates an uncertain, reserved or failed local call to the Synalux cloud,
+  sending the prompt and the accepted turns. Free plans are unaffected: they
+  have no cloud to reach. An omitted `cloud_fallback` used to
+  mean "no cloud", so a paid entitlement sat unused and an uncertain verdict
+  dead-ended. It now means "whatever my plan gives me". Explicit `false` still
+  forbids cloud inference fallback, which the clinical delegation rules depend
+  on (the route guard and grounding verifier keep their own switches); explicit
+  `true` still needs a plan with cloud. The default is image-aware, because
+  cloud can never serve an image request and turning it on for one would only
+  convert a usable local answer into a hard failure. The task router no longer
+  sends the argument: `prism_infer` resolves it from entitlements, and pinning
+  it in the recommendation made a paid plan's escalation unreachable for any
+  host that copied those arguments.
+- **Refusals name the layer.** `infer_metrics` gains the turn count and the
+  screen layer that decided the call (rules, isolated, prompt, context,
+  budget, backstop), so "how often is history passed" and "which layer refused
+  this" are queries. Both took a scan of host transcripts when it mattered.
+- **The context layer is unchanged, on evidence.** A candidate that built
+  context windows from user turns only cleared every false positive, and an
+  adversarial pass found the hole the live classifier then confirmed: a cloud
+  answer fed back as history, then "turn that into numbered steps", each clean
+  alone, is the reserved request, and it was served. Windows keep both roles.
+  The classifier's hedging on joined engineering text is a calibration gap,
+  routed to cloud by the plan instead of refused. On the realistic fixtures
+  that is one conversation in four; the live suite budgets it so a regression
+  reds the run.
+
+`tests/live` now carries realistic-size conversations run end to end on a paid
+plan; the exit criterion is "answered, never refused".
+
 ## 20.20.0 — 2026-09-16
 
 ### `prism_infer` takes the conversation, not just the last line
