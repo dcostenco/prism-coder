@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.2 — 2026-09-16
+
+### Local results carried names and nothing else
+
+A live search for libraries returned three venue names and eighteen `N/A`s. The
+formatter read `name`, `address.streetAddress`, `phone`, `openingHours` and
+`rating.ratingCount`; Brave sends `title`, `postal_address.displayAddress`,
+`contact.telephone`, `opening_hours` and `rating.reviewCount`. Only the name
+survived, because it happened to fall back to `title`. The same query now
+returns the street address, the phone number and today's opening hours. Legacy
+shapes remain as fallbacks so an older cached payload still renders.
+
+- **A remote portal is never addressed in the clear.** Startup hydration
+  published the stored base URL without the plaintext upgrade the storage layer
+  applies, so a self-hosted `http://` portal would have received the query and
+  a bearer token over cleartext. That control now lives in one place and every
+  path that yields a transport URL uses it. Loopback is unchanged.
+- **Search and entitlements resolve the portal identically.** They did not:
+  entitlements ignored the legacy `SYNALUX_BASE_URL` alias, accepted an
+  unexpanded `${...}` template and never checked the value parsed as a URL.
+  Four environments disagreed, the worst giving a paying subscriber working
+  search and a free-tier plan.
+- **A malformed base URL falls through instead of disabling search.** One
+  character wrong in a host config used to route every query to the direct
+  provider in silence.
+
 ## 20.21.1 — 2026-09-16
 
 ### Search asked for a Brave key from subscribers who had already paid
