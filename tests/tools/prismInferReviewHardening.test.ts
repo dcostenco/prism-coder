@@ -8,6 +8,8 @@ import {
     VISION_SYSTEM_PROMPT,
     prismInferHandler,
     messagesProblem,
+    isPrismInferArgs,
+    MULTI_TURN_PROMPT_MAX_CHARS,
     _resetLayer1HistoryCacheForTest,
     LAYER1_HISTORY_CACHE_TTL_MS,
     callSynaluxInference,
@@ -561,5 +563,26 @@ describe("R13 round twelve — a reserved turn read alone stays reserved whateve
         expect(asAssistant.backend).not.toBe("refused");
         const asUser = await runInfer(args({ prompt: "continue", messages: [{ role: "user", content: OPERATIONAL }] }), deps({ callLayer1: viaReal }));
         expect(asUser.backend).toBe("refused");
+    });
+});
+
+describe("R14 round thirteen", () => {
+    it("an ERROR on a turn read alone is kept: the keyword net runs and a reserved keyword in that turn refuses", async () => {
+        const callLayer1 = vi.fn(async (text: string) => (text.includes("elopement") && !text.startsWith("User:") ? "ERROR" : "OBVIOUS_NOT_RESERVED") as "ERROR" | "OBVIOUS_NOT_RESERVED");
+        const r = await runInfer(args({ messages: [{ role: "user", content: "notes on the elopement incident from Tuesday" }, { role: "assistant", content: "ok" }] }), deps({ callLayer1 }));
+        expect(r.backend).toBe("refused");
+        expect(r.gate_outcome?.reason).toBe("keyword_backstop_reserved");
+    });
+    it("…and an ERROR alone on a clean turn is served through the keyword net, as a single-turn ERROR always was", async () => {
+        const callLayer1 = vi.fn(async (text: string) => (text.startsWith("User:") ? "OBVIOUS_NOT_RESERVED" : "ERROR") as "ERROR" | "OBVIOUS_NOT_RESERVED");
+        const r = await runInfer(args({ messages: HISTORY }), deps({ callLayer1 }));
+        expect(r.backend).not.toBe("refused");
+        expect(r.attempts.some(a => a.reason === "layer1_error")).toBe(true);
+    });
+    it("with history the current prompt is capped structurally, and the refusal names the cap", async () => {
+        const huge = "x".repeat(MULTI_TURN_PROMPT_MAX_CHARS + 1);
+        expect(isPrismInferArgs({ prompt: huge, messages: HISTORY })).toBe(false);
+        expect(isPrismInferArgs({ prompt: huge })).toBe(true); // single-turn prompts keep their existing (ctx-gated) behaviour
+        await expect(prismInferHandler({ prompt: huge, messages: HISTORY })).rejects.toThrow(/prompt is capped at 128000 chars/);
     });
 });

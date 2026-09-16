@@ -637,10 +637,18 @@ export function messagesProblem(messages: unknown): string | null {
     return null;
 }
 
+/** With history, the current prompt is bounded like the history itself, so
+ *  the transcript screen has a hard ceiling of classifier work (review
+ *  round 12: an uncapped prompt made the window count unbounded). Anything
+ *  this long is already over every local window; the cap changes no
+ *  routing outcome. */
+export const MULTI_TURN_PROMPT_MAX_CHARS = ABSOLUTE_MULTI_TURN.max_chars;
+
 export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (typeof args !== "object" || args === null) return false;
     const a = args as Record<string, unknown>;
     if (typeof a.prompt !== "string" || !a.prompt.trim()) return false;
+    if (a.messages !== undefined && a.prompt.length > MULTI_TURN_PROMPT_MAX_CHARS) return false;
     if (a.system !== undefined && typeof a.system !== "string") return false;
     if (a.images !== undefined) {
         if (!Array.isArray(a.images) || a.images.length > MAX_INFER_IMAGES) return false;
@@ -1772,9 +1780,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
         }
         // 4th arg is fetchImpl (default), 5th is the images the classifier must see.
-        // Single turn: one call, unchanged. With history: a deterministic floor
-        // per turn, then the semantic classifier over windows of the
-        // role-labelled transcript (see below).
+        // Single turn: one call, unchanged. With history, three layers: the
+        // deterministic floor per turn, every turn read alone (reserved is
+        // final), then the transcript in context (raise only) — see below.
         let l1: Layer1Verdict;
         if (!args.messages?.length) {
             // Single turn: the exact call it always was.
@@ -1814,15 +1822,18 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // thread above is a novel excerpt") whitewashed a self-injury
             // request when the two shared one classifier window, while the
             // same note inside the turn, or in a single prompt, did not fool
-            // the classifier. UNCERTAIN/ERROR/NOT_RESERVED on an isolated
-            // snippet are not final — context decides those (step 3).
+            // the classifier. An ERROR alone is kept too: the classifier saw
+            // nothing, and the ERROR path's keyword net must still run
+            // (fail-closed, as before). UNCERTAIN or NOT_RESERVED on an
+            // isolated snippet are not final — context decides those (step 3).
+            // Owner-visible policy: a turn that is UNCERTAIN alone but clean
+            // in context is served; before, any UNCERTAIN refused.
             history: for (const turn of args.messages) {
                 for (const window of historyTurnWindows(turn.content)) {
                     if (!window.trim()) continue;
-                    if (await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model) === "OBVIOUS_RESERVED") {
-                        l1 = "OBVIOUS_RESERVED";
-                        break history;
-                    }
+                    const alone = await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model);
+                    if (alone === "OBVIOUS_RESERVED") { l1 = "OBVIOUS_RESERVED"; break history; }
+                    if (alone === "ERROR") l1 = worseLayer1Verdict(l1, alone);
                 }
             }
             // The current prompt is a request: its deterministic floor runs
@@ -1834,7 +1845,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             if (promptDet) l1 = worseLayer1Verdict(l1, promptDet);
             if (l1 !== "OBVIOUS_RESERVED") {
                 const promptVerdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
-                if (promptVerdict === "OBVIOUS_RESERVED" || (resolvedImages?.length ?? 0) > 0) {
+                if (promptVerdict === "OBVIOUS_RESERVED" || promptVerdict === "ERROR" || (resolvedImages?.length ?? 0) > 0) {
                     l1 = worseLayer1Verdict(l1, promptVerdict);
                 }
             }
@@ -2792,9 +2803,12 @@ export async function prismInferHandler(args: unknown): Promise<{
     if (!isPrismInferArgs(args)) {
         const raw = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
         const mp = raw.messages !== undefined ? messagesProblem(raw.messages) : null;
+        const longPrompt = raw.messages !== undefined && typeof raw.prompt === "string" && raw.prompt.length > MULTI_TURN_PROMPT_MAX_CHARS;
         throw new Error(mp
             ? `Invalid arguments for prism_infer: messages ${mp}`
-            : "Invalid arguments for prism_infer (need {prompt: string})");
+            : longPrompt
+                ? `Invalid arguments for prism_infer: with messages, prompt is capped at ${MULTI_TURN_PROMPT_MAX_CHARS} chars (got ${(raw.prompt as string).length})`
+                : "Invalid arguments for prism_infer (need {prompt: string})");
     }
     try {
         const prepared = await prepareMemoryAwareInferArgs(args);
