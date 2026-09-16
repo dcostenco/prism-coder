@@ -1937,7 +1937,10 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // prompt (see contextWindows), cached like any window. Skipped
             // once the verdict is UNCERTAIN or RESERVED: only a raise to
             // RESERVED is possible and the two take the same branch below.
-            if (l1 !== "UNCERTAIN" && l1 !== "OBVIOUS_RESERVED") {
+            if (l1 === "UNCERTAIN" || l1 === "OBVIOUS_RESERVED") {
+                // Audit: "context never read" is distinguishable from "context read clean".
+                attempts.push({ tier: "layer1", reason: `layer1_context_skipped_${l1.toLowerCase()}` });
+            } else {
                 for (const window of contextWindows(args)) {
                     if (!window.trim()) continue;
                     l1 = worseLayer1Verdict(l1, await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model, budget));
