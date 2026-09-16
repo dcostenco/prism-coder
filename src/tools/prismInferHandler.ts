@@ -1936,7 +1936,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // 3. Context, raise only: one window per turn and one for the
             // prompt (see contextWindows), cached like any window. Skipped
             // once the verdict is UNCERTAIN or RESERVED: only a raise to
-            // RESERVED is possible and the two take the same branch below.
+            // RESERVED is possible and the two take the same branch below;
+            // the recorded label is then the isolated verdict, not the
+            // strongest a context read might have returned.
             if (l1 === "UNCERTAIN" || l1 === "OBVIOUS_RESERVED") {
                 // Audit: "context never read" is distinguishable from "context read clean".
                 attempts.push({ tier: "layer1", reason: `layer1_context_skipped_${l1.toLowerCase()}` });
