@@ -4,6 +4,50 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### `prism_infer` takes the conversation, not just the last line
+
+`prism_infer` was single-shot: one optional system message and exactly one
+user message, whatever the host had said to the worker before. Without the
+earlier turns the larger tiers do not decline a follow-up they cannot answer,
+they fabricate — probed 2026-09-15, the 9b answered "what is my codename?"
+with a confident invented name when the turn that set it was missing.
+
+An optional `messages` array now carries prior turns, oldest first, each
+`{role: "user" | "assistant", content}`; `prompt` stays the current turn. The
+host curates the history (send only turns you accepted, as a brief, not a
+transcript); Prism bounds, screens, counts and forwards it, and never stores
+it:
+
+- **Bounded, rejected not trimmed.** ≤ 12 turns, ≤ 32,000 characters, user
+  and assistant roles only, text only. A `system` turn, an image, or an
+  over-cap history fails validation outright — silently dropping the turn that
+  mattered is the truncation class the context gate exists to prevent.
+- **Screened per turn.** The Layer 1 classifier runs on every turn separately,
+  not once over a concatenation: the oversize excerpt keeps ~3.8k chars of head,
+  middle and tail, and a position sweep showed a phrase at 20–40% or 60–80% of
+  a 12k-char text is missed by it. The keyword floor and reserved-category
+  attribution run over the whole conversation. A reserved phrase anywhere —
+  including in the model's own earlier answer — refuses the call exactly as it
+  would in a single prompt.
+- **Counted.** Every turn, plus per-message template framing, is charged to the
+  tier's context window, so the 4,096-token tiers are skipped rather than
+  truncated.
+- **Forwarded on escalation.** The portal's inference route already accepts a
+  `messages` array; the cloud client now sends the whole conversation instead
+  of the bare prompt, and refuses locally with `history_over_cloud_cap` before
+  any network call when the flattened transcript would exceed the portal's
+  32 KB limit.
+
+Every installed tier reads role-structured history correctly, including a
+turn another tier wrote (five writer/reader pairs probed, all recalled). A
+call without `messages` is byte-for-byte the call the handler made before.
+
+Twelve tests in `tests/tools/prismInferMultiTurn.test.ts`, nine of them proven
+to fail against the previous handler for the named reason: no history reached
+the model, the validator ignored it, the safety screen saw only the current
+turn (the reserved history was served by the 9b), the context gate did not
+count it, escalation dropped it.
+
 ### The MCP registry listing can actually publish
 
 `registry-publish.yml` ran on any push to main touching `server.json`, which

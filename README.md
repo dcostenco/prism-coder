@@ -1270,6 +1270,18 @@ prism_infer({
 })
 // → 27B generates code locally ($0), with thinking for quality
 // → If quality gate fails + paid tier → auto-escalate to Gemini 3.6 Flash
+
+// Follow-ups carry the conversation. The host curates the turns; Prism bounds
+// them (≤ 12 turns / 32k chars, user+assistant text only), safety-screens each
+// turn, counts them against the tier's context, and never stores them.
+prism_infer({
+    messages: [
+        { role: "user",      content: "Write a binary search in Python" },
+        { role: "assistant", content: "<the accepted answer>" },
+    ],
+    prompt: "Now make it return the insertion point when the value is absent",
+    mode: "code",
+})
 ```
 
 | Mode | Think | Model | Use case |

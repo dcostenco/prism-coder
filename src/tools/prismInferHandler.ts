@@ -121,6 +121,55 @@ export const VISION_SYSTEM_PROMPT =
     + "than the first thing you see.";
 
 export const MAX_INFER_IMAGES = 8;
+
+/** Multi-turn history (owner decision 2026-09-15): the HOST curates turns;
+ *  Prism bounds, screens, counts and forwards them, and never stores them.
+ *  Twelve turns keeps a brief a brief. 32,000 chars (~8k tokens) fits the 32k
+ *  tiers with room and exceeds the 4,096 ones, which the ctx gate handles.
+ *  Over-cap is REJECTED, never trimmed: silently dropping the turn that
+ *  mattered is the truncation class this handler exists to prevent. */
+export const MAX_HISTORY_TURNS = 12;
+export const MAX_HISTORY_CHARS = 32_000;
+export interface InferHistoryTurn { role: "user" | "assistant"; content: string }
+
+/** Tokens a history adds to the prompt body: content plus ~8 tokens of
+ *  chat-template framing per message (role markers and separators). */
+function historyTokenEstimate(history?: InferHistoryTurn[]): number {
+    if (!history?.length) return 0;
+    return history.reduce((n, t) => n + estimateTokens(t.content) + 8, 0);
+}
+
+/** History and current prompt as ONE text for the deterministic screens
+ *  (reserved-category attribution, keyword backstop). The semantic classifier
+ *  is run per turn instead — see the Layer 1 block. */
+function screenedText(args: PrismInferArgs): string {
+    const history = args.messages ?? [];
+    return history.length ? [...history.map(t => t.content), args.prompt].join("\n") : args.prompt;
+}
+
+/** Most severe of two Layer 1 verdicts. A reserved turn anywhere in the
+ *  conversation is a reserved conversation. */
+const LAYER1_SEVERITY: Record<Layer1Verdict, number> = {
+    OBVIOUS_NOT_RESERVED: 0, UNCERTAIN_LENGTH: 1, ERROR: 2, UNCERTAIN: 3, OBVIOUS_RESERVED: 4,
+};
+function worseLayer1Verdict(a: Layer1Verdict, b: Layer1Verdict): Layer1Verdict {
+    return LAYER1_SEVERITY[b] > LAYER1_SEVERITY[a] ? b : a;
+}
+
+/** The whole conversation for the cloud client: history plus the current
+ *  turn as its last entry. Empty object when there is no history, so a
+ *  single-turn call still sends the bare `prompt` it always did. */
+/** Trailing history argument for the local call — present ONLY when there is
+ *  history, so a single-turn call keeps the exact arity it always had (mocks
+ *  and harnesses that pin the argument list stay valid). */
+function historyArgs(args: PrismInferArgs): [] | [InferHistoryTurn[]] {
+    return args.messages?.length ? [args.messages] : [];
+}
+
+function cloudHistory(args: PrismInferArgs): { messages?: InferHistoryTurn[] } {
+    if (!args.messages?.length) return {};
+    return { messages: [...args.messages, { role: "user", content: args.prompt }] };
+}
 /** Bytes per supplied image. Beyond this the base64 blows request memory and
  *  the tier timeout before the model ever sees it. */
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
@@ -231,6 +280,24 @@ export const PRISM_INFER_TOOL: Tool = {
             prompt: {
                 type: "string",
                 description: "The user prompt. Required.",
+            },
+            messages: {
+                type: "array",
+                description:
+                    "Prior turns of THIS conversation, oldest first, each {role: 'user'|'assistant', content}. " +
+                    "`prompt` stays the current user turn. The host curates: send only turns you accepted, " +
+                    "as a brief, not a transcript. Max 12 turns / 32,000 chars, text only, user and assistant " +
+                    "roles only; over-cap or malformed history is rejected, never trimmed. Every turn is " +
+                    "safety-screened and counted against the tier's context. History is forwarded to the " +
+                    "cloud on escalation (32 KB cap) and is never stored.",
+                items: {
+                    type: "object",
+                    properties: {
+                        role: { type: "string", enum: ["user", "assistant"] },
+                        content: { type: "string" },
+                    },
+                    required: ["role", "content"],
+                },
             },
             system: {
                 type: "string",
@@ -389,6 +456,9 @@ export interface PrismInferArgs {
      *  8: images are the dominant context cost and an unbounded list silently
      *  blows the tier context budget. */
     images?: string[];
+    /** Prior turns, oldest first. Validated: ≤ MAX_HISTORY_TURNS, ≤ MAX_HISTORY_CHARS,
+     *  user/assistant only, text only. Never persisted. */
+    messages?: InferHistoryTurn[];
     max_tokens?: number;
     temperature?: number;
     model_ceiling?: "27b" | "9b" | "4b" | "2b";
@@ -441,6 +511,23 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (a.images !== undefined) {
         if (!Array.isArray(a.images) || a.images.length > MAX_INFER_IMAGES) return false;
         if (a.images.some((i: unknown) => typeof i !== "string" || !i.trim())) return false;
+    }
+    if (a.messages !== undefined) {
+        if (!Array.isArray(a.messages) || a.messages.length > MAX_HISTORY_TURNS) return false;
+        let chars = 0;
+        for (const m of a.messages as unknown[]) {
+            if (typeof m !== "object" || m === null) return false;
+            const t = m as Record<string, unknown>;
+            // user/assistant only: a `system` turn here would be a second system
+            // prompt behind the safety-bearing one.
+            if (t.role !== "user" && t.role !== "assistant") return false;
+            if (typeof t.content !== "string" || !t.content.trim()) return false;
+            // text only: a turn carrying images (or anything else) would bypass
+            // the image screen, which sees the current call's images only.
+            if (Object.keys(t).some(k => k !== "role" && k !== "content")) return false;
+            chars += t.content.length;
+        }
+        if (chars > MAX_HISTORY_CHARS) return false;
     }
     if (a.max_tokens !== undefined && typeof a.max_tokens !== "number") return false;
     if (a.temperature !== undefined && typeof a.temperature !== "number") return false;
@@ -829,10 +916,15 @@ export async function callOllamaGenerate(
     timeoutMs: number,
     think?: boolean,
     images?: string[],
+    history?: InferHistoryTurn[],
 ): Promise<{ ok: true; text: string; doneReason?: string; promptTokens?: number; completionTokens?: number } | { ok: false; reason: string }> {
     try {
         const messages: Array<{ role: string; content: string; images?: string[] }> = [];
         if (system) messages.push({ role: "system", content: system });
+        // Prior turns sit between the system message and the current turn, in
+        // the model's own chat template — the form every installed tier read
+        // correctly in the 2026-09-15 probes, including turns another tier wrote.
+        for (const t of history ?? []) messages.push({ role: t.role, content: t.content });
         messages.push({ role: "user", content: prompt, ...(images?.length ? { images } : {}) });
         const body = {
             model,
@@ -928,12 +1020,27 @@ interface CloudResult {
     reason?: string;
 }
 
-async function callSynaluxInference(
+/** Portal cap on the flattened conversation (`ROLE: content` lines) — see
+ *  portal/src/app/api/v1/prism/inference/route.ts MAX_PROMPT_BYTES. */
+export const CLOUD_HISTORY_CAP_BYTES = 32 * 1024;
+
+/** Exported for tests: the cap check must be provable without a portal. */
+export async function callSynaluxInference(
     prompt: string,
     maxTokens: number,
     timeoutMs: number,
-    opts?: { reserved?: boolean },
+    opts?: { reserved?: boolean; messages?: InferHistoryTurn[] },
 ): Promise<CloudResult> {
+    // /api/v1/prism/inference accepts `messages` (≤ 50) OR `prompt`, flattens the
+    // former to a role-labelled transcript, and rejects a flattened prompt over
+    // 32 KB with 413. Pure validation, so it runs before the base-URL check and
+    // the JWT exchange: an oversize conversation fails loud before any network
+    // call and before anything is spent.
+    if (opts?.messages?.length) {
+        const flattenedBytes = opts.messages.reduce(
+            (n, m) => n + Buffer.byteLength(`${m.role.toUpperCase()}: ${m.content}\n`, "utf8"), 0);
+        if (flattenedBytes > CLOUD_HISTORY_CAP_BYTES) return { ok: false, reason: "history_over_cloud_cap" };
+    }
     if (!PRISM_SYNALUX_BASE_URL) return { ok: false, reason: "no_synalux_base_url" };
 
     const jwt = await getSynaluxJwt();
@@ -943,7 +1050,14 @@ async function callSynaluxInference(
     // reserved=true tells the portal this prompt was refused by local Layer-1
     // as reserved clinical content: it must be served by the portal's
     // reserved-capable cloud backend or refused — never by a local model.
-    const reqBody = JSON.stringify({ prompt, max_tokens: maxTokens, ...(opts?.reserved ? { reserved: true } : {}) });
+    const reqBody = JSON.stringify({
+        // With history the conversation travels as `messages` (the current turn
+        // is its last entry) and `prompt` is omitted, because the portal reads
+        // `prompt` first and would ignore the turns.
+        ...(opts?.messages?.length ? { messages: opts.messages } : { prompt }),
+        max_tokens: maxTokens,
+        ...(opts?.reserved ? { reserved: true } : {}),
+    });
     try {
         let res = await fetch(url, {
             method: "POST",
@@ -1153,7 +1267,7 @@ export interface InferDeps {
     freemem: () => number;
     listTags: () => Promise<Set<string> | null>;
     listLoaded: () => Promise<Set<string>>;
-    callLocal: (url: string, model: string, prompt: string, system: string | undefined, maxTokens: number, temperature: number, timeoutMs: number, think?: boolean, images?: string[]) => ReturnType<typeof callOllamaGenerate>;
+    callLocal: (url: string, model: string, prompt: string, system: string | undefined, maxTokens: number, temperature: number, timeoutMs: number, think?: boolean, images?: string[], history?: InferHistoryTurn[]) => ReturnType<typeof callOllamaGenerate>;
     callCloud: typeof callSynaluxInference;
     ollamaUrl: string;
     /** Injectable verifier for testing. When omitted, verification is skipped (portal-side). */
@@ -1484,10 +1598,18 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
         }
         // 4th arg is fetchImpl (default), 5th is the images the classifier must see.
-        const l1 = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
+        // Per TURN, not one pass over a concatenation. The oversize excerpt in
+        // layer1.ts keeps ~3.8k chars of head, middle and tail, and a position
+        // sweep (2026-09-15) showed a phrase at 20–40% or 60–80% of a 12k-char
+        // text is missed by it. Each history turn is bounded by the validator,
+        // so each is classified in full; the current prompt keeps its images.
+        let l1: Layer1Verdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
+        for (const turn of args.messages ?? []) {
+            l1 = worseLayer1Verdict(l1, await l1fn(turn.content, deps.ollamaUrl, l1Model));
+        }
         // Null when the deterministic floor did not fire — the verdict then came
         // from the semantic classifier, which has no per-rule attribution.
-        const reservedCat = reservedCategory(args.prompt);
+        const reservedCat = reservedCategory(screenedText(args));
         if ((l1 === "OBVIOUS_RESERVED" || l1 === "UNCERTAIN")
             && (resolvedImages?.length ?? 0) > 0) {
             // Clinical images are PROCESSED, never refused (ruling 2026-08-18:
@@ -1527,7 +1649,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
             if (allowCloud) {
                 const cloudTimeout = args.timeout_ms ?? 90_000;
-                const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout, { reserved: true });
+                const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout, { reserved: true, ...cloudHistory(args) });
                 if (cloud.ok && cloud.output) {
                     // Defense in depth (§5.1): the escalation target for reserved
                     // content must be STRONGER than the local model that refused
@@ -1589,7 +1711,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
             if (allowCloud) {
                 const cloudTimeout = args.timeout_ms ?? 90_000;
-                const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout);
+                const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout, cloudHistory(args));
                 if (cloud.ok && cloud.output) {
                     return await applyVerification(cloud.output, gatedArgs, deps, {
                         backend: cloud.backend ?? "synalux",
@@ -1605,7 +1727,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 }
                 attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
             }
-            const backstop = keywordBackstop(args.prompt);
+            const backstop = keywordBackstop(screenedText(args));
             debugLog(`[prism_infer] keyword backstop verdict=${backstop}`);
             attempts.push({ tier: "keyword_backstop", reason: `backstop_${backstop.toLowerCase()}` });
             if (backstop === "OBVIOUS_RESERVED") {
@@ -1825,6 +1947,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // effectiveSystem, not args.system: the default vision prompt is 46
             // estimated tokens and the model is charged for them.
             const promptBodyEst = estimateImageTokens(resolvedImages?.length ?? 0) + estimateTokens(args.prompt)
+                + historyTokenEstimate(args.messages)
                 + (effectiveSystem ? estimateTokens(effectiveSystem) : 0);
             // Prefer what the model reports over what the table remembers. A
             // tag with a pinned num_ctx is authoritative; one without keeps the
@@ -1888,7 +2011,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 ? Math.min(Math.max(localMaxTokens, tier.minLocalTokens), 8192)
                 : localMaxTokens;
             let result = await deps.callLocal(
-                deps.ollamaUrl, ollamaName, args.prompt, effectiveSystem, tierTokens, temperature, timeout, enableThink, resolvedImages,
+                deps.ollamaUrl, ollamaName, args.prompt, effectiveSystem, tierTokens, temperature, timeout, enableThink, resolvedImages, ...historyArgs(args),
             );
             // Think-only retry: model burned all tokens on <think>, empty content.
             // Retry same model with think=false rather than falling to a smaller tier.
@@ -1897,7 +2020,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 debugLog(`[prism_infer] ${tier.tag} returned think-only — retrying with think=false`);
                 recordThinkOnlyRetry();
                 result = await deps.callLocal(
-                    deps.ollamaUrl, ollamaName, args.prompt, effectiveSystem, tierTokens, temperature, timeout, false, resolvedImages,
+                    deps.ollamaUrl, ollamaName, args.prompt, effectiveSystem, tierTokens, temperature, timeout, false, resolvedImages, ...historyArgs(args),
                 );
             }
             if (result.ok) {
@@ -1997,7 +2120,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     debugLog(`[prism_infer] ${tier.tag} truncated mid-answer — retrying with think=false`);
                     attempts.push({ tier: tier.tag, reason: "hard_truncation_retry" });
                     const retried = await deps.callLocal(
-                        deps.ollamaUrl, ollamaName, args.prompt, effectiveSystem, tierTokens, temperature, timeout, false, resolvedImages,
+                        deps.ollamaUrl, ollamaName, args.prompt, effectiveSystem, tierTokens, temperature, timeout, false, resolvedImages, ...historyArgs(args),
                     );
                     if (retried.ok) {
                         const retriedStrip = stripThink(retried.text);
@@ -2165,7 +2288,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 `for image inputs (screenshots stay on this device). attempts=${JSON.stringify(attempts)}`
             );
         }
-        const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout);
+        const cloud = await deps.callCloud(args.prompt, maxTokens, cloudTimeout, cloudHistory(args));
         if (cloud.ok && cloud.output) {
             return await applyVerification(cloud.output, gatedArgs, deps, {
                 backend: cloud.backend ?? "synalux",
