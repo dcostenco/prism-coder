@@ -786,7 +786,7 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
         await runInfer(args({ prompt: "and after that?", messages: next }), deps({ callLayer1 }));
         const delta = callLayer1.mock.calls.length - first;
         // new turns alone (≤3) + their context windows (2) + prompt alone (1) + prompt context (1) + the
-        // shifted first window or two (these turns are ~2,900 chars; short turns shift every window — a cost)
+        // shifted first window or two (these turns are ~2,900 chars; short turns shift every context window that still held the evicted turn, every one only while the whole transcript fits in one window — a cost)
         expect(delta).toBeLessThanOrEqual(9);
         expect(delta).toBeLessThan(first / 2);
     });
