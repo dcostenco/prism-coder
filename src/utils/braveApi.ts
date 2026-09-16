@@ -33,7 +33,7 @@ import { BRAVE_API_KEY, BRAVE_ANSWERS_API_KEY } from "../config.js";
 import { debugLog } from "./logger.js";
 import { isPortalPlanRefusal } from "./portalError.js";
 import {
-  SYNALUX_SEARCH_AVAILABLE,
+  synaluxSearchAvailable,
   synaluxWebSearch,
   synaluxWebSearchRaw,
   synaluxLocalSearch,
@@ -153,7 +153,7 @@ export async function performBraveAnswers(
   query: string,
   model: string = "brave"
 ) {
-  if (SYNALUX_SEARCH_AVAILABLE) {
+  if (synaluxSearchAvailable()) {
     return portalFirst(
       () => synaluxBraveAnswers(query, model),
       BRAVE_ANSWERS_API_KEY,
@@ -209,7 +209,7 @@ export async function performWebSearchRaw(
   count: number = 10,
   offset: number = 0
 ): Promise<string> {
-  if (SYNALUX_SEARCH_AVAILABLE) {
+  if (synaluxSearchAvailable()) {
     if (offset !== 0) throw new Error(SYNALUX_OFFSET_UNSUPPORTED_ERROR);
     return portalFirst(
       () => synaluxWebSearchRaw(query, count),
@@ -257,7 +257,7 @@ export async function performWebSearch(
   count: number = 10,
   offset: number = 0
 ) {
-  if (SYNALUX_SEARCH_AVAILABLE) {
+  if (synaluxSearchAvailable()) {
     if (offset !== 0) throw new Error(SYNALUX_OFFSET_UNSUPPORTED_ERROR);
     return portalFirst(
       () => synaluxWebSearch(query, count),
@@ -354,7 +354,7 @@ export async function performLocalSearchRaw(
   query: string,
   count: number = 5
 ): Promise<string> {
-  if (SYNALUX_SEARCH_AVAILABLE) {
+  if (synaluxSearchAvailable()) {
     return portalFirst(
       () => synaluxLocalSearchRaw(query, count),
       BRAVE_API_KEY,
@@ -442,7 +442,7 @@ async function braveLocalSearchRaw(
 
 // Local search API call with poi details
 export async function performLocalSearch(query: string, count: number = 5) {
-  if (SYNALUX_SEARCH_AVAILABLE) {
+  if (synaluxSearchAvailable()) {
     return portalFirst(
       () => synaluxLocalSearch(query, count),
       BRAVE_API_KEY,

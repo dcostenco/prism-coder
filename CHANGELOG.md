@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Search asked for a Brave key from subscribers who had already paid
+
+A paying subscriber's every web search failed with `BRAVE_API_KEY is not
+configured`, while the same account's entitlements correctly reported its plan.
+Portal search availability was a module-load constant derived from
+`SYNALUX_CONFIGURED`, which reads `process.env` at import time. `prism connect`
+copies `PRISM_SYNALUX_API_KEY` into a host's MCP env block only when that key
+already happens to be in the environment; a machine that signed in through
+Prism's settings store got a base URL and no key. The key did reach
+`process.env` later during startup, which is why entitlements resolved the paid
+plan — but the search constant had already frozen `false` for the life of the
+process, so every query skipped the portal and demanded a provider key the
+subscriber had no reason to own.
+
+- **Portal search availability is resolved per call, from the live
+  environment.** It uses the same resolution order `fetchEntitlements()` already
+  used, so the two can no longer disagree about whether the portal is usable.
+  An unexpanded `${...}` template is treated as no credential, matching how
+  `config.ts` has always sanitised these values.
+- **The portal request builder resolves its base URL the same way.** It read the
+  module-load constant behind a non-null assertion, which would have thrown a
+  `TypeError` on a host whose credentials arrive only from the settings store.
+- **The server hydrates the subscription key before it connects the
+  transport**, from the settings cache that startup has already warmed. No new
+  I/O on the Initialize handshake.
+- **`prism connect` hydrates before it writes host config**, so a machine that
+  signed in once keeps its subscription across re-registration instead of
+  silently dropping to unauthenticated search. A stored value that is not a URL
+  is never published to `process.env`, which storage and entitlements share.
+
+Nothing changes for an account with no subscription: search still uses
+`BRAVE_API_KEY`, and still says so when there is none.
+
 ## 20.21.0 — 2026-09-16
 
 ### The multi-turn screen refused real work

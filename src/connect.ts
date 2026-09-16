@@ -1435,6 +1435,9 @@ function buildMcpEntry(nodePath: string, serverPath: string, env: NodeJS.Process
     PRISM_SYNALUX_BASE_URL: env.PRISM_SYNALUX_BASE_URL || "https://synalux.ai",
     PRISM_STORAGE: storage,
   };
+  // process.env is hydrated from the settings store before connect runs, so a
+  // machine that logged in once keeps its subscription across re-registration
+  // instead of silently dropping to unauthenticated search.
   if (env.PRISM_SYNALUX_API_KEY) {
     serverEnv.PRISM_SYNALUX_API_KEY = env.PRISM_SYNALUX_API_KEY;
   }

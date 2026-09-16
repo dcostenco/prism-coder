@@ -14,20 +14,96 @@
  * Auth uses the shared JWT exchange from synaluxJwt.ts (same
  * refresh-token dance as SynaluxStorage, but without requiring
  * the full storage class). Falls back gracefully: callers check
- * SYNALUX_SEARCH_AVAILABLE before calling.
+ * synaluxSearchAvailable() before calling.
  */
 
 import { debugLog } from "./logger.js";
 import { PortalHttpError } from "./portalError.js";
 import { getSynaluxJwt, invalidateSynaluxJwt } from "./synaluxJwt.js";
 import {
+  PRISM_SYNALUX_API_KEY,
   PRISM_SYNALUX_BASE_URL,
-  SYNALUX_CONFIGURED,
 } from "../config.js";
 
 // ─── Public availability flag ────────────────────────────────
-/** True when Synalux portal credentials are configured. */
-export const SYNALUX_SEARCH_AVAILABLE: boolean = SYNALUX_CONFIGURED;
+
+/** A `${...}` template the shell never expanded is not a credential. config.ts
+ *  rejects those at load; the live read rejects them too, or a half-written host
+ *  config sends every search to a portal that can only answer 401. */
+function usableEnvValue(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed || trimmed.includes("${")) return undefined;
+  return trimmed;
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the portal can serve a search, resolved at CALL time.
+ *
+ *  This used to be a module-load constant taken from SYNALUX_CONFIGURED, and
+ *  that was wrong for the most common installation. `prism connect` copies the
+ *  subscription key into the host's MCP env block only when the key already
+ *  happened to be in the environment; otherwise it lives in Prism's settings
+ *  store and reaches process.env during startup. A constant read before that
+ *  froze "unconfigured" for the life of the process, so a paying subscriber's
+ *  every search skipped the portal and demanded a Brave key they had no reason
+ *  to own — while entitlements, resolved later from the same hydrated key,
+ *  correctly reported their paid plan. Measured 2026-09-16.
+ *
+ *  The resolution order below is deliberately the same one fetchEntitlements()
+ *  uses (live env first, module-load constant as the fallback). Search and
+ *  entitlements answering "is the portal usable" differently IS the defect. */
+export function resolvePortalBaseUrl(): string | undefined {
+  const baseUrl =
+    usableEnvValue(process.env.PRISM_SYNALUX_BASE_URL)
+    ?? usableEnvValue(process.env.SYNALUX_BASE_URL)
+    ?? PRISM_SYNALUX_BASE_URL;
+  if (!baseUrl || !isHttpUrl(baseUrl)) return undefined;
+  return baseUrl.replace(/\/+$/, "");
+}
+
+export function synaluxSearchAvailable(): boolean {
+  const apiKey =
+    usableEnvValue(process.env.PRISM_SYNALUX_API_KEY) ?? PRISM_SYNALUX_API_KEY;
+  return !!resolvePortalBaseUrl() && !!apiKey;
+}
+
+/** Put the subscription key where every consumer reads it — process.env —
+ *  taking the settings store as the fallback source. Idempotent, and it never
+ *  overwrites a value the environment already supplied. */
+export async function hydrateSynaluxCredentials(
+  getSetting: (key: string, fallback: string) => Promise<string>,
+): Promise<boolean> {
+  try {
+    const baseUrl =
+      usableEnvValue(process.env.PRISM_SYNALUX_BASE_URL)
+      ?? usableEnvValue(process.env.SYNALUX_BASE_URL)
+      ?? usableEnvValue(await getSetting("PRISM_SYNALUX_BASE_URL", ""))
+      ?? usableEnvValue(await getSetting("SYNALUX_BASE_URL", ""))
+      ?? PRISM_SYNALUX_BASE_URL;
+    // Validate before publishing. process.env is shared with storage and
+    // entitlements, so a settings row holding something that is not a URL would
+    // poison every portal client in the process, not just this one.
+    if (baseUrl && isHttpUrl(baseUrl)) {
+      process.env.PRISM_SYNALUX_BASE_URL = baseUrl.replace(/\/+$/, "");
+    }
+    const apiKey =
+      usableEnvValue(process.env.PRISM_SYNALUX_API_KEY)
+      ?? usableEnvValue(await getSetting("PRISM_SYNALUX_API_KEY", ""))
+      ?? PRISM_SYNALUX_API_KEY;
+    if (apiKey) process.env.PRISM_SYNALUX_API_KEY = apiKey;
+    return synaluxSearchAvailable();
+  } catch {
+    return synaluxSearchAvailable();   // a settings read must never break startup
+  }
+}
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -90,7 +166,14 @@ interface SynaluxScrapeResponse {
  * (JWT may have just expired). Throws on network or HTTP errors.
  */
 async function portalPost<T>(path: string, body: Record<string, unknown>, timeoutMs = 15_000): Promise<T> {
-  const baseUrl = PRISM_SYNALUX_BASE_URL!.replace(/\/+$/, "");
+  // Resolved, never the module-load constant: availability is now decided from
+  // the live environment, so a portal that is reachable must also be addressable.
+  // Reading a frozen constant here would throw on the very installation this
+  // routing exists to serve.
+  const baseUrl = resolvePortalBaseUrl();
+  if (!baseUrl) {
+    throw new Error("[synaluxSearch] no Synalux portal base URL is configured");
+  }
   const url = `${baseUrl}${path}`;
 
   const send = async (jwt: string): Promise<Response> => {

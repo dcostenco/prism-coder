@@ -13,7 +13,7 @@ async function loadBraveApi(braveApiKey?: string) {
     debugLog: vi.fn(),
   }));
   vi.doMock("../src/utils/synaluxSearch.js", () => ({
-    SYNALUX_SEARCH_AVAILABLE: false,
+    synaluxSearchAvailable: () => false,
     synaluxWebSearch: vi.fn(),
     synaluxWebSearchRaw: vi.fn(),
     synaluxLocalSearch: vi.fn(),
