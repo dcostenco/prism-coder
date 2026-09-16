@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 20.21.0 — 2026-09-16
 
 ### The multi-turn screen refused real work
 
