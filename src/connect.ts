@@ -1098,7 +1098,9 @@ export interface ManagedStartupRefresh {
   detail?: string;
 }
 
-/** Rewrite managed startup blocks that an OLDER release wrote, and nothing else.
+/** Rewrite a managed startup block whose content differs from what THIS binary
+ *  writes, and nothing else. Not "older": there is no version ordering in the
+ *  block, so a pinned older install can rewrite what a newer one wrote.
  *
  *  The instruction files are the one delivery channel that does not travel with
  *  the package: the MCP `initialize` instructions and every tool description
@@ -1117,8 +1119,11 @@ export interface ManagedStartupRefresh {
  *    consent is never inferred from a server start.
  *  - Startup blocks ONLY. It never touches MCP host registration — that is what
  *    connect's "close target hosts before registration" warning is about, since
- *    a live host rewrites its own config. No host writes its own instruction
- *    file, so refreshing one under a running host is safe.
+ *    a live host rewrites its own config. These files DO have another writer —
+ *    Gemini CLI writes GEMINI.md on a remember request, Claude Code writes
+ *    CLAUDE.md on /init — so only the bytes between the markers are replaced
+ *    and the file is re-checked immediately before committing; a write landing
+ *    inside that final window would still be lost.
  *  - Content-addressed, so it is a no-op once current: the block is compared
  *    byte-for-byte and only a difference writes.
  *
@@ -1132,6 +1137,9 @@ export function refreshManagedStartupBlocks(options: {
 } = {}): ManagedStartupRefresh[] {
   const homeDir = options.homeDir ?? homedir();
   const env = options.env ?? process.env;
+  // The opt-out lives here, next to the writing, so it is one decision and a
+  // test can exercise it without starting a server.
+  if (env.PRISM_NO_STARTUP_REFRESH === "1") return [];
   const dryRun = !!options.dryRun;
   const codexHome = env.CODEX_HOME?.trim() ? resolve(env.CODEX_HOME.trim()) : join(homeDir, ".codex");
   const targets: Array<{ host: ManagedStartupRefresh["host"]; path: string; configure: () => NativeStartupConfiguration }> = [
@@ -1145,18 +1153,35 @@ export function refreshManagedStartupBlocks(options: {
   // ownership marker, so without this each start rewrote that file twice and
   // never converged: two "refreshed" lines on every start, forever. Whoever
   // gets there first owns it; the second reports it as already handled.
-  const seen = new Map<string, ManagedStartupRefresh["host"]>();
-  for (const target of targets) {
-    let identity = target.path;
+  const identityOf = (path: string): string => {
     try {
-      identity = realpathSync(target.path);
-    } catch { /* absent or unreadable: the path itself is identity enough */ }
-    const owner = seen.get(identity);
-    if (owner !== undefined) {
-      results.push({ host: target.host, path: target.path, status: "unchanged", detail: `same file as the ${owner} block` });
+      return realpathSync(path);
+    } catch {
+      return path;   // absent or unreadable: the path itself is identity enough
+    }
+  };
+  const shared = new Map<string, ManagedStartupRefresh["host"][]>();
+  for (const target of targets) {
+    const identity = identityOf(target.path);
+    shared.set(identity, [...(shared.get(identity) ?? []), target.host]);
+  }
+  for (const target of targets) {
+    const sharing = shared.get(identityOf(target.path)) ?? [target.host];
+    if (sharing.length > 1) {
+      // One file, two hosts. Claude and Gemini serialize the SAME ownership
+      // marker but DIFFERENT instructions (the tool is named differently for
+      // each), so there is no content that satisfies both: healing it would
+      // hand one host the other's block, and before this check each start
+      // rewrote the file once per host, forever. Whose block it should be is
+      // the operator's call, not a background process's.
+      results.push({
+        host: target.host,
+        path: target.path,
+        status: "failed",
+        detail: `shared with ${sharing.filter(h => h !== target.host).join(", ")} (one file cannot hold both blocks); run: prism connect`,
+      });
       continue;
     }
-    seen.set(identity, target.host);
     try {
       // No independent pre-read. The configurator's own exact-line marker
       // recognition decides, from ONE snapshot: a second, weaker check here

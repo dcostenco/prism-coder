@@ -77,7 +77,7 @@ describe("self-healing startup blocks", () => {
     // every start rewrote that one file twice and never converged: two
     // "refreshed" lines on every start, forever, with the loser's flavour
     // winning. Measured 2026-09-16.
-    it("two hosts sharing one file converge: it is healed once and then stays unchanged", () => {
+    it("two hosts sharing one file are reported, never healed: no content satisfies both", () => {
         writeFileSync(claudeFile(), "# Shared\n");
         configureClaudeNativeStartup(home, false);
         const fresh = readFileSync(claudeFile(), "utf8");
@@ -85,19 +85,32 @@ describe("self-healing startup blocks", () => {
         rmSync(geminiFile(), { force: true });
         symlinkSync(claudeFile(), geminiFile());          // one file, two hosts
 
-        const first = refreshManagedStartupBlocks({ homeDir: home, env: {} });
-        expect(first.filter(r => r.status === "refreshed")).toHaveLength(1);
-        expect(first.find(r => r.host === "gemini")?.detail).toContain("same file");
-        expect(readFileSync(claudeFile(), "utf8")).toBe(fresh);
-
-        // The second start must be silent: no write, no "refreshed" line.
+        const staleBytes = readFileSync(claudeFile(), "utf8");
         const settled = statSync(claudeFile()).mtimeMs;
         for (let start = 0; start < 3; start++) {
             const results = refreshManagedStartupBlocks({ homeDir: home, env: {} });
-            expect(results.some(r => r.status === "refreshed"), "a shared file must not be rewritten on every start").toBe(false);
+            for (const host of ["claude-code", "gemini"] as const) {
+                const r = results.find(x => x.host === host);
+                expect(r?.status, `${host} on start ${start}`).toBe("failed");
+                expect(r?.detail).toContain("one file cannot hold both blocks");
+            }
+            // Never rewritten — not once per host, not once at all.
+            expect(results.some(r => r.status === "refreshed"), "a shared file must not be written").toBe(false);
         }
         expect(statSync(claudeFile()).mtimeMs).toBe(settled);
-        expect(readFileSync(claudeFile(), "utf8")).toBe(fresh);
+        expect(readFileSync(claudeFile(), "utf8")).toBe(staleBytes);
+        expect(fresh).not.toBe(staleBytes);   // it really was stale, and stayed that way on purpose
+    });
+
+    it("PRISM_NO_STARTUP_REFRESH=1 turns it off entirely: nothing is inspected and nothing is written", () => {
+        writeFileSync(claudeFile(), "");
+        configureClaudeNativeStartup(home, false);
+        const older = stale(readFileSync(claudeFile(), "utf8"));
+        writeFileSync(claudeFile(), older);
+        const settled = statSync(claudeFile()).mtimeMs;
+        expect(refreshManagedStartupBlocks({ homeDir: home, env: { PRISM_NO_STARTUP_REFRESH: "1" } })).toEqual([]);
+        expect(readFileSync(claudeFile(), "utf8")).toBe(older);
+        expect(statSync(claudeFile()).mtimeMs).toBe(settled);
     });
 
     it("a file with a start marker but no end marker is reported, not written", () => {

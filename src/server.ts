@@ -1457,7 +1457,9 @@ export async function startServer() {
 
   console.error(`[Prism] MCP Server successfully started and listening on stdio...`);
 
-  // Heal a startup block an OLDER release wrote. The instruction files are the
+  // Heal a startup block whose content differs from what this binary writes.
+  // (Not "older": nothing orders versions, so a pinned older install can
+  // rewrite what a newer one wrote.) The instruction files are the
   // one channel that does not travel with the package — `initialize`
   // instructions and every tool description update with the binary, a native
   // instruction file keeps whatever connect last wrote — and nothing on an
@@ -1500,7 +1502,7 @@ async function refreshStartupBlocksInBackground(): Promise<void> {
       if (result.status === "refreshed") {
         // The host read this file when the session began, so the corrected
         // text applies from the next one.
-        console.error(`[Prism] refreshed the ${result.host} startup block written by an older release: ${result.path} (applies from your next session)`);
+        console.error(`[Prism] refreshed the ${result.host} startup block to match this version: ${result.path} (applies from your next session)`);
       } else if (result.status === "failed") {
         console.error(`[Prism] could not refresh the ${result.host} startup block (${result.detail}); run: prism connect`);
       } else if (process.env.PRISM_DEBUG) {

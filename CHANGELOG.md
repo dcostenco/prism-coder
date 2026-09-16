@@ -23,14 +23,20 @@ the contract:
   from this path, so a file without exactly one ordered pair of Prism ownership
   markers is left byte-for-byte alone and an absent file is never created. Only
   `prism connect` can first install a block; consent is never inferred from a
-  server start. An unpaired or ambiguous marker is reported, not repaired.
+  server start. An opening marker without a valid pair is reported, not
+  repaired, and a closing marker alone is simply not ours.
 - **Startup blocks only.** MCP host registration is never touched, which is
   what connect's "close your hosts first" warning is about.
-- **Content-addressed**, so a current block is not rewritten on every start,
-  and two hosts that resolve to one file (a `GEMINI.md` symlinked to
-  `CLAUDE.md` is a common single-file setup, and both serialize the same
-  ownership marker) heal it once instead of rewriting it twice forever.
-- **Never fatal.** A failure is reported and the server starts.
+- **Content-addressed**, so a current block is not rewritten on every start.
+  Two hosts that resolve to one file (a `GEMINI.md` symlinked to `CLAUDE.md` is
+  a common single-file setup) are reported rather than healed: they share an
+  ownership marker but serialize different instructions, so no content
+  satisfies both, and whose block it should be is the operator's call. Before
+  this the file was rewritten once per host on every start, forever.
+- **Never fatal.** A failure is reported and the server starts. A file whose
+  own mode is read-only is still replaced when its directory is writable,
+  because the write is an atomic rename: `chmod` is not the opt-out,
+  `PRISM_NO_STARTUP_REFRESH=1` is.
 
 Two limits worth stating plainly. Gemini CLI writes `GEMINI.md` itself when you
 ask it to remember something, and Claude Code writes `CLAUDE.md` on `/init`, so
