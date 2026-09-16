@@ -11,7 +11,7 @@
  *                          2026-08-18, clinical images are processed)
  *   UNCERTAIN            → the same as OBVIOUS_RESERVED (conservative)
  *   UNCERTAIN_LENGTH     → §5.3: prompt too long to classify in full, but the
- *                          full-text keyword floor is clean AND a head+tail
+ *                          full-text keyword floor is clean AND a head+middle+tail
  *                          excerpt classified clean — permits local routing
  *                          with a distinct audit marker ("too long to classify"
  *                          ≠ "semantically uncertain")
@@ -19,7 +19,10 @@
  *                          the full-text keyword net decides and keyword-
  *                          clean text is served locally (the one path that
  *                          is not fail-closed: an availability policy; on a
- *                          history screen three in a row become UNCERTAIN)
+ *                          history screen three in a row become UNCERTAIN;
+ *                          with a current image callLayer1 maps ERROR to
+ *                          UNCERTAIN and the handler refuses one that
+ *                          reaches it, so an image ERROR is never served)
  *
  * The prompt below is VERBATIM from §E of prism-infer-boundaries/SKILL.md.
  * It is duplicated here (not imported) because prism is a thin client with no

@@ -46,7 +46,8 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
   small ones on top: mid-session prompt routing, and a post-compaction
   re-injection of the protected-floor digest.
 - **Safe escalation and observability** — inference outcomes are explicit,
-  reserved content remains fail-closed, and local/cloud usage is recorded for
+  reserved text remains fail-closed (clinical images are processed locally,
+  never sent to the cloud), and local/cloud usage is recorded for
   review.
 
 ## Get started
@@ -781,7 +782,7 @@ Qwen 3.5 models (9B/27B) with thinking enabled could burn all tokens on `<think>
 ## What's New in v20.0.3
 
 ### Layer 1 Cold-Model Resilience
-The reserved-category classifier now retries once with a longer timeout on cold-model failure, then falls back to a deterministic keyword backstop before refusing. Over-length prompts (>4K chars) are classified as UNCERTAIN before reaching the classifier — prompt padding can no longer force the ERROR branch. This eliminates the cold-start refusal problem without weakening the safety gate.
+(As shipped in an earlier release; the current contract is the header of `src/utils/layer1.ts`.) The reserved-category classifier retries once with a longer timeout on cold-model failure, then falls back to a deterministic keyword backstop; keyword-clean text is served locally. Over-length prompts (>4K chars) get the full-text keyword floor plus a head+middle+tail excerpt read and a distinct UNCERTAIN_LENGTH marker — prompt padding cannot force the ERROR branch. This eliminates the cold-start refusal problem without weakening the safety gate.
 
 ### Keyword Backstop for Reserved Content
 When the LLM classifier fails (timeout, injection, resource pressure), a deterministic regex floor catches reserved vocabulary (restraint, seclusion, self-harm, suicide, overdose, crisis de-escalation, etc.) including inflected and verb forms. Blocks prompt-padding and classifier-injection attacks on the ERROR path.
@@ -1273,7 +1274,7 @@ prism_infer({
 
 // Follow-ups carry the conversation (paid plans). The host curates the turns;
 // Prism bounds them to your plan's caps (user+assistant text only), safety-
-// screens every turn (each alone, then the request in context; a short routine
+// screens every turn (each alone, then each in context; a short routine
 // request skips its own model read), counts them against
 // the tier's context, and never stores them. A free plan or a host with no
 // portal is refused: multi_turn_not_in_plan.

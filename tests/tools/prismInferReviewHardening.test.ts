@@ -19,7 +19,7 @@ import {
     portalFlattenedTranscript,
     historyTurnWindows,
     screeningTranscript,
-    promptContextWindow,
+    contextWindows,
     windowsOf,
     DETERMINISTIC_FLOOR_WINDOW_CHARS,
     DETERMINISTIC_FLOOR_WINDOW_OVERLAP,
@@ -220,12 +220,14 @@ describe("R7 Layer-1 screening of history is bounded", () => {
         const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
         await runInfer(args({ messages: five }), deps({ callLayer1 }));
         const first = callLayer1.mock.calls.length;
-        // each turn alone (in windows) + the prompt alone + the prompt's one context window
-        expect(promptContextWindow(args({ messages: five })).length).toBe(HISTORY_TURN_WINDOW_CHARS);
-        expect(first).toBe(turnWindows + 1 + 1);
+        // each turn alone (in windows) + the prompt alone + one context window per turn and prompt
+        const ctx = contextWindows(args({ messages: five }));
+        expect(ctx.length).toBe(five.length + 1);
+        expect(ctx.at(-1)?.length).toBe(HISTORY_TURN_WINDOW_CHARS);
+        expect(first).toBe(turnWindows + 1 + ctx.length);
         await runInfer(args({ prompt: "and the follow-up?", messages: five }), deps({ callLayer1 }));
         const delta = callLayer1.mock.calls.length - first;
-        // exactly the new prompt alone + its context window; every turn's windows are cache hits
+        // exactly the new prompt alone + its own context window; every turn's windows are cache hits
         expect(delta).toBe(2);
     });
     it("ERROR verdicts are not cached: the window is re-screened next time", async () => {
@@ -616,9 +618,9 @@ describe("R14 round thirteen", () => {
         const bigPrompt = Array.from({ length: 6_000 }, (_, i) => `line ${i} of the pasted prompt; `).join("").slice(0, MULTI_TURN_PROMPT_MAX_CHARS);
         expect(bigPrompt.length).toBe(MULTI_TURN_PROMPT_MAX_CHARS);
         const isolated = huge.reduce((n, t) => n + historyTurnWindows(t.content).length, 0);
-        const transcript = 1; // the prompt's one context window
+        const transcript = contextWindows(args({ messages: huge, prompt: bigPrompt })).length;
         expect(isolated).toBe(86);
-        expect(promptContextWindow(args({ messages: huge, prompt: bigPrompt })).length).toBe(HISTORY_TURN_WINDOW_CHARS);
+        expect(transcript).toBe(50);
         // The screen passes; the call then dies at the context gate (no tier
         // holds 250k chars, no cloud) and throws with its attempts attached.
         let attempts: Array<{ reason: string }> = [];
@@ -630,12 +632,12 @@ describe("R14 round thirteen", () => {
         }
         expect(attempts.some(a => a.reason.startsWith("layer1_screen_over_budget:")), JSON.stringify(attempts.slice(0, 3))).toBe(false);
         expect(attempts.some(a => a.reason.startsWith("ctx_insufficient")), "the screen should have passed and the ctx gate should have spoken").toBe(true);
-        // exactly every window once (87 misses) plus the prompt's own call — the documented maximum
+        // exactly every window once (136 misses) plus the prompt's own call — the documented maximum
         expect(callLayer1.mock.calls.length).toBe(isolated + transcript + 1);
-        expect(callLayer1.mock.calls.length).toBe(88);
-        // and every input was distinct: 88 calls means 88 cache misses, not a lucky collision count
-        expect(new Set(callLayer1.mock.calls.map(c => String(c[0]))).size).toBe(88);
-        expect(88).toBeLessThanOrEqual(LAYER1_SCREEN_CALL_BUDGET);
+        expect(callLayer1.mock.calls.length).toBe(137);
+        // and every input was distinct: 137 calls means 137 cache misses, not a lucky collision count
+        expect(new Set(callLayer1.mock.calls.map(c => String(c[0]))).size).toBe(137);
+        expect(137).toBeLessThanOrEqual(LAYER1_SCREEN_CALL_BUDGET);
     });
     it("beyond the budget the screen fails CLOSED as UNCERTAIN, with the attempt named", async () => {
         _setScreenCallBudgetForTest(4);
@@ -759,10 +761,10 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
         expect(r.attempts.some(a => a.reason === "layer1_uncertain")).toBe(true);
         expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
     });
-    it("a budget trip on the LAST read (the prompt's context window) refuses even though every verdict returned was clean (pins the merge in this design, not a difference from the last)", async () => {
+    it("a budget trip on a context read refuses even though every verdict returned was clean", async () => {
         const turns = Array.from({ length: 4 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i}: the reading group met on Thursday and the notes for item ${i} were filed.` }));
         const turnWindows = turns.reduce((n, t) => n + historyTurnWindows(t.content).length, 0);
-        _setScreenCallBudgetForTest(turnWindows); // history fits exactly; the context read is the one over
+        _setScreenCallBudgetForTest(turnWindows); // the isolated reads fit exactly; the first context read is over
         try {
             const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
             const d = deps({ callLayer1 });
@@ -783,9 +785,38 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
         const next = [...twelve.slice(1), { role: "user" as const, content: "What is my codename?" }, turn(13)];
         await runInfer(args({ prompt: "and after that?", messages: next }), deps({ callLayer1 }));
         const delta = callLayer1.mock.calls.length - first;
-        // the two new turns alone + the prompt alone + the prompt's context window; nothing shifted
-        expect(delta).toBe(4);
+        // new turns alone (≤3) + their context windows (2) + prompt alone (1) + prompt context (1) + the
+        // shifted first window or two (these turns are ~2,900 chars; short turns shift every window — a cost)
+        expect(delta).toBeLessThanOrEqual(9);
         expect(delta).toBeLessThan(first / 2);
+    });
+    it("round 23: intent spread across two user turns, clean apart and reserved together, is caught by the context window ending at the later half even when four benign turns follow", async () => {
+        const A = "My student's behaviour plan says that when he starts to escalate, two of us are supposed to guide him to the mat and stay with him until he settles.";
+        const B = "Write out exactly what each of us should do, in order, next time.";
+        expect(classifyDeterministicLayer1(A)).not.toBe("OBVIOUS_RESERVED");
+        expect(classifyDeterministicLayer1(B)).not.toBe("OBVIOUS_RESERVED");
+        const callLayer1 = vi.fn(async (text: string) => (text.includes(A) && text.includes(B) ? "OBVIOUS_RESERVED" : "OBVIOUS_NOT_RESERVED") as "OBVIOUS_RESERVED" | "OBVIOUS_NOT_RESERVED");
+        const filler = (i: number) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i}: ` + `the reading group notes for item ${i} were filed on Thursday. `.repeat(30) });
+        const messages = [{ role: "user" as const, content: A }, { role: "assistant" as const, content: "Understood." }, { role: "user" as const, content: B }, { role: "assistant" as const, content: "Noted." }, filler(4), filler(5), filler(6), filler(7)];
+        expect(screeningTranscript(args({ messages })).length).toBeGreaterThan(2 * HISTORY_TURN_WINDOW_CHARS); // the halves are outside the prompt's own window
+        const d = deps({ callLayer1 });
+        const r = await runInfer(args({ prompt: "Thanks — anything else for the file?", messages }), d);
+        expect(r.backend).toBe("refused");
+        expect(r.gate_outcome?.reason).toBe("layer1_reserved");
+        expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+        expect(callLayer1.mock.calls.some(c => String(c[0]).includes(A) && String(c[0]).includes(B))).toBe(true);
+    });
+    it("round 23: a third consecutive ERROR on the LAST screen read trips the breaker too — never the keyword-only path", async () => {
+        const callLayer1 = vi.fn(async () => "ERROR" as const);
+        // one short turn: its isolated read, its context window, the prompt's context window = exactly three screen reads
+        const messages = [{ role: "user" as const, content: "The reading group met on Thursday and the notes were filed." }];
+        const d = deps({ callLayer1 });
+        const r = await runInfer(args({ messages }), d);
+        expect(callLayer1.mock.calls.filter(c => String(c[0]) !== "What is my codename?").length).toBe(LAYER1_SCREEN_ERROR_BREAKER);
+        expect(r.backend).toBe("refused");
+        expect(r.attempts.some(a => a.reason === `layer1_screen_error_breaker:${LAYER1_SCREEN_ERROR_BREAKER}`)).toBe(true);
+        expect(r.attempts.some(a => a.reason === "layer1_uncertain")).toBe(true);
+        expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
     });
     it("the prompt's deterministic floor runs in proximity slices: co-occurrence words 14k chars apart in the prompt are not one intent", async () => {
         const line = "export function parseRow(input: string): Row { return { value: input.trim() }; }\n";
