@@ -761,3 +761,26 @@ describe("R16 round nineteen", () => {
         // …while a short turn that is UNCERTAIN alone still defers to its context read (R13/2)
     });
 });
+
+describe("R17 round twenty", () => {
+    const clean = async () => new Response(JSON.stringify({ message: { content: "OBVIOUS_NOT_RESERVED" } }), { status: 200 });
+    const viaReal = (p: string, u: string, m: string, _f: unknown, images?: string[], opts?: { deterministic?: boolean }) =>
+        realCallLayer1(p, u, m, clean as unknown as typeof fetch, images, opts);
+    it("an oversize routine-shaped prompt still reaches the entry point's full-text keyword floor: a reserved keyword in its head refuses", async () => {
+        const routine = "Write an operational definition for hand raising during circle time. ";
+        const prompt = "notes on the elopement incident from Tuesday. " + routine.repeat(80); // > 4,000 chars, every slice routine-shaped
+        expect(prompt.length).toBeGreaterThan(4_000);
+        const r = await runInfer(args({ prompt, messages: HISTORY }), deps({ callLayer1: viaReal }));
+        expect(r.backend).toBe("refused");
+    });
+    it("the fast path still applies at its old boundary: a routine prompt of at most 4,000 chars skips the model", async () => {
+        const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
+        const routine = "Write an operational definition for hand raising during circle time.";
+        await runInfer(args({ prompt: routine, messages: HISTORY }), deps({ callLayer1 }));
+        expect(callLayer1.mock.calls.some(c => String(c[0]) === routine)).toBe(false);
+        const long = ("Write an operational definition for hand raising during circle time. ").repeat(70);
+        expect(long.length).toBeGreaterThan(4_000);
+        await runInfer(args({ prompt: long, messages: HISTORY }), deps({ callLayer1 }));
+        expect(callLayer1.mock.calls.some(c => String(c[0]) === long)).toBe(true);
+    });
+});

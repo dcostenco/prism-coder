@@ -412,7 +412,7 @@ export function keywordBackstop(prompt: string): Layer1Verdict {
 // bounded head+tail excerpt. A clean floor + clean excerpt yields the
 // distinct UNCERTAIN_LENGTH verdict so callers can tell "too long to
 // classify" from "semantically uncertain".
-const MAX_CLASSIFIER_PROMPT_LENGTH = 4_000;
+export const MAX_CLASSIFIER_PROMPT_LENGTH = 4_000;
 // Excerpt budget: head + middle + tail must stay under the classifier cap
 // with room for the LAYER1_PROMPT template. The sampled middle window
 // narrows the region an attacker can hide paraphrased reserved content in
@@ -460,9 +460,11 @@ export async function callLayer1(
      *  ever read the text prompt. */
     images?: string[],
     opts?: {
-        /** false = the caller already ran the deterministic floor with the
-         *  role context this text lacks (a transcript window mixes user and
-         *  assistant text; see prismInferHandler's history screen). */
+        /** false = the caller already ran the deterministic floor itself — per
+         *  turn with role context for history windows, and in proximity slices
+         *  for the current prompt — so this whole-text pass must not re-run
+         *  (see prismInferHandler's history screen). The oversize keyword
+         *  floor below is NOT gated by this and still runs. */
         deterministic?: boolean;
     },
 ): Promise<Layer1Verdict> {

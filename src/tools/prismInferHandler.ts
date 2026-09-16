@@ -46,7 +46,7 @@ import {
     passesCodingQualityGate,
 } from "../utils/codingQualityPolicy.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
-import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, keywordBackstop, reservedCategory, type Layer1Verdict } from "../utils/layer1.js";
+import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, keywordBackstop, reservedCategory, MAX_CLASSIFIER_PROMPT_LENGTH, type Layer1Verdict } from "../utils/layer1.js";
 import { recordInference, recordThinkOnlyRetry, formatInferenceMetrics, estimateTokens } from "../utils/inferenceMetrics.js";
 import { appendInferMetric } from "../storage/inferMetricsLedger.js";
 import { getStorage } from "../storage/index.js";
@@ -154,8 +154,8 @@ function screenedText(args: PrismInferArgs): string {
  *  (2 UNCERTAIN on context-free snippets, 2 false RESERVED: "We deploy to
  *  eu-west-3", "Steps: plan, build, test, deploy"); classified as windows of
  *  this transcript, 0 of 12 (live, 2026-09-16). Every window carries its
- *  context. Kept for the deterministic screens and tests; the semantic
- *  context layer reads contextWindows() instead (anchored per turn). */
+ *  context. Kept for tests and as the definition contextWindows() slices;
+ *  the semantic context layer reads contextWindows() (anchored per turn). */
 export function screeningTranscript(args: PrismInferArgs): string {
     return [...(args.messages ?? []), { role: "user" as const, content: args.prompt }]
         .map(t => `${t.role === "user" ? "User" : "Assistant"}: ${t.content}`)
@@ -1829,7 +1829,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         // 4th arg is fetchImpl (default), 5th is the images the classifier must see.
         // Single turn: one call, unchanged. With history, three layers: the
         // deterministic floor per turn, every turn read alone (reserved is
-        // final), then the transcript in context (raise only) — see below.
+        // final on a user turn), then one end-anchored context window per
+        // turn (raise only) — see below.
         let l1: Layer1Verdict;
         if (!args.messages?.length) {
             // Single turn: the exact call it always was.
@@ -1921,9 +1922,13 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // The classifier entry point's own whole-prompt deterministic pass
             // is switched off here — it would undo the slicing above (words
             // 14k chars apart firing one rule; review round 18). The routine
-            // fast path it provided is kept explicitly: a prompt every slice
-            // of which the rules call routine, with no images, skips the model.
-            if (l1 !== "OBVIOUS_RESERVED" && !(promptRoutine && (resolvedImages?.length ?? 0) === 0)) {
+            // fast path it provided is kept explicitly and on ITS boundary: a
+            // prompt of at most 4,000 chars whose rules verdict is routine,
+            // with no images, skips the model. Longer prompts always reach
+            // the entry point, whose full-text keyword floor must run
+            // (review round 19: skipping it there bypassed that floor).
+            const promptFastPath = promptRoutine && args.prompt.length <= MAX_CLASSIFIER_PROMPT_LENGTH && (resolvedImages?.length ?? 0) === 0;
+            if (l1 !== "OBVIOUS_RESERVED" && !promptFastPath) {
                 const promptVerdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false });
                 if (promptVerdict === "OBVIOUS_RESERVED" || promptVerdict === "ERROR" || (resolvedImages?.length ?? 0) > 0) {
                     l1 = worseLayer1Verdict(l1, promptVerdict);
