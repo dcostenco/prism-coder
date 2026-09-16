@@ -46,7 +46,8 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
   small ones on top: mid-session prompt routing, and a post-compaction
   re-injection of the protected-floor digest.
 - **Safe escalation and observability** — inference outcomes are explicit,
-  reserved content remains fail-closed, and local/cloud usage is recorded for
+  reserved text remains fail-closed (clinical images are processed locally,
+  never sent to the cloud), and local/cloud usage is recorded for
   review.
 
 ## Get started
@@ -781,7 +782,7 @@ Qwen 3.5 models (9B/27B) with thinking enabled could burn all tokens on `<think>
 ## What's New in v20.0.3
 
 ### Layer 1 Cold-Model Resilience
-The reserved-category classifier now retries once with a longer timeout on cold-model failure, then falls back to a deterministic keyword backstop before refusing. Over-length prompts (>4K chars) are classified as UNCERTAIN before reaching the classifier — prompt padding can no longer force the ERROR branch. This eliminates the cold-start refusal problem without weakening the safety gate.
+(As shipped in an earlier release; the current contract is the header of `src/utils/layer1.ts`.) The reserved-category classifier retries once with a longer timeout on cold-model failure, then falls back to a deterministic keyword backstop; keyword-clean text is served locally. Over-length prompts (>4K chars) get the full-text keyword floor plus a head+middle+tail excerpt read and a distinct UNCERTAIN_LENGTH marker — prompt padding cannot force the ERROR branch. This eliminates the cold-start refusal problem without weakening the safety gate.
 
 ### Keyword Backstop for Reserved Content
 When the LLM classifier fails (timeout, injection, resource pressure), a deterministic regex floor catches reserved vocabulary (restraint, seclusion, self-harm, suicide, overdose, crisis de-escalation, etc.) including inflected and verb forms. Blocks prompt-padding and classifier-injection attacks on the ERROR path.
@@ -1218,6 +1219,7 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 | Cloud search | -- | ✅ | ✅ | ✅ |
 | Max output tokens | 512 | 1,024 | 2,048 | 4,096 |
 | Cloud fallback | -- | Gemini 3.6 Flash | Gemini 3.6 Flash | Gemini 3.6 Flash (priority) |
+| Multi-turn `prism_infer` (conversation carried across calls) | -- | 12 turns / 32k chars | 20 turns / 64k chars | 30 turns / 96k chars |
 | Grounding verifier (fact-check AI output) | -- | ✅ | ✅ | ✅ |
 | Memory sync (cloud) | -- | ✅ | ✅ | ✅ |
 | Knowledge / session memory | limited | unlimited | unlimited | unlimited |
@@ -1270,7 +1272,114 @@ prism_infer({
 })
 // → 27B generates code locally ($0), with thinking for quality
 // → If quality gate fails + paid tier → auto-escalate to Gemini 3.6 Flash
+
+// Follow-ups carry the conversation (paid plans). The host curates the turns;
+// Prism bounds them to your plan's caps (user+assistant text only), safety-
+// screens every turn (each alone, then each in context; a short routine
+// request skips its own model read), counts them against
+// the tier's context, and never stores them. A free plan or a host with no
+// portal is refused: multi_turn_not_in_plan.
+prism_infer({
+    messages: [
+        { role: "user",      content: "Write a binary search in Python" },
+        { role: "assistant", content: "<the accepted answer>" },
+    ],
+    prompt: "Now make it return the insertion point when the value is absent",
+    mode: "code",
+})
 ```
+
+#### Multi-turn: why it matters, and why it is a paid feature
+
+A single `prism_infer` call has no memory. The host asks a question, the local
+model answers, and the next call starts from nothing: "now add a timeout to it"
+means nothing to a model that never saw "it". Without history the host either
+restates the whole context in every prompt (tokens, and the answer drifts) or
+gives up on local delegation and does the follow-up itself in the cloud. With
+`messages`, the host hands back the turns it accepted and the local model
+continues the thread at $0, which is what makes local delegation useful for
+real work instead of one-shot snippets.
+
+It is paid because it cannot run without Synalux behind it:
+
+- **The caps are served by the portal, per plan.** How many turns and how many
+  characters a conversation may carry is an entitlement your plan returns,
+  not a number the client decides. No portal, no policy, and the call is
+  refused as `multi_turn_not_in_plan`.
+- **Ambiguous turns go to Synalux cloud.** Every turn is safety-screened on
+  device, alone and in context. A turn the screen finds uncertain is never
+  served by the local model; it goes to the cloud when the plan allows it,
+  and is refused otherwise. Free has no cloud, so the only honest answer for
+  free is no history at all.
+- **Nothing is stored.** Prism bounds, screens, counts and forwards the turns
+  the host sends, and keeps none of them.
+
+<details>
+<summary>Without multi-turn (free plan, or no `messages`): every call starts cold</summary>
+
+```typescript
+// Call 1
+prism_infer({ prompt: "My project codename is Nightjar. Reply OK.", mode: "chat" })
+// → "OK"                                  (local 9b, $0)
+
+// Call 2 — the model never saw call 1
+prism_infer({ prompt: "What is my codename? One word.", mode: "chat" })
+// → "I don't have that information."      (local 9b, correct and useless)
+
+// Call 3 — a coding follow-up with no thread
+prism_infer({ prompt: "Now add a timeout parameter to it.", mode: "code" })
+// → guesses what "it" is, or asks         (the host has to redo the work)
+
+// A free plan that sends messages anyway:
+prism_infer({ messages: [/* … */], prompt: "…" })
+// → refused: multi_turn_not_in_plan       (no portal entitlement, no cloud)
+```
+</details>
+
+<details>
+<summary>With multi-turn (paid plan): the thread continues locally, and the screen decides per turn</summary>
+
+```typescript
+// The host keeps the turns it accepted and passes them back.
+prism_infer({
+    messages: [
+        { role: "user",      content: "My project codename is Nightjar. Reply OK." },
+        { role: "assistant", content: "OK" },
+    ],
+    prompt: "What is my codename? One word.",
+    mode: "chat",
+})
+// → "Nightjar"                            (local 9b, $0; history_turns: 2)
+
+prism_infer({
+    messages: [
+        { role: "user",      content: "We named the helper countActiveUsers(data). Confirm." },
+        { role: "assistant", content: "Confirmed." },
+    ],
+    prompt: "Write the one-line call that stores its result in n.",
+    mode: "code",
+})
+// → "n = countActiveUsers(data)"          (local 9b, $0)
+
+// A turn the on-device screen finds uncertain when read alone is not served
+// locally: it goes to Synalux cloud on a paid plan, or is refused with
+// cloud_fallback: false. The result names the reason (layer1_uncertain) so
+// the host can decide what to do with the thread.
+prism_infer({
+    messages: [
+        { role: "user",      content: "The ticket for this bug is SYN-4471. Acknowledge." },
+        { role: "assistant", content: "Acknowledged." },
+    ],
+    prompt: "Which ticket is this bug filed under?",
+    cloud_fallback: true,
+})
+// → "SYN-4471"                            (Gemini 3.6 Flash; used_cloud: true)
+```
+
+Measured on the real 9b through the real handler with cloud off: 7 of 12
+benign follow-ups are served locally, the rest refuse and name the reason;
+every injection variant the reviewers built refuses.
+</details>
 
 | Mode | Think | Model | Use case |
 |------|-------|-------|----------|
