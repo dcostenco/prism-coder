@@ -1058,6 +1058,112 @@ function configureJsonAgentPolicy(
 }
 
 /** Configure Claude Code's economy fallback model; policy text prevents routine fan-out. */
+/** One host's managed startup block, as the self-heal sees it. */
+export interface ManagedStartupRefresh {
+  host: "claude-code" | "gemini" | "codex";
+  path: string;
+  /** `absent` — no instruction file. `unmanaged` — a file with no Prism
+   *  ownership marker: the operator never ran connect for this host, so we
+   *  never write. `unchanged` / `refreshed` — the marker was there. */
+  status: "absent" | "unmanaged" | "unchanged" | "refreshed" | "failed";
+  detail?: string;
+}
+
+/** Rewrite managed startup blocks that an OLDER release wrote, and nothing else.
+ *
+ *  The instruction files are the one delivery channel that does not travel with
+ *  the package: the MCP `initialize` instructions and every tool description
+ *  update the moment the server binary does, but a native instruction file keeps
+ *  whatever text `prism connect` last wrote. Released 20.21.0 changed that text —
+ *  it used to tell hosts to pass `cloud_fallback: false`, which made a paid
+ *  plan's escalation unreachable — and a machine that never re-runs connect keeps
+ *  telling its host the retracted thing. `prism update` deliberately never
+ *  touches host configuration, autoupdate runs `update`, and npm's ignore-scripts
+ *  blocks the postinstall refresh, so on an ordinary machine nothing heals it.
+ *
+ *  This is the narrow, safe subset of connect, and the narrowness is the point:
+ *
+ *  - MARKER-GATED. A file without the ownership marker is left byte-for-byte
+ *    alone. Connect is still the only thing that can FIRST install a block;
+ *    consent is never inferred from a server start.
+ *  - Startup blocks ONLY. It never touches MCP host registration — that is what
+ *    connect's "close target hosts before registration" warning is about, since
+ *    a live host rewrites its own config. No host writes its own instruction
+ *    file, so refreshing one under a running host is safe.
+ *  - Content-addressed, so it is a no-op once current: the block is compared
+ *    byte-for-byte and only a difference writes.
+ *
+ *  The host reads its instruction file when a session starts, so a refresh made
+ *  during this session lands on the NEXT one. That is the cost of healing
+ *  without asking, and it is one session. */
+export function refreshManagedStartupBlocks(options: {
+  homeDir?: string;
+  dryRun?: boolean;
+  env?: NodeJS.ProcessEnv;
+} = {}): ManagedStartupRefresh[] {
+  const homeDir = options.homeDir ?? homedir();
+  const env = options.env ?? process.env;
+  const dryRun = !!options.dryRun;
+  const codexHome = env.CODEX_HOME?.trim() ? resolve(env.CODEX_HOME.trim()) : join(homeDir, ".codex");
+  const targets: Array<{
+    host: ManagedStartupRefresh["host"];
+    path: string;
+    marker: string;
+    configure: () => NativeStartupConfiguration;
+  }> = [
+    {
+      host: "claude-code",
+      path: join(homeDir, ".claude", "CLAUDE.md"),
+      marker: CLAUDE_STARTUP_MANAGED_START,
+      configure: () => configureClaudeNativeStartup(homeDir, dryRun),
+    },
+    {
+      host: "gemini",
+      path: join(homeDir, ".gemini", "GEMINI.md"),
+      marker: GEMINI_STARTUP_MANAGED_START,
+      configure: () => configureGeminiNativeStartup(homeDir, dryRun),
+    },
+    {
+      host: "codex",
+      path: join(codexHome, "AGENTS.md"),
+      marker: CODEX_STARTUP_MANAGED_START,
+      configure: () => configureCodexNativeStartup(homeDir, dryRun, undefined, env),
+    },
+  ];
+  const results: ManagedStartupRefresh[] = [];
+  for (const target of targets) {
+    try {
+      let current: string;
+      try {
+        current = readFileSync(target.path, "utf8");
+      } catch {
+        results.push({ host: target.host, path: target.path, status: "absent" });
+        continue;
+      }
+      if (!current.includes(target.marker)) {
+        results.push({ host: target.host, path: target.path, status: "unmanaged" });
+        continue;
+      }
+      const outcome = target.configure();
+      results.push({
+        host: target.host,
+        path: outcome.path,
+        // dryRun reports would-refresh; both mean the block is stale.
+        status: outcome.status === "unchanged" ? "unchanged" : "refreshed",
+      });
+    } catch (error) {
+      // A self-heal must never be the reason a server fails to start.
+      results.push({
+        host: target.host,
+        path: target.path,
+        status: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return results;
+}
+
 export function configureClaudeAgentPolicy(
   homeDir = homedir(),
   dryRun = false,

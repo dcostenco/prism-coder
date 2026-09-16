@@ -1457,6 +1457,41 @@ export async function startServer() {
 
   console.error(`[Prism] MCP Server successfully started and listening on stdio...`);
 
+  // Heal a startup block an OLDER release wrote. The instruction files are the
+  // one channel that does not travel with the package — `initialize`
+  // instructions and every tool description update with the binary, a native
+  // instruction file keeps whatever connect last wrote — and nothing on an
+  // ordinary machine re-runs connect: `prism update` never touches host
+  // configuration by design, autoupdate runs `update`, and npm's
+  // ignore-scripts blocks the postinstall refresh. 20.21.0 is the release that
+  // proved the cost: the old text told hosts to pass `cloud_fallback: false`,
+  // which made a paid plan's escalation unreachable.
+  //
+  // Marker-gated, so this can only ever rewrite a block the operator already
+  // consented to by running connect once; a file without the marker is left
+  // byte-for-byte alone. Startup blocks only — never MCP registration, which
+  // is what connect's "close your hosts first" warning is about. After the
+  // transport is connected, so the handshake is never held behind disk I/O.
+  // PRISM_NO_STARTUP_REFRESH=1 opts out.
+  if (process.env.PRISM_NO_STARTUP_REFRESH !== "1") {
+    try {
+      const { refreshManagedStartupBlocks } = await import("./connect.js");
+      for (const result of refreshManagedStartupBlocks()) {
+        if (result.status === "refreshed") {
+          // The host already read this file for the current session.
+          console.error(`[Prism] refreshed the ${result.host} startup block written by an older release: ${result.path} (applies from your next session)`);
+        } else if (result.status === "failed") {
+          console.error(`[Prism] could not refresh the ${result.host} startup block (${result.detail}); run: prism connect`);
+        } else if (process.env.PRISM_DEBUG) {
+          console.error(`[Prism] startup block ${result.host}: ${result.status}`);
+        }
+      }
+    } catch (error) {
+      // Never the reason a server fails to start.
+      if (process.env.PRISM_DEBUG) console.error(`[Prism] startup refresh skipped: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
   // Start the authoritative tier-skill refresh only after the MCP transport is
   // connected. session_load_context awaits this same single-flight promise,
   // while the initialize handshake is never held behind portal I/O. The

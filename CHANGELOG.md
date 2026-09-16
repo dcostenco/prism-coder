@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### A stale instruction block heals itself when a session starts
+
+20.21.0 corrected the text `prism connect` writes into host instruction files:
+the old wording told hosts to pass `cloud_fallback: false`, which made a paid
+plan's escalation unreachable. Nothing on an ordinary machine rewrites that
+text. `prism update` never touches host configuration by design, `autoupdate`
+runs `update`, and npm's ignore-scripts blocks the postinstall refresh — it was
+blocked again while publishing 20.21.0. So the fix shipped and the instruction
+that defeats it stayed on disk.
+
+The server now refreshes a managed startup block written by an older release,
+once its transport is connected. It is the narrowest useful subset of connect,
+and the narrowness is the contract:
+
+- **Marker-gated.** A file without Prism's ownership marker is left
+  byte-for-byte alone, and an absent file is never created. Only `prism
+  connect` can first install a block; consent is never inferred from a server
+  start.
+- **Startup blocks only.** MCP host registration is never touched. That is what
+  connect's "close your hosts first" warning is about, because a live host
+  rewrites its own config; no host writes its own instruction file.
+- **Content-addressed**, so a current block is not rewritten on every start.
+- **Never fatal.** An unwritable file is reported and the server starts.
+
+The host reads its instruction file when a session begins, so a refresh lands
+on the next one. `PRISM_NO_STARTUP_REFRESH=1` opts out.
+
 ## 20.21.0 — 2026-09-16
 
 ### The multi-turn screen refused real work
