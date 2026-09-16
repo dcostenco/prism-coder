@@ -32,8 +32,10 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
   undercounts inline — a number you can check, not marketing.
 - **Route-output enforcement** — route mode returns only well-formed calls to
   tools the host actually advertised. Standard and higher plans can add
-  authenticated deterministic correction; `route_guard: "local"` keeps the
-  prompt and draft entirely on-device.
+  authenticated deterministic correction; `route_guard: "local"` disables that
+  correction only. `cloud_fallback: false` forbids cloud inference fallback and
+  `verify: false` (with no `evidence`) disables the grounding verifier; a call
+  that must make no network request needs all three.
 - **One setup for every agent** — `prism connect` configures Claude Code,
   Claude Desktop, Cursor, Gemini CLI, and Codex while preserving unrelated
   settings.
@@ -1050,8 +1052,11 @@ before it reaches the host. Malformed or unadvertised calls become `NO_TOOL`.
 With `route_guard: "auto"` (the default), Standard and higher plans also send
 a well-formed draft for one of Prism's seven trained tools—or an unadvertised
 draft that may need correction—to Synalux for authenticated deterministic
-correction. Advertised custom host tools remain local. Set
-`route_guard: "local"` for a fully on-device route path.
+correction. Advertised custom host tools remain local. `route_guard: "local"`
+disables that correction only: cloud inference fallback is governed by
+`cloud_fallback`, and the grounding verifier is a separate channel with its
+own switch (`verify`, on by default when `evidence` is given). A route call
+that must make no network request sets all three off.
 
 | Model | Ollama tag | Size | Vision | Routing accuracy¹ | Role | Automatic routing tier |
 |---|---|---|---|---|---|---|

@@ -585,7 +585,7 @@ export const PRISM_INFER_TOOL: Tool = {
                 enum: ["auto", "local"],
                 description:
                     "'auto' (default): local advertised-tool contract plus, on paid plans, the private " +
-                    "Synalux deterministic route correction. 'local': prompt and draft stay on-device.",
+                    "Synalux deterministic route correction. 'local': skips that correction only.",
                 default: "auto",
             },
             think: {
@@ -659,7 +659,8 @@ export interface PrismInferArgs {
     mode?: "route" | "chat" | "code";
     /** Tool names actually advertised to the route model. */
     allowed_tools?: string[];
-    /** auto = local contract + subscribed portal correction; local = on-device contract only. */
+    /** auto = local contract + subscribed portal correction; local = skips that correction only
+     *  (cloud inference fallback and the grounding verifier are separate switches). */
     route_guard?: "auto" | "local";
     /** Enable thinking (<think> blocks). Default: true for chat/code, false for route. */
     think?: boolean;

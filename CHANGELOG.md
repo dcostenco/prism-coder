@@ -38,9 +38,13 @@ fixtures were short and synthetic.
   answer fed back as history, then "turn that into numbered steps", each clean
   alone, is the reserved request, and it was served. Windows keep both roles.
   The classifier's hedging on joined engineering text is a calibration gap,
-  routed to cloud by the plan instead of refused. On the realistic fixtures
-  that is one conversation in four; the live suite budgets it so a regression
-  reds the run.
+  not closed here: on a paid plan it is routed to cloud instead of refused,
+  which is what this release fixes. On the realistic fixtures that is one
+  conversation in four, and the same one is still refused by a caller that
+  passes `cloud_fallback: false` with history (free plans cannot reach it:
+  the portal has multi-turn off for them, so they never carry history). The
+  live suite pins both counts so either can only regress loudly. The durable
+  fix is classifier calibration, with these fixtures as its regression set.
 
 `tests/live` now carries realistic-size conversations run end to end on a paid
 plan; the exit criterion is "answered, never refused".
