@@ -171,9 +171,14 @@ export const HISTORY_TURN_WINDOW_OVERLAP = 200;
 /** The deterministic co-occurrence rules (restraint+document, diagnos+determine…)
  *  are proximity rules: over a whole 20k-char pasted file, "diagnose" and
  *  "determine" 14k chars apart fired one (measured 2026-09-16, +20% of real
- *  source files refused). They run over 2× classifier windows instead — wide
- *  enough that a split across two 3,600-char windows is still seen whole. */
+ *  source files refused). They run over 7,200-char windows advancing by
+ *  3,400 (the classifier stride), so ANY two terms up to 3,800 chars apart —
+ *  more than one classifier window, about one prompt — share a window
+ *  wherever they sit in the turn (a 7,000-char stride left a pair straddling
+ *  the boundary in no window: round-5 review). Wider apart than that is not
+ *  one intent. */
 export const DETERMINISTIC_FLOOR_WINDOW_CHARS = 7_200;
+export const DETERMINISTIC_FLOOR_WINDOW_OVERLAP = 3_800;
 export function windowsOf(content: string, size: number, overlap: number): string[] {
     if (content.length <= size) return [content];
     const isHigh = (i: number) => { const c = content.charCodeAt(i); return c >= 0xd800 && c <= 0xdbff; };
@@ -1766,7 +1771,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // run over 2× windows at zero network cost: split across two
             // classifier windows, neither half fires (review round 2), while a
             // whole-turn pass fired on words 14k chars apart (review round 3).
-            for (const slice of windowsOf(turn.content, DETERMINISTIC_FLOOR_WINDOW_CHARS, HISTORY_TURN_WINDOW_OVERLAP)) {
+            for (const slice of windowsOf(turn.content, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
                 const det = classifyDeterministicLayer1(slice);
                 if (det) l1 = worseLayer1Verdict(l1, det);
             }

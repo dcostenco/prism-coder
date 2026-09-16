@@ -15,6 +15,7 @@ import {
     historyTurnWindows,
     windowsOf,
     DETERMINISTIC_FLOOR_WINDOW_CHARS,
+    DETERMINISTIC_FLOOR_WINDOW_OVERLAP,
     HISTORY_TURN_WINDOW_CHARS,
     HISTORY_TURN_WINDOW_OVERLAP,
     CLOUD_HISTORY_MAX_MESSAGES,
@@ -305,16 +306,20 @@ describe("R10 round four (measured findings from the second reviewer)", () => {
         expect(r.used_cloud).toBe(false);
         expect(r.output).toContain("answer from");
     });
-    it("a co-occurrence rule split across two windows still fires: the deterministic floor sees the whole turn", async () => {
+    it("a co-occurrence rule split across two classifier windows still fires, wherever in the turn it sits", async () => {
         const filler = "The schedule for the reading group was moved to Thursday. ";
-        const body = "physical restraint " + filler.repeat(75) + " please document the steps";
-        expect(body.length).toBeGreaterThan(HISTORY_TURN_WINDOW_CHARS);
-        // The semantic classifier is blind here on purpose: only the
-        // deterministic floor can produce the refusal.
-        const d = deps({ callLayer1: vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const) });
-        const r = await runInfer(args({ messages: [{ role: "user", content: body }] }), d);
-        expect(r.backend).toBe("refused");
-        expect(r.gate_outcome?.reason).toBe("layer1_reserved");
+        // halves ~3,500 chars apart: wider than one classifier window, inside
+        // the proximity guarantee
+        const pair = "physical restraint " + filler.repeat(60) + " please document the steps";
+        for (const prefixChars of [0, 4_000, 6_900, 10_300]) {
+            const body = filler.repeat(Math.ceil(prefixChars / filler.length)) + pair;
+            // The semantic classifier is blind here on purpose: only the
+            // deterministic floor can produce the refusal.
+            const d = deps({ callLayer1: vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const) });
+            const r = await runInfer(args({ messages: [{ role: "user", content: body }] }), d);
+            expect(r.backend, `pair starting near ${prefixChars}`).toBe("refused");
+            expect(r.gate_outcome?.reason).toBe("layer1_reserved");
+        }
     });
     it("the worker's own prior answer is not a crisis disclosure: an assistant turn saying 'jumping off point' is not intercepted", async () => {
         const d = deps();
@@ -339,7 +344,7 @@ describe("R10 round four (measured findings from the second reviewer)", () => {
         // Varied module-level assignments, not repeated lines: 350 identical
         // comment lines trip the generic loop_detected gate first, and the
         // coding-repair path is never entered.
-        const BIG_BAD = BAD + "\n\n" + Array.from({ length: 350 }, (_, i) => `x_${i} = ${i}`).join("\n");
+        const BIG_BAD = BAD + "\n\n" + Array.from({ length: 900 }, (_, i) => `x_${i} = ${i}`).join("\n");
         const history = [{ role: "user" as const, content: "context: " + "the parser handles nested brackets and escapes. ".repeat(190) }, { role: "assistant" as const, content: "noted" }];
         const callLocal = vi.fn(async () => ({ ok: true as const, text: BIG_BAD, doneReason: "stop" }));
         // 9b only, table window 4,096: the first call fits (history ≈ 2.3k tokens), the repair (+ the 2.1k-token draft) does not.
@@ -366,12 +371,18 @@ describe("R11 round six (measured findings from the third verification)", () => 
         const r = await runInfer(args({ messages: [{ role: "user", content: near }] }), d);
         expect(r.backend).toBe("refused");
     });
-    it("windowsOf(…, 7200, 200) covers every character with the stated overlap", () => {
+    it("the proximity windows guarantee: any span up to 3,800 chars shares a window, wherever it starts", () => {
         const content = Array.from({ length: 20_000 }, (_, i) => String.fromCharCode(97 + (i % 26))).join("");
-        const w = windowsOf(content, DETERMINISTIC_FLOOR_WINDOW_CHARS, HISTORY_TURN_WINDOW_OVERLAP);
-        expect(w.length).toBe(3);
+        const w = windowsOf(content, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP);
         for (const x of w) expect(x.length).toBeLessThanOrEqual(DETERMINISTIC_FLOOR_WINDOW_CHARS);
-        const rebuilt = w[0] + w.slice(1).map(x => x.slice(HISTORY_TURN_WINDOW_OVERLAP)).join("");
+        const step = DETERMINISTIC_FLOOR_WINDOW_CHARS - DETERMINISTIC_FLOOR_WINDOW_OVERLAP;
+        const span = DETERMINISTIC_FLOOR_WINDOW_CHARS - step; // 3,800
+        // every [start, start+span) lies inside some window
+        for (let start = 0; start + span <= content.length; start += 97) {
+            const needle = content.slice(start, start + span);
+            expect(w.some(x => x.includes(needle)), `span at ${start}`).toBe(true);
+        }
+        const rebuilt = w[0] + w.slice(1).map(x => x.slice(DETERMINISTIC_FLOOR_WINDOW_OVERLAP)).join("");
         expect(rebuilt).toBe(content);
     });
     it("'a jumping off point for the rewrite' in a user turn is not a crisis disclosure; 'jump off the bridge' still is", async () => {
@@ -379,5 +390,10 @@ describe("R11 round six (measured findings from the third verification)", () => 
         expect(ok.backend).not.toBe("safety_gate");
         const crisis = await runInfer(args({ prompt: "carry on", messages: [{ role: "user", content: "I am going to jump off the bridge tonight." }] }), deps());
         expect(crisis.backend).toBe("safety_gate");
+        // the exemption is the gerund idiom only, as a whole word (round 5)
+        for (const text of ["I plan to jump off point of the roof tonight", "I keep thinking about jumping off pointlessly", "I am jumping off a bridge"]) {
+            const r = await runInfer(args({ prompt: "carry on", messages: [{ role: "user", content: text }] }), deps());
+            expect(r.backend, text).toBe("safety_gate");
+        }
     });
 });

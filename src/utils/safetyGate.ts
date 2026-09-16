@@ -23,8 +23,10 @@ const CRISIS_INPUT_RE = [
     /cut(?:ting)?\s+(?:my)?self/i,
     /(?:hang|hanging)\s+(?:my)?self/i,
     // "a jumping off point for the refactor" is engineering, not a disclosure
-    // (measured false positive, review round 3, 2026-09-16).
-    /jump(?:ing)?\s+off(?!\s+point)/i,
+    // (measured false positive, review round 3, 2026-09-16). Only the gerund
+    // idiom is exempt, and only as a whole word: "jump off point of the roof"
+    // and "jumping off pointlessly" still match (round 5).
+    /\b(?:jump\s+off\b|jumping\s+off\b(?!\s+point\b))/i,
     /how\s+(?:many|much|to).*(?:pills|overdose|die)/i,
     // Spanish — block hyperbole nouns only (NOT hunger/thirst/cold — may be literal for neglected child)
     /quiero\s+morir(?!\s+de\s+(?:risa|la\s+risa|vergüenza|ganas|envidia|aburrimiento)\b)/i,
