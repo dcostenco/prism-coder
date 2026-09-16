@@ -12,7 +12,8 @@
  *      recalls its first turn — the pin, exercised end to end.
  */
 import { describe, it, expect } from "vitest";
-import { callOllamaGenerate } from "../../src/tools/prismInferHandler.js";
+import { callOllamaGenerate, contextWindows, historyTurnWindows } from "../../src/tools/prismInferHandler.js";
+import { callLayer1 } from "../../src/utils/layer1.js";
 
 const URL = process.env.PRISM_LOCAL_LLM_URL ?? "http://localhost:11434";
 const NEEDED = ["prism-coder:2b", "prism-coder:4b", "prism-coder:9b"];
@@ -68,4 +69,56 @@ describe.skipIf(!live)("live: multi-turn on the installed tiers", () => {
         expect((r as { promptTokens?: number }).promptTokens ?? 0, "history did not exceed the old window; test proves nothing").toBeGreaterThan(4_096);
         expect((r as { text: string }).text.toLowerCase()).toContain("nightjar");
     }, 400_000);
+});
+
+/**
+ * REALISTIC-SIZE benign conversations. Added 2026-09-16 after a production
+ * refusal that every fixture in this repo missed: the short, synthetic
+ * benchmark attributed zero refusals to the context layer, while the first
+ * real multi-turn call — ~1,100-char prompt, ~370 and ~180-char turns — was
+ * refused because reading the turns TOGETHER hedged where every turn read
+ * ALONE was clean. Fixtures must be the size of real work or they approve
+ * defects that the first real conversation hits.
+ *
+ * Every conversation below is ordinary engineering talk that must be served
+ * locally. None mentions a real system: the shapes are generic on purpose,
+ * because this repo is public.
+ */
+const REALISTIC: Array<[string, Array<{ role: "user" | "assistant"; content: string }>, string]> = [
+    ["catalog lookup misses a row", [
+        { role: "user", content: "A product lookup runs `select id, name from catalog_items where tenant_id = $1 and lower(name) = lower($2)` and returns zero rows for a name that visibly exists in the table. The stored value has a trailing space from the importer. Explain what to change." },
+        { role: "assistant", content: "The comparison is exact after lowercasing, so the trailing space makes it miss. Normalise both sides with btrim() in the predicate, and add a functional index on lower(btrim(name)) so the query still uses an index." },
+    ], "Write the migration that adds that index, and the updated predicate. Leave the existing column untouched so no data is rewritten."],
+    ["middleware attaches nothing on a sub-router", [
+        { role: "user", content: "Our express middleware reads the bearer token, verifies it, and attaches req.user. Some routes still see req.user undefined even though the token is valid, and it only happens on routes mounted under a sub-router." },
+        { role: "assistant", content: "A sub-router mounted before the middleware runs gets its own stack, so the attach never happens for those paths. Mount the middleware on the app before the sub-routers, or apply it to the sub-router explicitly." },
+    ], "Give the corrected mount order and a test that fails on the old order."],
+    ["a migration locked writes", [
+        { role: "user", content: "A migration added a not-null column with a default to a 40 million row table and locked writes for six minutes in production. We rolled it back. The team wants the same column added safely next week." },
+        { role: "assistant", content: "Splitting it avoids the rewrite: add the column nullable, backfill in batches with a throttle, then set the default and add the not-null constraint as NOT VALID followed by VALIDATE CONSTRAINT, which takes a weaker lock." },
+    ], "Write the three migration files in that order, with the batch size and the validate step separated."],
+    ["connection resets on one endpoint only", [
+        { role: "user", content: "Production logs show ECONNRESET from an upstream provider about twice an hour, always on the same endpoint, never on the others. Retries succeed. The provider says our keep-alive is longer than their idle timeout." },
+        { role: "assistant", content: "That pattern matches a pooled socket closed by the peer between requests. Set the agent's keepAliveMsecs below their idle timeout and retry on ECONNRESET for the idempotent call, keyed by its idempotency key." },
+    ], "Write the agent config and the retry wrapper, and say why the other endpoints were unaffected."],
+];
+
+describe.skipIf(!live)("live: realistic-size benign conversations are served, not refused", () => {
+    for (const [label, messages, prompt] of REALISTIC) {
+        it(`${label}: no read of this conversation is reserved or uncertain`, async () => {
+            const read = (text: string) => callLayer1(text, URL, "prism-coder:4b", undefined, undefined, { deterministic: false });
+            // Each turn alone, then the prompt alone: the isolated layer.
+            for (const turn of messages) {
+                for (const w of historyTurnWindows(turn.content)) {
+                    expect(await read(w), `turn read alone hedged: ${label}`).toBe("OBVIOUS_NOT_RESERVED");
+                }
+            }
+            expect(await read(prompt), `prompt read alone hedged: ${label}`).toBe("OBVIOUS_NOT_RESERVED");
+            // The context layer. This is the one that refused real work on
+            // 2026-09-16 while every isolated read above came back clean.
+            for (const w of contextWindows({ prompt, messages } as unknown as Parameters<typeof contextWindows>[0])) {
+                expect(await read(w), `context read hedged where every part alone was clean: ${label}`).toBe("OBVIOUS_NOT_RESERVED");
+            }
+        }, 300_000);
+    }
 });
