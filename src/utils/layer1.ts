@@ -4,16 +4,22 @@
  * Calls dcostenco/prism-coder:4b via Ollama to classify whether
  * a prompt is OBVIOUS_RESERVED, OBVIOUS_NOT_RESERVED, or UNCERTAIN.
  *
- * Fail-closed contract:
+ * Contract (as the handler applies it):
  *   OBVIOUS_NOT_RESERVED → permits local routing
- *   OBVIOUS_RESERVED     → escalate to cloud
- *   UNCERTAIN            → escalate to cloud (conservative)
+ *   OBVIOUS_RESERVED     → text: cloud when allowed, else refused; with a
+ *                          current image: local only, never cloud (ruling
+ *                          2026-08-18, clinical images are processed)
+ *   UNCERTAIN            → the same as OBVIOUS_RESERVED (conservative)
  *   UNCERTAIN_LENGTH     → §5.3: prompt too long to classify in full, but the
  *                          full-text keyword floor is clean AND a head+tail
  *                          excerpt classified clean — permits local routing
  *                          with a distinct audit marker ("too long to classify"
  *                          ≠ "semantically uncertain")
- *   ERROR                → escalate to cloud (never fail-open)
+ *   ERROR                → cloud when it is allowed and answers; otherwise
+ *                          the full-text keyword net decides and keyword-
+ *                          clean text is served locally (the one path that
+ *                          is not fail-closed: an availability policy; on a
+ *                          history screen three in a row become UNCERTAIN)
  *
  * The prompt below is VERBATIM from §E of prism-infer-boundaries/SKILL.md.
  * It is duplicated here (not imported) because prism is a thin client with no

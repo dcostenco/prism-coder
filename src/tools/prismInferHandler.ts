@@ -246,7 +246,8 @@ export function _setScreenCallBudgetForTest(n: number | null): void { LAYER1_SCR
 /** A dead or stalled classifier answers ERROR after its 1.5 s + 5 s retry
  *  budget; across a long history that is minutes of nothing. After this many
  *  consecutive uncached ERRORs the remaining windows are UNCERTAIN without a
- *  call — fail-closed (cloud when allowed, else refused), NOT the ERROR path:
+ *  call — fail-closed for a text call (cloud when allowed, else refused; a
+ *  call carrying an image keeps the image policy, local only), NOT the ERROR path:
  *  the regex-only keyword net must not become the sole guard for windows the
  *  classifier never read (review round 16). */
 export const LAYER1_SCREEN_ERROR_BREAKER = 3;
@@ -1860,10 +1861,12 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // plan allows it, else refused — never local for a text-only call;
             // a call carrying an image keeps the image policy below, local
             // only); ERROR is kept and takes the path a single-prompt ERROR
-            // always took (cloud when allowed, else the keyword net over the
-            // whole conversation decides; three in a row trip to UNCERTAIN —
+            // always took (cloud when it is allowed and answers; otherwise the
+            // keyword net over the whole conversation decides, and keyword-
+            // clean text is served locally; three in a row trip to UNCERTAIN —
             // an availability policy the owner accepted for single turns, kept
-            // identical here). Deferring UNCERTAIN to "context" was
+            // identical here, so this one path is NOT fail-closed). Deferring
+            // UNCERTAIN to "context" was
             // tried in four shapes and each was measured bypassable: a note in
             // whichever window decided flipped the classifier. A turn read
             // alone is the one read no later text can touch. The deterministic
