@@ -41,7 +41,10 @@ means "differs from what this binary writes", not "older", so a pinned older
 install can rewrite a block a newer one wrote.
 
 The host reads its instruction file when a session begins, so a refresh lands
-on the next one. `PRISM_NO_STARTUP_REFRESH=1` opts out.
+on the next one either way. It therefore runs on a short unref'd timer rather
+than in the startup path: loading the connect module is synchronous work that
+would otherwise compete with the first tool call, which on a cold host is the
+one doing a storage round trip. `PRISM_NO_STARTUP_REFRESH=1` opts out.
 
 ## 20.21.0 — 2026-09-16
 

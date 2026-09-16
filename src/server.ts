@@ -1478,25 +1478,42 @@ export async function startServer() {
   // only the bytes between its markers and re-checks immediately before
   // committing. After the transport is connected, so the handshake is never
   // held behind disk I/O. PRISM_NO_STARTUP_REFRESH=1 opts out.
+  //
+  // DEFERRED, and unref'd, for two reasons. `connect.js` is a large module
+  // (the whole CLI surface, TOML parser included) and importing it is
+  // synchronous CPU work: awaited here it competes with the FIRST tool call,
+  // which on a cold host is the one that has to do a storage round trip. And
+  // an unref'd timer can never hold the process open. The block is read by the
+  // host at session start, so it was always landing on the next session — a
+  // couple of seconds changes nothing about when the fix arrives.
   if (process.env.PRISM_NO_STARTUP_REFRESH !== "1") {
-    try {
-      const { refreshManagedStartupBlocks } = await import("./connect.js");
-      for (const result of refreshManagedStartupBlocks()) {
-        if (result.status === "refreshed") {
-          // The host already read this file for the current session.
-          console.error(`[Prism] refreshed the ${result.host} startup block written by an older release: ${result.path} (applies from your next session)`);
-        } else if (result.status === "failed") {
-          console.error(`[Prism] could not refresh the ${result.host} startup block (${result.detail}); run: prism connect`);
-        } else if (process.env.PRISM_DEBUG) {
-          console.error(`[Prism] startup block ${result.host}: ${result.status}`);
-        }
-      }
-    } catch (error) {
-      // Never the reason a server fails to start.
-      if (process.env.PRISM_DEBUG) console.error(`[Prism] startup refresh skipped: ${error instanceof Error ? error.message : error}`);
-    }
+    setTimeout(() => { void refreshStartupBlocksInBackground(); }, 2_000).unref();
   }
 
+  await resumeServerStartup(server);
+}
+
+async function refreshStartupBlocksInBackground(): Promise<void> {
+  try {
+    const { refreshManagedStartupBlocks } = await import("./connect.js");
+    for (const result of refreshManagedStartupBlocks()) {
+      if (result.status === "refreshed") {
+        // The host read this file when the session began, so the corrected
+        // text applies from the next one.
+        console.error(`[Prism] refreshed the ${result.host} startup block written by an older release: ${result.path} (applies from your next session)`);
+      } else if (result.status === "failed") {
+        console.error(`[Prism] could not refresh the ${result.host} startup block (${result.detail}); run: prism connect`);
+      } else if (process.env.PRISM_DEBUG) {
+        console.error(`[Prism] startup block ${result.host}: ${result.status}${result.detail ? ` (${result.detail})` : ""}`);
+      }
+    }
+  } catch (error) {
+    // Never the reason a server fails to start.
+    if (process.env.PRISM_DEBUG) console.error(`[Prism] startup refresh skipped: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+async function resumeServerStartup(server: ReturnType<typeof createServer>): Promise<void> {
   // Start the authoritative tier-skill refresh only after the MCP transport is
   // connected. session_load_context awaits this same single-flight promise,
   // while the initialize handshake is never held behind portal I/O. The
