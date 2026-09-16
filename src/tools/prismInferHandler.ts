@@ -20,6 +20,7 @@
  * tier gating, and HIPAA audit are enforced in one place.
  */
 
+import { createHash } from "node:crypto";
 import { type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { pickLocalModel, fmtGb, MODEL_TIERS, resolveOllamaName } from "../utils/modelPicker.js";
 import { getSynaluxJwt, invalidateSynaluxJwt } from "../utils/synaluxJwt.js";
@@ -176,6 +177,35 @@ export function historyTurnWindows(content: string): string[] {
         if (i + HISTORY_TURN_WINDOW_CHARS >= content.length) break;
     }
     return out;
+}
+
+/** Verdict cache for history windows, keyed by a hash of model + text — no
+ *  turn text is retained. A follow-up re-sends the same accepted turns, so
+ *  without this an n-turn conversation re-screens every prior turn on every
+ *  call (quadratic classifier work; review 2026-09-16). ERROR verdicts are
+ *  transient and never cached; the current prompt, which may carry images,
+ *  never goes through here. */
+const LAYER1_HISTORY_CACHE_MAX = 1_000;
+const layer1HistoryCache = new Map<string, Layer1Verdict>();
+export function _resetLayer1HistoryCacheForTest(): void { layer1HistoryCache.clear(); }
+async function classifyHistoryWindow(
+    l1fn: NonNullable<InferDeps["callLayer1"]>,
+    window: string,
+    ollamaUrl: string,
+    model: string,
+): Promise<Layer1Verdict> {
+    const key = createHash("sha256").update(model).update("\0").update(window).digest("hex");
+    const hit = layer1HistoryCache.get(key);
+    if (hit) return hit;
+    const verdict = await l1fn(window, ollamaUrl, model);
+    if (verdict !== "ERROR") {
+        if (layer1HistoryCache.size >= LAYER1_HISTORY_CACHE_MAX) {
+            const oldest = layer1HistoryCache.keys().next().value;
+            if (oldest !== undefined) layer1HistoryCache.delete(oldest);
+        }
+        layer1HistoryCache.set(key, verdict);
+    }
+    return verdict;
 }
 
 function historyArgs(args: PrismInferArgs): [] | [InferHistoryTurn[]] {
@@ -536,6 +566,34 @@ export interface PrismInferArgs {
     strict_entitlements?: boolean;
 }
 
+/** Why a `messages` value fails the structural (absolute) contract, or null
+ *  when it passes. The MCP handler surfaces this text so an over-ceiling or
+ *  malformed history is refused with the ceiling named, not as a generic
+ *  "invalid arguments" (review 2026-09-16). Plan caps are checked later. */
+export function messagesProblem(messages: unknown): string | null {
+    if (!Array.isArray(messages)) return "must be an array of {role, content} turns";
+    if (messages.length > ABSOLUTE_MULTI_TURN.max_turns) {
+        return `has ${messages.length} turns; the absolute ceiling is ${ABSOLUTE_MULTI_TURN.max_turns} (plans cap lower)`;
+    }
+    let chars = 0;
+    for (const [i, m] of (messages as unknown[]).entries()) {
+        if (typeof m !== "object" || m === null) return `turn ${i} must be an object {role, content}`;
+        const t = m as Record<string, unknown>;
+        // user/assistant only: a `system` turn here would be a second system
+        // prompt behind the safety-bearing one.
+        if (t.role !== "user" && t.role !== "assistant") return `turn ${i} role must be 'user' or 'assistant'`;
+        if (typeof t.content !== "string" || !t.content.trim()) return `turn ${i} content must be a non-empty string`;
+        // text only: a turn carrying images (or anything else) would bypass
+        // the image screen, which sees the current call's images only.
+        if (Object.keys(t).some(k => k !== "role" && k !== "content")) return `turn ${i} may carry only role and content (text only)`;
+        chars += t.content.length;
+    }
+    if (chars > ABSOLUTE_MULTI_TURN.max_chars) {
+        return `totals ${chars} chars; the absolute ceiling is ${ABSOLUTE_MULTI_TURN.max_chars} (plans cap lower)`;
+    }
+    return null;
+}
+
 export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (typeof args !== "object" || args === null) return false;
     const a = args as Record<string, unknown>;
@@ -545,23 +603,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
         if (!Array.isArray(a.images) || a.images.length > MAX_INFER_IMAGES) return false;
         if (a.images.some((i: unknown) => typeof i !== "string" || !i.trim())) return false;
     }
-    if (a.messages !== undefined) {
-        if (!Array.isArray(a.messages) || a.messages.length > ABSOLUTE_MULTI_TURN.max_turns) return false;
-        let chars = 0;
-        for (const m of a.messages as unknown[]) {
-            if (typeof m !== "object" || m === null) return false;
-            const t = m as Record<string, unknown>;
-            // user/assistant only: a `system` turn here would be a second system
-            // prompt behind the safety-bearing one.
-            if (t.role !== "user" && t.role !== "assistant") return false;
-            if (typeof t.content !== "string" || !t.content.trim()) return false;
-            // text only: a turn carrying images (or anything else) would bypass
-            // the image screen, which sees the current call's images only.
-            if (Object.keys(t).some(k => k !== "role" && k !== "content")) return false;
-            chars += t.content.length;
-        }
-        if (chars > ABSOLUTE_MULTI_TURN.max_chars) return false;
-    }
+    if (a.messages !== undefined && messagesProblem(a.messages) !== null) return false;
     if (a.max_tokens !== undefined && typeof a.max_tokens !== "number") return false;
     if (a.temperature !== undefined && typeof a.temperature !== "number") return false;
     if (a.cloud_fallback !== undefined && typeof a.cloud_fallback !== "boolean") return false;
@@ -1422,7 +1464,10 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     const temperature = args.temperature ?? 0;
 
     // ── L1 Safety — deterministic input interception ────────────
-    const safetyIntercept = checkInputSafety(args.prompt);
+    // Over the current turn AND every history turn: a first-person crisis
+    // disclosure in a prior turn must meet the same intercept the portal
+    // applies to the flattened conversation (adversarial review 2026-09-16).
+    const safetyIntercept = checkInputSafety(screenedText(args));
     if (safetyIntercept) {
         return {
             output: safetyIntercept,
@@ -1432,6 +1477,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             latency_ms: Date.now() - t0,
             used_cloud: false,
             attempts: [{ tier: "l1_safety", reason: "crisis_or_medical_intercept" }],
+            // Entitlements are not resolved yet on this path (no network before
+            // the intercept), so `multi_turn` is absent; what was sent is not.
+            history_turns: args.messages?.length ?? 0,
         };
     }
 
@@ -1547,10 +1595,13 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         if (!policy.enabled) {
             attempts.push({ tier: "entitlements", reason: "multi_turn_not_in_plan" });
             if (wantReport) return refusedResult("multi_turn_not_in_plan");
-            throw new Error(
-                `prism_infer: multi-turn history is not included in the ${ent.plan} plan. ` +
-                `Send a single prompt, or upgrade: ${ent.upgrade_url}`,
-            );
+            // A portal outage assumes free-plan limits; say so instead of
+            // telling a paying customer to upgrade (review 2026-09-16).
+            const why = entSource === "fallback_free"
+                ? "the Synalux portal was unreachable, so free-plan limits are assumed " +
+                  "(entitlements_source=fallback_free); retry when it is back"
+                : `multi-turn history is not included in the ${ent.plan} plan`;
+            throw new Error(`prism_infer: ${why}. Send a single prompt, or upgrade: ${ent.upgrade_url}`);
         }
         if (turns > policy.max_turns || chars > policy.max_chars) {
             attempts.push({ tier: "entitlements", reason: "history_over_plan_cap" });
@@ -1678,9 +1729,12 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         // boundary is seen whole. The current prompt keeps its images and its
         // existing excerpt behaviour.
         let l1: Layer1Verdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
-        for (const turn of args.messages ?? []) {
+        history: for (const turn of args.messages ?? []) {
             for (const window of historyTurnWindows(turn.content)) {
-                l1 = worseLayer1Verdict(l1, await l1fn(window, deps.ollamaUrl, l1Model));
+                // OBVIOUS_RESERVED is the top of the severity order; no later
+                // window can lower it, so stop spending classifier calls.
+                if (l1 === "OBVIOUS_RESERVED") break history;
+                l1 = worseLayer1Verdict(l1, await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model));
             }
         }
         // Null when the deterministic floor did not fire — the verdict then came
@@ -2612,7 +2666,11 @@ export async function prismInferHandler(args: unknown): Promise<{
     isError?: boolean;
 }> {
     if (!isPrismInferArgs(args)) {
-        throw new Error("Invalid arguments for prism_infer (need {prompt: string})");
+        const raw = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
+        const mp = raw.messages !== undefined ? messagesProblem(raw.messages) : null;
+        throw new Error(mp
+            ? `Invalid arguments for prism_infer: messages ${mp}`
+            : "Invalid arguments for prism_infer (need {prompt: string})");
     }
     try {
         const prepared = await prepareMemoryAwareInferArgs(args);

@@ -295,7 +295,9 @@ export async function getEntitlements(): Promise<PrismEntitlements> {
  *  For display surfaces (the startup line) that must never add a portal
  *  fetch to startup; the first prism_infer result carries the policy anyway. */
 export function peekEntitlements(): PrismEntitlements | null {
-    return cache?.entitlements ?? null;
+    // Honour the TTL: a stale plan's caps must not be advertised at startup
+    // (review 2026-09-16); an expired cache reads as cold.
+    return cache && cache.expiresAt > Date.now() ? cache.entitlements : null;
 }
 
 export function invalidateEntitlements(): void {

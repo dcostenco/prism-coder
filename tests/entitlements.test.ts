@@ -256,4 +256,10 @@ describe("peekEntitlements — cache only, never a fetch", () => {
         fetchSpy.mockRestore();
         _resetEntitlementsForTest();
     });
+    it("reads an expired cache as cold, so a stale plan's caps are never advertised", async () => {
+        const { peekEntitlements, _setCacheForTest, _resetEntitlementsForTest, FREE_ENTITLEMENTS } = await import("../src/utils/entitlements.js");
+        _setCacheForTest({ ...FREE_ENTITLEMENTS, plan: "standard" }, -1);
+        expect(peekEntitlements()).toBeNull();
+        _resetEntitlementsForTest();
+    });
 });

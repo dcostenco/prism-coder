@@ -394,6 +394,13 @@ describe("needs_history — follow-up cues", () => {
     "fix it so the loader handles empty input",           // bare pronoun is not a cue
     "write a Dockerfile for a Node.js app",
     "what changed between these two versions",
+    // review 2026-09-16: a leading connective alone was enough — it is not
+    "Next.js 15 app router migration plan",
+    "Also fix the typo in README",
+    "Then run the migration script on staging",
+    "Again and again the test flakes — find the root cause",
+    "Now write a unit test for parseDate()",
+    "Restore the last version of the file from git",
   ])("does not flag a standalone task: %s", (desc) => {
     expect(looksLikeFollowUp(desc)).toBe(false);
   });

@@ -26,7 +26,10 @@ async function liveTags(): Promise<Set<string> | null> {
     } catch { return null; }
 }
 const tags = await liveTags();
-const live = tags !== null && NEEDED.every(t => tags.has(t));
+// Opt-in: `PRISM_LIVE_TESTS=1 npx vitest run tests/live`. Minutes of real
+// generation must not ride along with `npm test` on any machine that happens
+// to have the models (review 2026-09-16).
+const live = process.env.PRISM_LIVE_TESTS === "1" && tags !== null && NEEDED.every(t => tags.has(t));
 
 const T1 = "My project codename is Nightjar. Acknowledge in one short sentence without repeating the name.";
 const T2 = "What is my project codename? Answer with one word only.";

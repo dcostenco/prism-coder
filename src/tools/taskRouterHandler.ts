@@ -363,16 +363,26 @@ const WEIGHTS = {
  * would make the host attach history to everything.
  */
 const FOLLOW_UP_CUES: readonly RegExp[] = [
-  /^\s*(now|also|then|next|again|and now|and then|after that|same as before|as before|like before)\b/i,
-  /\b(the|that) (same|previous|earlier|last) (one|version|function|file|answer|approach|code|result|output|draft)\b/i,
+  /^\s*(same as before|as before|like before)\b/i,
+  // "last" dropped: "restore the last version of the file from git" is a
+  // standalone task (review 2026-09-16).
+  /\b(the|that) (same|previous|earlier) (one|version|function|file|answer|approach|code|result|output|draft)\b/i,
   /\byour (last|previous|earlier) (answer|version|output|draft|reply)\b/i,
   /\b(as|what) (we|you) (just |already )?(did|discussed|agreed|wrote|said|made|decided)\b/i,
   /\b(from|like) (before|last time|earlier)\b/i,
   /\b(continue|carry on|keep going|pick up) (from )?(where|what)\b/i,
 ];
 
+/** A leading connective alone is not a cue: "Next.js 15 migration plan",
+ *  "Also fix the typo in README", "Now write a unit test for parseDate()" are
+ *  standalone tasks (review 2026-09-16). It counts only with an anaphor that
+ *  points at prior work. */
+const LEADING_CONNECTIVE = /^\s*(now|also|then|next|again|and now|and then|after that)\b/i;
+const ANAPHOR = /\b(it|that|this|those|these|them|the same)\b|\b(as|like) before\b/i;
+
 export function looksLikeFollowUp(description: string): boolean {
-  return FOLLOW_UP_CUES.some((re) => re.test(description));
+  if (FOLLOW_UP_CUES.some((r) => r.test(description))) return true;
+  return LEADING_CONNECTIVE.test(description) && ANAPHOR.test(description);
 }
 
 function buildRecommendedArgs(
@@ -533,6 +543,7 @@ export async function sessionTaskRouteHandler(
           complexity_score: 5,
           rationale: "Local delegation was explicitly disabled in Prism settings.",
           recommended_tool: null,
+          needs_history: false,
           delegation_enabled: false,
         }),
       }],

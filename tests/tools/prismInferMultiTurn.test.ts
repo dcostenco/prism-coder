@@ -118,9 +118,11 @@ describe("B. gaps that must close", () => {
     it("B8 the classifier is run per turn, not once over a concatenation", async () => {
         const seen: string[] = [];
         const d = deps({ callLayer1: vi.fn(async (text: string) => { seen.push(text); return "OBVIOUS_NOT_RESERVED"; }) });
-        const long = "z".repeat(5_000);
-        await runInfer(withHistory({ messages: [{ role: "user", content: long }, { role: "assistant", content: long }, { role: "user", content: long }, { role: "assistant", content: long }] }), d);
-        // 4 history turns + the current prompt = 5 bounded classifications
+        // Distinct turns: identical text is classified once (verdicts are
+        // cached by content hash), which would hide the per-turn count here.
+        const long = (i: number) => `${i}:` + "z".repeat(5_000);
+        await runInfer(withHistory({ messages: [{ role: "user", content: long(1) }, { role: "assistant", content: long(2) }, { role: "user", content: long(3) }, { role: "assistant", content: long(4) }] }), d);
+        // 4 history turns (each in ≥1 window) + the current prompt ≥ 5 bounded classifications
         expect(seen.length, "classifier was not called once per turn").toBeGreaterThanOrEqual(5);
         expect(Math.max(...seen.map(s => s.length)), "a concatenation was classified").toBeLessThanOrEqual(5_100);
     });

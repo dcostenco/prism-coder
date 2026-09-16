@@ -5,6 +5,9 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import {
     runInfer,
+    prismInferHandler,
+    messagesProblem,
+    _resetLayer1HistoryCacheForTest,
     callSynaluxInference,
     portalFlattenedTranscript,
     historyTurnWindows,
@@ -29,7 +32,7 @@ const ENT: PrismEntitlements = {
     features: { cloud_fallback: false, grounding_verifier: false, knowledge_search_unlimited: true, session_memory_unlimited: true, analytics_dashboard: true },
     upgrade_url: "https://synalux.ai/pricing",
 };
-beforeEach(() => _setCacheForTest(ENT, 60_000));
+beforeEach(() => { _setCacheForTest(ENT, 60_000); _resetLayer1HistoryCacheForTest(); });
 afterAll(() => _resetEntitlementsForTest());
 
 function deps(overrides: Partial<InferDeps> = {}): InferDeps {
@@ -160,7 +163,69 @@ describe("R5 oversize history turns are classified in overlapping windows", () =
         const r = await runInfer(args({ messages: [{ role: "assistant", content: body }] }), d);
         expect(r.backend).toBe("refused");
         expect(r.gate_outcome?.reason).toBe("layer1_reserved");
-        expect(callLayer1.mock.calls.length).toBeGreaterThan(3);
+        // prompt + the windows up to and including the one holding the marker
+        // (screening stops there): the marker sits in the 2nd or 3rd window.
+        expect(callLayer1.mock.calls.length).toBeGreaterThanOrEqual(3);
+        expect(callLayer1.mock.calls.some(c => String(c[0]).includes(MARKER))).toBe(true);
         expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+    });
+});
+
+describe("R6 the crisis intercept reads history, not only the current prompt", () => {
+    it("a first-person crisis disclosure in a prior turn is intercepted before any model call, and history_turns is reported", async () => {
+        const d = deps();
+        const r = await runInfer(args({ prompt: "summarise that in one line", messages: [{ role: "user", content: "I want to die, nothing helps" }] }), d);
+        expect(r.backend).toBe("safety_gate");
+        expect(r.history_turns).toBe(1);
+        expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+    });
+});
+
+describe("R7 Layer-1 screening of history is bounded", () => {
+    const five = Array.from({ length: 5 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i} about the reading group schedule` }));
+    it("stops at the first OBVIOUS_RESERVED verdict: a reserved current prompt costs one classifier call, not six", async () => {
+        const callLayer1 = vi.fn(async () => "OBVIOUS_RESERVED" as const);
+        const r = await runInfer(args({ prompt: MARKER, messages: five }), deps({ callLayer1 }));
+        expect(r.backend).toBe("refused");
+        expect(callLayer1.mock.calls.length).toBe(1);
+    });
+    it("stops right after the reserved turn: turns 0-1 clean, turn 2 reserved → 4 calls, never 6", async () => {
+        const callLayer1 = vi.fn(async (text: string) => (text.startsWith("turn 2") ? "OBVIOUS_RESERVED" : "OBVIOUS_NOT_RESERVED") as "OBVIOUS_RESERVED" | "OBVIOUS_NOT_RESERVED");
+        await runInfer(args({ messages: five }), deps({ callLayer1 }));
+        expect(callLayer1.mock.calls.length).toBe(1 + 3);
+    });
+    it("a follow-up that re-sends the same accepted turns re-screens only the new prompt (verdicts cached by hash)", async () => {
+        const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
+        await runInfer(args({ messages: five }), deps({ callLayer1 }));
+        expect(callLayer1.mock.calls.length).toBe(1 + 5);
+        await runInfer(args({ prompt: "and the follow-up?", messages: five }), deps({ callLayer1 }));
+        expect(callLayer1.mock.calls.length).toBe(1 + 5 + 1);
+    });
+    it("ERROR verdicts are not cached: the turn is re-screened next time", async () => {
+        let first = true;
+        const callLayer1 = vi.fn(async (text: string) => {
+            if (text.startsWith("turn 0") && first) { first = false; return "ERROR" as const; }
+            return "OBVIOUS_NOT_RESERVED" as const;
+        });
+        await runInfer(args({ messages: five.slice(0, 1), escalation: "report" }), deps({ callLayer1 }));
+        await runInfer(args({ messages: five.slice(0, 1), escalation: "report" }), deps({ callLayer1 }));
+        const turn0Calls = callLayer1.mock.calls.filter(c => String(c[0]).startsWith("turn 0")).length;
+        expect(turn0Calls).toBe(2);
+    });
+});
+
+describe("R8 refusal wording and structural refusals", () => {
+    it("a portal outage (fallback_free) is named as such, not as 'not in the free plan'", async () => {
+        _setCacheForTest({ ...ENT, plan: "free", source: "fallback_free", multi_turn: undefined } as PrismEntitlements, 60_000);
+        await expect(runInfer(args({ escalation: "serve" }), deps())).rejects.toThrow(/entitlements_source=fallback_free/);
+        await expect(runInfer(args({ escalation: "serve" }), deps())).rejects.not.toThrow(/not included in the free plan/);
+    });
+    it("over the absolute ceiling is refused with the ceiling named, via the MCP handler too", async () => {
+        const fiftyOne = Array.from({ length: 51 }, () => ({ role: "user", content: "t" }));
+        expect(messagesProblem(fiftyOne)).toMatch(/51 turns; the absolute ceiling is 50/);
+        expect(messagesProblem([{ role: "user", content: "x", images: ["a"] }])).toMatch(/turn 0 may carry only role and content/);
+        expect(messagesProblem([{ role: "user", content: "x".repeat(128_001) }])).toMatch(/absolute ceiling is 128000/);
+        expect(messagesProblem([{ role: "user", content: "fine" }])).toBeNull();
+        await expect(prismInferHandler({ prompt: "x", messages: fiftyOne })).rejects.toThrow(/messages has 51 turns; the absolute ceiling is 50/);
     });
 });

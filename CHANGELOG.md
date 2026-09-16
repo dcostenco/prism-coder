@@ -20,7 +20,8 @@ it:
 
 - **A paid-plan feature, bounded by the plan, rejected not trimmed.** Whether
   multi-turn is available and its turn and character caps are entitlements
-  set in the portal's plan table, not decisions the client makes: Prism is a
+  set in the portal's plan table (the portal's companion change — deploy it BEFORE this
+  release, or every plan is refused with `multi_turn_not_in_plan`), not decisions the client makes: Prism is a
   thin client. It enforces whatever the portal says, refuses an over-cap call
   naming the caps (`history_over_plan_cap`), and refuses outright on a free
   plan, a host with no portal, or a portal that says nothing
@@ -49,7 +50,7 @@ Every installed tier reads role-structured history correctly, including a
 turn another tier wrote (five writer/reader pairs probed, all recalled). A
 call without `messages` is byte-for-byte the call the handler made before.
 
-Twelve tests in `tests/tools/prismInferMultiTurn.test.ts`, nine of them proven
+35 tests in `tests/tools/prismInferMultiTurn.test.ts`, nine of them proven
 to fail against the previous handler for the named reason: no history reached
 the model, the validator ignored it, the safety screen saw only the current
 turn (the reserved history was served by the 9b), the context gate did not
@@ -72,10 +73,10 @@ local-first policy telling every host to attach the accepted prior turns when
 it does. The router holds no turns; attaching them stays the host's job. Bare
 pronouns are deliberately not cues, so "fix it" stays a standalone task.
 
-Twenty-eight tests in `tests/tools/prismInferMultiTurn.test.ts` (nine proven to
+35 tests in `tests/tools/prismInferMultiTurn.test.ts` (nine proven to
 fail against the previous handler, one compatibility baseline, two guards, nine
 regression cases for the caps, retries, verdict severity and escalation
-payload, seven for the entitlement-ruled policy), plus a live suite in `tests/live/multiTurn.live.test.ts` that runs
+payload, 8 for the entitlement-ruled policy), plus an opt-in live suite in `tests/live/multiTurn.live.test.ts` (`PRISM_LIVE_TESTS=1`) that runs
 only when a local Ollama serves the tiers and pins what was verified by hand:
 every tier reads role history through the real local call, a no-history
 control fails, and the 9b recalls the first turn across a history past its
@@ -1309,6 +1310,7 @@ search result. Upgrade if you use Web Scholar at all.
 ## [Unreleased]
 
 ### Fixed
+- Second review round: the deterministic crisis/medical intercept now reads every history turn, not only the current prompt (the portal already screened the flattened conversation; the client was weaker than the server it forwards to); Layer-1 screening of history stops at the first OBVIOUS_RESERVED verdict and caches window verdicts by content hash (no turn text retained), so a follow-up no longer re-screens every prior turn; a portal outage is reported as `entitlements_source=fallback_free`, not as "not in the free plan", to a paying customer; an over-ceiling or malformed `messages` is refused with the ceiling named; `session_task_route` no longer flags "Next.js 15 migration plan" or "Also fix the typo in README" as follow-ups (a leading connective needs an anaphor), and the delegation-disabled route carries `needs_history` like every other; the startup line honours the entitlement cache TTL; a converge run says when `/api/show` facts are unavailable and the digest rule applies. Unchanged by design and now documented: a reserved history turn with an image is served local-only with cloud pinned off, per the 2026-08-18 clinical-image ruling.
 - Multi-turn hardening from the pre-merge adversarial review: history turns longer than the Layer-1 full-read limit are classified in overlapping windows, so no region of a turn goes unscreened; a call carrying history is always screened, whatever `mode`/`max_tokens` pair it uses; the silent-truncation backstop counts the whole input (prompt plus history), not the current prompt alone; the code-repair retry carries the same images and history as the first call; and the cloud cap now mirrors the portal byte-for-byte (50 messages including the current turn, portal-exact flattening), so nothing the client accepts is refused with 413 upstream.
 - `prism_infer`'s input schema now stays under Codex's 5,000-byte schema-compaction budget (was ~5,800), so Codex sees every parameter description including the `messages` contract; the description no longer claims Codex drops parameter text unconditionally. Regression: `tests/tools/prismInferSchemaBudget.test.ts`.
 - Handoff history snapshots now retain the effective role and active branch,

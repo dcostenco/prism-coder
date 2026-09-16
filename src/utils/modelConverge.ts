@@ -136,6 +136,11 @@ export async function convergeModels(deps: ModelConvergeDeps): Promise<TierOutco
                     } else if (a.pinnedNumCtx !== null) {
                         droppedPin = a.pinnedNumCtx;
                     }
+                } else {
+                    // /api/show failed or had no FROM line: the digest rule
+                    // applies and a local pin cannot be detected — say so
+                    // before overwriting (review 2026-09-16).
+                    deps.log(`? ${alias}: /api/show facts unavailable — digest rule applies; a local num_ctx pin on this alias cannot be detected`);
                 }
             }
 
