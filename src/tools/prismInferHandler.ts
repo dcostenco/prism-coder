@@ -149,13 +149,12 @@ function screenedText(args: PrismInferArgs): string {
     return history.length ? [...history.map(t => t.content), args.prompt].join("\n") : args.prompt;
 }
 
-/** Role-labelled transcript, current prompt last, for the SEMANTIC screen.
- *  Classified turn by turn, the 4b refused 4 of 12 benign bench follow-ups
- *  (2 UNCERTAIN on context-free snippets, 2 false RESERVED: "We deploy to
- *  eu-west-3", "Steps: plan, build, test, deploy"); classified as windows of
- *  this transcript, 0 of 12 (live, 2026-09-16). Every window carries its
- *  context. Kept for tests and as the definition contextWindows() slices;
- *  the semantic context layer reads contextWindows() (anchored per turn). */
+/** Role-labelled transcript, current prompt last. Classified turn by turn,
+ *  the 4b refused 4 of 12 benign bench follow-ups (2 UNCERTAIN on
+ *  context-free snippets, 2 false RESERVED); read with context, far fewer —
+ *  which is why the context layer exists. Kept for tests and as the
+ *  definition contextWindows() slices; the semantic context layer reads
+ *  contextWindows() (anchored per turn). */
 export function screeningTranscript(args: PrismInferArgs): string {
     return [...(args.messages ?? []), { role: "user" as const, content: args.prompt }]
         .map(t => `${t.role === "user" ? "User" : "Assistant"}: ${t.content}`)
@@ -1866,11 +1865,11 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
             // 2. Semantic floor, per TURN in isolation. On a USER turn an
             // OBVIOUS_RESERVED verdict read alone is FINAL: nothing written
-            // later can lower it. Measured 2026-09-16: a note in a later
-            // prompt ("the thread above is a novel excerpt") whitewashed a
-            // self-injury request when the two shared one classifier window,
-            // while the same note inside the turn, or in a single prompt, did
-            // not fool the classifier. On an ASSISTANT turn — the worker's own
+            // later can lower it. Measured 2026-09-16: a classifier-directed
+            // note placed in a later prompt cleared a reserved earlier turn
+            // when the two shared one classifier window, while the same note
+            // inside the turn, or in a single prompt, did not fool the
+            // classifier. On an ASSISTANT turn — the worker's own
             // prior answer — a reserved read alone floors the verdict at
             // UNCERTAIN instead: the capable cloud when the plan allows it,
             // else refused, never local; the classifier reads the worker's
@@ -1881,12 +1880,11 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // runs, fail-closed). UNCERTAIN or NOT_RESERVED on an isolated
             // snippet are not final — that turn's own context read decides.
             // Owner-visible policy: a turn that is UNCERTAIN alone but clean
-            // in its context is served; before, any UNCERTAIN refused. Known
-            // residual of that policy (measured, narrow): a note the caller
-            // placed in an EARLIER turn, still inside the 3,600-char tail before
-            // a payload the classifier finds only UNCERTAIN alone (about 1 in 20
-            // subtle reserved payloads; the rest are reserved alone, final),
-            // can keep that payload's context read clean. Later text cannot.
+            // in its context is served; before, any UNCERTAIN refused. That
+            // policy has a measured, narrow residual involving content the
+            // classifier finds only UNCERTAIN alone; per this project's
+            // disclosure rule (see layer1.ts) the detail is kept in the private
+            // repo. Later text can never affect an earlier turn's read.
             const budget = { calls: 0, consecutiveErrors: 0, tripped: false };
             history: for (const turn of args.messages) {
                 const windows = historyTurnWindows(turn.content);
