@@ -267,7 +267,10 @@ export const PRISM_INFER_TOOL: Tool = {
         "otherwise hand to the cloud model — it costs $0 when the local hit succeeds. " +
         "For a FOLLOW-UP to an earlier prism_infer answer, pass the accepted prior turns as `messages` " +
         "(paid plans): without them the worker answers the follow-up from nothing and fabricates. " +
-        "Every result reports `multi_turn` (your plan's caps) and `history_turns` (what was sent).",
+        "Every result reports `multi_turn` (your plan's caps) and `history_turns` (what was sent). " +
+        "History over the plan's caps is refused (history_over_plan_cap), never trimmed; a free plan " +
+        "or a host with no portal is refused (multi_turn_not_in_plan). Codex receives only this " +
+        "description, not per-parameter text, so the contract lives here.",
     inputSchema: {
         type: "object",
         properties: {

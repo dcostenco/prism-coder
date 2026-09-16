@@ -375,6 +375,11 @@ describe("G. host-facing guidance", () => {
         expect(PRISM_INFER_TOOL.description).toMatch(/FOLLOW-UP to an earlier prism_infer answer, pass the accepted prior turns as `messages`/);
         expect(PRISM_INFER_TOOL.description).toMatch(/fabricates/);
         expect(PRISM_INFER_TOOL.description).toMatch(/`multi_turn`.*`history_turns`/);
+        // Verified with the real Codex CLI 2026-09-15: Codex receives the tool
+        // description but NOT per-parameter descriptions, so the refusal
+        // contract must be in the description itself.
+        expect(PRISM_INFER_TOOL.description).toMatch(/history_over_plan_cap.*never trimmed/);
+        expect(PRISM_INFER_TOOL.description).toMatch(/multi_turn_not_in_plan/);
     });
 
     it("G2 the messages parameter is in the schema and says it is a paid-plan feature ruled by the plan", () => {
