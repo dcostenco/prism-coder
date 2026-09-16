@@ -105,6 +105,9 @@ export interface BraveLocation {
   id: string;
   name?: string;
   title?: string;
+  postal_address?: { displayAddress?: string };
+  contact?: { telephone?: string; email?: string };
+  opening_hours?: { current_day?: Array<{ opens?: string; closes?: string }> };
   address: {
     streetAddress?: string;
     addressLocality?: string;
@@ -119,8 +122,10 @@ export interface BraveLocation {
   rating?: {
     ratingValue?: number;
     ratingCount?: number;
+    reviewCount?: number;
   };
   openingHours?: string[];
+  price_range?: string;
   priceRange?: string;
 }
 
@@ -480,7 +485,16 @@ export function formatLocalResults(
   return (
     (poisData.results || [])
       .map((poi) => {
+        // Brave sends postal_address.displayAddress, contact.telephone and
+        // opening_hours. The streetAddress/phone/openingHours shapes below have
+        // never appeared on a POI, which is why every venue came back N/A while
+        // the name resolved through the title fallback. Measured 2026-09-16.
+        const today = poi.opening_hours?.current_day?.[0];
+        const hours = (poi.openingHours || []).join(", ")
+          || (today?.opens && today?.closes ? `${today.opens}-${today.closes}` : "")
+          || "N/A";
         const address =
+          poi.postal_address?.displayAddress ||
           [
             poi.address?.streetAddress ?? "",
             poi.address?.addressLocality ?? "",
@@ -490,13 +504,13 @@ export function formatLocalResults(
             .filter((part) => part !== "")
             .join(", ") || "N/A";
 
-        return `Name: ${poi.name || poi.title || "N/A"}
+        return `Name: ${poi.title || poi.name || "N/A"}
 Address: ${address}
-Phone: ${poi.phone || "N/A"}
-Rating: ${poi.rating?.ratingValue ?? "N/A"} (${poi.rating?.ratingCount ?? 0
+Phone: ${poi.contact?.telephone || poi.phone || "N/A"}
+Rating: ${poi.rating?.ratingValue ?? "N/A"} (${poi.rating?.reviewCount ?? poi.rating?.ratingCount ?? 0
           } reviews)
-Price Range: ${poi.priceRange || "N/A"}
-Hours: ${(poi.openingHours || []).join(", ") || "N/A"}
+Price Range: ${poi.price_range || poi.priceRange || "N/A"}
+Hours: ${hours}
 Description: ${descData.descriptions[poi.id] || "No description available"}
 `;
       })
