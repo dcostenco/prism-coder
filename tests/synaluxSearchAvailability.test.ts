@@ -1,6 +1,6 @@
 /**
  * Regression: an enterprise subscriber's web search must reach the Synalux
- * portal, not die on a Brave key they have no reason to own.
+ * portal, not die asking for a provider key in the server's own environment.
  *
  * Field defect, measured 2026-09-16. Portal search availability was a
  * module-load constant derived from SYNALUX_CONFIGURED, which reads

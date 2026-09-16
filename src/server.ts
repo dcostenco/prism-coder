@@ -1456,7 +1456,8 @@ export async function startServer() {
   // portal is reachable. `prism connect` copies it into the host's MCP env
   // block only if it was in the environment when connect ran; otherwise it is
   // in the settings store, and a paid subscriber's searches were failing on a
-  // Brave key they had no reason to own.
+  // Brave key in the server's own environment, which a host launched from the
+  // graphical shell does not carry.
   // getSetting reads the cache initConfigStorage() just warmed, so this adds
   // no I/O to the path the Initialize handshake waits on.
   const portalSearchReady = await hydrateSynaluxCredentials(getSetting);

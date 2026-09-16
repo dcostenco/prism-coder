@@ -274,7 +274,8 @@ program
       // does not carry it. connect writes into each host's MCP env block only
       // what it can see, so without this a machine that logged in once lost its
       // subscription on the next re-registration and every search fell through
-      // to a Brave key it had no reason to own.
+      // to a Brave key in the server's own environment, which a host launched
+      // from the graphical shell does not carry.
       {
         const { hydrateSynaluxCredentials } = await import('./utils/synaluxSearch.js');
         const { getSetting } = await import('./storage/configStorage.js');

@@ -7,7 +7,8 @@
  * was never in that environment, so connect wrote a base URL and no key. The
  * server then started with no key, portal search availability froze false at
  * module load, and every search failed asking for a Brave key the subscriber
- * had no reason to own. Entitlements still reported the paid plan, because they
+ * in the server's own environment, which a host launched from the graphical
+ * shell does not carry. Entitlements still reported the paid plan, because they
  * resolve the key later from the settings store — which is what made the
  * failure look like the portal refusing a paying customer.
  *

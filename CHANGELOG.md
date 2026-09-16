@@ -15,8 +15,9 @@ already happens to be in the environment; a machine that signed in through
 Prism's settings store got a base URL and no key. The key did reach
 `process.env` later during startup, which is why entitlements resolved the paid
 plan — but the search constant had already frozen `false` for the life of the
-process, so every query skipped the portal and demanded a provider key the
-subscriber had no reason to own.
+process, so every query skipped the portal and fell back to a provider key in
+the server's own environment. A host launched from the graphical shell carries
+none, so the search failed outright.
 
 - **Portal search availability is resolved per call, from the live
   environment.** It uses the same resolution order `fetchEntitlements()` already
