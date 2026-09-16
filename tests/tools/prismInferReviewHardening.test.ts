@@ -595,13 +595,20 @@ describe("R14 round thirteen", () => {
     it("the structural maximum (one ~128k turn + 48 minimal turns + a 128k prompt) fits under the budget: a paid call never trips it", async () => {
         const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
         _setCacheForTest({ ...ENT, multi_turn: { enabled: true, max_turns: 49, max_chars: 128_000 } }, 60_000);
-        // worst distribution: 48 one-char turns (48 windows) + one turn taking the rest (≈37 windows)
-        const minimal = Array.from({ length: 48 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: String.fromCharCode(97 + (i % 26)) }));
+        // worst distribution: 48 DISTINCT one-char turns (48 windows, no two
+        // alike so none is a cache hit; all assistant, the longer label) + one
+        // turn taking the rest (37 windows) = 86 isolated windows
+        const minimal = Array.from({ length: 48 }, (_, i) => ({ role: "assistant" as const, content: String.fromCharCode(0x41 + i) }));
+        expect(new Set(minimal.map(t => t.content)).size).toBe(48);
         const longTurn = Array.from({ length: 6_000 }, (_, i) => `entry ${i} of the pasted log; `).join("").slice(0, 128_000 - 48);
         const huge = [...minimal, { role: "user" as const, content: longTurn }];
         expect(huge.reduce((n, t) => n + t.content.length, 0)).toBe(128_000);
         const bigPrompt = Array.from({ length: 6_000 }, (_, i) => `line ${i} of the pasted prompt; `).join("").slice(0, MULTI_TURN_PROMPT_MAX_CHARS);
         expect(bigPrompt.length).toBe(MULTI_TURN_PROMPT_MAX_CHARS);
+        const isolated = huge.reduce((n, t) => n + historyTurnWindows(t.content).length, 0);
+        const transcript = historyTurnWindows(screeningTranscript(args({ messages: huge, prompt: bigPrompt }))).length;
+        expect(isolated).toBe(86);
+        expect(transcript).toBe(76);
         // The screen passes; the call then dies at the context gate (no tier
         // holds 250k chars, no cloud) and throws with its attempts attached.
         let attempts: Array<{ reason: string }> = [];
@@ -613,7 +620,10 @@ describe("R14 round thirteen", () => {
         }
         expect(attempts.some(a => a.reason.startsWith("layer1_screen_over_budget:")), JSON.stringify(attempts.slice(0, 3))).toBe(false);
         expect(attempts.some(a => a.reason.startsWith("ctx_insufficient")), "the screen should have passed and the ctx gate should have spoken").toBe(true);
-        expect(callLayer1.mock.calls.length).toBeLessThanOrEqual(LAYER1_SCREEN_CALL_BUDGET);
+        // exactly every window once (162 misses) plus the prompt's own call — the documented maximum
+        expect(callLayer1.mock.calls.length).toBe(isolated + transcript + 1);
+        expect(callLayer1.mock.calls.length).toBe(163);
+        expect(163).toBeLessThanOrEqual(LAYER1_SCREEN_CALL_BUDGET);
     });
     it("beyond the budget the screen fails CLOSED as UNCERTAIN, with the attempt named", async () => {
         _setScreenCallBudgetForTest(4);
