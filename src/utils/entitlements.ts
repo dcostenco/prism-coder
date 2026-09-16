@@ -25,8 +25,12 @@ export interface MultiTurnEntitlement {
     max_chars: number;
 }
 
-/** What a host with NO portal (unconfigured) or an older portal gets. */
-export const DEFAULT_MULTI_TURN: MultiTurnEntitlement = { enabled: true, max_turns: 12, max_chars: 32_000 };
+/** What a host with NO portal (unconfigured), a portal that says nothing
+ *  (older deployment), or an assumed-free fallback gets: OFF. Multi-turn is
+ *  a paid-plan feature (owner decision 2026-09-15); a client default that
+ *  enabled it would hand a paid feature to anyone without an account. The
+ *  caps here are what a paid plan gets when the portal omits them. */
+export const DEFAULT_MULTI_TURN: MultiTurnEntitlement = { enabled: false, max_turns: 12, max_chars: 32_000 };
 /** Structural ceiling no plan can exceed: the portal's own inference route
  *  takes at most 50 messages, and 128k chars ≈ 32k tokens — the largest
  *  local window. Above this the payload is malformed, not merely over plan. */

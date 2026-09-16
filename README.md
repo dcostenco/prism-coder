@@ -1271,10 +1271,10 @@ prism_infer({
 // → 27B generates code locally ($0), with thinking for quality
 // → If quality gate fails + paid tier → auto-escalate to Gemini 3.6 Flash
 
-// Follow-ups carry the conversation. The host curates the turns; Prism bounds
-// them to your plan's caps (default 12 turns / 32k chars; user+assistant text
-// only), safety-screens each turn, counts them against the tier's context, and
-// never stores them.
+// Follow-ups carry the conversation (paid plans). The host curates the turns;
+// Prism bounds them to your plan's caps (user+assistant text only), safety-
+// screens each turn, counts them against the tier's context, and never stores
+// them. A free plan or a host with no portal is refused: multi_turn_not_in_plan.
 prism_infer({
     messages: [
         { role: "user",      content: "Write a binary search in Python" },

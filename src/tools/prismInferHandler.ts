@@ -286,9 +286,10 @@ export const PRISM_INFER_TOOL: Tool = {
                 description:
                     "Prior turns of THIS conversation, oldest first, each {role: 'user'|'assistant', content}. " +
                     "`prompt` stays the current user turn. The host curates: send only turns you accepted, " +
-                    "as a brief, not a transcript. Text only, user and assistant roles only. The turn and " +
-                    "character caps are set by your Synalux plan (default 12 turns / 32,000 chars); over-cap " +
-                    "or malformed history is refused with the caps named, never trimmed. Every turn is " +
+                    "as a brief, not a transcript. Text only, user and assistant roles only. Multi-turn is a " +
+                    "paid Synalux plan feature: the plan sets the turn and character caps, a free plan or a " +
+                    "host with no portal is refused (multi_turn_not_in_plan), and over-cap or malformed " +
+                    "history is refused with the caps named, never trimmed. Every turn is " +
                     "safety-screened and counted against the tier's context. History is forwarded to the " +
                     "cloud on escalation (32 KB cap) and is never stored.",
                 items: {

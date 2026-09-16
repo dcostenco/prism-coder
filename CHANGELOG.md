@@ -18,14 +18,15 @@ host curates the history (send only turns you accepted, as a brief, not a
 transcript); Prism bounds, screens, counts and forwards it, and never stores
 it:
 
-- **Bounded by your plan, rejected not trimmed.** The turn and character caps
-  are entitlements set in the portal's plan table, not decisions the client
-  makes: Prism is a thin client. It enforces whatever the portal says (default
-  12 turns / 32,000 characters for a host with no portal; an absolute ceiling
-  of 50 turns / 128,000 characters that no plan can exceed), refuses an
-  over-cap call naming the caps (`history_over_plan_cap`), and refuses
-  outright on a plan without multi-turn (`multi_turn_not_in_plan`, with the
-  upgrade URL). User and assistant roles only, text only; a `system` turn or
+- **A paid-plan feature, bounded by the plan, rejected not trimmed.** Whether
+  multi-turn is available and its turn and character caps are entitlements
+  set in the portal's plan table, not decisions the client makes: Prism is a
+  thin client. It enforces whatever the portal says, refuses an over-cap call
+  naming the caps (`history_over_plan_cap`), and refuses outright on a free
+  plan, a host with no portal, or a portal that says nothing
+  (`multi_turn_not_in_plan`, with the upgrade URL) — the client's own default
+  is OFF, so no one gets a paid feature without an account. An absolute
+  ceiling of 50 turns / 128,000 characters bounds any plan. User and assistant roles only, text only; a `system` turn or
   an image fails validation. Silently dropping the turn that mattered is the
   truncation class the context gate exists to prevent.
 - **Screened per turn.** The Layer 1 classifier runs on every turn separately,

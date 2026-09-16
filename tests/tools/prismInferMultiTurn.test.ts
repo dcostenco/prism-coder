@@ -23,6 +23,9 @@ const ent = (cloud: boolean): PrismEntitlements => ({
     daily_infer_limit: 100_000,
     max_tokens: 4096,
     max_seats: 25,
+    // Multi-turn is a paid feature; the A–D suites run as a paid plan with the
+    // standard policy. E1/E5/E8 cover the free/unconfigured side.
+    multi_turn: { enabled: true, max_turns: 12, max_chars: 32_000 },
     features: {
         cloud_fallback: cloud,
         grounding_verifier: false,
@@ -273,8 +276,8 @@ describe("E. multi-turn policy comes from entitlements (thin client)", () => {
     const turns = (n: number, content = "t") => Array.from({ length: n }, (_, i) => turn(i % 2 ? "assistant" : "user", content));
     const withPolicy = (multi_turn: Ent["multi_turn"]): Ent => ({ ...ent(false), multi_turn });
 
-    it("E1 a portal that says nothing about multi-turn gets the built-in default (12 / 32,000, enabled)", () => {
-        expect(multiTurnPolicy(ent(false))).toEqual(DEFAULT_MULTI_TURN);
+    it("E1 a portal that says nothing about multi-turn gets the built-in default, which is OFF (paid feature)", () => {
+        expect(DEFAULT_MULTI_TURN.enabled).toBe(false);
         expect(multiTurnPolicy({ ...ent(false), multi_turn: undefined })).toEqual(DEFAULT_MULTI_TURN);
     });
 
@@ -315,6 +318,14 @@ describe("E. multi-turn policy comes from entitlements (thin client)", () => {
             .toEqual({ enabled: true, max_turns: ABSOLUTE_MULTI_TURN.max_turns, max_chars: ABSOLUTE_MULTI_TURN.max_chars });
         expect(multiTurnPolicy(withPolicy({ enabled: "yes", max_turns: -3, max_chars: "lots" } as never)))
             .toEqual(DEFAULT_MULTI_TURN);
+    });
+
+    it("E8 a host with NO portal (unconfigured, default policy) is refused: no paid feature without an account", async () => {
+        _setCacheForTest({ ...ent(false), multi_turn: undefined, source: "unconfigured" }, 60_000);
+        const d = deps();
+        const r = await runInfer(withHistory(), d);
+        expect(r.gate_outcome?.reason).toBe("multi_turn_not_in_plan");
+        expect(d.callLocal).not.toHaveBeenCalled();
     });
 
     it("E7 a single-turn call is never touched by the policy, even when the plan disables multi-turn", async () => {
