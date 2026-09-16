@@ -181,8 +181,10 @@ export function contextWindows(args: PrismInferArgs): string[] {
     return out;
 }
 
-/** Most severe of two Layer 1 verdicts. A reserved turn anywhere in the
- *  conversation is a reserved conversation. */
+/** Most severe of two Layer 1 verdicts. A reserved USER turn anywhere in
+ *  the conversation is a reserved conversation; a reserved read of the
+ *  worker's own assistant turn floors at UNCERTAIN (cloud or refused, never
+ *  local) — see the Layer 1 block. */
 const LAYER1_SEVERITY: Record<Layer1Verdict, number> = {
     OBVIOUS_NOT_RESERVED: 0, UNCERTAIN_LENGTH: 1, ERROR: 2, UNCERTAIN: 3, OBVIOUS_RESERVED: 4,
 };

@@ -41,8 +41,9 @@ it:
   raise the verdict — read alone, short benign snippets came back UNCERTAIN or
   falsely reserved. The deterministic rules run per turn (role-aware for the
   operational ones), the keyword floor and reserved-category attribution over the
-  whole conversation. A reserved phrase anywhere — including in the model's own
-  earlier answer — refuses the call exactly as it would in a single prompt.
+  whole conversation. A reserved phrase in any user turn refuses the call exactly as it
+  would in a single prompt; in the model's own earlier answer it sends the call
+  to the cloud when the plan allows it and refuses it otherwise, never local.
 - **Counted.** Every turn, plus per-message template framing, is charged to the
   tier's context window, so the 4,096-token tiers are skipped rather than
   truncated.
