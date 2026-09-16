@@ -115,16 +115,17 @@ describe("B. gaps that must close", () => {
         expect(r.gate_outcome?.status).toBe("refused");
     });
 
-    it("B8 the classifier is run per turn, not once over a concatenation", async () => {
+    it("B8 every part of a long history reaches the classifier in bounded windows (per turn alone, then in context)", async () => {
         const seen: string[] = [];
         const d = deps({ callLayer1: vi.fn(async (text: string) => { seen.push(text); return "OBVIOUS_NOT_RESERVED"; }) });
         // Distinct turns: identical text is classified once (verdicts are
         // cached by content hash), which would hide the per-turn count here.
         const long = (i: number) => `${i}:` + "z".repeat(5_000);
         await runInfer(withHistory({ messages: [{ role: "user", content: long(1) }, { role: "assistant", content: long(2) }, { role: "user", content: long(3) }, { role: "assistant", content: long(4) }] }), d);
-        // 4 history turns (each in ≥1 window) + the current prompt ≥ 5 bounded classifications
-        expect(seen.length, "classifier was not called once per turn").toBeGreaterThanOrEqual(5);
-        expect(Math.max(...seen.map(s => s.length)), "a concatenation was classified").toBeLessThanOrEqual(5_100);
+        // every turn's text is classified in some window, and no window is oversize
+        for (const i of [1, 2, 3, 4]) expect(seen.some(t => t.includes(`${i}:zzz`)), `turn ${i} never reached the classifier`).toBe(true);
+        expect(seen.length).toBeGreaterThanOrEqual(5);
+        expect(Math.max(...seen.map(s => s.length)), "an oversize text was classified").toBeLessThanOrEqual(3_601);
     });
 
     it("B9 the context gate counts history: a 24k-char history skips the 4,096-token 9b", async () => {

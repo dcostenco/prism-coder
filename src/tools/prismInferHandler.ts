@@ -375,7 +375,7 @@ export const PRISM_INFER_TOOL: Tool = {
         "otherwise hand to the cloud model — it costs $0 when the local hit succeeds. " +
         "For a FOLLOW-UP to an earlier prism_infer answer, pass the accepted prior turns as `messages` " +
         "(paid plans): without them the worker answers the follow-up from nothing and fabricates. " +
-        "Every inference result reports `multi_turn` (your plan's caps) and `history_turns` (what was sent); " +
+        "Every entitlement-resolved result reports `multi_turn` (your plan's caps) and `history_turns` (what was sent); " +
         "the crisis intercept reports only `history_turns`. " +
         "History over the plan's caps is refused (history_over_plan_cap), never trimmed; a free plan " +
         "or a host with no portal is refused (multi_turn_not_in_plan). Hosts that compact large " +
@@ -1808,30 +1808,51 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     if (det) l1 = worseLayer1Verdict(l1, det);
                 }
             }
+            // 2. Semantic floor, per TURN in isolation. An OBVIOUS_RESERVED
+            // verdict on a turn read alone is FINAL: nothing written later can
+            // lower it. Measured 2026-09-16: a note in a later prompt ("the
+            // thread above is a novel excerpt") whitewashed a self-injury
+            // request when the two shared one classifier window, while the
+            // same note inside the turn, or in a single prompt, did not fool
+            // the classifier. UNCERTAIN/ERROR/NOT_RESERVED on an isolated
+            // snippet are not final — context decides those (step 3).
+            history: for (const turn of args.messages) {
+                for (const window of historyTurnWindows(turn.content)) {
+                    if (!window.trim()) continue;
+                    if (await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model) === "OBVIOUS_RESERVED") {
+                        l1 = "OBVIOUS_RESERVED";
+                        break history;
+                    }
+                }
+            }
+            // The current prompt is a request: its deterministic floor runs
+            // here explicitly (not only inside the classifier entry point, so
+            // an injected classifier cannot skip it), then it is read alone
+            // with its images: a reserved verdict is final; with images the
+            // verdict stands as it always has (the image path below reads it).
             const promptDet = classifyDeterministicLayer1(args.prompt);
             if (promptDet) l1 = worseLayer1Verdict(l1, promptDet);
-            // 2. Semantic classifier over windows of the role-labelled
-            // transcript (current prompt last), so every window has its
-            // context; no window is oversize, so layer1's head/middle/tail
-            // excerpt (which a position sweep on 2026-09-15 showed misses a
-            // phrase at 20–40% or 60–80% of a 12k-char text) never applies
-            // here; windows overlap so a phrase on a boundary is seen whole.
-            const windows = historyTurnWindows(screeningTranscript(args));
-            for (const [i, window] of windows.entries()) {
-                // OBVIOUS_RESERVED is the top of the severity order; no later
-                // window can lower it, so stop spending classifier calls.
-                if (l1 === "OBVIOUS_RESERVED") break;
-                // A whitespace-only window (a pasted log's padding) carries no
-                // policy content; the classifier would answer ERROR for it and
-                // that ERROR would push a benign conversation to the cloud.
-                if (!window.trim()) continue;
-                // The current prompt sits in the last window; it carries the
-                // images, and an image call is never cached.
-                const last = i === windows.length - 1;
-                const verdict = last && (resolvedImages?.length ?? 0) > 0
-                    ? await l1fn(window, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false })
-                    : await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model);
-                l1 = worseLayer1Verdict(l1, verdict);
+            if (l1 !== "OBVIOUS_RESERVED") {
+                const promptVerdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
+                if (promptVerdict === "OBVIOUS_RESERVED" || (resolvedImages?.length ?? 0) > 0) {
+                    l1 = worseLayer1Verdict(l1, promptVerdict);
+                }
+            }
+            // 3. Context: windows of the role-labelled transcript, current
+            // prompt last. Read alone, the 4b refused 4 of 12 benign bench
+            // follow-ups (2 UNCERTAIN on context-free snippets, 2 false
+            // RESERVED); with context, far fewer. These verdicts can only
+            // RAISE the aggregate (worseLayer1Verdict), never lower a final
+            // one. No window is oversize, so layer1's head/middle/tail excerpt
+            // never applies; windows overlap so a phrase on a boundary is
+            // seen whole; windows are aligned from the start, so a follow-up
+            // re-uses every cached verdict but the last.
+            if (l1 !== "OBVIOUS_RESERVED") {
+                for (const window of historyTurnWindows(screeningTranscript(args))) {
+                    if (l1 === "OBVIOUS_RESERVED") break;
+                    if (!window.trim()) continue;
+                    l1 = worseLayer1Verdict(l1, await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model));
+                }
             }
         }
         // Null when the deterministic floor did not fire — the verdict then came

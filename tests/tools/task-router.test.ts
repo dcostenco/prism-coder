@@ -392,6 +392,7 @@ describe("needs_history — follow-up cues", () => {
     "Continue?",
     "now continue",
     "Now, continue.",
+    "Now,continue",
   ])("flags a follow-up: %s", (desc) => {
     expect(looksLikeFollowUp(desc)).toBe(true);
   });

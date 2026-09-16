@@ -96,7 +96,7 @@ const CLINICAL_RESERVED_RULES: readonly IntentRule[] = [
         has(/\b(?:draft|write|document|procedure|protocol|use|implement|instruct\w*)\b/i),
     ),
     all(
-        has(/\b(?:self[- ]?(?:harm|injur\w*)|bites?\s+(?:him|her|them)self|scratches?\s+(?:him|her|them)self|bangs?\s+(?:his|her|their)\s+head|harm\s+(?:himself|herself|themselves))\b/i),
+        has(/\b(?:self[- ]?(?:harm|injur\w*)|bites?\s+(?:him|her|them)self|bites?\s+(?:his|her|their)\s+own\b|scratches?\s+(?:him|her|them)self|scratches?\s+(?:his|her|their)\s+own\b|bangs?\s+(?:his|her|their)\s+head|harm\s+(?:himself|herself|themselves))\b/i),
         has(/\b(?:bleed\w*|blood|concrete|head\s+impact|medical\s+attention|risk(?:\s+of\s+injury)?|causes?\s+injury|actual\s+injury|assess\w*|screen\w*|want\w*)\b/i),
     ),
     (prompt) => (
