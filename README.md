@@ -1275,7 +1275,7 @@ prism_infer({
 
 // Follow-ups carry the conversation (paid plans). The host curates the turns;
 // Prism bounds them to your plan's caps (user+assistant text only), safety-
-// screens every turn (each alone, then each in context; a short routine
+// screens every turn (each alone, then the requests in context; a short routine
 // request skips its own model read), counts them against
 // the tier's context, and never stores them. A free plan or a host with no
 // portal is refused: multi_turn_not_in_plan.

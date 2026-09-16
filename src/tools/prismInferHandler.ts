@@ -158,29 +158,42 @@ export function screeningTranscript(args: PrismInferArgs): string {
         .join("\n");
 }
 
-/** One context window per turn (and one for the current prompt): the last
- *  HISTORY_TURN_WINDOW_CHARS chars of the role-labelled transcript ENDING at
- *  that turn. A context read can only RAISE the verdict: intent spread across
- *  turns that each read clean alone (measured 2026-09-16: the two halves of a
- *  restraint request in separate user turns, clean apart, reserved together)
- *  is caught by the window ending at the later half — when both parts fall
- *  inside one window, i.e. the last HISTORY_TURN_WINDOW_CHARS chars of the
- *  transcript up to the END of the later part's turn; windows exist only at
- *  turn ends, so a later part at the start of a long turn, or parts further
- *  apart than that, are never in one read (the limit). No context read ever
- *  lowers or replaces an isolated verdict, so no window containing OTHER
- *  turns adjudicates a turn (review rounds 12–22: every "defer UNCERTAIN to
- *  context" variant was measured bypassable by a classifier-directed note in
- *  whichever window decided; round 23 restored these windows as raise-only
- *  reads after dropping them left a >3,600-char prefix unscreened for
- *  cross-turn intent). Anchored on the turn's end, so a later prompt is
- *  never in an earlier turn's window, and an eviction at the plan cap
- *  changes only the windows the evicted turn was in — one or two for long
- *  turns, every one while the whole transcript still fits in one window
- *  (a cost, not a safety property). */
+/** One context window per USER turn (and one for the current prompt): the
+ *  last HISTORY_TURN_WINDOW_CHARS chars of the role-labelled transcript of
+ *  requests, ending at that turn.
+ *
+ *  A context read can only RAISE the verdict. It exists for intent spread
+ *  across turns that each read clean alone (measured 2026-09-16: the two
+ *  halves of a restraint request in separate user turns, clean apart,
+ *  reserved together) — caught when both parts fall inside one window, i.e.
+ *  the last HISTORY_TURN_WINDOW_CHARS chars up to the END of the later
+ *  part's turn. Windows exist only at turn ends, so a later part at the
+ *  start of a long turn, or parts further apart than that, are never in one
+ *  read (the window's size and placement are the limit).
+ *
+ *  ASSISTANT turns are excluded from the joint read, and this is the whole
+ *  point of the shape. Every turn of BOTH roles is still read alone and
+ *  every verdict from that read is kept, so a reserved answer from the
+ *  worker is still caught. What changes is that the worker's own prose no
+ *  longer bulks up a joint read: concatenating benign turns pushed the
+ *  classifier over its threshold on vocabulary it already leans on (auth,
+ *  token, deploy), and it refused ordinary engineering conversations whose
+ *  every part was clean. Measured 2026-09-16 in production on the first
+ *  organic multi-turn call, and reproduced on demand in tests/live. Intent
+ *  belongs to the requester, so requests are what the joint read compares;
+ *  a note planted in an assistant turn can no longer reach a context read
+ *  at all, which is strictly safer on that axis. The trust assumption is
+ *  the host's role labels, which the deterministic operational rules
+ *  already make.
+ *
+ *  Anchored on the turn's end, so a later prompt is never in an earlier
+ *  turn's window, and an eviction at the plan cap changes only the windows
+ *  the evicted turn was in — one or two for long turns, every one while the
+ *  whole transcript still fits in one window (a cost, not a safety
+ *  property). */
 export function contextWindows(args: PrismInferArgs): string[] {
-    const labelled = [...(args.messages ?? []), { role: "user" as const, content: args.prompt }]
-        .map(t => `${t.role === "user" ? "User" : "Assistant"}: ${t.content}`);
+    const requests = [...(args.messages ?? []).filter(t => t.role === "user"), { role: "user" as const, content: args.prompt }];
+    const labelled = requests.map(t => `User: ${t.content}`);
     const out: string[] = [];
     let transcript = "";
     for (const line of labelled) {
