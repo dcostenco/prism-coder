@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 20.21.1 — 2026-09-16
 
 ### Search asked for a Brave key from subscribers who had already paid
 
