@@ -134,7 +134,7 @@ export interface InferHistoryTurn { role: "user" | "assistant"; content: string 
 
 /** Tokens a history adds to the prompt body: content plus ~8 tokens of
  *  chat-template framing per message (role markers and separators). */
-function historyTokenEstimate(history?: InferHistoryTurn[]): number {
+export function historyTokenEstimate(history?: InferHistoryTurn[]): number {
     if (!history?.length) return 0;
     return history.reduce((n, t) => n + estimateTokens(t.content) + 8, 0);
 }

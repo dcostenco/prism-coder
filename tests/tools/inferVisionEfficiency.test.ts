@@ -57,6 +57,12 @@ function makeDeps(seen: Seen[], overrides: Partial<InferDeps> = {}): InferDeps {
         callCloud: async () => ({ ok: false as const, reason: "no_cloud" }),
         ollamaUrl: "http://localhost:11434",
         callLayer1: async () => "OBVIOUS_NOT_RESERVED",
+        // Hermetic: these tests assert the TABLE's 4,096-token window for the
+        // 9b/27b. Without an injected probe the gate reads num_ctx from the
+        // LIVE daemon at ollamaUrl, and on a host that adopted
+        // scripts/prism-coder-9b.Modelfile (32768) they fail while passing on
+        // CI, which has no Ollama. Found 2026-09-15 the day the pin landed.
+        probeNumCtx: async () => null,
         ...overrides,
     };
 }

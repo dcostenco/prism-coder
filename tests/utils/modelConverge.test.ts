@@ -123,3 +123,56 @@ describe("convergeModels", () => {
         expect(logs.some(l => l.includes("would pull"))).toBe(true);
     });
 });
+
+// ── Local pins survive convergence (found 2026-09-15, before it bit) ──────
+//
+// scripts/prism-coder-9b.Modelfile rebuilds prism-coder:9b FROM the same weights
+// with `PARAMETER num_ctx 32768`. That changes the manifest digest and nothing
+// else. The digest rule above would have called the alias stale and cp'd the
+// unpinned upstream over it on the next converge — silently undoing the pin.
+
+describe("convergeModels — local num_ctx pins", () => {
+    const facts = (table: Record<string, { weightsBlob: string; pinnedNumCtx: number | null }>) =>
+        vi.fn(async (name: string) => table[name] ?? null);
+
+    it("a pinned alias on the SAME weights is left alone, not re-aliased", async () => {
+        const state = [T("dcostenco/prism-coder:9b", "e8b71"), T("prism-coder:9b", "d48df")];
+        const { deps, copies, logs } = harness([state, state]);
+        const out = await convergeModels({ ...deps, tagFacts: facts({
+            "prism-coder:9b": { weightsBlob: "sha256-1c72", pinnedNumCtx: 32768 },
+            "dcostenco/prism-coder:9b": { weightsBlob: "sha256-1c72", pinnedNumCtx: null },
+        }) });
+        expect(copies, "the pinned alias was overwritten").toEqual([]);
+        expect(out.find(o => o.tier === "9b")).toEqual({ tier: "9b", action: "up_to_date", detail: "locally_pinned" });
+        expect(logs.some(l => l.includes("local pin"))).toBe(true);
+    });
+
+    it("a pinned alias on OLD weights is rebuilt, and the lost pin is announced with the re-adopt command", async () => {
+        const state = [T("dcostenco/prism-coder:9b", "new99"), T("prism-coder:9b", "d48df")];
+        const { deps, copies, logs } = harness([state, state]);
+        const out = await convergeModels({ ...deps, tagFacts: facts({
+            "prism-coder:9b": { weightsBlob: "sha256-OLD", pinnedNumCtx: 32768 },
+            "dcostenco/prism-coder:9b": { weightsBlob: "sha256-NEW", pinnedNumCtx: null },
+        }) });
+        expect(copies).toContainEqual(["dcostenco/prism-coder:9b", "prism-coder:9b"]);
+        expect(out.find(o => o.tier === "9b")?.detail).toBe("pin_dropped_readopt");
+        expect(logs.some(l => l.includes("ollama create prism-coder:9b -f scripts/prism-coder-9b.Modelfile"))).toBe(true);
+    });
+
+    it("without tagFacts the digest rule still applies (unchanged behaviour for older hosts)", async () => {
+        const state = [T("dcostenco/prism-coder:9b", "e8b71"), T("prism-coder:9b", "d48df")];
+        const { deps, copies } = harness([state, state]);
+        await convergeModels(deps);
+        expect(copies).toContainEqual(["dcostenco/prism-coder:9b", "prism-coder:9b"]);
+    });
+
+    it("an unpinned alias with a different digest and different weights is still repaired", async () => {
+        const state = [T("dcostenco/prism-coder:2b", "new222"), T("prism-coder:2b", "old111")];
+        const { deps, copies } = harness([state, state]);
+        await convergeModels({ ...deps, tagFacts: facts({
+            "prism-coder:2b": { weightsBlob: "sha256-OLD", pinnedNumCtx: null },
+            "dcostenco/prism-coder:2b": { weightsBlob: "sha256-NEW", pinnedNumCtx: null },
+        }) });
+        expect(copies).toContainEqual(["dcostenco/prism-coder:2b", "prism-coder:2b"]);
+    });
+});

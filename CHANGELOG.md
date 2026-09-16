@@ -48,6 +48,34 @@ the model, the validator ignored it, the safety screen saw only the current
 turn (the reserved history was served by the 9b), the context gate did not
 count it, escalation dropped it.
 
+Twenty-one tests in `tests/tools/prismInferMultiTurn.test.ts` (nine proven to
+fail against the previous handler, one compatibility baseline, two guards, nine
+regression cases for the caps, retries, verdict severity and escalation
+payload), plus a live suite in `tests/live/multiTurn.live.test.ts` that runs
+only when a local Ollama serves the tiers and pins what was verified by hand:
+every tier reads role history through the real local call, a no-history
+control fails, and the 9b recalls the first turn across a history past its
+old window.
+
+### The 9b context pin survives `prism update-models`
+
+`scripts/prism-coder-9b.Modelfile` rebuilds `prism-coder:9b` FROM the same
+weights with `PARAMETER num_ctx 32768` — the manifest digest changes and
+nothing else. Convergence judged an alias stale by digest, so the next
+`prism update-models` would have `ollama cp`'d the unpinned upstream over the
+pinned tag and silently undone the pin. Found before it happened.
+
+Stale now means OLD WEIGHTS. Convergence reads each tag's `FROM` blob and
+`num_ctx` from `/api/show`; a pin on the same weights is left alone
+(`up_to_date`, `locally_pinned`), and a pin on superseded weights is rebuilt
+with the lost pin announced together with the exact re-adopt command
+(`pin_dropped_readopt`). Hosts whose Ollama cannot answer `/api/show` keep the
+digest rule. Four regression tests, the first proven to fail before the fix.
+
+Two context-gate tests that asserted the table's 4,096-token window read
+`num_ctx` from the live daemon instead of injecting a probe, so they passed on
+CI and failed on a host with the pin adopted. They now inject the probe.
+
 ### The MCP registry listing can actually publish
 
 `registry-publish.yml` ran on any push to main touching `server.json`, which

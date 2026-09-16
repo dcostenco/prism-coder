@@ -87,6 +87,18 @@ export async function runOllamaConverge(opts: { dryRun?: boolean } = {}): Promis
             const data = (await res.json()) as { models?: Array<{ name: string; digest: string }> };
             return (data.models ?? []).map((m) => ({ name: m.name, digest: m.digest }));
         },
+        tagFacts: async (name) => {
+            const res = await fetch(`${OLLAMA_URL}/api/show`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ model: name }), signal: AbortSignal.timeout(5_000),
+            });
+            if (!res.ok) return null;
+            const data = (await res.json()) as { modelfile?: string; parameters?: string };
+            const from = /^FROM\s+(\S+)/m.exec(data.modelfile ?? "")?.[1];
+            if (!from) return null;
+            const pin = /^\s*num_ctx\s+(\d+)\s*$/m.exec(data.parameters ?? "");
+            return { weightsBlob: from, pinnedNumCtx: pin ? Number(pin[1]) : null };
+        },
         pull: (ref) => runOllama(["pull", ref], true),
         copy: (from, to) => runOllama(["cp", from, to], false),
         log: (line) => console.log(`  ${line}`),

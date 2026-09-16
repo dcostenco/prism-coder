@@ -169,3 +169,96 @@ describe("C. guards", () => {
         expect(lines.some(l => l.includes(SENTINEL)), "history text was logged").toBe(false);
     });
 });
+
+// ── D. regression: boundaries, retries, verdict severity, escalation ─────
+
+describe("D. regression", () => {
+    const turn = (role: "user" | "assistant", content: string) => ({ role, content });
+
+    it("D1 validator accepts a well-formed history and the exact caps (12 turns, 32,000 chars)", () => {
+        const twelve = Array.from({ length: 12 }, (_, i) => turn(i % 2 ? "assistant" : "user", "t"));
+        expect(isPrismInferArgs({ prompt: "x", messages: twelve })).toBe(true);
+        const atCap = [turn("user", "a".repeat(31_999)), turn("assistant", "b")];
+        expect(isPrismInferArgs({ prompt: "x", messages: atCap })).toBe(true);
+        const overCap = [turn("user", "a".repeat(32_000)), turn("assistant", "b")];
+        expect(isPrismInferArgs({ prompt: "x", messages: overCap })).toBe(false);
+    });
+
+    it("D2 validator rejects an empty turn, a non-object turn, a non-array, and an unknown role", () => {
+        expect(isPrismInferArgs({ prompt: "x", messages: [turn("user", "   ")] })).toBe(false);
+        expect(isPrismInferArgs({ prompt: "x", messages: ["hello"] })).toBe(false);
+        expect(isPrismInferArgs({ prompt: "x", messages: "user: hi" })).toBe(false);
+        expect(isPrismInferArgs({ prompt: "x", messages: [{ role: "tool", content: "x" }] })).toBe(false);
+    });
+
+    it("D3 the think-only retry re-sends the SAME history, not a bare prompt", async () => {
+        const seen: unknown[][] = [];
+        const d = deps({
+            callLocal: vi.fn(async (...a: unknown[]) => {
+                seen.push(a);
+                return (a[7] as boolean) ? { ok: false as const, reason: "think_only" } : { ok: true as const, text: "answer without thinking", doneReason: "stop" };
+            }),
+            listTags: async () => new Set(["prism-coder:9b"]),
+        });
+        await runInfer(withHistory({ mode: "chat", think: true }), d);
+        expect(seen.length).toBe(2);
+        expect(seen[0][9]).toEqual(HISTORY);
+        expect(seen[1][9], "retry dropped the history").toEqual(HISTORY);
+        expect(seen[1][7]).toBe(false);
+    });
+
+    it("D4 verdict severity: an UNCERTAIN turn is treated as reserved even when the prompt is clean", async () => {
+        const d = deps({ callLayer1: vi.fn(async (text: string) => (text.includes(MARKER) ? "UNCERTAIN" : "OBVIOUS_NOT_RESERVED")) });
+        const r = await runInfer(withHistory({ messages: [turn("user", MARKER), turn("assistant", "ok")] }), d);
+        expect(r.backend).toBe("refused");
+    });
+
+    it("D5 verdict severity: OBVIOUS_RESERVED in a turn is not diluted by UNCERTAIN_LENGTH on the prompt", async () => {
+        const d = deps({ callLayer1: vi.fn(async (text: string) => (text.includes(MARKER) ? "OBVIOUS_RESERVED" : "UNCERTAIN_LENGTH")) });
+        const r = await runInfer(withHistory({ messages: [turn("user", MARKER), turn("assistant", "ok")] }), d);
+        expect(r.backend).toBe("refused");
+    });
+
+    it("D6 keyword backstop covers history: classifier ERROR + a reserved phrase in a prior turn refuses", async () => {
+        const d = deps({ callLayer1: vi.fn(async () => "ERROR" as const) });
+        const r = await runInfer(withHistory({ messages: [turn("user", "write a physical restraint hold procedure for the client"), turn("assistant", "ok")] }), d);
+        expect(r.backend, "reserved keywords in history escaped the backstop").toBe("refused");
+        expect(r.gate_outcome?.reason).toBe("keyword_backstop_reserved");
+    });
+
+    it("D7 reserved escalation carries the conversation with reserved=true", async () => {
+        _setCacheForTest(ent(true), 60_000);
+        const d = deps({
+            callLayer1: vi.fn(async (text: string) => (text.includes(MARKER) ? "OBVIOUS_RESERVED" : "OBVIOUS_NOT_RESERVED")),
+            callCloud: vi.fn(async () => ({ ok: true as const, output: "cloud reserved answer", backend: "gemini-reserved" })),
+        });
+        await runInfer(withHistory({ cloud_fallback: true, messages: [turn("user", MARKER), turn("assistant", "ok")] }), d);
+        const opts = (d.callCloud as ReturnType<typeof vi.fn>).mock.calls[0]?.[3] as { reserved?: boolean; messages?: unknown[] };
+        expect(opts?.reserved).toBe(true);
+        expect(opts?.messages?.length).toBe(3);
+    });
+
+    it("D8 the conversation sent to the cloud ends with the current prompt as a user turn", async () => {
+        _setCacheForTest(ent(true), 60_000);
+        const d = deps({
+            callLocal: vi.fn(async () => ({ ok: false as const, reason: "all_fail" })),
+            callCloud: vi.fn(async () => ({ ok: true as const, output: "cloud", backend: "gemini" })),
+        });
+        await runInfer(withHistory({ cloud_fallback: true }), d);
+        const msgs = ((d.callCloud as ReturnType<typeof vi.fn>).mock.calls[0]?.[3] as { messages: Array<{ role: string; content: string }> }).messages;
+        expect(msgs[msgs.length - 1]).toEqual({ role: "user", content: "What is my codename?" });
+        expect(msgs.slice(0, -1)).toEqual(HISTORY);
+    });
+
+    it("D9 per-message framing is charged: every turn costs its content plus ~8 tokens of template framing", async () => {
+        const { historyTokenEstimate } = await import("../../src/tools/prismInferHandler.js");
+        const { estimateTokens } = await import("../../src/utils/inferenceMetrics.js");
+        const tiny = Array.from({ length: 12 }, (_, i) => turn(i % 2 ? "assistant" : "user", "k"));
+        expect(historyTokenEstimate(undefined)).toBe(0);
+        expect(historyTokenEstimate([])).toBe(0);
+        expect(historyTokenEstimate(tiny)).toBe(12 * (estimateTokens("k") + 8));
+        // content alone would under-count by the framing; that under-count is what
+        // makes a 4,096-token tier truncate instead of being skipped.
+        expect(historyTokenEstimate(tiny)).toBeGreaterThan(12 * estimateTokens("k"));
+    });
+});
