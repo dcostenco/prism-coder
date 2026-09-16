@@ -23,14 +23,13 @@ const CRISIS_INPUT_RE = [
     /cut(?:ting)?\s+(?:my)?self/i,
     /(?:hang|hanging)\s+(?:my)?self/i,
     // "a jumping off point for the refactor" is engineering, not a disclosure
-    // (measured false positive, review round 3, 2026-09-16). The idiom is
-    // exempt in both spellings ("jumping off point", "a jump off point"), as
-    // whole words, so "jumping off pointlessly" and "jumping off a bridge"
-    // still match. Trade-off, decided 2026-09-16: "jump off point of the
-    // roof" is exempt too — that phrasing is far rarer than the idiom in a
-    // refactor question, and the 988 card in place of an answer is the cost
-    // being weighed. The portal keeps a copy of this list — mirror edits.
-    /\bjump(?:ing)?\s+off\b(?!\s+points?\b)/i,
+    // (measured false positive, review round 3, 2026-09-16). Exempt ONLY the
+    // idiom as a noun phrase: a determiner + "jump(ing) off point(s)" ("a
+    // jumping off point for the refactor", "good jumping off points"). "I
+    // plan to jump off point of the roof" has no determiner and matches;
+    // "jumping off pointlessly" and "jumping off a bridge" match. The
+    // portal keeps a copy of this list — mirror edits.
+    /(?:(?<!\b(?:a|an|the|this|that|good|great|solid|useful|our|your|my|as)\s)\bjump(?:ing)?\s+off\b|\bjump(?:ing)?\s+off\b(?!\s+points?\b))/i,
     /how\s+(?:many|much|to).*(?:pills|overdose|die)/i,
     // Spanish — block hyperbole nouns only (NOT hunger/thirst/cold — may be literal for neglected child)
     /quiero\s+morir(?!\s+de\s+(?:risa|la\s+risa|vergüenza|ganas|envidia|aburrimiento)\b)/i,

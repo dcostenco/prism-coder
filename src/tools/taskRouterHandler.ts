@@ -376,7 +376,7 @@ const FOLLOW_UP_CUES: readonly RegExp[] = [
   // The bare verb, optionally "from/where/with …", and nothing else:
   // "Continue integration tests for the parser" and "Go on-call rotation
   // doc" are standalone tasks (review round 3).
-  /^\s*((please|ok,?|now)\s+(continue|carry on|keep going|go on)\b|(continue|carry on|keep going|go on)(\s+(from|where|with)\b.*)?\s*[.!?]?\s*$)/i,
+  /^\s*(please\s+|ok,?\s+|now\s+)?(continue|carry on|keep going|go on)(\s+(from|where|with)\b.*)?\s*[.!?]?\s*$/i,
   /\b(redo|repeat) (it|that)\b|\bdo (it|that) again\b/i,
 ];
 

@@ -46,7 +46,7 @@ import {
     passesCodingQualityGate,
 } from "../utils/codingQualityPolicy.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
-import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, isNonOperationalArtifact, keywordBackstop, reservedCategory, type Layer1Verdict } from "../utils/layer1.js";
+import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, keywordBackstop, reservedCategory, type Layer1Verdict } from "../utils/layer1.js";
 import { recordInference, recordThinkOnlyRetry, formatInferenceMetrics, estimateTokens } from "../utils/inferenceMetrics.js";
 import { appendInferMetric } from "../storage/inferMetricsLedger.js";
 import { getStorage } from "../storage/index.js";
@@ -142,7 +142,8 @@ export function historyTokenEstimate(history?: InferHistoryTurn[]): number {
 
 /** History and current prompt as ONE text for the deterministic screens
  *  (reserved-category attribution, keyword backstop). The semantic classifier
- *  is run per turn instead — see the Layer 1 block. */
+ *  reads windows of the role-labelled transcript instead — see the Layer 1
+ *  block and screeningTranscript. */
 function screenedText(args: PrismInferArgs): string {
     const history = args.messages ?? [];
     return history.length ? [...history.map(t => t.content), args.prompt].join("\n") : args.prompt;
@@ -218,8 +219,8 @@ export function historyTurnWindows(content: string): string[] {
  *  turn text is retained. A follow-up re-sends the same accepted turns, so
  *  without this an n-turn conversation re-screens every prior turn on every
  *  call (quadratic classifier work; review 2026-09-16). ERROR verdicts are
- *  transient and never cached; the current prompt, which may carry images,
- *  never goes through here. */
+ *  transient and never cached; a window classified WITH images never goes
+ *  through here (the key has no image bytes in it). */
 const LAYER1_HISTORY_CACHE_MAX = 1_000;
 /** Entries expire so a classifier alias updated in place (same name, new
  *  weights) cannot keep serving a clearance the old weights gave. */
@@ -1794,16 +1795,20 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 // re-sent as an assistant turn. A USER turn is a request and
                 // gets them; an ASSISTANT turn is the worker's prior output
                 // and does not. Clinical rules run on every turn.
+                // Roles come from the host's `messages`, not from the text:
+                // the host is the trusted orchestrator and the alternative —
+                // request rules over the worker's own answers — refused half
+                // of this repo's files. The semantic classifier still reads
+                // every window whatever the label says.
                 const isUser = turn.role === "user";
-                // The artifact exemption ("add auth_bypass as a test fixture
-                // label…") is decided over the WHOLE turn: a window that lost
-                // that context must not be more reserved than its turn.
-                const artifactExempt = isUser && isNonOperationalArtifact(turn.content);
                 // Co-occurrence rules are proximity rules: 7,200-char windows
                 // advancing by 3,400, so any two terms up to 3,800 chars apart
-                // share a window wherever they sit (review rounds 2-5).
+                // share a window wherever they sit (review rounds 2-5). The
+                // artifact exemption ("add auth_bypass as a test fixture
+                // label…") is decided per slice too: an exemption thousands
+                // of chars away from a trigger is not the same clause.
                 for (const slice of windowsOf(turn.content, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
-                    const det = classifyDeterministicLayer1(slice, { operational: isUser, artifactExempt });
+                    const det = classifyDeterministicLayer1(slice, { operational: isUser });
                     if (det) l1 = worseLayer1Verdict(l1, det);
                 }
             }
@@ -1811,10 +1816,10 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             if (promptDet) l1 = worseLayer1Verdict(l1, promptDet);
             // 2. Semantic classifier over windows of the role-labelled
             // transcript (current prompt last), so every window has its
-            // context. The oversize excerpt in layer1.ts keeps ~3.8k chars of
-            // head, middle and tail, and a position sweep (2026-09-15) showed
-            // a phrase at 20–40% or 60–80% of a 12k-char text is missed by it;
-            // windows overlap so a phrase on a boundary is seen whole.
+            // context; no window is oversize, so layer1's head/middle/tail
+            // excerpt (which a position sweep on 2026-09-15 showed misses a
+            // phrase at 20–40% or 60–80% of a 12k-char text) never applies
+            // here; windows overlap so a phrase on a boundary is seen whole.
             const windows = historyTurnWindows(screeningTranscript(args));
             for (const [i, window] of windows.entries()) {
                 // OBVIOUS_RESERVED is the top of the severity order; no later

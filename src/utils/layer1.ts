@@ -282,7 +282,8 @@ export interface DeterministicLayer1Options {
      *  worker's own output, and ordinary code matches them by description
      *  (half of this repo's files, measured 2026-09-16). Clinical rules always run. */
     operational?: boolean;
-    /** Whole-turn artifact exemption computed by the caller (see above). */
+    /** An artifact exemption the caller decided over a wider text than this
+     *  one. Not used by prism_infer's history screen (decided per slice). */
     artifactExempt?: boolean;
 }
 
