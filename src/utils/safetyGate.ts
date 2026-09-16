@@ -22,7 +22,9 @@ const CRISIS_INPUT_RE = [
     /want\s+to\s+(?:commit\s+)?suicide/i,
     /cut(?:ting)?\s+(?:my)?self/i,
     /(?:hang|hanging)\s+(?:my)?self/i,
-    /jump(?:ing)?\s+off/i,
+    // "a jumping off point for the refactor" is engineering, not a disclosure
+    // (measured false positive, review round 3, 2026-09-16).
+    /jump(?:ing)?\s+off(?!\s+point)/i,
     /how\s+(?:many|much|to).*(?:pills|overdose|die)/i,
     // Spanish — block hyperbole nouns only (NOT hunger/thirst/cold — may be literal for neglected child)
     /quiero\s+morir(?!\s+de\s+(?:risa|la\s+risa|vergüenza|ganas|envidia|aburrimiento)\b)/i,

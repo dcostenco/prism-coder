@@ -61,7 +61,7 @@ count it, escalation dropped it.
 
 A feature the host is instructed not to use is invisible. Four surfaces now
 carry it: the `prism_infer` description says follow-ups need `messages` and
-that a stateless follow-up fabricates; every result reports `multi_turn`
+that a stateless follow-up fabricates; every inference result reports `multi_turn`
 (the plan's caps) and `history_turns` (a count, never content), so the host
 learns its budget from the first call instead of from a refusal; the startup
 display prints one line — on with the caps, or off on this plan — whenever the
@@ -113,6 +113,13 @@ Every bullet below carries a test that failed on the code before it.
 - Second review round: the deterministic crisis/medical intercept now reads every user history turn, not only the current prompt (user turns only as of the fourth round) (the portal already screened the flattened conversation; the client was weaker than the server it forwards to); Layer-1 screening of history stops at the first OBVIOUS_RESERVED verdict and caches window verdicts by content hash (no turn text retained), so a follow-up no longer re-screens every prior turn; a portal outage is reported as `entitlements_source=fallback_free`, not as "not in the free plan", to a paying customer; an over-ceiling or malformed `messages` is refused with the ceiling named; `session_task_route` no longer flags "Next.js 15 migration plan" or "Also fix the typo in README" as follow-ups (a leading connective needs an anaphor), and the delegation-disabled route carries `needs_history` like every other; the startup line honours the entitlement cache TTL; a converge run says when `/api/show` facts are unavailable and the digest rule applies. Unchanged by design and now documented: a reserved history turn with an image is served local-only with cloud pinned off, per the 2026-08-18 clinical-image ruling.
 - Third review round: the caller-controlled Layer-1 skip (`mode: route` + `max_tokens <= 16`, the classifier's old signature) is gone — the classifier never re-enters `prism_infer`, so it only ever served as a bypass; every call is screened. History-window verdicts expire after 15 minutes so a classifier alias rebuilt in place cannot keep a stale clearance; windows never cut a surrogate pair; the crisis intercept checks each turn separately so adjacent turns cannot synthesise a phrase; the code-repair retry is sized like the first call (history, images, effective system prompt, live window); `prism update-models` leaves an alias alone, and says so, when `/api/show` cannot tell a local pin from stale weights; a bare "continue" / "keep going" is a follow-up cue; the live suite no longer probes Ollama unless opted in. Documented and unchanged: the `system` argument is not screened (a clinical system prompt would false-positive the crisis intercept); last-known-good entitlements persist through a portal outage (the fail-closed safety controls depend on it); the half-window truncation signature keeps its ±8-token band.
 - Fourth review round (measured by the second reviewer): a whitespace-only window inside a long history turn no longer returns an ERROR verdict that pushed a benign conversation to the cloud; the deterministic Layer-1 rules run over each WHOLE turn as well as its windows, so a co-occurrence split across two windows still fires; the crisis intercept screens user turns only (the worker's own prior answer is not a first-person disclosure); the absolute turn ceiling is 49 so that 49 prior turns plus the current one meet the portal's 50-message cap exactly; the single-prompt cloud path fails fast above the portal's 32 KB body cap (`prompt_over_cloud_cap`) instead of a doomed 413 round trip; "redo that" / "do it again" are follow-up cues. Release note: the half-window truncation signature (±8 tokens of num_ctx/2) can, about once in two thousand long calls, abandon a conversation that genuinely fits; with a single installed tier that is a hard failure, not a downgrade.
+- Fifth and sixth rounds: `prism update-models` exits non-zero when any installed tier failed to converge; the verdict cache keeps monotonic time; the deterministic co-occurrence floor over history runs in 7,200-char proximity windows rather than over a whole turn, after a measured false positive refused a 20 KB pasted source file ("diagnose" and "determine" 14k chars apart) and, on a cloud plan, shipped it off-device; "a jumping off point for the refactor" no longer trips the crisis intercept; the bare "continue" cue matches only the bare verb, so "Continue integration tests for the parser" and "Go on-call rotation doc" are standalone; three regression tests that stayed green with their fix reverted now fail.
+
+### Fixed
+
+- Handoff history snapshots now retain the effective role and active branch,
+  and save responses distinguish a durable primary handoff from a failed
+  optional time-travel snapshot.
 
 ### The MCP registry listing can actually publish
 
@@ -1319,13 +1326,6 @@ search result. Upgrade if you use Web Scholar at all.
   queries (TPNs, function names) that embeddings blur. Results state how they
   were found (`hybrid retrieval`, per-hit `sem#/lex#`, `exact-term match`).
   Local SQLite installs keep pure vector search.
-
-## [Unreleased]
-
-### Fixed
-- Handoff history snapshots now retain the effective role and active branch,
-  and save responses distinguish a durable primary handoff from a failed
-  optional time-travel snapshot.
 
 ## [20.2.9] - 2026-07-26 — Reliable Releases and Sessions
 

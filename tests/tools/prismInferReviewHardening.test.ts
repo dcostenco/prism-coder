@@ -13,6 +13,8 @@ import {
     callSynaluxInference,
     portalFlattenedTranscript,
     historyTurnWindows,
+    windowsOf,
+    DETERMINISTIC_FLOOR_WINDOW_CHARS,
     HISTORY_TURN_WINDOW_CHARS,
     HISTORY_TURN_WINDOW_OVERLAP,
     CLOUD_HISTORY_MAX_MESSAGES,
@@ -234,9 +236,10 @@ describe("R8 refusal wording and structural refusals", () => {
 
 describe("R9 round three", () => {
     it("windows never cut a surrogate pair and still cover every code point", () => {
-        // One BMP char in front makes every window boundary land on an ODD
-        // code-unit index, i.e. in the middle of a pair (round 3 review:
-        // without it the pre-fix slicer passed this test too).
+        // One BMP char in front shifts surrogate parity: every raw window
+        // boundary (3,400 / 3,600 …) then falls in the middle of a pair, so
+        // the pre-fix slicer cuts one (round 3 review: without the prefix it
+        // passed this test too).
         const emoji = "a" + "\u{1F600}".repeat(3_000); // 6,001 code units, 3,001 code points
         const w = historyTurnWindows(emoji);
         const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
@@ -245,8 +248,8 @@ describe("R9 round three", () => {
         expect(seen).toBeGreaterThanOrEqual(3_000);
     });
     it("a cached history verdict expires: after the TTL the turn is re-classified", async () => {
-        // A Date.now spy, not fake timers: the handler's own timeouts must
-        // keep running.
+        // A performance.now spy, not fake timers: the handler's own timeouts
+        // must keep running.
         // The cache runs on the monotonic clock (performance.now), so a
         // wall-clock rollback cannot extend a clearance; the entitlements
         // cache (Date.now) is untouched by this spy.
@@ -329,11 +332,52 @@ describe("R10 round four (measured findings from the second reviewer)", () => {
     it("the code-repair retry is not sent when history would not fit the tier: skipped, never truncated", async () => {
         const PROMPT = "Implement class TrieNode with a valid Python constructor. Return only the implementation source code.";
         const BAD = "class TrieNode:\n    def __init__():\n        self.children = {}";
-        const history = [{ role: "user" as const, content: "context: " + "the parser handles nested brackets and escapes. ".repeat(325) }, { role: "assistant" as const, content: "noted" }];
-        const callLocal = vi.fn(async () => ({ ok: true as const, text: BAD, doneReason: "stop" }));
-        // 9b only, table window 4,096: the first call fits (history ≈ 3.6k tokens), the larger repair prompt does not.
+        // A large failing draft makes the repair prompt ~2,000 tokens bigger
+        // than the first call, so the fixture sits hundreds of tokens inside
+        // the skip region on either side (round 3 review: the earlier fixture
+        // was 70 tokens past the boundary).
+        // Varied module-level assignments, not repeated lines: 350 identical
+        // comment lines trip the generic loop_detected gate first, and the
+        // coding-repair path is never entered.
+        const BIG_BAD = BAD + "\n\n" + Array.from({ length: 350 }, (_, i) => `x_${i} = ${i}`).join("\n");
+        const history = [{ role: "user" as const, content: "context: " + "the parser handles nested brackets and escapes. ".repeat(190) }, { role: "assistant" as const, content: "noted" }];
+        const callLocal = vi.fn(async () => ({ ok: true as const, text: BIG_BAD, doneReason: "stop" }));
+        // 9b only, table window 4,096: the first call fits (history ≈ 2.3k tokens), the repair (+ the 2.1k-token draft) does not.
         const r = await runInfer(args({ prompt: PROMPT, mode: "code", model_ceiling: "9b", messages: history }), deps({ listTags: async () => new Set(["prism-coder:9b"]), callLocal }));
         expect(r.attempts.some(a => a.reason === "code_repair_skipped:ctx_insufficient"), JSON.stringify(r.attempts)).toBe(true);
         expect(callLocal.mock.calls.length).toBe(1);
+    });
+});
+
+describe("R11 round six (measured findings from the third verification)", () => {
+    it("a 20k-char pasted source file in history is NOT refused: co-occurrence words 14k chars apart are not one intent", async () => {
+        const line = "export function parseRow(input: string): Row { return { value: input.trim() }; }\n";
+        const file = "// We diagnose parse failures by their first bad token.\n" + line.repeat(175) + "// determine the column width from the widest cell.\n" + line.repeat(60);
+        expect(file.length).toBeGreaterThan(19_000);
+        expect(file.indexOf("determine") - file.indexOf("diagnose")).toBeGreaterThan(DETERMINISTIC_FLOOR_WINDOW_CHARS);
+        const d = deps();
+        const r = await runInfer(args({ prompt: "carry on", messages: [{ role: "user", content: file }] }), d);
+        expect(r.backend, JSON.stringify(r.attempts)).not.toBe("refused");
+        expect(r.used_cloud).toBe(false);
+    });
+    it("but the same two words inside one proximity window still fire", async () => {
+        const near = "We diagnose the client and then determine the ICD code to assign. " + "filler text about the schedule. ".repeat(20);
+        const d = deps();
+        const r = await runInfer(args({ messages: [{ role: "user", content: near }] }), d);
+        expect(r.backend).toBe("refused");
+    });
+    it("windowsOf(…, 7200, 200) covers every character with the stated overlap", () => {
+        const content = Array.from({ length: 20_000 }, (_, i) => String.fromCharCode(97 + (i % 26))).join("");
+        const w = windowsOf(content, DETERMINISTIC_FLOOR_WINDOW_CHARS, HISTORY_TURN_WINDOW_OVERLAP);
+        expect(w.length).toBe(3);
+        for (const x of w) expect(x.length).toBeLessThanOrEqual(DETERMINISTIC_FLOOR_WINDOW_CHARS);
+        const rebuilt = w[0] + w.slice(1).map(x => x.slice(HISTORY_TURN_WINDOW_OVERLAP)).join("");
+        expect(rebuilt).toBe(content);
+    });
+    it("'a jumping off point for the rewrite' in a user turn is not a crisis disclosure; 'jump off the bridge' still is", async () => {
+        const ok = await runInfer(args({ prompt: "carry on", messages: [{ role: "user", content: "Use the old parser as a jumping off point for the rewrite." }] }), deps());
+        expect(ok.backend).not.toBe("safety_gate");
+        const crisis = await runInfer(args({ prompt: "carry on", messages: [{ role: "user", content: "I am going to jump off the bridge tonight." }] }), deps());
+        expect(crisis.backend).toBe("safety_gate");
     });
 });

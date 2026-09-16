@@ -32,7 +32,8 @@ export interface MultiTurnEntitlement {
  *  caps here are what a paid plan gets when the portal omits them. */
 export const DEFAULT_MULTI_TURN: MultiTurnEntitlement = { enabled: false, max_turns: 12, max_chars: 32_000 };
 /** Structural ceiling no plan can exceed: the portal's own inference route
- *  takes at most 50 messages, and 128k chars ≈ 32k tokens — the largest
+ *  takes at most 50 messages INCLUDING the current turn appended on
+ *  escalation, hence 49 prior turns; 128k chars ≈ 32k tokens — the largest
  *  local window. Above this the payload is malformed, not merely over plan. */
 export const ABSOLUTE_MULTI_TURN: MultiTurnEntitlement = { enabled: true, max_turns: 49, max_chars: 128_000 };
 

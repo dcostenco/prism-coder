@@ -406,6 +406,11 @@ describe("needs_history — follow-up cues", () => {
     "Again and again the test flakes — find the root cause",
     "Now write a unit test for parseDate()",
     "Restore the last version of the file from git",
+    // round 3 verification: the bare-verb cues must not match a verb that
+    // merely starts a standalone task
+    "Go on-call rotation doc for the SRE team",
+    "Continue integration tests for the parser module",
+    "Repeat this SQL for the EU project",
   ])("does not flag a standalone task: %s", (desc) => {
     expect(looksLikeFollowUp(desc)).toBe(false);
   });

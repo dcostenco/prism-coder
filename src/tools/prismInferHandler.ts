@@ -168,23 +168,32 @@ function worseLayer1Verdict(a: Layer1Verdict, b: Layer1Verdict): Layer1Verdict {
  *  region of every turn is classified. Exported for tests. */
 export const HISTORY_TURN_WINDOW_CHARS = 3_600;
 export const HISTORY_TURN_WINDOW_OVERLAP = 200;
-export function historyTurnWindows(content: string): string[] {
-    if (content.length <= HISTORY_TURN_WINDOW_CHARS) return [content];
+/** The deterministic co-occurrence rules (restraint+document, diagnos+determine…)
+ *  are proximity rules: over a whole 20k-char pasted file, "diagnose" and
+ *  "determine" 14k chars apart fired one (measured 2026-09-16, +20% of real
+ *  source files refused). They run over 2× classifier windows instead — wide
+ *  enough that a split across two 3,600-char windows is still seen whole. */
+export const DETERMINISTIC_FLOOR_WINDOW_CHARS = 7_200;
+export function windowsOf(content: string, size: number, overlap: number): string[] {
+    if (content.length <= size) return [content];
     const isHigh = (i: number) => { const c = content.charCodeAt(i); return c >= 0xd800 && c <= 0xdbff; };
     const isLow = (i: number) => { const c = content.charCodeAt(i); return c >= 0xdc00 && c <= 0xdfff; };
     const out: string[] = [];
-    const step = HISTORY_TURN_WINDOW_CHARS - HISTORY_TURN_WINDOW_OVERLAP;
+    const step = size - overlap;
     for (let i = 0; i < content.length; i += step) {
         // Never cut a surrogate pair: a window that starts on a low or ends
         // on a high surrogate is malformed text for the classifier.
         let start = i;
         if (start > 0 && isLow(start)) start += 1;
-        let end = Math.min(content.length, start + HISTORY_TURN_WINDOW_CHARS);
+        let end = Math.min(content.length, start + size);
         if (end < content.length && isHigh(end - 1)) end += 1;
         out.push(content.slice(start, end));
         if (end >= content.length) break;
     }
     return out;
+}
+export function historyTurnWindows(content: string): string[] {
+    return windowsOf(content, HISTORY_TURN_WINDOW_CHARS, HISTORY_TURN_WINDOW_OVERLAP);
 }
 
 /** Verdict cache for history windows, keyed by a hash of model + text — no
@@ -1547,8 +1556,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // Per-tier adjustment happens in the tier loop — a tier that reasons before
     // answering needs room for the reasoning as well as the answer.
     const localMaxTokens = Math.min(args.max_tokens ?? 1024, 8192);
-    // Retained for the log line and the layer-1 recursion guard, both of which
-    // describe the request rather than a specific backend.
+    // Retained for the log line, which describes the request rather than a
+    // specific backend.
     const maxTokens = cloudMaxTokens;
 
     // Cloud fallback only for paid plans
@@ -1754,10 +1763,13 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         let l1: Layer1Verdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
         history: for (const turn of args.messages ?? []) {
             // The deterministic rules (co-occurrence like restraint+document)
-            // see the WHOLE turn at zero network cost: split across two
-            // windows, neither half fires (review round 2, 2026-09-16).
-            const det = classifyDeterministicLayer1(turn.content);
-            if (det) l1 = worseLayer1Verdict(l1, det);
+            // run over 2× windows at zero network cost: split across two
+            // classifier windows, neither half fires (review round 2), while a
+            // whole-turn pass fired on words 14k chars apart (review round 3).
+            for (const slice of windowsOf(turn.content, DETERMINISTIC_FLOOR_WINDOW_CHARS, HISTORY_TURN_WINDOW_OVERLAP)) {
+                const det = classifyDeterministicLayer1(slice);
+                if (det) l1 = worseLayer1Verdict(l1, det);
+            }
             for (const window of historyTurnWindows(turn.content)) {
                 // OBVIOUS_RESERVED is the top of the severity order; no later
                 // window can lower it, so stop spending classifier calls.
