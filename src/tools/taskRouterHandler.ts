@@ -374,6 +374,7 @@ const FOLLOW_UP_CUES: readonly RegExp[] = [
   // A bare "continue" / "please continue" / "keep going" is a follow-up by
   // definition (review 2026-09-16).
   /^\s*(please\s+|ok,?\s+|now\s+)?(continue|carry on|keep going|go on)\b/i,
+  /\b(redo|repeat) (it|that|this)\b|\bdo (it|that) again\b/i,
 ];
 
 /** A leading connective alone is not a cue: "Next.js 15 migration plan",

@@ -34,7 +34,7 @@ export const DEFAULT_MULTI_TURN: MultiTurnEntitlement = { enabled: false, max_tu
 /** Structural ceiling no plan can exceed: the portal's own inference route
  *  takes at most 50 messages, and 128k chars ≈ 32k tokens — the largest
  *  local window. Above this the payload is malformed, not merely over plan. */
-export const ABSOLUTE_MULTI_TURN: MultiTurnEntitlement = { enabled: true, max_turns: 50, max_chars: 128_000 };
+export const ABSOLUTE_MULTI_TURN: MultiTurnEntitlement = { enabled: true, max_turns: 49, max_chars: 128_000 };
 
 /** The policy prism_infer enforces for these entitlements: portal values
  *  when present, clamped into the absolute ceiling; the default otherwise. */

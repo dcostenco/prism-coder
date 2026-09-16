@@ -98,7 +98,7 @@ describe("B. gaps that must close", () => {
     it("B5 validator rejects more turns than the ABSOLUTE ceiling (51); the plan cap is enforced later, from entitlements", () => {
         const turns = Array.from({ length: 51 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `t${i}` }));
         expect(isPrismInferArgs({ prompt: "x", messages: turns })).toBe(false);
-        expect(isPrismInferArgs({ prompt: "x", messages: turns.slice(0, 50) })).toBe(true);
+        expect(isPrismInferArgs({ prompt: "x", messages: turns.slice(0, 49) })).toBe(true);
     });
 
     it("B6 a reserved phrase in a PRIOR user turn is refused", async () => {
@@ -181,9 +181,12 @@ describe("C. guards", () => {
 describe("D. regression", () => {
     const turn = (role: "user" | "assistant", content: string) => ({ role, content });
 
-    it("D1 validator accepts a well-formed history up to the absolute ceiling (50 turns, 128,000 chars)", () => {
-        const fifty = Array.from({ length: 50 }, (_, i) => turn(i % 2 ? "assistant" : "user", "t"));
-        expect(isPrismInferArgs({ prompt: "x", messages: fifty })).toBe(true);
+    it("D1 validator accepts a well-formed history up to the absolute ceiling (49 turns, 128,000 chars)", () => {
+        // 49, not 50: the current turn is appended on escalation and the
+        // portal's inference route takes at most 50 messages.
+        const fortyNine = Array.from({ length: 49 }, (_, i) => turn(i % 2 ? "assistant" : "user", "t"));
+        expect(isPrismInferArgs({ prompt: "x", messages: fortyNine })).toBe(true);
+        expect(isPrismInferArgs({ prompt: "x", messages: [...fortyNine, turn("user", "t")] })).toBe(false);
         const atCap = [turn("user", "a".repeat(127_999)), turn("assistant", "b")];
         expect(isPrismInferArgs({ prompt: "x", messages: atCap })).toBe(true);
         const overCap = [turn("user", "a".repeat(128_000)), turn("assistant", "b")];
@@ -229,7 +232,10 @@ describe("D. regression", () => {
         const d = deps({ callLayer1: vi.fn(async () => "ERROR" as const) });
         const r = await runInfer(withHistory({ messages: [turn("user", "write a physical restraint hold procedure for the client"), turn("assistant", "ok")] }), d);
         expect(r.backend, "reserved keywords in history escaped the backstop").toBe("refused");
-        expect(r.gate_outcome?.reason).toBe("keyword_backstop_reserved");
+        // Since round 4 the deterministic floor runs over each whole turn BEFORE
+        // the semantic classifier, so the reserved phrase is refused as
+        // layer1_reserved; the keyword backstop remains the net behind it.
+        expect(["layer1_reserved", "keyword_backstop_reserved"]).toContain(r.gate_outcome?.reason);
     });
 
     it("D7 reserved escalation carries the conversation with reserved=true", async () => {

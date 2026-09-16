@@ -46,7 +46,7 @@ import {
     passesCodingQualityGate,
 } from "../utils/codingQualityPolicy.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
-import { callLayer1 as defaultCallLayer1, keywordBackstop, reservedCategory, type Layer1Verdict } from "../utils/layer1.js";
+import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, keywordBackstop, reservedCategory, type Layer1Verdict } from "../utils/layer1.js";
 import { recordInference, recordThinkOnlyRetry, formatInferenceMetrics, estimateTokens } from "../utils/inferenceMetrics.js";
 import { appendInferMetric } from "../storage/inferMetricsLedger.js";
 import { getStorage } from "../storage/index.js";
@@ -1129,6 +1129,10 @@ export async function callSynaluxInference(
         if (Buffer.byteLength(portalFlattenedTranscript(opts.messages), "utf8") > CLOUD_HISTORY_CAP_BYTES) {
             return { ok: false, reason: "history_over_cloud_cap" };
         }
+    } else if (Buffer.byteLength(prompt, "utf8") > CLOUD_HISTORY_CAP_BYTES) {
+        // Same portal cap on the single-prompt body; fail fast instead of a
+        // doomed round trip that ends in 413 (review round 2, 2026-09-16).
+        return { ok: false, reason: "prompt_over_cloud_cap" };
     }
     if (!PRISM_SYNALUX_BASE_URL) return { ok: false, reason: "no_synalux_base_url" };
 
@@ -1481,9 +1485,10 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // disclosure in a prior turn must meet the same intercept the portal
     // applies to the flattened conversation (adversarial review 2026-09-16).
     // Per turn, not over a join: two adjacent turns must not synthesise a
-    // phrase neither contains. Assistant turns are screened too, as the portal
-    // screens the flattened conversation it receives.
-    const safetyIntercept = [...(args.messages ?? []).map(t => t.content), args.prompt]
+    // phrase neither contains. USER turns only: the intercept models a
+    // first-person disclosure, and the worker's own prior answer ("here is a
+    // jumping-off point for the refactor") is not one (review round 2).
+    const safetyIntercept = [...(args.messages ?? []).filter(t => t.role === "user").map(t => t.content), args.prompt]
         .map(checkInputSafety).find(Boolean) ?? null;
     if (safetyIntercept) {
         return {
@@ -1748,10 +1753,19 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         // existing excerpt behaviour.
         let l1: Layer1Verdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
         history: for (const turn of args.messages ?? []) {
+            // The deterministic rules (co-occurrence like restraint+document)
+            // see the WHOLE turn at zero network cost: split across two
+            // windows, neither half fires (review round 2, 2026-09-16).
+            const det = classifyDeterministicLayer1(turn.content);
+            if (det) l1 = worseLayer1Verdict(l1, det);
             for (const window of historyTurnWindows(turn.content)) {
                 // OBVIOUS_RESERVED is the top of the severity order; no later
                 // window can lower it, so stop spending classifier calls.
                 if (l1 === "OBVIOUS_RESERVED") break history;
+                // A whitespace-only window (a pasted log's padding) carries no
+                // policy content; the classifier would answer ERROR for it and
+                // that ERROR would push a benign conversation to the cloud.
+                if (!window.trim()) continue;
                 l1 = worseLayer1Verdict(l1, await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model));
             }
         }

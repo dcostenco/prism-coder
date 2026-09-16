@@ -223,11 +223,11 @@ describe("R8 refusal wording and structural refusals", () => {
     });
     it("over the absolute ceiling is refused with the ceiling named, via the MCP handler too", async () => {
         const fiftyOne = Array.from({ length: 51 }, () => ({ role: "user", content: "t" }));
-        expect(messagesProblem(fiftyOne)).toMatch(/51 turns; the absolute ceiling is 50/);
+        expect(messagesProblem(fiftyOne)).toMatch(/51 turns; the absolute ceiling is 49/);
         expect(messagesProblem([{ role: "user", content: "x", images: ["a"] }])).toMatch(/turn 0 may carry only role and content/);
         expect(messagesProblem([{ role: "user", content: "x".repeat(128_001) }])).toMatch(/absolute ceiling is 128000/);
         expect(messagesProblem([{ role: "user", content: "fine" }])).toBeNull();
-        await expect(prismInferHandler({ prompt: "x", messages: fiftyOne })).rejects.toThrow(/messages has 51 turns; the absolute ceiling is 50/);
+        await expect(prismInferHandler({ prompt: "x", messages: fiftyOne })).rejects.toThrow(/messages has 51 turns; the absolute ceiling is 49/);
     });
 });
 
@@ -259,10 +259,13 @@ describe("R9 round three", () => {
             expect(callLayer1.mock.calls.filter(c => String(c[0]).startsWith("turn about")).length).toBe(2);
         } finally { nowSpy.mockRestore(); }
     });
-    it("a crisis phrase in an ASSISTANT turn is intercepted (parity with the portal's flattened screen)", async () => {
+    it("a crisis phrase in an ASSISTANT turn is NOT the intercept's business (round 4: first-person disclosures are user turns)", async () => {
         const d = deps();
         const r = await runInfer(args({ prompt: "continue", messages: [{ role: "assistant", content: "I want to die, nothing helps" }] }), d);
-        expect(r.backend).toBe("safety_gate");
+        expect(r.backend).not.toBe("safety_gate");
+        // …while the same words in a USER turn are (R6).
+        const r2 = await runInfer(args({ prompt: "continue", messages: [{ role: "user", content: "I want to die, nothing helps" }] }), deps());
+        expect(r2.backend).toBe("safety_gate");
     });
     it("the repair call uses the first call's effective system prompt (kept with the images it now carries)", async () => {
         const PROMPT = "Implement class TrieNode with a valid Python constructor. Return only the implementation source code.";
@@ -275,5 +278,52 @@ describe("R9 round three", () => {
         expect(callLocal.mock.calls.length).toBeGreaterThanOrEqual(2);
         expect(String(callLocal.mock.calls[1][3])).toContain("house style: snake_case");
         expect(String(callLocal.mock.calls[1][3])).toContain(String(callLocal.mock.calls[0][3]));
+    });
+});
+
+describe("R10 round four (measured findings from the second reviewer)", () => {
+    it("a whitespace-only window inside a long turn is skipped, so a pasted log's padding cannot push the call to the cloud", async () => {
+        const turnText = "Here is the log:" + " ".repeat(7_500) + "end of log, nothing else.";
+        const callLayer1 = vi.fn(async (text: string) => (text.trim() ? "OBVIOUS_NOT_RESERVED" : "ERROR") as "OBVIOUS_NOT_RESERVED" | "ERROR");
+        const d = deps({ callLayer1 });
+        const r = await runInfer(args({ messages: [{ role: "user", content: turnText }] }), d);
+        expect(callLayer1.mock.calls.every(c => String(c[0]).trim().length > 0), "a blank window reached the classifier").toBe(true);
+        expect(r.attempts.some(a => a.reason === "layer1_error")).toBe(false);
+        expect(r.used_cloud).toBe(false);
+        expect(r.output).toContain("answer from");
+    });
+    it("a co-occurrence rule split across two windows still fires: the deterministic floor sees the whole turn", async () => {
+        const filler = "The schedule for the reading group was moved to Thursday. ";
+        const body = "physical restraint " + filler.repeat(75) + " please document the steps";
+        expect(body.length).toBeGreaterThan(HISTORY_TURN_WINDOW_CHARS);
+        // The semantic classifier is blind here on purpose: only the
+        // deterministic floor can produce the refusal.
+        const d = deps({ callLayer1: vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const) });
+        const r = await runInfer(args({ messages: [{ role: "user", content: body }] }), d);
+        expect(r.backend).toBe("refused");
+        expect(r.gate_outcome?.reason).toBe("layer1_reserved");
+    });
+    it("the worker's own prior answer is not a crisis disclosure: an assistant turn saying 'jumping off point' is not intercepted", async () => {
+        const d = deps();
+        const r = await runInfer(args({ prompt: "carry on with the refactor", messages: [{ role: "assistant", content: "Here is a jumping off point for the refactor." }] }), d);
+        expect(r.backend).not.toBe("safety_gate");
+    });
+    it("the single-prompt cloud path fails fast above the portal's 32 KB body cap", async () => {
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("must not be called"));
+        try {
+            const r = await callSynaluxInference("x".repeat(CLOUD_HISTORY_CAP_BYTES + 1), 64, 1_000);
+            expect((r as { ok: false; reason: string }).reason).toBe("prompt_over_cloud_cap");
+            expect(fetchSpy).not.toHaveBeenCalled();
+        } finally { fetchSpy.mockRestore(); }
+    });
+    it("the code-repair retry is not sent when history would not fit the tier: skipped, never truncated", async () => {
+        const PROMPT = "Implement class TrieNode with a valid Python constructor. Return only the implementation source code.";
+        const BAD = "class TrieNode:\n    def __init__():\n        self.children = {}";
+        const history = [{ role: "user" as const, content: "context: " + "the parser handles nested brackets and escapes. ".repeat(325) }, { role: "assistant" as const, content: "noted" }];
+        const callLocal = vi.fn(async () => ({ ok: true as const, text: BAD, doneReason: "stop" }));
+        // 9b only, table window 4,096: the first call fits (history ≈ 3.6k tokens), the larger repair prompt does not.
+        const r = await runInfer(args({ prompt: PROMPT, mode: "code", model_ceiling: "9b", messages: history }), deps({ listTags: async () => new Set(["prism-coder:9b"]), callLocal }));
+        expect(r.attempts.some(a => a.reason === "code_repair_skipped:ctx_insufficient"), JSON.stringify(r.attempts)).toBe(true);
+        expect(callLocal.mock.calls.length).toBe(1);
     });
 });
