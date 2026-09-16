@@ -282,9 +282,6 @@ export interface DeterministicLayer1Options {
      *  worker's own output, and ordinary code matches them by description
      *  (half of this repo's files, measured 2026-09-16). Clinical rules always run. */
     operational?: boolean;
-    /** An artifact exemption the caller decided over a wider text than this
-     *  one. Not used by prism_infer's history screen (decided per slice). */
-    artifactExempt?: boolean;
 }
 
 export function classifyDeterministicLayer1(userPrompt: string, opts?: DeterministicLayer1Options): Layer1Verdict | null {
@@ -307,7 +304,7 @@ export function classifyDeterministicLayer1(userPrompt: string, opts?: Determini
     if (opts?.operational === false) {
         return matchesAny(userPrompt, ROUTINE_BCBA_INTENT_RULES) ? "OBVIOUS_NOT_RESERVED" : null;
     }
-    if (opts?.artifactExempt || isNonOperationalArtifact(userPrompt)) {
+    if (isNonOperationalArtifact(userPrompt)) {
         return "OBVIOUS_NOT_RESERVED";
     }
     if (matchesAny(userPrompt, RESERVED_INTENT_RULES)) return "OBVIOUS_RESERVED";

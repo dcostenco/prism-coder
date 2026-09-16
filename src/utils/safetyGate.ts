@@ -30,7 +30,7 @@ const CRISIS_INPUT_RE = [
     // "jumping off pointlessly", "jumping off a bridge" and the hyphenated
     // "jump-off the roof" match; "a jumping-off point" is exempt. The portal
     // keeps a copy of this list — mirror edits.
-    /(?:(?<!\b(?:a|an|the|this|that|good|great|solid|useful|our|your|my|as)\s+)\bjump(?:ing)?[\s-]+off\b|\bjump(?:ing)?[\s-]+off\b(?![\s-]+points?\b))/i,
+    /(?:(?<!\b(?:a|an|the|this|that|good|great|solid|useful|our|your|my|as)\s{1,4})\bjump(?:ing)?[\s-]+off\b|\bjump(?:ing)?[\s-]+off\b(?![\s-]+points?\b))/i,
     /how\s+(?:many|much|to).*(?:pills|overdose|die)/i,
     // Spanish — block hyperbole nouns only (NOT hunger/thirst/cold — may be literal for neglected child)
     /quiero\s+morir(?!\s+de\s+(?:risa|la\s+risa|vergüenza|ganas|envidia|aburrimiento)\b)/i,

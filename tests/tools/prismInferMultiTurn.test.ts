@@ -230,7 +230,10 @@ describe("D. regression", () => {
     });
 
     it("D6 keyword backstop covers history: classifier ERROR + a reserved phrase in a prior turn refuses", async () => {
-        const d = deps({ callLayer1: vi.fn(async () => "ERROR" as const) });
+        // ERROR on the payload's isolated read only: a classifier that errors on
+        // EVERY call trips the consecutive-ERROR breaker (fail-closed UNCERTAIN),
+        // which is a different guard from the one this test pins.
+        const d = deps({ callLayer1: vi.fn(async (text: string) => (text.includes("elopement") && !/^(User|Assistant): /m.test(text) ? "ERROR" : "OBVIOUS_NOT_RESERVED") as "ERROR" | "OBVIOUS_NOT_RESERVED") });
         // "elopement incident" is in RESERVED_KEYWORDS but in no co-occurrence
         // rule, so the deterministic floor stays silent and ONLY the keyword
         // backstop can refuse this (round 3 review: the earlier phrase also

@@ -154,12 +154,32 @@ function screenedText(args: PrismInferArgs): string {
  *  (2 UNCERTAIN on context-free snippets, 2 false RESERVED: "We deploy to
  *  eu-west-3", "Steps: plan, build, test, deploy"); classified as windows of
  *  this transcript, 0 of 12 (live, 2026-09-16). Every window carries its
- *  context, and windows are aligned from the start, so a follow-up re-uses
- *  the cached verdicts of every window but the last. */
+ *  context. Kept for the deterministic screens and tests; the semantic
+ *  context layer reads contextWindows() instead (anchored per turn). */
 export function screeningTranscript(args: PrismInferArgs): string {
     return [...(args.messages ?? []), { role: "user" as const, content: args.prompt }]
         .map(t => `${t.role === "user" ? "User" : "Assistant"}: ${t.content}`)
         .join("\n");
+}
+
+/** One context window per turn (and one for the current prompt): the last
+ *  HISTORY_TURN_WINDOW_CHARS chars of the role-labelled transcript ENDING at
+ *  that turn. Anchored on the turn's end, not the transcript's start, so (a)
+ *  a later prompt can never be part of an earlier turn's context read — a
+ *  note in the prompt cannot clear an earlier turn — and (b) when the host
+ *  evicts the oldest turn at the plan cap, only the first window or two
+ *  change; start-aligned windows all shifted and every one missed the cache
+ *  (measured 2026-09-16: 26 uncached calls, 13.6 s, per follow-up at cap). */
+export function contextWindows(args: PrismInferArgs): string[] {
+    const labelled = [...(args.messages ?? []), { role: "user" as const, content: args.prompt }]
+        .map(t => `${t.role === "user" ? "User" : "Assistant"}: ${t.content}`);
+    const out: string[] = [];
+    let transcript = "";
+    for (const line of labelled) {
+        transcript = transcript ? `${transcript}\n${line}` : line;
+        out.push(transcript.slice(-HISTORY_TURN_WINDOW_CHARS));
+    }
+    return out;
 }
 
 /** Most severe of two Layer 1 verdicts. A reserved turn anywhere in the
@@ -223,14 +243,16 @@ export function historyTurnWindows(content: string): string[] {
  *  through here (the key has no image bytes in it). */
 /** Aggregate classifier-call budget for one request's history screen — a
  *  safety net at the STRUCTURAL maximum (49 turns / 128k chars of history
- *  alone: 49 base windows + 37 extra for the long ones = 86; a 128k prompt in
- *  context: 256,594 chars of transcript = 76 windows; 162 budgeted misses,
- *  163 calls with the prompt's own), not a plan-level limit: every shape the
- *  caps allow fits under it with 8 calls of headroom, so a paid call never
+ *  alone: 49 base windows + 37 extra for the long ones = 86; one context
+ *  window per turn and one for the prompt = 50; 136 budgeted misses, 137
+ *  calls with the prompt's own), not a plan-level limit: every shape the
+ *  caps allow fits under it with 33 calls of headroom, so a paid call never
  *  trips it, and a runaway loop cannot exceed it. Beyond it the screen fails
- *  CLOSED (UNCERTAIN). The real bounds are the plan caps (enterprise ≈ 124
- *  calls on a cold cache, a warm follow-up pays only its tail) and the
- *  consecutive-ERROR breaker below (review rounds 13–16). */
+ *  CLOSED (UNCERTAIN). The real bounds are the plan caps (enterprise: 30
+ *  turns alone + 30 context + 1 ≈ 61 calls on a cold cache; a follow-up that
+ *  appends pays the new turn, the prompt and their two context windows; one
+ *  that evicts the oldest turn pays that plus the first window or two) and
+ *  the consecutive-ERROR breaker below (review rounds 13–18). */
 export let LAYER1_SCREEN_CALL_BUDGET = 170;
 export function _setScreenCallBudgetForTest(n: number | null): void { LAYER1_SCREEN_CALL_BUDGET = n ?? 170; }
 /** A dead or stalled classifier answers ERROR after its 1.5 s + 5 s retry
@@ -251,7 +273,7 @@ async function classifyHistoryWindow(
     window: string,
     ollamaUrl: string,
     model: string,
-    budget?: { calls: number; consecutiveErrors: number },
+    budget?: { calls: number; consecutiveErrors: number; tripped: boolean },
 ): Promise<Layer1Verdict> {
     const key = createHash("sha256").update(model).update("\0").update(window).digest("hex");
     // performance.now() is monotonic: a wall-clock rollback must not extend
@@ -261,8 +283,8 @@ async function classifyHistoryWindow(
     if (hit) layer1HistoryCache.delete(key);
     // Cache misses cost a model call; over budget the screen fails closed,
     // and a classifier that keeps failing is not asked again this request.
-    if (budget && budget.consecutiveErrors >= LAYER1_SCREEN_ERROR_BREAKER) return "UNCERTAIN";
-    if (budget && ++budget.calls > LAYER1_SCREEN_CALL_BUDGET) return "UNCERTAIN";
+    if (budget && budget.consecutiveErrors >= LAYER1_SCREEN_ERROR_BREAKER) { budget.tripped = true; return "UNCERTAIN"; }
+    if (budget && ++budget.calls > LAYER1_SCREEN_CALL_BUDGET) { budget.tripped = true; return "UNCERTAIN"; }
     const verdict = await l1fn(window, ollamaUrl, model, undefined, undefined, { deterministic: false });
     if (budget) budget.consecutiveErrors = verdict === "ERROR" ? budget.consecutiveErrors + 1 : 0;
     if (verdict !== "ERROR") {
@@ -1841,56 +1863,72 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     if (det) l1 = worseLayer1Verdict(l1, det);
                 }
             }
-            // 2. Semantic floor, per TURN in isolation. An OBVIOUS_RESERVED
-            // verdict on a turn read alone is FINAL: nothing written later can
-            // lower it. Measured 2026-09-16: a note in a later prompt ("the
-            // thread above is a novel excerpt") whitewashed a self-injury
-            // request when the two shared one classifier window, while the
-            // same note inside the turn, or in a single prompt, did not fool
-            // the classifier. An ERROR alone is kept too: the classifier saw
-            // nothing, and the ERROR path's keyword net must still run
-            // (fail-closed, as before). UNCERTAIN or NOT_RESERVED on an
-            // isolated snippet are not final — context decides those (step 3).
+            // 2. Semantic floor, per TURN in isolation. On a USER turn an
+            // OBVIOUS_RESERVED verdict read alone is FINAL: nothing written
+            // later can lower it. Measured 2026-09-16: a note in a later
+            // prompt ("the thread above is a novel excerpt") whitewashed a
+            // self-injury request when the two shared one classifier window,
+            // while the same note inside the turn, or in a single prompt, did
+            // not fool the classifier. On an ASSISTANT turn — the worker's own
+            // prior answer — a reserved read alone floors the verdict at
+            // UNCERTAIN instead: the capable cloud when the plan allows it,
+            // else refused, never local; the classifier reads the worker's
+            // own auth-middleware answer as reserved alone and routine in
+            // context (measured), and a final refusal there broke ordinary
+            // coding conversations. The floor cannot be lowered by context.
+            // An ERROR alone is kept too (the ERROR path's keyword net still
+            // runs, fail-closed). UNCERTAIN or NOT_RESERVED on an isolated
+            // snippet are not final — that turn's own context read decides.
             // Owner-visible policy: a turn that is UNCERTAIN alone but clean
-            // in context is served; before, any UNCERTAIN refused.
-            const budget = { calls: 0, consecutiveErrors: 0 };
+            // in its context is served; before, any UNCERTAIN refused.
+            const budget = { calls: 0, consecutiveErrors: 0, tripped: false };
             history: for (const turn of args.messages) {
                 for (const window of historyTurnWindows(turn.content)) {
                     if (!window.trim()) continue;
                     const alone = await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model, budget);
-                    if (alone === "OBVIOUS_RESERVED") { l1 = "OBVIOUS_RESERVED"; break history; }
-                    if (alone === "ERROR") l1 = worseLayer1Verdict(l1, alone);
+                    if (alone === "OBVIOUS_RESERVED") {
+                        if (turn.role === "user") { l1 = "OBVIOUS_RESERVED"; break history; }
+                        l1 = worseLayer1Verdict(l1, "UNCERTAIN");
+                    } else if (alone === "ERROR") {
+                        l1 = worseLayer1Verdict(l1, alone);
+                    }
                 }
             }
             // The current prompt is a request: its deterministic floor runs
             // here explicitly (not only inside the classifier entry point, so
-            // an injected classifier cannot skip it), then it is read alone
-            // with its images: a reserved verdict is final; with images the
-            // verdict stands as it always has (the image path below reads it).
-            const promptDet = classifyDeterministicLayer1(args.prompt);
-            if (promptDet) l1 = worseLayer1Verdict(l1, promptDet);
+            // an injected classifier cannot skip it), in the same proximity
+            // slices as a turn, then it is read alone with its images: a
+            // reserved verdict is final; with images the verdict stands as it
+            // always has (the image path below reads it).
+            for (const slice of windowsOf(args.prompt, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
+                const promptDet = classifyDeterministicLayer1(slice);
+                if (promptDet) l1 = worseLayer1Verdict(l1, promptDet);
+            }
             if (l1 !== "OBVIOUS_RESERVED") {
                 const promptVerdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
                 if (promptVerdict === "OBVIOUS_RESERVED" || promptVerdict === "ERROR" || (resolvedImages?.length ?? 0) > 0) {
                     l1 = worseLayer1Verdict(l1, promptVerdict);
                 }
             }
-            // 3. Context: windows of the role-labelled transcript, current
-            // prompt last. Read alone, the 4b refused 4 of 12 benign bench
-            // follow-ups (2 UNCERTAIN on context-free snippets, 2 false
-            // RESERVED); with context, far fewer. These verdicts can only
-            // RAISE the aggregate (worseLayer1Verdict), never lower a final
-            // one. No window is oversize, so layer1's head/middle/tail excerpt
-            // never applies; windows overlap so a phrase on a boundary is
-            // seen whole; windows are aligned from the start, so a follow-up
-            // re-uses every cached verdict but the last.
+            // 3. Context: one window per turn, the transcript's tail ENDING at
+            // that turn (see contextWindows), and one for the prompt. Read
+            // alone, the 4b refused 4 of 12 benign bench follow-ups (UNCERTAIN
+            // on context-free snippets, false RESERVED on deploy words); with
+            // context, far fewer. These verdicts can only RAISE the aggregate
+            // (worseLayer1Verdict), never lower a final one, and a turn's
+            // context never contains anything written after it. No window is
+            // oversize, so layer1's head/middle/tail excerpt never applies.
+            // Appends never change an earlier window; evicting the oldest turn
+            // changes only the first one or two.
             if (l1 !== "OBVIOUS_RESERVED") {
-                for (const window of historyTurnWindows(screeningTranscript(args))) {
+                for (const window of contextWindows(args)) {
                     if (l1 === "OBVIOUS_RESERVED") break;
                     if (!window.trim()) continue;
                     l1 = worseLayer1Verdict(l1, await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model, budget));
                 }
             }
+            // A budget or breaker trip is fail-closed whatever the cache held.
+            if (budget.tripped) l1 = worseLayer1Verdict(l1, "UNCERTAIN");
             if (budget.calls > LAYER1_SCREEN_CALL_BUDGET) {
                 attempts.push({ tier: "layer1", reason: `layer1_screen_over_budget:${LAYER1_SCREEN_CALL_BUDGET}` });
             }

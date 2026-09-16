@@ -393,6 +393,10 @@ describe("needs_history — follow-up cues", () => {
     "now continue",
     "Now, continue.",
     "Now,continue",
+    "Now continue the migration",
+    "Please continue the migration",
+    "ok, continue the migration",
+    "Please continue integration tests for the parser module", // a prefix makes it continuation
   ])("flags a follow-up: %s", (desc) => {
     expect(looksLikeFollowUp(desc)).toBe(true);
   });
@@ -414,7 +418,6 @@ describe("needs_history — follow-up cues", () => {
     // merely starts a standalone task
     "Go on-call rotation doc for the SRE team",
     "Continue integration tests for the parser module",
-    "Please continue integration tests for the parser module",
     "Repeat this SQL for the EU project",
   ])("does not flag a standalone task: %s", (desc) => {
     expect(looksLikeFollowUp(desc)).toBe(false);
