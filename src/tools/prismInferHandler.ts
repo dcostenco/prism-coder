@@ -1856,9 +1856,14 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // verdict read alone is kept: OBVIOUS_RESERVED is final (nothing
             // written later can lower it — measured 2026-09-16, a classifier-
             // directed note placed later cleared a reserved earlier turn when
-            // the two shared one window), UNCERTAIN and ERROR are kept too
-            // (cloud when the plan allows it, else refused; the ERROR path's
-            // keyword net still runs). Deferring UNCERTAIN to "context" was
+            // the two shared one window); UNCERTAIN is kept (cloud when the
+            // plan allows it, else refused — never local for a text-only call;
+            // a call carrying an image keeps the image policy below, local
+            // only); ERROR is kept and takes the path a single-prompt ERROR
+            // always took (cloud when allowed, else the keyword net over the
+            // whole conversation decides; three in a row trip to UNCERTAIN —
+            // an availability policy the owner accepted for single turns, kept
+            // identical here). Deferring UNCERTAIN to "context" was
             // tried in four shapes and each was measured bypassable: a note in
             // whichever window decided flipped the classifier. A turn read
             // alone is the one read no later text can touch. The deterministic
