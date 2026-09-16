@@ -26,7 +26,7 @@ import { buildVaultDirectory } from "../utils/vaultExporter.js";
  */
 
 import { debugLog } from "../utils/logger.js";
-import { FREE_ENTITLEMENTS } from "../utils/entitlements.js";
+import { FREE_ENTITLEMENTS, peekEntitlements, multiTurnPolicy } from "../utils/entitlements.js";
 import { getStorage, activeStorageBackend } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
@@ -651,6 +651,7 @@ async function buildNativeSystemReadyBlock(
       `> - 🧠 **Context depth:** ${depth}\n` +
       `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · native materialization incomplete${conflictSuffix}` +
       conflictWarning +
+      localWorkerLine() +
       freeTierUpgradeLine(snapshot.tier));
   }
   if (snapshot.source === "tier-fallback") {
@@ -661,6 +662,7 @@ async function buildNativeSystemReadyBlock(
       `> - 🧠 **Context depth:** ${depth}\n` +
       `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · no committed manifest${conflictSuffix}` +
       conflictWarning +
+      localWorkerLine() +
       freeTierUpgradeLine(snapshot.tier));
   }
   return wrap(`> **Prism System Ready**\n>` + undeliveredWarning + `\n` +
@@ -673,7 +675,8 @@ async function buildNativeSystemReadyBlock(
     `> - 🧠 **Context depth:** ${depth}\n` +
     `> - 🔄 **Skill sync:** ${SKILL_SYNC_STATUS_LABELS[snapshot.syncStatus]} · committed manifest${conflictSuffix}` +
     conflictWarning +
-    freeTierUpgradeLine(snapshot.tier));
+    localWorkerLine() +
+      freeTierUpgradeLine(snapshot.tier));
 }
 
 /**
@@ -682,6 +685,22 @@ async function buildNativeSystemReadyBlock(
  * queryMemoryNaturalHandler); the startup path — the only guaranteed
  * impression — referenced it zero times.
  */
+/**
+ * One startup line so the host knows, before its first delegation, whether
+ * the local worker takes conversation history and how much. Reads the
+ * entitlements CACHE only — never a portal fetch on the startup path; when
+ * cold, the first prism_infer result carries the same policy.
+ */
+function localWorkerLine(): string {
+  const ent = peekEntitlements();
+  if (!ent) return "";
+  const p = multiTurnPolicy(ent);
+  return p.enabled
+    ? `\n> - 🧵 **Local worker multi-turn:** on — up to ${p.max_turns} turns / ` +
+      `${p.max_chars.toLocaleString("en-US")} chars per prism_infer call; pass accepted prior turns as \`messages\``
+    : `\n> - 🧵 **Local worker multi-turn:** off on the ${ent.plan} plan — a prism_infer follow-up is answered without context`;
+}
+
 function freeTierUpgradeLine(tier: string): string {
   if (tier !== "free") return "";
   return `\n> - 💎 **Free tier:** paid plans unlock the full skill library, ` +

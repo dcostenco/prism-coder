@@ -336,3 +336,58 @@ describe("E. multi-turn policy comes from entitlements (thin client)", () => {
         expect(d.callLocal).toHaveBeenCalled();
     });
 });
+
+// ── F. the host learns its budget from every result, never from a refusal alone ──
+
+describe("F. result metadata", () => {
+    it("F1 every result carries the plan's multi_turn policy and the history_turns count", async () => {
+        const d = deps();
+        const r = await runInfer(withHistory(), d);
+        expect(r.multi_turn).toEqual({ enabled: true, max_turns: 12, max_chars: 32_000 });
+        expect(r.history_turns).toBe(2);
+        const single = await runInfer({ prompt: "single", mode: "chat", escalation: "report" }, d);
+        expect(single.multi_turn).toEqual({ enabled: true, max_turns: 12, max_chars: 32_000 });
+        expect(single.history_turns).toBe(0);
+    });
+
+    it("F2 a refusal carries the policy too, so the host can size its next attempt", async () => {
+        const d = deps();
+        const r = await runInfer(withHistory({ messages: Array.from({ length: 13 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: "t" })) }), d);
+        expect(r.backend).toBe("refused");
+        expect(r.multi_turn?.max_turns).toBe(12);
+        expect(r.history_turns).toBe(13);
+    });
+
+    it("F3 metadata is counts only: no turn content appears anywhere in the result", async () => {
+        const d = deps();
+        const r = await runInfer(withHistory({ messages: [{ role: "user", content: "SENTINEL_meta_9c1d" }, { role: "assistant", content: "ok" }] }), d);
+        expect(JSON.stringify(r)).not.toContain("SENTINEL_meta_9c1d");
+    });
+});
+
+// ── G. regression: the surfaces the HOST learns from must keep saying it ──
+
+import { PRISM_INFER_TOOL } from "../../src/tools/prismInferHandler.js";
+import { LOCAL_FIRST_POLICY_TEXT } from "../../src/localFirstPolicy.js";
+
+describe("G. host-facing guidance", () => {
+    it("G1 the tool description itself tells the host follow-ups need messages and why", () => {
+        expect(PRISM_INFER_TOOL.description).toMatch(/FOLLOW-UP to an earlier prism_infer answer, pass the accepted prior turns as `messages`/);
+        expect(PRISM_INFER_TOOL.description).toMatch(/fabricates/);
+        expect(PRISM_INFER_TOOL.description).toMatch(/`multi_turn`.*`history_turns`/);
+    });
+
+    it("G2 the messages parameter is in the schema and says it is a paid-plan feature ruled by the plan", () => {
+        const props = (PRISM_INFER_TOOL.inputSchema as { properties: Record<string, { description?: string }> }).properties;
+        expect(props.messages).toBeDefined();
+        expect(props.messages.description).toMatch(/paid Synalux plan feature/);
+        expect(props.messages.description).toMatch(/multi_turn_not_in_plan/);
+        expect(props.messages.description).toMatch(/never trimmed/);
+    });
+
+    it("G3 the shared local-first policy every host receives names needs_history and messages", () => {
+        expect(LOCAL_FIRST_POLICY_TEXT).toMatch(/`needs_history`/);
+        expect(LOCAL_FIRST_POLICY_TEXT).toMatch(/pass the accepted prior turns as `messages`/);
+        expect(LOCAL_FIRST_POLICY_TEXT).toMatch(/never re-send a turn you rejected/);
+    });
+});

@@ -371,3 +371,45 @@ describe("computeRoute scope influence", () => {
     expect(result.complexity_score).toBeLessThanOrEqual(8);
   });
 });
+
+// ── Follow-up detection: the router cannot attach turns, but it can say they are needed ──
+
+import { looksLikeFollowUp } from "../../src/tools/taskRouterHandler.js";
+
+describe("needs_history — follow-up cues", () => {
+  it.each([
+    "now make it return the insertion point when the value is absent",
+    "also add a unit test for the same function",
+    "use the same approach as before for the config loader",
+    "your previous answer missed the null case; fix that",
+    "continue from where you stopped in the parser",
+    "as we discussed, rename the helper and re-export it",
+  ])("flags a follow-up: %s", (desc) => {
+    expect(looksLikeFollowUp(desc)).toBe(true);
+  });
+
+  it.each([
+    "create file for the new template stub",
+    "fix typo in the config file, simple change",
+    "fix it so the loader handles empty input",           // bare pronoun is not a cue
+    "write a Dockerfile for a Node.js app",
+    "what changed between these two versions",
+  ])("does not flag a standalone task: %s", (desc) => {
+    expect(looksLikeFollowUp(desc)).toBe(false);
+  });
+
+  it("a claw route for a follow-up carries needs_history and says so in the rationale", () => {
+    const r = computeRoute({
+      task_description: "now add the same null guard to the config loader, simple change",
+      files_involved: ["src/config.ts"],
+      estimated_scope: "minor_edit",
+    });
+    expect(r.needs_history).toBe(true);
+    expect(r.rationale).toMatch(/follow-up.*`messages`/);
+  });
+
+  it("a standalone task carries needs_history=false, including the early host return for a too-short description", () => {
+    expect(computeRoute({ task_description: "create file for the new template stub", files_involved: ["src/t.ts"], estimated_scope: "minor_edit" }).needs_history).toBe(false);
+    expect(computeRoute({ task_description: "hi", files_involved: [], estimated_scope: "minor_edit" }).needs_history).toBe(false);
+  });
+});

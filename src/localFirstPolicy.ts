@@ -10,6 +10,8 @@ export const LOCAL_FIRST_POLICY_LINES = [
   "For bounded, verifiable delegated work, use Prism's local worker before any host-native or background subagent.",
   "When session_task_route is available, call it first. If it returns target `claw`, call `prism_infer` with the",
   "recommended arguments, `cloud_fallback: false`, and the `project` and `conversation_id` from this session when known.",
+  "If the route says `needs_history`, or the task follows up an earlier `prism_infer` answer, pass the accepted prior",
+  "turns as `messages` (paid plans); never send a follow-up without them, and never re-send a turn you rejected.",
   "Prism loads that project's dashboard-configured quick, standard, or deep memory and selects a RAM-safe local model.",
   "Never create host-native or background subagents for routine work, never fan out, and never nest agents.",
   "If local inference is unavailable, refused, degraded, or the task requires host tools or reserved judgment, continue",

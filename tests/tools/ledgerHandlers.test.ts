@@ -1718,6 +1718,22 @@ describe("ledgerHandlers", () => {
         expect(text).toContain(`Provisioned skills:** ${manifestNames.length}`);
         expect(text).toContain(`Context depth:** ${depth}`);
         expect(text).toContain("automatic from Synalux · current · committed manifest");
+        // The local worker line is cache-only: cold cache → no line (never a
+        // fetch on the startup path); warm cache → the plan's policy, on or off.
+        expect(text).not.toContain("Local worker multi-turn");
+        {
+          const ent = await import("../../src/utils/entitlements.js");
+          try {
+            ent._setCacheForTest({ ...ent.FREE_ENTITLEMENTS, plan: "standard", multi_turn: { enabled: true, max_turns: 12, max_chars: 32_000 } }, 60_000);
+            const on = (await sessionBootstrapHandler({})).content[0].text as string;
+            expect(on).toContain("Local worker multi-turn:** on — up to 12 turns / 32,000 chars");
+            ent._setCacheForTest({ ...ent.FREE_ENTITLEMENTS, plan: "free", multi_turn: { enabled: false, max_turns: 0, max_chars: 0 } }, 60_000);
+            const off = (await sessionBootstrapHandler({})).content[0].text as string;
+            expect(off).toContain("Local worker multi-turn:** off on the free plan");
+          } finally {
+            ent._resetEntitlementsForTest();
+          }
+        }
         expect(text).toContain("Open TODOs");
         expect(text).toContain("Session Version");
         for (const coreSkill of nativeFloor) expect(text).toContain(coreSkill);

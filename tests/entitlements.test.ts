@@ -243,3 +243,17 @@ describe("tier enforcement matrix", () => {
         expect(clampCeiling("27b", "27b")).toBe("27b");
     });
 });
+
+describe("peekEntitlements — cache only, never a fetch", () => {
+    it("returns null when cold and the cached value when warm, without touching fetch", async () => {
+        const { peekEntitlements, _setCacheForTest, _resetEntitlementsForTest, FREE_ENTITLEMENTS } = await import("../src/utils/entitlements.js");
+        _resetEntitlementsForTest();
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        expect(peekEntitlements()).toBeNull();
+        _setCacheForTest({ ...FREE_ENTITLEMENTS, plan: "standard", multi_turn: { enabled: true, max_turns: 12, max_chars: 32_000 } }, 60_000);
+        expect(peekEntitlements()?.plan).toBe("standard");
+        expect(fetchSpy).not.toHaveBeenCalled();
+        fetchSpy.mockRestore();
+        _resetEntitlementsForTest();
+    });
+});

@@ -41,6 +41,11 @@ export interface TaskRouteResult {
   confidence: number;
   complexity_score: number;
   rationale: string;
+  /** The task reads as a FOLLOW-UP to earlier work ("now…", "the same…",
+   *  "your previous answer"). The router holds no turns, so it cannot attach
+   *  them; the host must pass the accepted prior turns as `messages` (paid
+   *  plans) or the local worker answers from nothing and fabricates. */
+  needs_history: boolean;
   recommended_tool: string | null;
   recommended_args?: {
     prompt: string;
@@ -351,6 +356,25 @@ const WEIGHTS = {
  * memory size, installed models, live RAM, entitlements, and explicit caller
  * overrides.
  */
+/**
+ * Follow-up cues. Deliberately narrow: leading connectives and explicit
+ * references to prior work. Bare pronouns ("fix it") are NOT cues — "fix
+ * the typo in it" is a normal standalone task and a false positive here
+ * would make the host attach history to everything.
+ */
+const FOLLOW_UP_CUES: readonly RegExp[] = [
+  /^\s*(now|also|then|next|again|and now|and then|after that|same as before|as before|like before)\b/i,
+  /\b(the|that) (same|previous|earlier|last) (one|version|function|file|answer|approach|code|result|output|draft)\b/i,
+  /\byour (last|previous|earlier) (answer|version|output|draft|reply)\b/i,
+  /\b(as|what) (we|you) (just |already )?(did|discussed|agreed|wrote|said|made|decided)\b/i,
+  /\b(from|like) (before|last time|earlier)\b/i,
+  /\b(continue|carry on|keep going|pick up) (from )?(where|what)\b/i,
+];
+
+export function looksLikeFollowUp(description: string): boolean {
+  return FOLLOW_UP_CUES.some((re) => re.test(description));
+}
+
 function buildRecommendedArgs(
   args: SessionTaskRouteArgs,
   complexityScore: number,
@@ -378,6 +402,7 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
     return {
       target: "host",
       confidence: 0.5,
+      needs_history: false,
       complexity_score: 5,
       rationale: "Insufficient information for confident routing. Defaulting to host model.",
       recommended_tool: null,
@@ -448,6 +473,9 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
     signals.push(`host boundary: ${delegability.reasons.join(", ")}`);
   }
 
+  const needs_history = looksLikeFollowUp(task_description);
+  if (needs_history) signals.push("follow-up to earlier work: pass the accepted prior turns as `messages`");
+
   const rationale = target === "claw"
     ? `Task is delegable to the local agent. Signals: ${signals.join("; ") || "neutral"}.`
     : `Task should remain with the host model. Signals: ${signals.join("; ") || "neutral"}.`;
@@ -457,6 +485,7 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
     confidence,
     complexity_score,
     rationale,
+    needs_history,
     recommended_tool: target === "claw" ? "prism_infer" : null,
     ...(target === "claw" ? {
       recommended_args: buildRecommendedArgs(args, complexity_score),

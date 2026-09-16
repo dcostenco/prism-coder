@@ -35,7 +35,7 @@ import { debugLog } from "../utils/logger.js";
 // Grounding verification is portal-side. Prism is a thin client.
 type EvidenceSnippet = { source: string; content: string };
 type GroundingOutcome = { action: string; finalText: string; claims: unknown[]; verifierChain: unknown[]; refusalClaim?: string };
-import { getEntitlements, clampCeiling, type PrismEntitlements, FREE_ENTITLEMENTS, multiTurnPolicy, ABSOLUTE_MULTI_TURN } from "../utils/entitlements.js";
+import { getEntitlements, clampCeiling, type PrismEntitlements, FREE_ENTITLEMENTS, multiTurnPolicy, ABSOLUTE_MULTI_TURN, type MultiTurnEntitlement } from "../utils/entitlements.js";
 import { ddLog } from "../utils/ddLogger.js";
 import { stripThink } from "../utils/thinkStrip.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
@@ -264,7 +264,10 @@ export const PRISM_INFER_TOOL: Tool = {
         "When `project` is provided, loads the dashboard-configured quick/standard/deep handoff and bounded history " +
         "as untrusted historical context for a memory-aware local worker. " +
         "Use this for code generation, summarisation, classification, or any synth task you would " +
-        "otherwise hand to the cloud model — it costs $0 when the local hit succeeds.",
+        "otherwise hand to the cloud model — it costs $0 when the local hit succeeds. " +
+        "For a FOLLOW-UP to an earlier prism_infer answer, pass the accepted prior turns as `messages` " +
+        "(paid plans): without them the worker answers the follow-up from nothing and fabricates. " +
+        "Every result reports `multi_turn` (your plan's caps) and `history_turns` (what was sent).",
     inputSchema: {
         type: "object",
         properties: {
@@ -1228,6 +1231,11 @@ export interface PrismInferResult {
     used_cloud: boolean;
     attempts: Array<{ tier: string; reason: string }>;
     plan?: string;
+    /** Your plan's multi-turn policy, on every result, so the host learns its
+     *  budget from the first call instead of from a refusal. */
+    multi_turn?: MultiTurnEntitlement;
+    /** How many prior turns this call carried (a count, never content). */
+    history_turns?: number;
     /** Actual token counts from Ollama, or char/4 estimates for cloud. */
     prompt_tokens?: number;
     completion_tokens?: number;
@@ -1479,7 +1487,12 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     const wantReport = args.escalation === "report";
     // Shared per-result entitlement metadata (§5.5) — spread into every
     // terminal result so callers can audit which plan/provenance applied.
-    const entMeta = { plan: ent.plan, entitlements_source: entSource } as const;
+    const entMeta = {
+        plan: ent.plan,
+        entitlements_source: entSource,
+        multi_turn: multiTurnPolicy(ent),
+        history_turns: args.messages?.length ?? 0,
+    } as const;
     const refusedResult = (reason: string): PrismInferResult => ({
         output: "",
         backend: "refused",

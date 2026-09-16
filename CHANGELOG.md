@@ -55,6 +55,21 @@ the model, the validator ignored it, the safety screen saw only the current
 turn (the reserved history was served by the 9b), the context gate did not
 count it, escalation dropped it.
 
+### The host is told the worker can hold a conversation, and what it costs
+
+A feature the host is instructed not to use is invisible. Four surfaces now
+carry it: the `prism_infer` description says follow-ups need `messages` and
+that a stateless follow-up fabricates; every result reports `multi_turn`
+(the plan's caps) and `history_turns` (a count, never content), so the host
+learns its budget from the first call instead of from a refusal; the startup
+display prints one line — on with the caps, or off on this plan — read from
+the entitlements cache only, never a portal fetch on the startup path; and
+`session_task_route` returns `needs_history: true` when a task reads as a
+follow-up ("now…", "the same…", "your previous answer"), with the shared
+local-first policy telling every host to attach the accepted prior turns when
+it does. The router holds no turns; attaching them stays the host's job. Bare
+pronouns are deliberately not cues, so "fix it" stays a standalone task.
+
 Twenty-eight tests in `tests/tools/prismInferMultiTurn.test.ts` (nine proven to
 fail against the previous handler, one compatibility baseline, two guards, nine
 regression cases for the caps, retries, verdict severity and escalation

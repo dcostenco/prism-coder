@@ -291,6 +291,13 @@ export async function getEntitlements(): Promise<PrismEntitlements> {
 /**
  * Force cache invalidation (e.g. after plan upgrade).
  */
+/** Cached entitlements WITHOUT a network round-trip, or null when cold.
+ *  For display surfaces (the startup line) that must never add a portal
+ *  fetch to startup; the first prism_infer result carries the policy anyway. */
+export function peekEntitlements(): PrismEntitlements | null {
+    return cache?.entitlements ?? null;
+}
+
 export function invalidateEntitlements(): void {
     cache = null;
     negativeCache = null;
