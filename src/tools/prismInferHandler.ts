@@ -1772,13 +1772,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
         }
         // 4th arg is fetchImpl (default), 5th is the images the classifier must see.
-        // Per TURN, not one pass over a concatenation, and per WINDOW for a
-        // turn longer than the classifier reads in full: the oversize excerpt
-        // in layer1.ts keeps ~3.8k chars of head, middle and tail, and a
-        // position sweep (2026-09-15) showed a phrase at 20–40% or 60–80% of a
-        // 12k-char text is missed by it. Windows overlap so a phrase on a
-        // boundary is seen whole. The current prompt keeps its images and its
-        // existing excerpt behaviour.
+        // Single turn: one call, unchanged. With history: a deterministic floor
+        // per turn, then the semantic classifier over windows of the
+        // role-labelled transcript (see below).
         let l1: Layer1Verdict;
         if (!args.messages?.length) {
             // Single turn: the exact call it always was.

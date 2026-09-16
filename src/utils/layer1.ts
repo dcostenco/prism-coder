@@ -268,10 +268,10 @@ const NON_OPERATIONAL_ARTIFACT_ACTION =
  * clear routine BCBA work reaches local inference. Ambiguous prompts return
  * null and continue to the semantic classifier below.
  */
-/** The non-operational artifact exemption, evaluated over a whole text. The
- *  caller passes the result for every window of a long turn, so a window
- *  that lost its "test fixture" context cannot be more reserved than the
- *  turn it came from (review round 4, 2026-09-16). */
+/** The non-operational artifact exemption over a text. classifyDeterministic
+ *  Layer1 applies it to the text it is given; prism_infer's history screen
+ *  passes 7,200-char proximity slices, so the exemption reaches the clause it
+ *  sits in and nothing thousands of chars away (review rounds 4 and 10). */
 export function isNonOperationalArtifact(text: string): boolean {
     return NON_OPERATIONAL_ARTIFACT_CONTEXT.test(text) && NON_OPERATIONAL_ARTIFACT_ACTION.test(text);
 }

@@ -391,6 +391,7 @@ describe("needs_history — follow-up cues", () => {
     "do it again but for the EU region",
     "Continue?",
     "now continue",
+    "Now, continue.",
   ])("flags a follow-up: %s", (desc) => {
     expect(looksLikeFollowUp(desc)).toBe(true);
   });

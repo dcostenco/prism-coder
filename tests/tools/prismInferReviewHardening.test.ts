@@ -403,11 +403,11 @@ describe("R11 round six (measured findings from the third verification)", () => 
         const crisis = await runInfer(args({ prompt: "carry on", messages: [{ role: "user", content: "I am going to jump off the bridge tonight." }] }), deps());
         expect(crisis.backend).toBe("safety_gate");
         // only a determiner + "jump(ing) off point(s)" is exempt (rounds 5–10)
-        for (const text of ["I keep thinking about jumping off pointlessly", "I am jumping off a bridge", "I will jump off tonight", "I plan to jump off point of the roof tonight"]) {
+        for (const text of ["I keep thinking about jumping off pointlessly", "I am jumping off a bridge", "I will jump off tonight", "I plan to jump off point of the roof tonight", "I will jump-off the roof tonight"]) {
             const r = await runInfer(args({ prompt: "carry on", messages: [{ role: "user", content: text }] }), deps());
             expect(r.backend, text).toBe("safety_gate");
         }
-        for (const text of ["Use this as a jump off point for the rewrite.", "Good jumping off points for the migration plan:"]) {
+        for (const text of ["Use this as a jump off point for the rewrite.", "Good jumping off points for the migration plan:", "A jumping-off point for the refactor:"]) {
             const r = await runInfer(args({ prompt: "carry on", messages: [{ role: "user", content: text }] }), deps());
             expect(r.backend, text).not.toBe("safety_gate");
         }
@@ -488,6 +488,10 @@ describe("R12 round eight — screening is role-aware", () => {
         const r = await runInfer(args({ messages: turns }), deps({ callLayer1 }));
         expect(r.backend).toBe("refused");
         expect(r.gate_outcome?.reason).toBe("layer1_reserved");
+        // not cached: the same window is classified again on the next call
+        const turn1Before = callLayer1.mock.calls.filter(c => String(c[0]).includes("turn 1:")).length;
+        await runInfer(args({ messages: turns }), deps({ callLayer1 }));
+        expect(callLayer1.mock.calls.filter(c => String(c[0]).includes("turn 1:")).length).toBeGreaterThan(turn1Before);
     });
     it("a window verdict cached WITHOUT images is not reused for the same text WITH images", async () => {
         const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";

@@ -27,9 +27,10 @@ const CRISIS_INPUT_RE = [
     // idiom as a noun phrase: a determiner + "jump(ing) off point(s)" ("a
     // jumping off point for the refactor", "good jumping off points"). "I
     // plan to jump off point of the roof" has no determiner and matches;
-    // "jumping off pointlessly" and "jumping off a bridge" match. The
-    // portal keeps a copy of this list — mirror edits.
-    /(?:(?<!\b(?:a|an|the|this|that|good|great|solid|useful|our|your|my|as)\s)\bjump(?:ing)?\s+off\b|\bjump(?:ing)?\s+off\b(?!\s+points?\b))/i,
+    // "jumping off pointlessly", "jumping off a bridge" and the hyphenated
+    // "jump-off the roof" match; "a jumping-off point" is exempt. The portal
+    // keeps a copy of this list — mirror edits.
+    /(?:(?<!\b(?:a|an|the|this|that|good|great|solid|useful|our|your|my|as)\s+)\bjump(?:ing)?[\s-]+off\b|\bjump(?:ing)?[\s-]+off\b(?![\s-]+points?\b))/i,
     /how\s+(?:many|much|to).*(?:pills|overdose|die)/i,
     // Spanish — block hyperbole nouns only (NOT hunger/thirst/cold — may be literal for neglected child)
     /quiero\s+morir(?!\s+de\s+(?:risa|la\s+risa|vergüenza|ganas|envidia|aburrimiento)\b)/i,
