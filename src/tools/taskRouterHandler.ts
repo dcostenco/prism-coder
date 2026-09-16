@@ -376,10 +376,12 @@ const FOLLOW_UP_CUES: readonly RegExp[] = [
   // The bare verb, optionally "from/where/with …", and nothing else:
   // "Continue integration tests for the parser" and "Go on-call rotation
   // doc" are standalone tasks (review round 3).
-  // "please/now/ok, continue <anything>" is conversational continuation; the
-  // bare verb alone counts only as the whole message (or "from/where/with…"),
-  // so "Continue integration tests for the parser" stays standalone
-  // (review rounds 3–18: the prefixed forms were dropped once and restored).
+  // "please/now/ok, continue <anything>" is conversational continuation
+  // (so "Please continue integration tests for the parser" IS a cue — the
+  // prefix is the signal, accepted false positives included); the bare verb
+  // counts only as the whole message (or "from/where/with…"), so "Continue
+  // integration tests for the parser" stays standalone (review rounds 3–18:
+  // the prefixed forms were dropped once and restored).
   /^\s*(please|ok|now)(,\s*|\s+)(continue|carry on|keep going|go on)\b/i,
   /^\s*(continue|carry on|keep going|go on)(\s+(from|where|with)\b.*)?\s*[.!?]?\s*$/i,
   /\b(redo|repeat) (it|that)\b|\bdo (it|that) again\b/i,

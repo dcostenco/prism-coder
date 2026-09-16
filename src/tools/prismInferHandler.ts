@@ -142,8 +142,8 @@ export function historyTokenEstimate(history?: InferHistoryTurn[]): number {
 
 /** History and current prompt as ONE text for the deterministic screens
  *  (reserved-category attribution, keyword backstop). The semantic classifier
- *  reads windows of the role-labelled transcript instead — see the Layer 1
- *  block and screeningTranscript. */
+ *  reads each turn alone and then one context window per turn instead — see
+ *  the Layer 1 block and contextWindows. */
 function screenedText(args: PrismInferArgs): string {
     const history = args.messages ?? [];
     return history.length ? [...history.map(t => t.content), args.prompt].join("\n") : args.prompt;
@@ -1880,16 +1880,28 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // runs, fail-closed). UNCERTAIN or NOT_RESERVED on an isolated
             // snippet are not final — that turn's own context read decides.
             // Owner-visible policy: a turn that is UNCERTAIN alone but clean
-            // in its context is served; before, any UNCERTAIN refused.
+            // in its context is served; before, any UNCERTAIN refused. Known
+            // residual of that policy (measured, narrow): a note the caller
+            // placed in an EARLIER turn, still inside the 3,600-char tail before
+            // a payload the classifier finds only UNCERTAIN alone (about 1 in 20
+            // subtle reserved payloads; the rest are reserved alone, final),
+            // can keep that payload's context read clean. Later text cannot.
             const budget = { calls: 0, consecutiveErrors: 0, tripped: false };
             history: for (const turn of args.messages) {
-                for (const window of historyTurnWindows(turn.content)) {
+                const windows = historyTurnWindows(turn.content);
+                for (const [i, window] of windows.entries()) {
                     if (!window.trim()) continue;
                     const alone = await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model, budget);
                     if (alone === "OBVIOUS_RESERVED") {
                         if (turn.role === "user") { l1 = "OBVIOUS_RESERVED"; break history; }
                         l1 = worseLayer1Verdict(l1, "UNCERTAIN");
                     } else if (alone === "ERROR") {
+                        l1 = worseLayer1Verdict(l1, alone);
+                    } else if (alone === "UNCERTAIN" && i < windows.length - 1) {
+                        // Only the turn's LAST window is inside its context read
+                        // (the transcript's tail ending at this turn). An
+                        // UNCERTAIN head of a long turn would otherwise never be
+                        // adjudicated by context — it is kept, fail-closed.
                         l1 = worseLayer1Verdict(l1, alone);
                     }
                 }
@@ -1900,12 +1912,19 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // slices as a turn, then it is read alone with its images: a
             // reserved verdict is final; with images the verdict stands as it
             // always has (the image path below reads it).
+            let promptRoutine = true;
             for (const slice of windowsOf(args.prompt, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
                 const promptDet = classifyDeterministicLayer1(slice);
                 if (promptDet) l1 = worseLayer1Verdict(l1, promptDet);
+                if (promptDet !== "OBVIOUS_NOT_RESERVED") promptRoutine = false;
             }
-            if (l1 !== "OBVIOUS_RESERVED") {
-                const promptVerdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
+            // The classifier entry point's own whole-prompt deterministic pass
+            // is switched off here — it would undo the slicing above (words
+            // 14k chars apart firing one rule; review round 18). The routine
+            // fast path it provided is kept explicitly: a prompt every slice
+            // of which the rules call routine, with no images, skips the model.
+            if (l1 !== "OBVIOUS_RESERVED" && !(promptRoutine && (resolvedImages?.length ?? 0) === 0)) {
+                const promptVerdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false });
                 if (promptVerdict === "OBVIOUS_RESERVED" || promptVerdict === "ERROR" || (resolvedImages?.length ?? 0) > 0) {
                     l1 = worseLayer1Verdict(l1, promptVerdict);
                 }

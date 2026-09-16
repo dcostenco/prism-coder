@@ -732,3 +732,32 @@ describe("R15 round eighteen — per-turn context windows, assistant floor, evic
         expect(r.backend, JSON.stringify(r.attempts.slice(0, 3))).not.toBe("refused");
     });
 });
+
+describe("R16 round nineteen", () => {
+    const clean = async () => new Response(JSON.stringify({ message: { content: "OBVIOUS_NOT_RESERVED" } }), { status: 200 });
+    const viaReal = (p: string, u: string, m: string, _f: unknown, images?: string[], opts?: { deterministic?: boolean }) =>
+        realCallLayer1(p, u, m, clean as unknown as typeof fetch, images, opts);
+    it("through the REAL classifier entry point, co-occurrence words 14k chars apart in the prompt do not fire (its whole-prompt pass is off for the prompt-alone call)", async () => {
+        const line = "export function parseRow(input: string): Row { return { value: input.trim() }; }\n";
+        const prompt = "// We diagnose parse failures by their first bad token.\n" + line.repeat(175) + "// determine the column width from the widest cell.\n" + line.repeat(60);
+        const r = await runInfer(args({ prompt, messages: HISTORY }), deps({ callLayer1: viaReal }));
+        expect(r.backend, JSON.stringify(r.attempts.slice(0, 3))).not.toBe("refused");
+    });
+    it("the routine fast path survives: a prompt the rules call routine in every slice skips the prompt-alone model call", async () => {
+        const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
+        const routine = "Write an operational definition for hand raising during circle time.";
+        expect(classifyDeterministicLayer1(routine)).toBe("OBVIOUS_NOT_RESERVED");
+        await runInfer(args({ prompt: routine, messages: HISTORY }), deps({ callLayer1 }));
+        expect(callLayer1.mock.calls.some(c => String(c[0]) === routine)).toBe(false);
+    });
+    it("an UNCERTAIN read of a long turn's HEAD is kept fail-closed: the context read only covers the tail", async () => {
+        const filler = "The schedule for the reading group was moved to Thursday. ";
+        const head = "HEAD-MARKER " + filler.repeat(10);
+        const body = head + filler.repeat(130); // > 2 windows; the marker sits in the first
+        const callLayer1 = vi.fn(async (text: string) => (text.includes("HEAD-MARKER") && !/^(User|Assistant): /m.test(text) ? "UNCERTAIN" : "OBVIOUS_NOT_RESERVED") as "UNCERTAIN" | "OBVIOUS_NOT_RESERVED");
+        const r = await runInfer(args({ messages: [{ role: "user", content: body }] }), deps({ callLayer1 }));
+        expect(r.backend).toBe("refused");
+        expect(r.attempts.some(a => a.reason === "layer1_uncertain")).toBe(true);
+        // …while a short turn that is UNCERTAIN alone still defers to its context read (R13/2)
+    });
+});

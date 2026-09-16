@@ -28,8 +28,10 @@ const CRISIS_INPUT_RE = [
     // jumping off point for the refactor", "good jumping off points"). "I
     // plan to jump off point of the roof" has no determiner and matches;
     // "jumping off pointlessly", "jumping off a bridge" and the hyphenated
-    // "jump-off the roof" match; "a jumping-off point" is exempt. The portal
-    // keeps a copy of this list — mirror edits.
+    // "jump-off the roof" match; "a jumping-off point" is exempt. Source of
+    // truth: the private repo's safety/patterns.json (bounded lookbehind for the
+    // Swift copy); the generator's other patterns drift from this file —
+    // reported; apply single lines, and keep the portal copy in step.
     /(?:(?<!\b(?:a|an|the|this|that|good|great|solid|useful|our|your|my|as)\s{1,4})\bjump(?:ing)?[\s-]+off\b|\bjump(?:ing)?[\s-]+off\b(?![\s-]+points?\b))/i,
     /how\s+(?:many|much|to).*(?:pills|overdose|die)/i,
     // Spanish — block hyperbole nouns only (NOT hunger/thirst/cold — may be literal for neglected child)
