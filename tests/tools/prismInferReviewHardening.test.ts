@@ -872,6 +872,73 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
     });
 });
 
+describe("R19 cloud fallback is defined by the PLAN, not by the caller's silence", () => {
+    // Reproduces a production refusal measured 2026-09-16: a paid, portal-ruled
+    // enterprise session sent a legitimate engineering follow-up, the screen
+    // returned UNCERTAIN, and the call was refused outright — because the host
+    // simply did not pass `cloud_fallback`, and an omitted flag used to mean
+    // "no cloud". The plan had cloud fallback and paid for it.
+    const PAID = { ...ENT, features: { ...ENT.features, cloud_fallback: true } };
+    const FREE = { ...ENT, plan: "free", features: { ...ENT.features, cloud_fallback: false } } as PrismEntitlements;
+    const uncertain = () => vi.fn(async () => "UNCERTAIN" as const);
+    const cloudOk = () => vi.fn(async () => ({ ok: true as const, output: "cloud answer", backend: "gemini-3.6-flash" }));
+
+    it("omitted + paid plan: an UNCERTAIN verdict escalates instead of dead-ending", async () => {
+        _setCacheForTest(PAID, 60_000);
+        const callCloud = cloudOk();
+        const d = deps({ callLayer1: uncertain(), callCloud });
+        const r = await runInfer(args(), d);                       // note: no cloud_fallback key at all
+        expect(r.backend).not.toBe("refused");
+        expect(r.used_cloud).toBe(true);
+        expect(callCloud.mock.calls.length).toBe(1);
+        expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0); // never local
+    });
+    it("omitted + free plan: no cloud to give, so it still refuses", async () => {
+        _setCacheForTest(FREE, 60_000);
+        const callCloud = cloudOk();
+        const d = deps({ callLayer1: uncertain(), callCloud });
+        const r = await runInfer(args(), d);
+        expect(r.backend).toBe("refused");
+        expect(callCloud.mock.calls.length).toBe(0);
+        expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+    });
+    it("explicit false + paid plan: local-only is still honoured — the clinical delegation rules depend on it", async () => {
+        _setCacheForTest(PAID, 60_000);
+        const callCloud = cloudOk();
+        const d = deps({ callLayer1: uncertain(), callCloud });
+        const r = await runInfer(args({ cloud_fallback: false }), d);
+        expect(r.backend).toBe("refused");
+        expect(callCloud.mock.calls.length).toBe(0);
+    });
+    it("explicit true + free plan: the plan is still the authority", async () => {
+        _setCacheForTest(FREE, 60_000);
+        const callCloud = cloudOk();
+        const d = deps({ callLayer1: uncertain(), callCloud });
+        const r = await runInfer(args({ cloud_fallback: true }), d);
+        expect(r.backend).toBe("refused");
+        expect(callCloud.mock.calls.length).toBe(0);
+    });
+    it("omitted + paid plan + IMAGES: the default stays off — cloud cannot see a screenshot, and turning it on would throw away a usable local answer", async () => {
+        _setCacheForTest(PAID, 60_000);
+        const callCloud = cloudOk();
+        const B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        const d = deps({ callCloud, probeVision: async () => true, listTags: async () => new Set(["prism-coder:9b"]) });
+        const r = await runInfer(args({ images: [B64], messages: undefined }), d);
+        expect(callCloud.mock.calls.length).toBe(0);          // never offered the screenshot
+        expect(r.attempts.some(a => a.tier === "synalux")).toBe(false);
+        expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0);
+    });
+    it("omitted + paid plan, clean prompt: nothing changes — local still serves it, no cloud spent", async () => {
+        _setCacheForTest(PAID, 60_000);
+        const callCloud = cloudOk();
+        const d = deps({ callCloud });                              // classifier clean by default
+        const r = await runInfer(args(), d);
+        expect(r.used_cloud).toBeFalsy();
+        expect(callCloud.mock.calls.length).toBe(0);
+        expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    });
+});
+
 describe("R16 round nineteen", () => {
     const clean = async () => new Response(JSON.stringify({ message: { content: "OBVIOUS_NOT_RESERVED" } }), { status: 200 });
     const viaReal = (p: string, u: string, m: string, _f: unknown, images?: string[], opts?: { deterministic?: boolean }) =>

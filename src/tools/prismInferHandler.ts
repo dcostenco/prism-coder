@@ -521,8 +521,7 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             cloud_fallback: {
                 type: "boolean",
-                description: "Fall through to the Synalux portal cascade on local failure. Default false: saving tokens is the point.",
-                default: false,
+                description: "Synalux portal cascade when local is unviable or refused. Omitted: the plan decides; false forces local-only.",
             },
             timeout_ms: {
                 type: "number",
@@ -1175,8 +1174,9 @@ export class ReservedRefusalError extends Error {
         const what = category ? `category="${category}"` : "matched the semantic classifier";
         const remedy = cloudWasAllowed
             ? "Cloud escalation was permitted and did not produce an answer; see attempts."
-            : "Reserved content is never answered by a local model. Pass cloud_fallback: true "
-              + "to escalate to a stronger model, or answer it in the host thread instead.";
+            : "Reserved content is never answered by a local model. This call had no cloud: either it "
+              + "passed cloud_fallback: false, or the plan has none. Pass cloud_fallback: true (or omit "
+              + "it, on a paid plan) to escalate to a stronger model, or answer it in the host thread instead.";
         super(
             `prism_infer: Layer 1 verdict=${verdict}, ${what} — reserved content refused. `
             + `${remedy} attempts=${JSON.stringify(attempts)}`,
@@ -1650,10 +1650,23 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // specific backend.
     const maxTokens = cloudMaxTokens;
 
-    // Cloud fallback only for paid plans
+    // Cloud fallback is the PLAN's to give. An omitted flag means "whatever my
+    // plan entitles me to": paid plans escalate, free plans do not. Explicit
+    // false still forces local-only — the clinical delegation rules and
+    // token-saving callers depend on that — and explicit true still needs a
+    // plan with cloud. Until 2026-09-16 an omitted flag meant "no cloud", so a
+    // paid, portal-ruled entitlement sat unused and an UNCERTAIN verdict
+    // dead-ended instead of escalating; measured in production the day
+    // multi-turn shipped, on a host that simply did not pass the argument.
     // let, not const: the reserved-image branch pins this off mid-call so no
     // later escalation path can carry even the prompt text off-device.
-    let allowCloud = args.cloud_fallback === true && ent.features.cloud_fallback;
+    // The default is image-aware: cloud can never serve an image request
+    // (screenshots stay on this device), so defaulting it ON for one would only
+    // convert a gate-failed-but-usable local answer into a hard failure — an
+    // explicit request still behaves as before and is refused at the point of
+    // use with its attempt named.
+    const planDefault = ent.features.cloud_fallback && !(args.images?.length);
+    let allowCloud = (args.cloud_fallback ?? planDefault) && ent.features.cloud_fallback;
 
     // Verification only for paid plans (free users skip L3 grounding)
     const canVerify = ent.features.grounding_verifier;

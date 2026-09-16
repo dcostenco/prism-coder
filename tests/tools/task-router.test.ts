@@ -127,7 +127,6 @@ describe("computeRoute output shape", () => {
         project: "prism-mcp",
         mode: "code",
         task_complexity: result.complexity_score,
-        cloud_fallback: false,
         escalation: "report",
       });
     }
@@ -144,8 +143,11 @@ describe("computeRoute output shape", () => {
     expect(result.complexity_score).toBe(4);
     expect(result.recommended_args).toMatchObject({
       task_complexity: result.complexity_score,
-      cloud_fallback: false,
     });
+    // Deliberately absent: prism_infer resolves cloud fallback from the plan's
+    // entitlements. Pinning it false here made a paid plan's escalation
+    // unreachable for any host that copied these arguments verbatim.
+    expect(result.recommended_args).not.toHaveProperty("cloud_fallback");
     expect(result.recommended_args).not.toHaveProperty("model_ceiling");
     expect(result.recommended_args).not.toHaveProperty("think");
   });

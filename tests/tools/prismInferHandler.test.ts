@@ -911,9 +911,12 @@ describe("runInfer — cloud fallback", () => {
     it("suppresses malformed route output even when it is the only degraded local candidate", async () => {
         const malformed = "<|tool_call|>{bad-json}<|tool_call_end|>";
         const callRouteGuard = vi.fn();
+        // Local-only: since the default follows the plan, a gate failure on a
+        // paid plan escalates instead of being suppressed and served.
         const result = await runInfer(args({
             mode: "route",
             model_ceiling: "2b",
+            cloud_fallback: false,
         }), makeDeps({
             callLocal: async () => ({ ok: true as const, text: malformed }),
             callRouteGuard,
@@ -1172,13 +1175,13 @@ describe("runInfer — cloud fallback", () => {
         expect(cloudFn).toHaveBeenCalledOnce();
     });
 
-    it("cloud_fallback=false (default): never calls cloud, throws on local exhaustion", async () => {
+    it("cloud_fallback=false, the explicit opt-out (the DEFAULT now follows the plan): never calls cloud, throws on local exhaustion", async () => {
         const cloudFn = vi.fn();
         const deps = makeDeps({
             callLocal: async () => ({ ok: false as const, reason: "network" }),
             callCloud: cloudFn as any,
         });
-        await expect(runInfer(args(), deps)).rejects.toThrow(/no backend produced output/);
+        await expect(runInfer(args({ cloud_fallback: false }), deps)).rejects.toThrow(/no backend produced output/);
         expect(cloudFn).not.toHaveBeenCalled();
     });
 
@@ -1870,7 +1873,7 @@ describe("a truncated prompt is never answered from the fragment", () => {
         // that coincidentally evaluates near the collapse value is not mistaken
         // for a truncated one — no tokenizer turns 14 characters into 16,386
         // tokens.
-        const r = await runInfer({ prompt: "short question", mode: "code", escalation: "report" }, deps({
+        const r = await runInfer({ prompt: "short question", mode: "code", escalation: "report", cloud_fallback: false }, deps({
             callLocal: async () => ({ ok: true as const, text: "fine", doneReason: "stop", promptTokens: 16_386 }),
         }));
         expect(r.output).toContain("fine");

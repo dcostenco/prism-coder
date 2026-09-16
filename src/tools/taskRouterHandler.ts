@@ -52,7 +52,6 @@ export interface TaskRouteResult {
     project?: string;
     mode: "code";
     task_complexity: number;
-    cloud_fallback: false;
     escalation: "report";
   };
   experience?: {
@@ -408,7 +407,10 @@ function buildRecommendedArgs(
     ...(args.project ? { project: args.project } : {}),
     mode: "code",
     task_complexity: complexityScore,
-    cloud_fallback: false,
+    // cloud_fallback is deliberately absent: prism_infer resolves it from the
+    // plan's entitlements, which the router does not read. Pinning it false
+    // here made a paid plan's escalation unreachable for any host that copied
+    // these arguments verbatim (2026-09-16).
     escalation: "report",
   };
 }

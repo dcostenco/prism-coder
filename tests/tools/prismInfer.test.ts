@@ -164,12 +164,12 @@ describe("runInfer — local-first cascade", () => {
         expect(r.attempts.length).toBeGreaterThanOrEqual(4); // tried all 4 local tiers
     });
 
-    it("all local fail + cloud_fallback=false → throws (token-saving default)", async () => {
+    it("all local fail + cloud_fallback=false → throws (the explicit opt-out; the default now follows the plan)", async () => {
         const deps = makeDeps({
             callLocal: async () => ({ ok: false as const, reason: "network" }),
             callCloud: vi.fn(),
         });
-        await expect(runInfer(args(), deps)).rejects.toThrow();
+        await expect(runInfer(args({ cloud_fallback: false }), deps)).rejects.toThrow();
         expect(deps.callCloud).not.toHaveBeenCalled();
     });
 
