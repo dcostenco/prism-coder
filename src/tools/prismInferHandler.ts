@@ -221,12 +221,21 @@ export function historyTurnWindows(content: string): string[] {
  *  call (quadratic classifier work; review 2026-09-16). ERROR verdicts are
  *  transient and never cached; a window classified WITH images never goes
  *  through here (the key has no image bytes in it). */
-/** Aggregate classifier-call budget for one request's history screen: the
- *  enterprise plan's worst case (96k chars of history alone + in context,
- *  ≈60 windows) with margin. Beyond it the screen fails CLOSED (UNCERTAIN),
- *  never runs unbounded — a maximally fragmented 128k history plus a 128k
- *  prompt would otherwise cost ~160 serial calls (review round 13). */
-export const LAYER1_SCREEN_CALL_BUDGET = 96;
+/** Aggregate classifier-call budget for one request's history screen — a
+ *  safety net at the STRUCTURAL maximum (49 turns / 128k chars of history
+ *  alone ≈ 87 windows + a 128k prompt in context ≈ 76 windows ≈ 163 calls),
+ *  not a plan-level limit: every shape the caps allow fits under it, so a
+ *  paid call never trips it, and a runaway loop cannot exceed it. Beyond it
+ *  the screen fails CLOSED (UNCERTAIN). The real bounds are the plan caps
+ *  (enterprise ≈ 124 calls on a cold cache, a warm follow-up pays only its
+ *  tail) and the consecutive-ERROR breaker below (review rounds 13–15). */
+export let LAYER1_SCREEN_CALL_BUDGET = 170;
+export function _setScreenCallBudgetForTest(n: number | null): void { LAYER1_SCREEN_CALL_BUDGET = n ?? 170; }
+/** A dead or stalled classifier answers ERROR after its 1.5 s + 5 s retry
+ *  budget; across a long history that is minutes of nothing. After this many
+ *  consecutive ERRORs the remaining windows are marked ERROR without a call:
+ *  the ERROR path's keyword net still runs, fail-closed, as for one ERROR. */
+export const LAYER1_SCREEN_ERROR_BREAKER = 3;
 const LAYER1_HISTORY_CACHE_MAX = 1_000;
 /** Entries expire so a classifier alias updated in place (same name, new
  *  weights) cannot keep serving a clearance the old weights gave. */
@@ -238,7 +247,7 @@ async function classifyHistoryWindow(
     window: string,
     ollamaUrl: string,
     model: string,
-    budget?: { calls: number },
+    budget?: { calls: number; consecutiveErrors: number },
 ): Promise<Layer1Verdict> {
     const key = createHash("sha256").update(model).update("\0").update(window).digest("hex");
     // performance.now() is monotonic: a wall-clock rollback must not extend
@@ -246,9 +255,12 @@ async function classifyHistoryWindow(
     const hit = layer1HistoryCache.get(key);
     if (hit && hit.expiresAt > performance.now()) return hit.verdict;
     if (hit) layer1HistoryCache.delete(key);
-    // Cache misses cost a model call; over budget the screen fails closed.
+    // Cache misses cost a model call; over budget the screen fails closed,
+    // and a classifier that keeps failing is not asked again this request.
+    if (budget && budget.consecutiveErrors >= LAYER1_SCREEN_ERROR_BREAKER) return "ERROR";
     if (budget && ++budget.calls > LAYER1_SCREEN_CALL_BUDGET) return "UNCERTAIN";
     const verdict = await l1fn(window, ollamaUrl, model, undefined, undefined, { deterministic: false });
+    if (budget) budget.consecutiveErrors = verdict === "ERROR" ? budget.consecutiveErrors + 1 : 0;
     if (verdict !== "ERROR") {
         if (layer1HistoryCache.size >= LAYER1_HISTORY_CACHE_MAX) {
             const oldest = layer1HistoryCache.keys().next().value;
@@ -1837,7 +1849,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // isolated snippet are not final — context decides those (step 3).
             // Owner-visible policy: a turn that is UNCERTAIN alone but clean
             // in context is served; before, any UNCERTAIN refused.
-            const budget = { calls: 0 };
+            const budget = { calls: 0, consecutiveErrors: 0 };
             history: for (const turn of args.messages) {
                 for (const window of historyTurnWindows(turn.content)) {
                     if (!window.trim()) continue;
@@ -1877,6 +1889,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
             if (budget.calls > LAYER1_SCREEN_CALL_BUDGET) {
                 attempts.push({ tier: "layer1", reason: `layer1_screen_over_budget:${LAYER1_SCREEN_CALL_BUDGET}` });
+            }
+            if (budget.consecutiveErrors >= LAYER1_SCREEN_ERROR_BREAKER) {
+                attempts.push({ tier: "layer1", reason: `layer1_screen_error_breaker:${LAYER1_SCREEN_ERROR_BREAKER}` });
             }
         }
         // Null when the deterministic floor did not fire — the verdict then came

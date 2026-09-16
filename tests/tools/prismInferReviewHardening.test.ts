@@ -11,6 +11,8 @@ import {
     isPrismInferArgs,
     MULTI_TURN_PROMPT_MAX_CHARS,
     LAYER1_SCREEN_CALL_BUDGET,
+    LAYER1_SCREEN_ERROR_BREAKER,
+    _setScreenCallBudgetForTest,
     _resetLayer1HistoryCacheForTest,
     LAYER1_HISTORY_CACHE_TTL_MS,
     callSynaluxInference,
@@ -590,24 +592,44 @@ describe("R14 round thirteen", () => {
         const huge = "x".repeat(MULTI_TURN_PROMPT_MAX_CHARS + 1);
         expect(isPrismInferArgs({ prompt: huge, messages: [] })).toBe(true);
     });
-    it("the screen has an aggregate call budget and fails CLOSED beyond it", async () => {
+    it("the structural worst case (49 fragmented turns / 128k history + a 128k prompt) fits under the budget: a paid call never trips it", async () => {
         const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
         _setCacheForTest({ ...ENT, multi_turn: { enabled: true, max_turns: 49, max_chars: 128_000 } }, 60_000);
-        // 30 distinct ~3,000-char turns: ~30 isolated + ~28 transcript windows, inside the budget
-        const turns = Array.from({ length: 30 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i}: ` + `item ${i} of the reading schedule moved. `.repeat(70) }));
-        const ok = await runInfer(args({ messages: turns }), deps({ callLayer1 }));
-        expect(ok.backend).not.toBe("refused");
+        const huge = Array.from({ length: 49 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `t${i}: ` + `item ${i} of the reading schedule moved. `.repeat(63) }));
+        const bigPrompt = Array.from({ length: 5_800 }, (_, i) => `line ${i} of the pasted log; `).join("").slice(0, 127_000);
+        // The screen passes; the call then dies at the context gate (no tier
+        // holds 250k chars, no cloud) and throws with its attempts attached.
+        let attempts: Array<{ reason: string }> = [];
+        try {
+            const r = await runInfer(args({ messages: huge, prompt: bigPrompt, escalation: "report" }), deps({ callLayer1 }));
+            attempts = r.attempts;
+        } catch (e) {
+            attempts = (e as { attempts?: Array<{ reason: string }> }).attempts ?? [];
+        }
+        expect(attempts.some(a => a.reason.startsWith("layer1_screen_over_budget:")), JSON.stringify(attempts.slice(0, 3))).toBe(false);
+        expect(attempts.some(a => a.reason.startsWith("ctx_insufficient")), "the screen should have passed and the ctx gate should have spoken").toBe(true);
         expect(callLayer1.mock.calls.length).toBeLessThanOrEqual(LAYER1_SCREEN_CALL_BUDGET);
-        // 49 fragmented turns plus a 120k-char prompt, every window a cache miss: over budget → UNCERTAIN → refused (no cloud)
-        _resetLayer1HistoryCacheForTest();
-        const huge = Array.from({ length: 49 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `t${i}: ` + `item ${i} of the reading schedule moved. `.repeat(64) }));
-        // a non-repetitive prompt: identical windows would be cache hits and cost nothing
-        const bigPrompt = Array.from({ length: 3_000 }, (_, i) => `line ${i} of the pasted log; `).join("");
-        expect(bigPrompt.length).toBeGreaterThan(60_000);
-        const over = await runInfer(args({ messages: huge, prompt: bigPrompt }), deps({ callLayer1 }));
-        expect(over.backend).toBe("refused");
-        expect(over.attempts.some(a => a.reason.startsWith("layer1_screen_over_budget:"))).toBe(true);
-        expect(callLayer1.mock.calls.length).toBeLessThanOrEqual(LAYER1_SCREEN_CALL_BUDGET * 2 + 4);
+    });
+    it("beyond the budget the screen fails CLOSED as UNCERTAIN, with the attempt named", async () => {
+        _setScreenCallBudgetForTest(4);
+        try {
+            const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
+            const turns = Array.from({ length: 8 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i}: ` + `item ${i} of the reading schedule moved. `.repeat(70) }));
+            const r = await runInfer(args({ messages: turns }), deps({ callLayer1 }));
+            expect(r.backend).toBe("refused");
+            expect(r.attempts.some(a => a.reason === "layer1_screen_over_budget:4")).toBe(true);
+            expect(callLayer1.mock.calls.filter(c => String(c[0]) !== "What is my codename?").length).toBe(4);
+        } finally { _setScreenCallBudgetForTest(null); }
+    });
+    it("a classifier that keeps failing is not asked again: after three consecutive ERRORs the rest are ERROR without a call", async () => {
+        const callLayer1 = vi.fn(async () => "ERROR" as const);
+        const turns = Array.from({ length: 10 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i}: ` + `item ${i} of the reading schedule moved. `.repeat(70) }));
+        const r = await runInfer(args({ messages: turns }), deps({ callLayer1 }));
+        // budgeted window calls stop at the breaker; the prompt's own call is separate
+        expect(callLayer1.mock.calls.filter(c => String(c[0]) !== "What is my codename?").length).toBe(LAYER1_SCREEN_ERROR_BREAKER);
+        expect(r.attempts.some(a => a.reason === `layer1_screen_error_breaker:${LAYER1_SCREEN_ERROR_BREAKER}`)).toBe(true);
+        // ERROR path, keyword net clean → served locally, as one ERROR always was
+        expect(r.attempts.some(a => a.reason === "layer1_error")).toBe(true);
     });
     it("with history the current prompt is capped structurally, and the refusal names the cap", async () => {
         const huge = "x".repeat(MULTI_TURN_PROMPT_MAX_CHARS + 1);
