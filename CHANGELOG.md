@@ -4,29 +4,41 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-### A stale instruction block heals itself when a session starts
+### A stale startup block heals itself when a session starts
 
 20.21.0 corrected the text `prism connect` writes into host instruction files:
-the old wording told hosts to pass `cloud_fallback: false`, which made a paid
-plan's escalation unreachable. Nothing on an ordinary machine rewrites that
-text. `prism update` never touches host configuration by design, `autoupdate`
-runs `update`, and npm's ignore-scripts blocks the postinstall refresh — it was
-blocked again while publishing 20.21.0. So the fix shipped and the instruction
-that defeats it stayed on disk.
+the old wording told hosts to pass `cloud_fallback: false`, which is what made
+a paid plan's escalation unreachable. Nothing on an ordinary machine rewrites
+that text. `prism update` never touches host configuration by design,
+`autoupdate` runs `update`, and the `postinstall` upgrade path is both limited
+to the prompt-routing hook and routinely disabled by npm's ignore-scripts,
+which blocked it again while publishing 20.21.0. So the fix shipped and the
+instruction that defeats it stayed on disk.
 
-The server now refreshes a managed startup block written by an older release,
-once its transport is connected. It is the narrowest useful subset of connect,
-and the narrowness is the contract:
+The server now refreshes a managed startup block once its transport is
+connected. It is the narrowest useful subset of connect, and the narrowness is
+the contract:
 
-- **Marker-gated.** A file without Prism's ownership marker is left
-  byte-for-byte alone, and an absent file is never created. Only `prism
-  connect` can first install a block; consent is never inferred from a server
-  start.
-- **Startup blocks only.** MCP host registration is never touched. That is what
-  connect's "close your hosts first" warning is about, because a live host
-  rewrites its own config; no host writes its own instruction file.
-- **Content-addressed**, so a current block is not rewritten on every start.
-- **Never fatal.** An unwritable file is reported and the server starts.
+- **It can only refresh, never install.** The install branch is unreachable
+  from this path, so a file without exactly one ordered pair of Prism ownership
+  markers is left byte-for-byte alone and an absent file is never created. Only
+  `prism connect` can first install a block; consent is never inferred from a
+  server start. An unpaired or ambiguous marker is reported, not repaired.
+- **Startup blocks only.** MCP host registration is never touched, which is
+  what connect's "close your hosts first" warning is about.
+- **Content-addressed**, so a current block is not rewritten on every start,
+  and two hosts that resolve to one file (a `GEMINI.md` symlinked to
+  `CLAUDE.md` is a common single-file setup, and both serialize the same
+  ownership marker) heal it once instead of rewriting it twice forever.
+- **Never fatal.** A failure is reported and the server starts.
+
+Two limits worth stating plainly. Gemini CLI writes `GEMINI.md` itself when you
+ask it to remember something, and Claude Code writes `CLAUDE.md` on `/init`, so
+these files do have another writer: the refresh replaces only the bytes between
+its own markers and re-checks the file immediately before committing, but a
+write that lands inside that final window would be overwritten. And "stale"
+means "differs from what this binary writes", not "older", so a pinned older
+install can rewrite a block a newer one wrote.
 
 The host reads its instruction file when a session begins, so a refresh lands
 on the next one. `PRISM_NO_STARTUP_REFRESH=1` opts out.

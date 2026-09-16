@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -45,10 +45,104 @@ describe("self-healing startup blocks", () => {
         expect(statSync(claudeFile()).mtimeMs).toBe(before);   // not even rewritten identically
     });
 
+    // The consent gate used to be a substring scan, which a file could pass
+    // by MENTIONING the marker. The configurator would then find no exact
+    // marker line, take its install branch, and append a block to a file the
+    // operator never gave us. Every shape below must be left alone.
+    for (const [name, body] of [
+        ["the marker quoted in prose", "# Notes\n\nWe use <!-- >>> prism connect managed: native startup --> as our sentinel.\n"],
+        ["the marker inside a fenced code block", "# Notes\n\n```md\n<!-- >>> prism connect managed: native startup -->\n```\n"],
+        ["the marker indented, so not a standalone line", "# Notes\n\n    <!-- >>> prism connect managed: native startup -->\n"],
+        ["only the END marker", "# Notes\n\n<!-- <<< prism connect managed: native startup -->\n"],
+        ["the marker with trailing text on the line", "# Notes\n\n<!-- >>> prism connect managed: native startup --> and more\n"],
+    ] as Array<[string, string]>) {
+        it(`leaves a file alone when it only contains ${name}`, () => {
+            writeFileSync(claudeFile(), body);
+            const before = readFileSync(claudeFile(), "utf8");
+            const results = refreshManagedStartupBlocks({ homeDir: home, env: {} });
+            const claude = results.find(r => r.host === "claude-code");
+            // Not written is the contract. A lone or unpaired marker line is
+            // an ambiguous ownership state: the configurator throws and the
+            // refresh reports `failed` with the reason, which is better than
+            // silence because the operator's file needs a human. Either way
+            // nothing is written.
+            expect(claude?.status, `status for: ${name}`).not.toBe("refreshed");
+            expect(["unmanaged", "failed"], `status for: ${name}`).toContain(claude?.status);
+            expect(readFileSync(claudeFile(), "utf8"), `content for: ${name}`).toBe(before);
+        });
+    }
+
+    // Claude and Gemini serialize the SAME ownership marker, and a single-file
+    // setup symlinks GEMINI.md to CLAUDE.md. Before the real-path de-duplication
+    // every start rewrote that one file twice and never converged: two
+    // "refreshed" lines on every start, forever, with the loser's flavour
+    // winning. Measured 2026-09-16.
+    it("two hosts sharing one file converge: it is healed once and then stays unchanged", () => {
+        writeFileSync(claudeFile(), "# Shared\n");
+        configureClaudeNativeStartup(home, false);
+        const fresh = readFileSync(claudeFile(), "utf8");
+        writeFileSync(claudeFile(), stale(fresh));
+        rmSync(geminiFile(), { force: true });
+        symlinkSync(claudeFile(), geminiFile());          // one file, two hosts
+
+        const first = refreshManagedStartupBlocks({ homeDir: home, env: {} });
+        expect(first.filter(r => r.status === "refreshed")).toHaveLength(1);
+        expect(first.find(r => r.host === "gemini")?.detail).toContain("same file");
+        expect(readFileSync(claudeFile(), "utf8")).toBe(fresh);
+
+        // The second start must be silent: no write, no "refreshed" line.
+        const settled = statSync(claudeFile()).mtimeMs;
+        for (let start = 0; start < 3; start++) {
+            const results = refreshManagedStartupBlocks({ homeDir: home, env: {} });
+            expect(results.some(r => r.status === "refreshed"), "a shared file must not be rewritten on every start").toBe(false);
+        }
+        expect(statSync(claudeFile()).mtimeMs).toBe(settled);
+        expect(readFileSync(claudeFile(), "utf8")).toBe(fresh);
+    });
+
+    it("a file with a start marker but no end marker is reported, not written", () => {
+        const body = "# Notes\n\n<!-- >>> prism connect managed: native startup -->\nhalf a block\n";
+        writeFileSync(claudeFile(), body);
+        const claude = refreshManagedStartupBlocks({ homeDir: home, env: {} }).find(r => r.host === "claude-code");
+        expect(["unmanaged", "failed"]).toContain(claude?.status);
+        expect(readFileSync(claudeFile(), "utf8")).toBe(body);
+    });
+
+    it("a file that is simply not Prism's is 'unmanaged', not an error the operator has to read", () => {
+        writeFileSync(claudeFile(), "# Notes\n\n<!-- <<< prism connect managed: native startup -->\n");
+        const claude = refreshManagedStartupBlocks({ homeDir: home, env: {} }).find(r => r.host === "claude-code");
+        expect(claude?.status, "an END marker alone is not an ambiguous Prism block, it is not ours").toBe("unmanaged");
+    });
+
+    it("honours CODEX_HOME for the codex instruction file", () => {
+        const custom = join(home, "custom-codex");
+        mkdirSync(custom, { recursive: true });
+        writeFileSync(join(custom, "AGENTS.md"), "");
+        configureCodexNativeStartup(home, false, undefined, { CODEX_HOME: custom });
+        const fresh = readFileSync(join(custom, "AGENTS.md"), "utf8");
+        writeFileSync(join(custom, "AGENTS.md"), stale(fresh));
+        const results = refreshManagedStartupBlocks({ homeDir: home, env: { CODEX_HOME: custom } });
+        const codex = results.find(r => r.host === "codex");
+        expect(codex?.status).toBe("refreshed");
+        expect(codex?.path).toBe(join(custom, "AGENTS.md"));
+        expect(readFileSync(join(custom, "AGENTS.md"), "utf8")).toBe(fresh);
+    });
+
+    it("heals a CRLF file without converting the operator's own line endings", () => {
+        writeFileSync(claudeFile(), "# Notes\r\n\r\nKeep me.\r\n");
+        configureClaudeNativeStartup(home, false);
+        const fresh = readFileSync(claudeFile(), "utf8");
+        writeFileSync(claudeFile(), stale(fresh));
+        expect(refreshManagedStartupBlocks({ homeDir: home, env: {} }).find(r => r.host === "claude-code")?.status).toBe("refreshed");
+        const healed = readFileSync(claudeFile(), "utf8");
+        expect(healed).toBe(fresh);
+        expect(healed).toContain("# Notes\r\n");
+    });
+
     it("an absent file is never created — the self-heal cannot first-install a block", () => {
         rmSync(join(home, ".claude"), { recursive: true, force: true });
         const results = refreshManagedStartupBlocks({ homeDir: home, env: {} });
-        expect(results.find(r => r.host === "claude-code")?.status).toBe("absent");
+        expect(results.find(r => r.host === "claude-code")?.status).toBe("unmanaged");
         expect(() => readFileSync(claudeFile(), "utf8")).toThrow();
     });
 
@@ -105,8 +199,8 @@ describe("self-healing startup blocks", () => {
         try {
             const results = refreshManagedStartupBlocks({ homeDir: home, env: {} });
             const claude = results.find(r => r.host === "claude-code");
-            expect(["failed", "refreshed"]).toContain(claude?.status);
-            if (claude?.status === "failed") expect(claude.detail).toBeTruthy();
+            expect(claude?.status, "an unwritable managed file must be REPORTED, not silently skipped").toBe("failed");
+            expect(claude?.detail).toBeTruthy();
         } finally {
             chmodSync(join(home, ".claude"), 0o700);
         }

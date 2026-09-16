@@ -86,7 +86,7 @@ export interface LegacyProjectMcpMigration {
 
 export interface NativeStartupConfiguration {
   path: string;
-  status: "unchanged" | "would-install" | "would-refresh" | "installed" | "refreshed";
+  status: "unchanged" | "would-install" | "would-refresh" | "installed" | "refreshed" | "unmanaged";
 }
 
 export type NativeAgentPolicyConfiguration = NativeStartupConfiguration;
@@ -770,6 +770,12 @@ export function configureClaudeNativeStartup(
   homeDir = homedir(),
   dryRun = false,
   beforeCommit?: (path: string) => void,
+  /** Refresh an existing managed block and nothing else. With this set the
+   *  install branch is unreachable, so a caller that did not receive the
+   *  operator's consent (the unattended startup refresh) cannot create a
+   *  block — not through a marker that only appears in prose, and not through
+   *  a marker removed between a caller's check and this read. */
+  refreshOnly = false,
 ): NativeStartupConfiguration {
   const instructionPath = join(homeDir, ".claude", "CLAUDE.md");
   let writePath = instructionPath;
@@ -793,6 +799,11 @@ export function configureClaudeNativeStartup(
   const newline = currentText.includes("\r\n") ? "\r\n" : "\n";
   const startRanges = findExactLineRanges(currentText, CLAUDE_STARTUP_MANAGED_START);
   const endRanges = findExactLineRanges(currentText, CLAUDE_STARTUP_MANAGED_END);
+  // Not ours: no opening marker at all. Under refreshOnly that is the ordinary
+  // case (a host the operator never connected), not an ambiguity to shout about.
+  if (refreshOnly && startRanges.length === 0) {
+    return { path: instructionPath, status: "unmanaged" };
+  }
   if (startRanges.length !== endRanges.length || startRanges.length > 1) {
     throw new Error(`Claude instructions contain ambiguous Prism startup ownership markers: ${instructionPath}`);
   }
@@ -811,6 +822,7 @@ export function configureClaudeNativeStartup(
     nextText = currentText.slice(0, startRanges[0].start) + managedBlock + currentText.slice(managedEnd);
     action = "refresh";
   } else {
+    if (refreshOnly) return { path: instructionPath, status: "unmanaged" };
     const separator = currentText.length === 0
       ? ""
       : currentText.endsWith("\n") || currentText.endsWith("\r")
@@ -876,6 +888,8 @@ export function configureGeminiNativeStartup(
   homeDir = homedir(),
   dryRun = false,
   beforeCommit?: (path: string) => void,
+  /** See configureClaudeNativeStartup. */
+  refreshOnly = false,
 ): NativeStartupConfiguration {
   const instructionPath = join(homeDir, ".gemini", "GEMINI.md");
   let writePath = instructionPath;
@@ -899,6 +913,11 @@ export function configureGeminiNativeStartup(
   const newline = currentText.includes("\r\n") ? "\r\n" : "\n";
   const startRanges = findExactLineRanges(currentText, GEMINI_STARTUP_MANAGED_START);
   const endRanges = findExactLineRanges(currentText, GEMINI_STARTUP_MANAGED_END);
+  // Not ours: no opening marker at all. Under refreshOnly that is the ordinary
+  // case (a host the operator never connected), not an ambiguity to shout about.
+  if (refreshOnly && startRanges.length === 0) {
+    return { path: instructionPath, status: "unmanaged" };
+  }
   if (startRanges.length !== endRanges.length || startRanges.length > 1) {
     throw new Error(`Gemini instructions contain ambiguous Prism startup ownership markers: ${instructionPath}`);
   }
@@ -917,6 +936,7 @@ export function configureGeminiNativeStartup(
     nextText = currentText.slice(0, startRanges[0].start) + managedBlock + currentText.slice(managedEnd);
     action = "refresh";
   } else {
+    if (refreshOnly) return { path: instructionPath, status: "unmanaged" };
     const legacyBlock = legacyGeminiStartupBlock(newline);
     if (currentText.startsWith(legacyBlock)) {
       nextText = managedBlock + newline + currentText.slice(legacyBlock.length);
@@ -953,6 +973,8 @@ export function configureCodexNativeStartup(
   dryRun = false,
   beforeCommit?: (path: string) => void,
   env: NodeJS.ProcessEnv = homeDir === undefined ? process.env : {},
+  /** See configureClaudeNativeStartup. */
+  refreshOnly = false,
 ): NativeStartupConfiguration {
   const userHome = homeDir ?? homedir();
   const configuredCodexHome = env.CODEX_HOME?.trim();
@@ -979,6 +1001,11 @@ export function configureCodexNativeStartup(
   const newline = currentText.includes("\r\n") ? "\r\n" : "\n";
   const startRanges = findExactLineRanges(currentText, CODEX_STARTUP_MANAGED_START);
   const endRanges = findExactLineRanges(currentText, CODEX_STARTUP_MANAGED_END);
+  // Not ours: no opening marker at all. Under refreshOnly that is the ordinary
+  // case (a host the operator never connected), not an ambiguity to shout about.
+  if (refreshOnly && startRanges.length === 0) {
+    return { path: instructionPath, status: "unmanaged" };
+  }
   if (startRanges.length !== endRanges.length || startRanges.length > 1) {
     throw new Error(`Codex instructions contain ambiguous Prism startup ownership markers: ${instructionPath}`);
   }
@@ -997,6 +1024,7 @@ export function configureCodexNativeStartup(
     nextText = currentText.slice(0, startRanges[0].start) + managedBlock + currentText.slice(managedEnd);
     action = "refresh";
   } else {
+    if (refreshOnly) return { path: instructionPath, status: "unmanaged" };
     const separator = currentText.length === 0
       ? ""
       : currentText.endsWith("\n") || currentText.endsWith("\r")
@@ -1062,10 +1090,11 @@ function configureJsonAgentPolicy(
 export interface ManagedStartupRefresh {
   host: "claude-code" | "gemini" | "codex";
   path: string;
-  /** `absent` — no instruction file. `unmanaged` — a file with no Prism
-   *  ownership marker: the operator never ran connect for this host, so we
-   *  never write. `unchanged` / `refreshed` — the marker was there. */
-  status: "absent" | "unmanaged" | "unchanged" | "refreshed" | "failed";
+  /** `unmanaged` — no instruction file, or one without a single ordered pair
+   *  of Prism ownership markers: the operator never ran connect for this host,
+   *  so nothing is written. `unchanged` / `refreshed` — a managed block was
+   *  there. `failed` — reported, never thrown. */
+  status: "unmanaged" | "unchanged" | "refreshed" | "failed";
   detail?: string;
 }
 
@@ -1105,51 +1134,42 @@ export function refreshManagedStartupBlocks(options: {
   const env = options.env ?? process.env;
   const dryRun = !!options.dryRun;
   const codexHome = env.CODEX_HOME?.trim() ? resolve(env.CODEX_HOME.trim()) : join(homeDir, ".codex");
-  const targets: Array<{
-    host: ManagedStartupRefresh["host"];
-    path: string;
-    marker: string;
-    configure: () => NativeStartupConfiguration;
-  }> = [
-    {
-      host: "claude-code",
-      path: join(homeDir, ".claude", "CLAUDE.md"),
-      marker: CLAUDE_STARTUP_MANAGED_START,
-      configure: () => configureClaudeNativeStartup(homeDir, dryRun),
-    },
-    {
-      host: "gemini",
-      path: join(homeDir, ".gemini", "GEMINI.md"),
-      marker: GEMINI_STARTUP_MANAGED_START,
-      configure: () => configureGeminiNativeStartup(homeDir, dryRun),
-    },
-    {
-      host: "codex",
-      path: join(codexHome, "AGENTS.md"),
-      marker: CODEX_STARTUP_MANAGED_START,
-      configure: () => configureCodexNativeStartup(homeDir, dryRun, undefined, env),
-    },
+  const targets: Array<{ host: ManagedStartupRefresh["host"]; path: string; configure: () => NativeStartupConfiguration }> = [
+    { host: "claude-code", path: join(homeDir, ".claude", "CLAUDE.md"), configure: () => configureClaudeNativeStartup(homeDir, dryRun, undefined, true) },
+    { host: "gemini", path: join(homeDir, ".gemini", "GEMINI.md"), configure: () => configureGeminiNativeStartup(homeDir, dryRun, undefined, true) },
+    { host: "codex", path: join(codexHome, "AGENTS.md"), configure: () => configureCodexNativeStartup(homeDir, dryRun, undefined, env, true) },
   ];
   const results: ManagedStartupRefresh[] = [];
+  // Two hosts can resolve to ONE file — GEMINI.md symlinked to CLAUDE.md is a
+  // common single-file setup — and Claude and Gemini serialize the SAME
+  // ownership marker, so without this each start rewrote that file twice and
+  // never converged: two "refreshed" lines on every start, forever. Whoever
+  // gets there first owns it; the second reports it as already handled.
+  const seen = new Map<string, ManagedStartupRefresh["host"]>();
   for (const target of targets) {
+    let identity = target.path;
     try {
-      let current: string;
-      try {
-        current = readFileSync(target.path, "utf8");
-      } catch {
-        results.push({ host: target.host, path: target.path, status: "absent" });
-        continue;
-      }
-      if (!current.includes(target.marker)) {
-        results.push({ host: target.host, path: target.path, status: "unmanaged" });
-        continue;
-      }
+      identity = realpathSync(target.path);
+    } catch { /* absent or unreadable: the path itself is identity enough */ }
+    const owner = seen.get(identity);
+    if (owner !== undefined) {
+      results.push({ host: target.host, path: target.path, status: "unchanged", detail: `same file as the ${owner} block` });
+      continue;
+    }
+    seen.set(identity, target.host);
+    try {
+      // No independent pre-read. The configurator's own exact-line marker
+      // recognition decides, from ONE snapshot: a second, weaker check here
+      // (a substring scan) would call a file managed because the marker
+      // appears in its prose, and the window between two reads is a way to
+      // lose the marker after the check. With refreshOnly the install branch
+      // is unreachable either way.
       const outcome = target.configure();
       results.push({
         host: target.host,
         path: outcome.path,
-        // dryRun reports would-refresh; both mean the block is stale.
-        status: outcome.status === "unchanged" ? "unchanged" : "refreshed",
+        // dry runs report would-refresh; both mean the block is stale.
+        status: outcome.status === "unchanged" || outcome.status === "unmanaged" ? outcome.status : "refreshed",
       });
     } catch (error) {
       // A self-heal must never be the reason a server fails to start.

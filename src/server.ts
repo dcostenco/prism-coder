@@ -1462,17 +1462,22 @@ export async function startServer() {
   // instructions and every tool description update with the binary, a native
   // instruction file keeps whatever connect last wrote — and nothing on an
   // ordinary machine re-runs connect: `prism update` never touches host
-  // configuration by design, autoupdate runs `update`, and npm's
-  // ignore-scripts blocks the postinstall refresh. 20.21.0 is the release that
+  // configuration by design, autoupdate runs `update`, and the postinstall
+  // path covers only the prompt-routing hook and is routinely disabled by
+  // npm's ignore-scripts. 20.21.0 is the release that
   // proved the cost: the old text told hosts to pass `cloud_fallback: false`,
   // which made a paid plan's escalation unreachable.
   //
-  // Marker-gated, so this can only ever rewrite a block the operator already
-  // consented to by running connect once; a file without the marker is left
+  // Refresh-only, so this can only ever rewrite a block the operator already
+  // consented to by running connect once: the install branch is unreachable
+  // from here, and a file without exactly one ordered marker pair is left
   // byte-for-byte alone. Startup blocks only — never MCP registration, which
-  // is what connect's "close your hosts first" warning is about. After the
-  // transport is connected, so the handshake is never held behind disk I/O.
-  // PRISM_NO_STARTUP_REFRESH=1 opts out.
+  // is what connect's "close your hosts first" warning is about. These files
+  // do have another writer (Gemini CLI writes GEMINI.md on a remember
+  // request, Claude Code writes CLAUDE.md on /init), so the refresh replaces
+  // only the bytes between its markers and re-checks immediately before
+  // committing. After the transport is connected, so the handshake is never
+  // held behind disk I/O. PRISM_NO_STARTUP_REFRESH=1 opts out.
   if (process.env.PRISM_NO_STARTUP_REFRESH !== "1") {
     try {
       const { refreshManagedStartupBlocks } = await import("./connect.js");
