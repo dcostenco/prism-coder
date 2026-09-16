@@ -2,47 +2,6 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
-
-### The multi-turn screen refused real work; three fixes
-
-The first organic multi-turn call after 20.20.0 shipped was refused, and it
-was ordinary engineering talk. Replaying it with the real classifier showed
-why: every turn read alone was clean, and the joined read hedged. Remove the
-history and the identical prompt is served locally.
-
-- **Cloud fallback follows the plan.** An omitted `cloud_fallback` used to
-  mean "no cloud", so a paid entitlement sat unused and an uncertain verdict
-  dead-ended. It now means "whatever my plan gives me". Explicit `false` still
-  forces local-only, which the clinical delegation rules depend on, and
-  explicit `true` still needs a plan with cloud. The default is image-aware,
-  because cloud can never serve an image request and turning it on for one
-  would only convert a usable local answer into a hard failure. The task
-  router no longer sends the argument at all: `prism_infer` resolves it from
-  entitlements, and pinning it in the recommendation made a paid plan's
-  escalation unreachable for any host that copied those arguments.
-- **The context layer compares requests, not the worker's own prose.** Every
-  turn of both roles is still read alone and every verdict from that read is
-  kept, so a reserved answer from the worker is still caught. What changed is
-  that assistant text no longer bulks up a joint read. Concatenating benign
-  turns pushed the classifier over its threshold on vocabulary it already
-  leans on, and it refused conversations whose every part was clean. Intent
-  belongs to the requester, so requests are what the joint read compares, and
-  a note planted in an assistant turn can no longer reach a context read at
-  all. The trust assumption is the host's role labels, which the deterministic
-  operational rules already make. Known and pinned: intent split with one half
-  under an assistant label is no longer joined in context.
-- **Refusals name the layer.** `infer_metrics` gains the turn count and the
-  screen layer that decided the call, so "how often is history passed" and
-  "which layer refused this" are queries. Both took a scan of host transcripts
-  when it mattered.
-
-Fixtures were the root cause of the miss. The benchmark was short and
-synthetic and attributed no refusals to the context layer; the first real
-conversation hit exactly that. `tests/live` now carries realistic-size
-conversations, and the one that reproduced the defect is the fix's exit
-criterion.
-
 ## 20.20.0 — 2026-09-16
 
 ### `prism_infer` takes the conversation, not just the last line

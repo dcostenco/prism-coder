@@ -222,8 +222,7 @@ describe("R7 Layer-1 screening of history is bounded", () => {
         const first = callLayer1.mock.calls.length;
         // each turn alone (in windows) + the prompt alone + one context window per turn and prompt
         const ctx = contextWindows(args({ messages: five }));
-        expect(ctx.length).toBe(five.filter(t => t.role === "user").length + 1); // requests only
-        expect(ctx.every(w => !w.includes("Assistant: "))).toBe(true);
+        expect(ctx.length).toBe(five.length + 1);
         expect(ctx.at(-1)?.length).toBe(HISTORY_TURN_WINDOW_CHARS);
         expect(first).toBe(turnWindows + 1 + ctx.length);
         await runInfer(args({ prompt: "and the follow-up?", messages: five }), deps({ callLayer1 }));
@@ -609,11 +608,9 @@ describe("R14 round thirteen", () => {
         const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
         _setCacheForTest({ ...ENT, multi_turn: { enabled: true, max_turns: 49, max_chars: 128_000 } }, 60_000);
         // worst distribution: 48 DISTINCT one-char turns (48 windows, no two
-        // alike so none is a cache hit) + one turn taking the rest (38
-        // windows) = 86 isolated windows. All USER, which is also the worst
-        // case for the context layer: one window per request + one for the
-        // prompt = 50.
-        const minimal = Array.from({ length: 48 }, (_, i) => ({ role: "user" as const, content: String.fromCharCode(0x41 + i) }));
+        // alike so none is a cache hit; all assistant, the longer label) + one
+        // turn taking the rest (38 windows) = 86 isolated windows
+        const minimal = Array.from({ length: 48 }, (_, i) => ({ role: "assistant" as const, content: String.fromCharCode(0x41 + i) }));
         expect(new Set(minimal.map(t => t.content)).size).toBe(48);
         const longTurn = Array.from({ length: 6_000 }, (_, i) => `entry ${i} of the pasted log; `).join("").slice(0, 128_000 - 48);
         const huge = [...minimal, { role: "user" as const, content: longTurn }];
@@ -805,9 +802,8 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
         await runInfer(args({ prompt: "and after that?", messages: next }), deps({ callLayer1 }));
         const delta = callLayer1.mock.calls.length - first;
         // two new turns alone + the prompt alone + EVERY context window (all shifted by the eviction)
-        const ctxAfter = contextWindows(args({ prompt: "and after that?", messages: next }));
-        expect(delta).toBe(2 + 1 + ctxAfter.length);
-        expect(ctxAfter.length).toBe(next.filter(t => t.role === "user").length + 1);
+        expect(delta).toBe(2 + 1 + contextWindows(args({ prompt: "and after that?", messages: next })).length);
+        expect(delta).toBeGreaterThanOrEqual(30);
     });
     it("round 23: intent spread across two user turns, clean apart and reserved together, is caught by the context window ending at the later half even when four benign turns follow", async () => {
         const A = "My student's behaviour plan says that when he starts to escalate, two of us are supposed to guide him to the mat and stay with him until he settles.";
@@ -830,10 +826,8 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
         const B = "BETA-HALF: the second half of the plan.";
         const both = () => vi.fn(async (text: string) => (text.includes("ALPHA-HALF") && text.includes("BETA-HALF") ? "OBVIOUS_RESERVED" : "OBVIOUS_NOT_RESERVED") as "OBVIOUS_RESERVED" | "OBVIOUS_NOT_RESERVED");
         const pad = (n: number) => "the reading group notes were filed on Thursday. ".repeat(Math.ceil(n / 47)).slice(0, n);
-        // The spacer is a USER turn: assistant prose is no longer part of a
-        // context read, so only requests put distance between two halves.
         const conv = (gap: number) => args({ prompt: "Thanks, anything else?", messages: [
-            { role: "user", content: A }, { role: "user", content: pad(gap) }, { role: "user", content: B }] });
+            { role: "user", content: A }, { role: "assistant", content: pad(gap) }, { role: "user", content: B }] });
         const near = await runInfer(conv(3_000), deps({ callLayer1: both() }));
         expect(near.backend).toBe("refused");
         const farMock = both();
@@ -846,7 +840,7 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
         const headMock = both();
         const headDeps = deps({ callLayer1: headMock });
         const head = await runInfer(args({ prompt: "Thanks, anything else?", messages: [
-            { role: "user", content: A }, { role: "user", content: B + " " + pad(HISTORY_TURN_WINDOW_CHARS) }] }), headDeps);
+            { role: "user", content: A }, { role: "assistant", content: "Noted." }, { role: "user", content: B + " " + pad(HISTORY_TURN_WINDOW_CHARS) }] }), headDeps);
         expect(head.backend).toBe("ollama-9b");
         expect((headDeps.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
         expect(headMock.mock.calls.some(c => String(c[0]).includes("ALPHA-HALF") && String(c[0]).includes("BETA-HALF"))).toBe(false);
@@ -942,55 +936,6 @@ describe("R19 cloud fallback is defined by the PLAN, not by the caller's silence
         expect(r.used_cloud).toBeFalsy();
         expect(callCloud.mock.calls.length).toBe(0);
         expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
-    });
-});
-
-describe("R21 the context layer compares REQUESTS, not the worker's own prose", () => {
-    // 2026-09-16, production: the first organic multi-turn call was refused
-    // because reading the turns together hedged where every turn read alone
-    // was clean. Concatenating the worker's answer bulked up the joint read on
-    // vocabulary the classifier already leans on. Requests are what carry
-    // intent, so requests are what the joint read compares. Both roles are
-    // still read ALONE and every verdict is kept.
-    const ASSISTANT_TEXT = "Here is the middleware: verifyToken reads the bearer token and attaches req.user.";
-    it("no context read contains assistant text, however many assistant turns there are", () => {
-        const messages = [
-            { role: "user" as const, content: "show me the token check" },
-            { role: "assistant" as const, content: ASSISTANT_TEXT },
-            { role: "user" as const, content: "and the refresh path?" },
-            { role: "assistant" as const, content: "The refresh path re-issues on expiry." },
-        ];
-        const wins = contextWindows(args({ messages }));
-        expect(wins.length).toBe(3);                                  // two requests + the prompt
-        for (const w of wins) {
-            expect(w).not.toContain("Assistant: ");
-            expect(w).not.toContain(ASSISTANT_TEXT);
-        }
-    });
-    it("a reserved ASSISTANT turn is still caught — by its own isolated read, which no context read can lower", async () => {
-        const callLayer1 = vi.fn(async (text: string) => (text === ASSISTANT_TEXT ? "OBVIOUS_RESERVED" : "OBVIOUS_NOT_RESERVED") as "OBVIOUS_RESERVED" | "OBVIOUS_NOT_RESERVED");
-        const d = deps({ callLayer1 });
-        const r = await runInfer(args({ prompt: "now add a timeout to it", messages: [
-            { role: "user", content: "show me the token check" }, { role: "assistant", content: ASSISTANT_TEXT }] }), d);
-        expect(r.backend).toBe("refused");
-        expect(r.refusal_layer).toBe("isolated");
-        expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
-    });
-    it("KNOWN WEAKENING, pinned: intent split with one half under an assistant label is no longer joined in context — it survives only because that half is reserved when read alone", async () => {
-        const A = "My student's behaviour plan says that when he starts to escalate, two of us guide him to the mat and stay with him until he settles.";
-        const B = "Write out exactly what each of us should do, in order, next time.";
-        const both = (t: string) => t.includes("guide him to the mat") && t.includes("what each of us should do");
-        // A classifier that ONLY fires on the pair, never on a half: the pure
-        // cross-turn case, with the second half mislabelled as the worker's.
-        const pairOnly = vi.fn(async (text: string) => (both(text) ? "OBVIOUS_RESERVED" : "OBVIOUS_NOT_RESERVED") as "OBVIOUS_RESERVED" | "OBVIOUS_NOT_RESERVED");
-        const mislabelled = await runInfer(args({ prompt: "Thanks — anything else for the file?", messages: [
-            { role: "user", content: A }, { role: "assistant", content: B }] }), deps({ callLayer1: pairOnly }));
-        expect(mislabelled.backend).not.toBe("refused");   // the gap this shape accepts
-        // Both halves as requests — the shape the rule is for — is still caught.
-        const asRequests = await runInfer(args({ prompt: "Thanks — anything else for the file?", messages: [
-            { role: "user", content: A }, { role: "user", content: B }] }), deps({ callLayer1: pairOnly }));
-        expect(asRequests.backend).toBe("refused");
-        expect(asRequests.refusal_layer).toBe("context");
     });
 });
 
