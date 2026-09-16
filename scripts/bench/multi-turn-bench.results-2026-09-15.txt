@@ -1,0 +1,37 @@
+model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
+prism-coder:4b        no_history         0         5          10     665            1121
+prism-coder:4b        messages          13         0           2     478            1150
+prism-coder:9b        no_history         0         0          15     393              23
+prism-coder:9b        messages          14         0           1     363              52
+
+per-task (no_history -> messages):
+  prism-coder:4b   recall:codename    fabricated -> correct    | "The Codename for the AI model you are interacting with is **" -> "Nightjar"
+  prism-coder:4b   recall:ticket      declined   -> correct    | "I do not have access to your specific session context or con" -> "SYN-4471"
+  prism-coder:4b   recall:region      declined   -> correct    | "I do not have access to your location or regional data, so I" -> "eu-west-3"
+  prism-coder:4b   recall:owner       declined   -> correct    | "I do not have access to specific context or data about \"the " -> "Marisol"
+  prism-coder:4b   recall:deadline    declined   -> correct    | "I do not have access to your specific project details or cal" -> "October 9"
+  prism-coder:4b   constraint:json    fabricated -> fabricated | "42" -> "42"
+  prism-coder:4b   constraint:prefix  fabricated -> fabricated | "Red." -> "RED is a primary color. (Other examples include blue and yel"
+  prism-coder:4b   constraint:lang    fabricated -> correct    | "There are seven days in a week." -> "Hay 7 días en una semana."
+  prism-coder:4b   ref:second         fabricated -> correct    | "The second option." -> "SQLite"
+  prism-coder:4b   ref:last           fabricated -> correct    | "Evaluation" -> "Deploy"
+  prism-coder:4b   ref:pronoun        fabricated -> correct    | "It returns nothing without further context or input, as \"wha" -> "An array of Row objects."
+  prism-coder:4b   state:x            fabricated -> correct    | "x * 6 = 6x" -> "42"
+  prism-coder:4b   state:list         declined   -> correct    | "I do not have access to your personal lists or data unless y" -> "16"
+  prism-coder:4b   code:call          fabricated -> correct    | "const n = data.helper();" -> "const n = countActiveUsers(data);"
+  prism-coder:4b   code:rename        fabricated -> correct    | "const ledger = new Ledger();" -> "const ledger: InvoiceLedger = new InvoiceLedger();"
+  prism-coder:9b   recall:codename    fabricated -> correct    | "Sapphire" -> "Nightjar"
+  prism-coder:9b   recall:ticket      fabricated -> correct    | "10" -> "SYN-4471"
+  prism-coder:9b   recall:region      fabricated -> correct    | "Europe" -> "eu-west-3"
+  prism-coder:9b   recall:owner       fabricated -> correct    | "Google LLC" -> "Marisol"
+  prism-coder:9b   recall:deadline    fabricated -> correct    | "2026-12-31" -> "October 9"
+  prism-coder:9b   constraint:json    fabricated -> correct    | "49" -> "{\"answer\": 42}"
+  prism-coder:9b   constraint:prefix  fabricated -> fabricated | "Red is a primary colour. Other examples include blue and yel" -> "Red."
+  prism-coder:9b   constraint:lang    fabricated -> correct    | "There are 7 days in a week." -> "Hay siete días en una semana."
+  prism-coder:9b   ref:second         fabricated -> correct    | "Option B" -> "SQLite"
+  prism-coder:9b   ref:last           fabricated -> correct    | "Sleep" -> "Deploy."
+  prism-coder:9b   ref:pronoun        fabricated -> correct    | "It returns a value." -> "An array of Row objects."
+  prism-coder:9b   state:x            fabricated -> correct    | "30" -> "42"
+  prism-coder:9b   state:list         fabricated -> correct    | "10" -> "16"
+  prism-coder:9b   code:call          fabricated -> correct    | "```js const n = data.helper(); ```" -> "```js const n = countActiveUsers(data); ```"
+  prism-coder:9b   code:rename        fabricated -> correct    | "```typescript const ledger = new Ledger(); ```" -> "```typescript const ledger = new InvoiceLedger(); ```"
