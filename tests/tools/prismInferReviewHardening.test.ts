@@ -831,14 +831,18 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
         const near = await runInfer(conv(3_000), deps({ callLayer1: both() }));
         expect(near.backend).toBe("refused");
         const farMock = both();
-        const far = await runInfer(conv(HISTORY_TURN_WINDOW_CHARS), deps({ callLayer1: farMock }));
-        expect(far.backend).not.toBe("refused");
+        const farDeps = deps({ callLayer1: farMock });
+        const far = await runInfer(conv(HISTORY_TURN_WINDOW_CHARS), farDeps);
+        expect(far.backend).toBe("ollama-9b");
+        expect((farDeps.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
         expect(farMock.mock.calls.some(c => String(c[0]).includes("ALPHA-HALF") && String(c[0]).includes("BETA-HALF"))).toBe(false);
         // the later half at the START of a long turn: the window ending at that turn is the turn's own tail
         const headMock = both();
+        const headDeps = deps({ callLayer1: headMock });
         const head = await runInfer(args({ prompt: "Thanks, anything else?", messages: [
-            { role: "user", content: A }, { role: "assistant", content: "Noted." }, { role: "user", content: B + " " + pad(HISTORY_TURN_WINDOW_CHARS) }] }), deps({ callLayer1: headMock }));
-        expect(head.backend).not.toBe("refused");
+            { role: "user", content: A }, { role: "assistant", content: "Noted." }, { role: "user", content: B + " " + pad(HISTORY_TURN_WINDOW_CHARS) }] }), headDeps);
+        expect(head.backend).toBe("ollama-9b");
+        expect((headDeps.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
         expect(headMock.mock.calls.some(c => String(c[0]).includes("ALPHA-HALF") && String(c[0]).includes("BETA-HALF"))).toBe(false);
     });
     it("skipping the context reads once the verdict is UNCERTAIN leaves an audit marker", async () => {
