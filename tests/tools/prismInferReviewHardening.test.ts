@@ -798,7 +798,7 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
         await runInfer(args({ messages: thirty }), deps({ callLayer1 }));
         const first = callLayer1.mock.calls.length;
         const next = [...thirty.slice(1), { role: "user" as const, content: "What is my codename?" }, turn(31)];
-        expect(screeningTranscript(args({ prompt: "and after that?", messages: next })).length).toBeLessThan(HISTORY_TURN_WINDOW_CHARS); // every window sees the whole transcript
+        expect(screeningTranscript(args({ prompt: "and after that?", messages: next })).length).toBeLessThan(HISTORY_TURN_WINDOW_CHARS); // each window holds its entire transcript prefix, so every one held turn 0
         await runInfer(args({ prompt: "and after that?", messages: next }), deps({ callLayer1 }));
         const delta = callLayer1.mock.calls.length - first;
         // two new turns alone + the prompt alone + EVERY context window (all shifted by the eviction)

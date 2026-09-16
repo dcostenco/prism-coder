@@ -172,7 +172,8 @@ export function screeningTranscript(args: PrismInferArgs): string {
  *  cross-turn intent). Anchored on the turn's end, so a later prompt is
  *  never in an earlier turn's window, and an eviction at the plan cap
  *  changes only the windows the evicted turn was in — one or two for long
- *  turns, all of them for short turns (a cost, not a safety property). */
+ *  turns, every one while the whole transcript still fits in one window
+ *  (a cost, not a safety property). */
 export function contextWindows(args: PrismInferArgs): string[] {
     const labelled = [...(args.messages ?? []), { role: "user" as const, content: args.prompt }]
         .map(t => `${t.role === "user" ? "User" : "Assistant"}: ${t.content}`);
