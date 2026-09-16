@@ -389,6 +389,8 @@ describe("needs_history — follow-up cues", () => {
     "ok, keep going",
     "redo that with the flag off",
     "do it again but for the EU region",
+    "Now continue the migration",
+    "Continue?",
   ])("flags a follow-up: %s", (desc) => {
     expect(looksLikeFollowUp(desc)).toBe(true);
   });

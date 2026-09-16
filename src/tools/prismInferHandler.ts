@@ -46,7 +46,7 @@ import {
     passesCodingQualityGate,
 } from "../utils/codingQualityPolicy.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
-import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, keywordBackstop, reservedCategory, type Layer1Verdict } from "../utils/layer1.js";
+import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, isNonOperationalArtifact, keywordBackstop, reservedCategory, type Layer1Verdict } from "../utils/layer1.js";
 import { recordInference, recordThinkOnlyRetry, formatInferenceMetrics, estimateTokens } from "../utils/inferenceMetrics.js";
 import { appendInferMetric } from "../storage/inferMetricsLedger.js";
 import { getStorage } from "../storage/index.js";
@@ -148,6 +148,19 @@ function screenedText(args: PrismInferArgs): string {
     return history.length ? [...history.map(t => t.content), args.prompt].join("\n") : args.prompt;
 }
 
+/** Role-labelled transcript, current prompt last, for the SEMANTIC screen.
+ *  Classified turn by turn, the 4b refused 4 of 12 benign bench follow-ups
+ *  (2 UNCERTAIN on context-free snippets, 2 false RESERVED: "We deploy to
+ *  eu-west-3", "Steps: plan, build, test, deploy"); classified as windows of
+ *  this transcript, 0 of 12 (live, 2026-09-16). Every window carries its
+ *  context, and windows are aligned from the start, so a follow-up re-uses
+ *  the cached verdicts of every window but the last. */
+export function screeningTranscript(args: PrismInferArgs): string {
+    return [...(args.messages ?? []), { role: "user" as const, content: args.prompt }]
+        .map(t => `${t.role === "user" ? "User" : "Assistant"}: ${t.content}`)
+        .join("\n");
+}
+
 /** Most severe of two Layer 1 verdicts. A reserved turn anywhere in the
  *  conversation is a reserved conversation. */
 const LAYER1_SEVERITY: Record<Layer1Verdict, number> = {
@@ -225,7 +238,7 @@ async function classifyHistoryWindow(
     const hit = layer1HistoryCache.get(key);
     if (hit && hit.expiresAt > performance.now()) return hit.verdict;
     if (hit) layer1HistoryCache.delete(key);
-    const verdict = await l1fn(window, ollamaUrl, model);
+    const verdict = await l1fn(window, ollamaUrl, model, undefined, undefined, { deterministic: false });
     if (verdict !== "ERROR") {
         if (layer1HistoryCache.size >= LAYER1_HISTORY_CACHE_MAX) {
             const oldest = layer1HistoryCache.keys().next().value;
@@ -1401,7 +1414,7 @@ export interface InferDeps {
     /** Injectable template-overhead probe; defaults to probeTemplateOverhead. */
     probeTemplateOverhead?: typeof probeTemplateOverhead;
     /** Injectable Layer 1 classifier for testing. Defaults to callLayer1 from layer1.ts. */
-    callLayer1?: (userPrompt: string, ollamaUrl: string, model: string, fetchImpl?: typeof fetch, images?: string[]) => Promise<Layer1Verdict>;
+    callLayer1?: (userPrompt: string, ollamaUrl: string, model: string, fetchImpl?: typeof fetch, images?: string[], opts?: { deterministic?: boolean }) => Promise<Layer1Verdict>;
 }
 
 /**
@@ -1765,25 +1778,59 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         // 12k-char text is missed by it. Windows overlap so a phrase on a
         // boundary is seen whole. The current prompt keeps its images and its
         // existing excerpt behaviour.
-        let l1: Layer1Verdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
-        history: for (const turn of args.messages ?? []) {
-            // The deterministic rules (co-occurrence like restraint+document)
-            // run over 2× windows at zero network cost: split across two
-            // classifier windows, neither half fires (review round 2), while a
-            // whole-turn pass fired on words 14k chars apart (review round 3).
-            for (const slice of windowsOf(turn.content, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
-                const det = classifyDeterministicLayer1(slice);
-                if (det) l1 = worseLayer1Verdict(l1, det);
+        let l1: Layer1Verdict;
+        if (!args.messages?.length) {
+            // Single turn: the exact call it always was.
+            l1 = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
+        } else {
+            l1 = "OBVIOUS_NOT_RESERVED";
+            // 1. Deterministic floor, per TURN and role-aware, regex only.
+            for (const turn of args.messages) {
+                // Role matters for the deterministic OPERATIONAL rules (write
+                // auth code, auth bypass, ship/deploy, PHI exposure): they
+                // classify a request, and by description they match ordinary
+                // code — measured 2026-09-16, half of this repo's files and
+                // the worker's own code answers refused the follow-up when
+                // re-sent as an assistant turn. A USER turn is a request and
+                // gets them; an ASSISTANT turn is the worker's prior output
+                // and does not. Clinical rules run on every turn.
+                const isUser = turn.role === "user";
+                // The artifact exemption ("add auth_bypass as a test fixture
+                // label…") is decided over the WHOLE turn: a window that lost
+                // that context must not be more reserved than its turn.
+                const artifactExempt = isUser && isNonOperationalArtifact(turn.content);
+                // Co-occurrence rules are proximity rules: 7,200-char windows
+                // advancing by 3,400, so any two terms up to 3,800 chars apart
+                // share a window wherever they sit (review rounds 2-5).
+                for (const slice of windowsOf(turn.content, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
+                    const det = classifyDeterministicLayer1(slice, { operational: isUser, artifactExempt });
+                    if (det) l1 = worseLayer1Verdict(l1, det);
+                }
             }
-            for (const window of historyTurnWindows(turn.content)) {
+            const promptDet = classifyDeterministicLayer1(args.prompt);
+            if (promptDet) l1 = worseLayer1Verdict(l1, promptDet);
+            // 2. Semantic classifier over windows of the role-labelled
+            // transcript (current prompt last), so every window has its
+            // context. The oversize excerpt in layer1.ts keeps ~3.8k chars of
+            // head, middle and tail, and a position sweep (2026-09-15) showed
+            // a phrase at 20–40% or 60–80% of a 12k-char text is missed by it;
+            // windows overlap so a phrase on a boundary is seen whole.
+            const windows = historyTurnWindows(screeningTranscript(args));
+            for (const [i, window] of windows.entries()) {
                 // OBVIOUS_RESERVED is the top of the severity order; no later
                 // window can lower it, so stop spending classifier calls.
-                if (l1 === "OBVIOUS_RESERVED") break history;
+                if (l1 === "OBVIOUS_RESERVED") break;
                 // A whitespace-only window (a pasted log's padding) carries no
                 // policy content; the classifier would answer ERROR for it and
                 // that ERROR would push a benign conversation to the cloud.
                 if (!window.trim()) continue;
-                l1 = worseLayer1Verdict(l1, await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model));
+                // The current prompt sits in the last window; it carries the
+                // images, and an image call is never cached.
+                const last = i === windows.length - 1;
+                const verdict = last && (resolvedImages?.length ?? 0) > 0
+                    ? await l1fn(window, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false })
+                    : await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model);
+                l1 = worseLayer1Verdict(l1, verdict);
             }
         }
         // Null when the deterministic floor did not fire — the verdict then came

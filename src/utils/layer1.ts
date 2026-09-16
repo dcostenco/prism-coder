@@ -268,7 +268,25 @@ const NON_OPERATIONAL_ARTIFACT_ACTION =
  * clear routine BCBA work reaches local inference. Ambiguous prompts return
  * null and continue to the semantic classifier below.
  */
-export function classifyDeterministicLayer1(userPrompt: string): Layer1Verdict | null {
+/** The non-operational artifact exemption, evaluated over a whole text. The
+ *  caller passes the result for every window of a long turn, so a window
+ *  that lost its "test fixture" context cannot be more reserved than the
+ *  turn it came from (review round 4, 2026-09-16). */
+export function isNonOperationalArtifact(text: string): boolean {
+    return NON_OPERATIONAL_ARTIFACT_CONTEXT.test(text) && NON_OPERATIONAL_ARTIFACT_ACTION.test(text);
+}
+
+export interface DeterministicLayer1Options {
+    /** false = skip the operational (auth code, auth bypass, ship/deploy, PHI
+     *  exposure) rules. They classify a REQUEST; a prior assistant turn is the
+     *  worker's own output, and ordinary code matches them by description
+     *  (half of this repo's files, measured 2026-09-16). Clinical rules always run. */
+    operational?: boolean;
+    /** Whole-turn artifact exemption computed by the caller (see above). */
+    artifactExempt?: boolean;
+}
+
+export function classifyDeterministicLayer1(userPrompt: string, opts?: DeterministicLayer1Options): Layer1Verdict | null {
     // The artifact exemption is checked BEFORE the reserved rules, and only for
     // the non-clinical ones.
     //
@@ -285,10 +303,10 @@ export function classifyDeterministicLayer1(userPrompt: string): Layer1Verdict |
     // closed first, before anything can exempt it.
     const clinicalReserved = matchesAny(userPrompt, CLINICAL_RESERVED_RULES);
     if (clinicalReserved) return "OBVIOUS_RESERVED";
-    if (
-        NON_OPERATIONAL_ARTIFACT_CONTEXT.test(userPrompt) &&
-        NON_OPERATIONAL_ARTIFACT_ACTION.test(userPrompt)
-    ) {
+    if (opts?.operational === false) {
+        return matchesAny(userPrompt, ROUTINE_BCBA_INTENT_RULES) ? "OBVIOUS_NOT_RESERVED" : null;
+    }
+    if (opts?.artifactExempt || isNonOperationalArtifact(userPrompt)) {
         return "OBVIOUS_NOT_RESERVED";
     }
     if (matchesAny(userPrompt, RESERVED_INTENT_RULES)) return "OBVIOUS_RESERVED";
@@ -443,12 +461,18 @@ export async function callLayer1(
      *  screenshot of clinical material would otherwise pass a gate that only
      *  ever read the text prompt. */
     images?: string[],
+    opts?: {
+        /** false = the caller already ran the deterministic floor with the
+         *  role context this text lacks (a transcript window mixes user and
+         *  assistant text; see prismInferHandler's history screen). */
+        deterministic?: boolean;
+    },
 ): Promise<Layer1Verdict> {
     if (!userPrompt || !userPrompt.trim()) return "ERROR";
 
     const oversize = userPrompt.length > MAX_CLASSIFIER_PROMPT_LENGTH;
     const hasImages = !!images?.length;
-    const deterministic = classifyDeterministicLayer1(userPrompt);
+    const deterministic = opts?.deterministic === false ? null : classifyDeterministicLayer1(userPrompt);
     if (deterministic === "OBVIOUS_RESERVED") return deterministic;
     // The routine-work fast path may only skip the model when there is nothing
     // to look at. It reads the PROMPT, so with an image attached it is a free
