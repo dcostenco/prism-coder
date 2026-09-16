@@ -159,6 +159,15 @@ describe("convergeModels — local num_ctx pins", () => {
         expect(logs.some(l => l.includes("ollama create prism-coder:9b -f scripts/prism-coder-9b.Modelfile"))).toBe(true);
     });
 
+    it("with tagFacts present but /api/show unavailable, a digest-mismatched alias is LEFT ALONE and reported", async () => {
+        const state = [T("dcostenco/prism-coder:9b", "e8b71"), T("prism-coder:9b", "d48df")];
+        const { deps, copies, logs } = harness([state, state]);
+        const out = await convergeModels({ ...deps, tagFacts: async () => null });
+        expect(copies).not.toContainEqual(["dcostenco/prism-coder:9b", "prism-coder:9b"]);
+        expect(out.find(o => o.tier === "9b")?.detail).toBe("tag_facts_unavailable_pin_unknown");
+        expect(logs.some(l => l.includes("left alone"))).toBe(true);
+    });
+
     it("without tagFacts the digest rule still applies (unchanged behaviour for older hosts)", async () => {
         const state = [T("dcostenco/prism-coder:9b", "e8b71"), T("prism-coder:9b", "d48df")];
         const { deps, copies } = harness([state, state]);

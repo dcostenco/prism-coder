@@ -137,10 +137,13 @@ export async function convergeModels(deps: ModelConvergeDeps): Promise<TierOutco
                         droppedPin = a.pinnedNumCtx;
                     }
                 } else {
-                    // /api/show failed or had no FROM line: the digest rule
-                    // applies and a local pin cannot be detected — say so
-                    // before overwriting (review 2026-09-16).
-                    deps.log(`? ${alias}: /api/show facts unavailable — digest rule applies; a local num_ctx pin on this alias cannot be detected`);
+                    // /api/show failed or had no FROM line: a local pin cannot
+                    // be detected, so do NOT overwrite — a digest mismatch may
+                    // be nothing but the pin (review 2026-09-16). Hosts without
+                    // tagFacts (older callers) keep the digest rule.
+                    outcomes.push({ tier, action: "failed", detail: "tag_facts_unavailable_pin_unknown" });
+                    deps.log(`? ${alias}: /api/show facts unavailable — left alone (a local num_ctx pin cannot be told from stale weights). Re-run when Ollama answers /api/show, or rebuild deliberately with: ollama cp ${source} ${alias}`);
+                    continue;
                 }
             }
 

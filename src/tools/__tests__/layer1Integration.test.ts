@@ -421,16 +421,19 @@ describe("Layer 1 handler integration", () => {
         expect(result.used_cloud).toBe(false);
     });
 
-    it("recursion guard: mode=route + max_tokens<=16 skips Layer 1", async () => {
-        const callLayer1Mock = vi.fn().mockResolvedValue("OBVIOUS_RESERVED");
-        const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "OBVIOUS_RESERVED", doneReason: "stop" });
+    it("no recursion guard: mode=route + max_tokens<=16 (the classifier's old signature) is screened like any call", async () => {
+        // The classifier calls Ollama directly and never re-enters runInfer,
+        // so the skip only ever served as a caller-controlled bypass
+        // (two independent reviews, 2026-09-16).
+        const callLayer1Mock = vi.fn().mockResolvedValue("OBVIOUS_NOT_RESERVED");
+        const callLocal = vi.fn().mockResolvedValue({ ok: true, text: "knowledge_search", doneReason: "stop" });
 
         await runInfer(
             { prompt: "classify this", mode: "route", cloud_fallback: true, max_tokens: 16 },
             makeBaseDeps({ callLayer1: callLayer1Mock, callLocal }),
         );
 
-        expect(callLayer1Mock).not.toHaveBeenCalled();
+        expect(callLayer1Mock).toHaveBeenCalledTimes(1);
     });
 
     it("RESERVED + cloud fails → throws, never falls through to local", async () => {

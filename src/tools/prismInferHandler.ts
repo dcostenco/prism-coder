@@ -170,11 +170,19 @@ export const HISTORY_TURN_WINDOW_CHARS = 3_600;
 export const HISTORY_TURN_WINDOW_OVERLAP = 200;
 export function historyTurnWindows(content: string): string[] {
     if (content.length <= HISTORY_TURN_WINDOW_CHARS) return [content];
+    const isHigh = (i: number) => { const c = content.charCodeAt(i); return c >= 0xd800 && c <= 0xdbff; };
+    const isLow = (i: number) => { const c = content.charCodeAt(i); return c >= 0xdc00 && c <= 0xdfff; };
     const out: string[] = [];
     const step = HISTORY_TURN_WINDOW_CHARS - HISTORY_TURN_WINDOW_OVERLAP;
     for (let i = 0; i < content.length; i += step) {
-        out.push(content.slice(i, i + HISTORY_TURN_WINDOW_CHARS));
-        if (i + HISTORY_TURN_WINDOW_CHARS >= content.length) break;
+        // Never cut a surrogate pair: a window that starts on a low or ends
+        // on a high surrogate is malformed text for the classifier.
+        let start = i;
+        if (start > 0 && isLow(start)) start += 1;
+        let end = Math.min(content.length, start + HISTORY_TURN_WINDOW_CHARS);
+        if (end < content.length && isHigh(end - 1)) end += 1;
+        out.push(content.slice(start, end));
+        if (end >= content.length) break;
     }
     return out;
 }
@@ -186,7 +194,10 @@ export function historyTurnWindows(content: string): string[] {
  *  transient and never cached; the current prompt, which may carry images,
  *  never goes through here. */
 const LAYER1_HISTORY_CACHE_MAX = 1_000;
-const layer1HistoryCache = new Map<string, Layer1Verdict>();
+/** Entries expire so a classifier alias updated in place (same name, new
+ *  weights) cannot keep serving a clearance the old weights gave. */
+export const LAYER1_HISTORY_CACHE_TTL_MS = 15 * 60_000;
+const layer1HistoryCache = new Map<string, { verdict: Layer1Verdict; expiresAt: number }>();
 export function _resetLayer1HistoryCacheForTest(): void { layer1HistoryCache.clear(); }
 async function classifyHistoryWindow(
     l1fn: NonNullable<InferDeps["callLayer1"]>,
@@ -196,14 +207,15 @@ async function classifyHistoryWindow(
 ): Promise<Layer1Verdict> {
     const key = createHash("sha256").update(model).update("\0").update(window).digest("hex");
     const hit = layer1HistoryCache.get(key);
-    if (hit) return hit;
+    if (hit && hit.expiresAt > Date.now()) return hit.verdict;
+    if (hit) layer1HistoryCache.delete(key);
     const verdict = await l1fn(window, ollamaUrl, model);
     if (verdict !== "ERROR") {
         if (layer1HistoryCache.size >= LAYER1_HISTORY_CACHE_MAX) {
             const oldest = layer1HistoryCache.keys().next().value;
             if (oldest !== undefined) layer1HistoryCache.delete(oldest);
         }
-        layer1HistoryCache.set(key, verdict);
+        layer1HistoryCache.set(key, { verdict, expiresAt: Date.now() + LAYER1_HISTORY_CACHE_TTL_MS });
     }
     return verdict;
 }
@@ -333,7 +345,8 @@ export const PRISM_INFER_TOOL: Tool = {
         "otherwise hand to the cloud model — it costs $0 when the local hit succeeds. " +
         "For a FOLLOW-UP to an earlier prism_infer answer, pass the accepted prior turns as `messages` " +
         "(paid plans): without them the worker answers the follow-up from nothing and fabricates. " +
-        "Every result reports `multi_turn` (your plan's caps) and `history_turns` (what was sent). " +
+        "Every inference result reports `multi_turn` (your plan's caps) and `history_turns` (what was sent); " +
+        "the crisis intercept reports only `history_turns`. " +
         "History over the plan's caps is refused (history_over_plan_cap), never trimmed; a free plan " +
         "or a host with no portal is refused (multi_turn_not_in_plan). Hosts that compact large " +
         "schemas may drop parameter text, so the contract lives here.",
@@ -1467,7 +1480,11 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // Over the current turn AND every history turn: a first-person crisis
     // disclosure in a prior turn must meet the same intercept the portal
     // applies to the flattened conversation (adversarial review 2026-09-16).
-    const safetyIntercept = checkInputSafety(screenedText(args));
+    // Per turn, not over a join: two adjacent turns must not synthesise a
+    // phrase neither contains. Assistant turns are screened too, as the portal
+    // screens the flattened conversation it receives.
+    const safetyIntercept = [...(args.messages ?? []).map(t => t.content), args.prompt]
+        .map(checkInputSafety).find(Boolean) ?? null;
     if (safetyIntercept) {
         return {
             output: safetyIntercept,
@@ -1656,10 +1673,11 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // request rather than silently routing to local.
     // Recursion guard: skip when this call IS the Layer 1 classification
     // (mode="route" + max_tokens<=16 is the Layer 1 call signature).
-    // The classifier never carries history, so a call WITH history is never
-    // the classifier: history must be screened whatever the mode/max_tokens
-    // pair says (a caller-controlled pair; adversarial review 2026-09-16).
-    const layer1RecursionGuard = mode === "route" && maxTokens <= 16 && !args.messages?.length;
+    // No recursion guard: the classifier (layer1.ts) calls Ollama directly and
+    // never re-enters runInfer, so the old "mode=route + max_tokens<=16 is the
+    // classifier" skip only ever served as a caller-controlled bypass of the
+    // safety screen (two independent reviews, 2026-09-16). Every call is
+    // screened.
     // Resolved BEFORE Layer 1: the classifier must see the same images the
     // model will. Classifying only the text prompt let a screenshot of
     // clinical material through a gate that never looked at it.
@@ -1693,7 +1711,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         if (wouldVerify) attempts.push({ tier: "verifier", reason: "verifier_skipped_images_stay_local" });
         gatedArgs = { ...gatedArgs, route_guard: "local" as const, verify: false };
     }
-    if (installed && !layer1RecursionGuard) {
+    if (installed) {
         const l1fn = deps.callLayer1 ?? defaultCallLayer1;
         const l1Model = resolveOllamaName("prism-coder:4b", installed);
         // The classifier must be able to SEE what it is classifying. Ollama
@@ -2312,14 +2330,20 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     }
 
                     const repair = buildCodingRepairPrompt(args.prompt, output, failedReason);
-                    const repairSystem = args.system
-                        ? `${args.system}\n\n${repair.system}`
+                    // effectiveSystem, not args.system: the repair carries the
+                    // first call's images, so it keeps the default vision
+                    // instruction too. Sized like the first call — history and
+                    // images counted, against the live window (review 2026-09-16).
+                    const repairSystem = effectiveSystem
+                        ? `${effectiveSystem}\n\n${repair.system}`
                         : repair.system;
                     const repairPromptTokens =
+                        estimateImageTokens(resolvedImages?.length ?? 0) +
                         estimateTokens(repair.prompt) +
+                        historyTokenEstimate(args.messages) +
                         estimateTokens(repairSystem) +
                         CTX_TEMPLATE_MARGIN;
-                    if (repairPromptTokens <= tier.ctxTokens) {
+                    if (repairPromptTokens <= effectiveCtx) {
                         attempts.push({ tier: tier.tag, reason: `code_repair:${failedReason}` });
                         // Same images and history as the first call: a repair
                         // of a follow-up without its context "repairs" against

@@ -8,6 +8,7 @@ import {
     prismInferHandler,
     messagesProblem,
     _resetLayer1HistoryCacheForTest,
+    LAYER1_HISTORY_CACHE_TTL_MS,
     callSynaluxInference,
     portalFlattenedTranscript,
     historyTurnWindows,
@@ -136,10 +137,10 @@ describe("R4 a call with history is always Layer-1 screened", () => {
         const l1 = d.callLayer1 as ReturnType<typeof vi.fn>;
         expect(l1.mock.calls.length).toBe(1 + HISTORY.length);
     });
-    it("the same signature WITHOUT history keeps skipping (the classifier's recursion guard is unchanged)", async () => {
+    it("the same signature WITHOUT history is screened too: the old skip is gone (round 3)", async () => {
         const d = deps();
         await runInfer({ prompt: "route me", mode: "route", max_tokens: 16, escalation: "report" }, d);
-        expect((d.callLayer1 as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+        expect((d.callLayer1 as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
     });
 });
 
@@ -227,5 +228,52 @@ describe("R8 refusal wording and structural refusals", () => {
         expect(messagesProblem([{ role: "user", content: "x".repeat(128_001) }])).toMatch(/absolute ceiling is 128000/);
         expect(messagesProblem([{ role: "user", content: "fine" }])).toBeNull();
         await expect(prismInferHandler({ prompt: "x", messages: fiftyOne })).rejects.toThrow(/messages has 51 turns; the absolute ceiling is 50/);
+    });
+});
+
+describe("R9 round three", () => {
+    it("windows never cut a surrogate pair and still cover every code point", () => {
+        const emoji = "\u{1F600}".repeat(3_000); // 6,000 code units, 3,000 code points
+        const w = historyTurnWindows(emoji);
+        const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+        for (const x of w) expect(lone.test(x), "a window cut a surrogate pair").toBe(false);
+        const seen = w.reduce((n, x) => n + (x.match(/\u{1F600}/gu)?.length ?? 0), 0);
+        expect(seen).toBeGreaterThanOrEqual(3_000);
+    });
+    it("a cached history verdict expires: after the TTL the turn is re-classified", async () => {
+        // A Date.now spy, not fake timers: the handler's own timeouts must
+        // keep running.
+        const realNow = Date.now();
+        // The entitlements cache must outlive the clock jump, or the third
+        // call is refused (multi_turn_not_in_plan) before Layer 1 runs.
+        _setCacheForTest(ENT, LAYER1_HISTORY_CACHE_TTL_MS * 4);
+        const nowSpy = vi.spyOn(Date, "now").mockReturnValue(realNow);
+        try {
+            const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
+            const one = [{ role: "user" as const, content: "turn about the reading group" }];
+            await runInfer(args({ messages: one }), deps({ callLayer1 }));
+            await runInfer(args({ messages: one }), deps({ callLayer1 }));
+            expect(callLayer1.mock.calls.filter(c => String(c[0]).startsWith("turn about")).length).toBe(1);
+            nowSpy.mockReturnValue(realNow + LAYER1_HISTORY_CACHE_TTL_MS + 1);
+            await runInfer(args({ messages: one }), deps({ callLayer1 }));
+            expect(callLayer1.mock.calls.filter(c => String(c[0]).startsWith("turn about")).length).toBe(2);
+        } finally { nowSpy.mockRestore(); }
+    });
+    it("a crisis phrase in an ASSISTANT turn is intercepted (parity with the portal's flattened screen)", async () => {
+        const d = deps();
+        const r = await runInfer(args({ prompt: "continue", messages: [{ role: "assistant", content: "I want to die, nothing helps" }] }), d);
+        expect(r.backend).toBe("safety_gate");
+    });
+    it("the repair call uses the first call's effective system prompt (kept with the images it now carries)", async () => {
+        const PROMPT = "Implement class TrieNode with a valid Python constructor. Return only the implementation source code.";
+        const BAD = "class TrieNode:\n    def __init__():\n        self.children = {}";
+        const GOOD = "class TrieNode:\n    def __init__(self):\n        self.children = {}";
+        const callLocal = vi.fn()
+            .mockResolvedValueOnce({ ok: true as const, text: BAD, doneReason: "stop" })
+            .mockResolvedValueOnce({ ok: true as const, text: GOOD, doneReason: "stop" });
+        await runInfer(args({ prompt: PROMPT, mode: "code", model_ceiling: "9b", system: "house style: snake_case" }), deps({ callLocal }));
+        expect(callLocal.mock.calls.length).toBeGreaterThanOrEqual(2);
+        expect(String(callLocal.mock.calls[1][3])).toContain("house style: snake_case");
+        expect(String(callLocal.mock.calls[1][3])).toContain(String(callLocal.mock.calls[0][3]));
     });
 });

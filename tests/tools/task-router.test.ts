@@ -384,6 +384,9 @@ describe("needs_history — follow-up cues", () => {
     "your previous answer missed the null case; fix that",
     "continue from where you stopped in the parser",
     "as we discussed, rename the helper and re-export it",
+    "continue",
+    "please continue",
+    "ok, keep going",
   ])("flags a follow-up: %s", (desc) => {
     expect(looksLikeFollowUp(desc)).toBe(true);
   });
