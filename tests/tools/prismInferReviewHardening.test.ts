@@ -778,9 +778,15 @@ describe("R17 round twenty", () => {
         const routine = "Write an operational definition for hand raising during circle time.";
         await runInfer(args({ prompt: routine, messages: HISTORY }), deps({ callLayer1 }));
         expect(callLayer1.mock.calls.some(c => String(c[0]) === routine)).toBe(false);
-        const long = ("Write an operational definition for hand raising during circle time. ").repeat(70);
-        expect(long.length).toBeGreaterThan(4_000);
-        await runInfer(args({ prompt: long, messages: HISTORY }), deps({ callLayer1 }));
-        expect(callLayer1.mock.calls.some(c => String(c[0]) === long)).toBe(true);
+        // exactly the boundary: 4,000 chars takes the fast path, 4,001 does not
+        const unit = "Write an operational definition for hand raising during circle time. ";
+        const at = unit.repeat(80).slice(0, 4_000);
+        const over = unit.repeat(80).slice(0, 4_001);
+        expect(classifyDeterministicLayer1(at)).toBe("OBVIOUS_NOT_RESERVED");
+        expect(classifyDeterministicLayer1(over)).toBe("OBVIOUS_NOT_RESERVED");
+        await runInfer(args({ prompt: at, messages: HISTORY }), deps({ callLayer1 }));
+        expect(callLayer1.mock.calls.some(c => String(c[0]) === at)).toBe(false);
+        await runInfer(args({ prompt: over, messages: HISTORY }), deps({ callLayer1 }));
+        expect(callLayer1.mock.calls.some(c => String(c[0]) === over)).toBe(true);
     });
 });

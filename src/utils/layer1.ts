@@ -396,10 +396,11 @@ const LAYER1_RETRY_TIMEOUT_MS = 5_000;
 const RESERVED_KEYWORDS = /\b(restrain\w*|seclu(?:sion|d\w*)|physical\s*holds?|(?:prone|supine|basket|therapeutic|manual|two[- ]?person)\s+holds?|hold(?:ing)?\s+(?:the\s+)?(?:client|child|student|patient)\s+down|containment|self[- ]?harm\w*|suicid\w*|overdos\w*|dos(?:age|ing)\s*(?:mg|schedule)|crisis\s*de[- ]?escalation|meltdown\s*management|rage\s+episode|elopement\s*incident)\b/i;
 
 /**
- * Deterministic keyword check — the ERROR-path floor.
+ * Deterministic keyword check — the ERROR-path floor, and the full-text
+ * floor for oversize input (over MAX_CLASSIFIER_PROMPT_LENGTH the classifier
+ * reads an excerpt, so this runs over the whole text first).
  * Returns OBVIOUS_RESERVED if reserved vocabulary is present,
- * OBVIOUS_NOT_RESERVED otherwise. Used only when the LLM classifier
- * fails (timeout, model not loaded, injection attack).
+ * OBVIOUS_NOT_RESERVED otherwise.
  */
 export function keywordBackstop(prompt: string): Layer1Verdict {
     return RESERVED_KEYWORDS.test(prompt) ? "OBVIOUS_RESERVED" : "OBVIOUS_NOT_RESERVED";

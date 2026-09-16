@@ -34,8 +34,10 @@ it:
   truncation class the context gate exists to prevent.
 - **Screened per turn, then in context.** Every history turn is classified alone
   (in ≤3,600-char windows, so nothing hides in the middle of a long turn), the
-  current prompt alone through the classifier's own call, and a reserved verdict
-  on a turn read alone is final: nothing written later can lower it. Then the role-labelled transcript is classified in context, which can only
+  current prompt alone through the classifier's own call unless it is at most
+  4,000 chars and the deterministic rules call it routine, and a reserved verdict
+  on a user turn read alone is final: nothing written later can lower it (on the
+  worker's own assistant turn it floors the verdict at UNCERTAIN instead). Then the role-labelled transcript is classified in context, which can only
   raise the verdict — read alone, short benign snippets came back UNCERTAIN or
   falsely reserved. The deterministic rules run per turn (role-aware for the
   operational ones), the keyword floor and reserved-category attribution over the
@@ -105,7 +107,7 @@ Two context-gate tests that asserted the table's 4,096-token window read
 `num_ctx` from the live daemon instead of injecting a probe, so they passed on
 CI and failed on a host with the pin adopted. They now inject the probe.
 
-### Hardened by four adversarial review rounds before merge
+### Hardened by twenty adversarial review rounds before merge
 
 Two independent reviewers (Codex CLI and a verifier agent that reverted each fix and
 confirmed its regression test failed) reviewed the feature and then each round of fixes.

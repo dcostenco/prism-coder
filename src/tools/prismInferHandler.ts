@@ -1910,9 +1910,10 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // The current prompt is a request: its deterministic floor runs
             // here explicitly (not only inside the classifier entry point, so
             // an injected classifier cannot skip it), in the same proximity
-            // slices as a turn, then it is read alone with its images: a
-            // reserved verdict is final; with images the verdict stands as it
-            // always has (the image path below reads it).
+            // slices as a turn; then, unless the routine fast path below
+            // applies, it is read alone with its images: a reserved verdict is
+            // final; with images the verdict stands as it always has (the
+            // image path below reads it). Its context window is read either way.
             let promptRoutine = true;
             for (const slice of windowsOf(args.prompt, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
                 const promptDet = classifyDeterministicLayer1(slice);
