@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 20.20.0 — 2026-09-16
 
 ### `prism_infer` takes the conversation, not just the last line
 
