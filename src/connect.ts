@@ -1094,7 +1094,7 @@ export interface ManagedStartupRefresh {
    *  of Prism ownership markers: the operator never ran connect for this host,
    *  so nothing is written. `unchanged` / `refreshed` — a managed block was
    *  there. `failed` — reported, never thrown. */
-  status: "unmanaged" | "unchanged" | "refreshed" | "failed";
+  status: "unmanaged" | "unchanged" | "refreshed" | "would-refresh" | "failed";
   detail?: string;
 }
 
@@ -1153,20 +1153,28 @@ export function refreshManagedStartupBlocks(options: {
   // ownership marker, so without this each start rewrote that file twice and
   // never converged: two "refreshed" lines on every start, forever. Whoever
   // gets there first owns it; the second reports it as already handled.
+  // Identity is the FILE, not the path: statSync follows symlinks, and dev:ino
+  // is shared by hard links too, which a path comparison misses entirely (an
+  // atomic replace would then break the link and hand both hosts a "refreshed"
+  // they should never have got). Resolved ONCE per target and reused, so the
+  // decision below is the one that was actually measured; a target retargeted
+  // after this point is the same inherent window as the compare-to-rename one
+  // documented on writeTextAtomically.
   const identityOf = (path: string): string => {
     try {
-      return realpathSync(path);
+      const info = statSync(path);
+      return `${info.dev}:${info.ino}`;
     } catch {
-      return path;   // absent or unreadable: the path itself is identity enough
+      return `path:${path}`;   // absent or unreadable: the path itself is identity enough
     }
   };
+  const resolved = targets.map(target => ({ target, identity: identityOf(target.path) }));
   const shared = new Map<string, ManagedStartupRefresh["host"][]>();
-  for (const target of targets) {
-    const identity = identityOf(target.path);
+  for (const { target, identity } of resolved) {
     shared.set(identity, [...(shared.get(identity) ?? []), target.host]);
   }
-  for (const target of targets) {
-    const sharing = shared.get(identityOf(target.path)) ?? [target.host];
+  for (const { target, identity } of resolved) {
+    const sharing = shared.get(identity) ?? [target.host];
     if (sharing.length > 1) {
       // One file, two hosts. Claude and Gemini serialize the SAME ownership
       // marker but DIFFERENT instructions (the tool is named differently for
@@ -1193,8 +1201,12 @@ export function refreshManagedStartupBlocks(options: {
       results.push({
         host: target.host,
         path: outcome.path,
-        // dry runs report would-refresh; both mean the block is stale.
-        status: outcome.status === "unchanged" || outcome.status === "unmanaged" ? outcome.status : "refreshed",
+        // A dry run must not claim a write it did not make: would-refresh is
+        // carried through as itself. installed/would-install are unreachable
+        // under refreshOnly, so anything else is a completed refresh.
+        status: outcome.status === "unchanged" || outcome.status === "unmanaged" || outcome.status === "would-refresh"
+          ? outcome.status
+          : "refreshed",
       });
     } catch (error) {
       // A self-heal must never be the reason a server fails to start.

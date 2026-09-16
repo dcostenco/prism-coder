@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, statSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, statSync, symlinkSync, linkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -100,6 +100,20 @@ describe("self-healing startup blocks", () => {
         expect(statSync(claudeFile()).mtimeMs).toBe(settled);
         expect(readFileSync(claudeFile(), "utf8")).toBe(staleBytes);
         expect(fresh).not.toBe(staleBytes);   // it really was stale, and stayed that way on purpose
+    });
+
+    it("two hosts hard-linked to one file are reported too — a path comparison would have missed it and broken the link", () => {
+        writeFileSync(claudeFile(), "# Shared\n");
+        configureClaudeNativeStartup(home, false);
+        writeFileSync(claudeFile(), stale(readFileSync(claudeFile(), "utf8")));
+        rmSync(geminiFile(), { force: true });
+        linkSync(claudeFile(), geminiFile());          // one inode, two paths, no symlink
+        const before = readFileSync(claudeFile(), "utf8");
+        const results = refreshManagedStartupBlocks({ homeDir: home, env: {} });
+        for (const host of ["claude-code", "gemini"] as const) {
+            expect(results.find(r => r.host === host)?.status, host).toBe("failed");
+        }
+        expect(readFileSync(claudeFile(), "utf8")).toBe(before);
     });
 
     it("PRISM_NO_STARTUP_REFRESH=1 turns it off entirely: nothing is inspected and nothing is written", () => {
@@ -227,7 +241,8 @@ describe("self-healing startup blocks", () => {
         const older = stale(readFileSync(claudeFile(), "utf8"));
         writeFileSync(claudeFile(), older);
         const results = refreshManagedStartupBlocks({ homeDir: home, dryRun: true, env: {} });
-        expect(results.find(r => r.host === "claude-code")?.status).toBe("refreshed");
+        // Never "refreshed": a dry run must not claim a write it did not make.
+        expect(results.find(r => r.host === "claude-code")?.status).toBe("would-refresh");
         expect(readFileSync(claudeFile(), "utf8")).toBe(older);
     });
 });

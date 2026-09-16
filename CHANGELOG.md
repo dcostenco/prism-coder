@@ -29,9 +29,10 @@ the contract:
   what connect's "close your hosts first" warning is about.
 - **Content-addressed**, so a current block is not rewritten on every start.
   Two hosts that resolve to one file (a `GEMINI.md` symlinked to `CLAUDE.md` is
-  a common single-file setup) are reported rather than healed: they share an
-  ownership marker but serialize different instructions, so no content
-  satisfies both, and whose block it should be is the operator's call. Before
+  a common single-file setup, or a hard link) are reported rather than healed:
+  they share an ownership marker but serialize different instructions, so no
+  content satisfies both, and whose block it should be is the operator's call.
+  Sameness is the file's inode, not its path, so a hard link counts. Before
   this the file was rewritten once per host on every start, forever.
 - **Never fatal.** A failure is reported and the server starts. A file whose
   own mode is read-only is still replaced when its directory is writable,
