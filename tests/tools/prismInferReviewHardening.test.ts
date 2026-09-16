@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import {
     runInfer,
+    VISION_SYSTEM_PROMPT,
     prismInferHandler,
     messagesProblem,
     _resetLayer1HistoryCacheForTest,
@@ -233,7 +234,10 @@ describe("R8 refusal wording and structural refusals", () => {
 
 describe("R9 round three", () => {
     it("windows never cut a surrogate pair and still cover every code point", () => {
-        const emoji = "\u{1F600}".repeat(3_000); // 6,000 code units, 3,000 code points
+        // One BMP char in front makes every window boundary land on an ODD
+        // code-unit index, i.e. in the middle of a pair (round 3 review:
+        // without it the pre-fix slicer passed this test too).
+        const emoji = "a" + "\u{1F600}".repeat(3_000); // 6,001 code units, 3,001 code points
         const w = historyTurnWindows(emoji);
         const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
         for (const x of w) expect(lone.test(x), "a window cut a surrogate pair").toBe(false);
@@ -243,11 +247,11 @@ describe("R9 round three", () => {
     it("a cached history verdict expires: after the TTL the turn is re-classified", async () => {
         // A Date.now spy, not fake timers: the handler's own timeouts must
         // keep running.
-        const realNow = Date.now();
-        // The entitlements cache must outlive the clock jump, or the third
-        // call is refused (multi_turn_not_in_plan) before Layer 1 runs.
-        _setCacheForTest(ENT, LAYER1_HISTORY_CACHE_TTL_MS * 4);
-        const nowSpy = vi.spyOn(Date, "now").mockReturnValue(realNow);
+        // The cache runs on the monotonic clock (performance.now), so a
+        // wall-clock rollback cannot extend a clearance; the entitlements
+        // cache (Date.now) is untouched by this spy.
+        const realNow = performance.now();
+        const nowSpy = vi.spyOn(performance, "now").mockReturnValue(realNow);
         try {
             const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
             const one = [{ role: "user" as const, content: "turn about the reading group" }];
@@ -267,17 +271,23 @@ describe("R9 round three", () => {
         const r2 = await runInfer(args({ prompt: "continue", messages: [{ role: "user", content: "I want to die, nothing helps" }] }), deps());
         expect(r2.backend).toBe("safety_gate");
     });
-    it("the repair call uses the first call's effective system prompt (kept with the images it now carries)", async () => {
-        const PROMPT = "Implement class TrieNode with a valid Python constructor. Return only the implementation source code.";
+    it("the repair call keeps the DEFAULT vision system prompt and the images when the caller supplied none of its own", async () => {
+        // No `system` and an image: effectiveSystem is the vision instruction.
+        // A repair built from args.system would silently drop it (round 3 review).
+        const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+        const PROMPT = "Implement class TrieNode with a valid Python constructor as shown. Return only the implementation source code.";
         const BAD = "class TrieNode:\n    def __init__():\n        self.children = {}";
         const GOOD = "class TrieNode:\n    def __init__(self):\n        self.children = {}";
         const callLocal = vi.fn()
             .mockResolvedValueOnce({ ok: true as const, text: BAD, doneReason: "stop" })
             .mockResolvedValueOnce({ ok: true as const, text: GOOD, doneReason: "stop" });
-        await runInfer(args({ prompt: PROMPT, mode: "code", model_ceiling: "9b", system: "house style: snake_case" }), deps({ callLocal }));
-        expect(callLocal.mock.calls.length).toBeGreaterThanOrEqual(2);
-        expect(String(callLocal.mock.calls[1][3])).toContain("house style: snake_case");
-        expect(String(callLocal.mock.calls[1][3])).toContain(String(callLocal.mock.calls[0][3]));
+        const r = await runInfer(args({ prompt: PROMPT, mode: "code", model_ceiling: "9b", images: [PNG_B64] }), deps({ callLocal, probeVision: async () => true }));
+        expect(r.attempts.some(a => a.reason.startsWith("code_repair:")), JSON.stringify(r.attempts)).toBe(true);
+        const first = callLocal.mock.calls[0]; const repair = callLocal.mock.calls[1];
+        expect(String(first[3])).toContain(VISION_SYSTEM_PROMPT);
+        expect(String(repair[3])).toContain(VISION_SYSTEM_PROMPT);
+        expect(repair[8]).toEqual(first[8]);
+        expect(repair[9]).toEqual(HISTORY);
     });
 });
 

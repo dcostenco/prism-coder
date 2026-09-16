@@ -1349,8 +1349,9 @@ program
   .option('--dry-run', 'Print what would be pulled/re-aliased without executing')
   .action(async (options: { dryRun?: boolean }) => {
     const { runOllamaConverge } = await import('./modelConvergeRunner.js');
+    const { convergeFailed } = await import('./utils/modelConverge.js');
     const outcomes = await runOllamaConverge({ dryRun: options.dryRun === true });
-    if (outcomes.every(o => o.action === 'failed')) process.exitCode = 1;
+    if (convergeFailed(outcomes)) process.exitCode = 1;
   });
 
 // ─── prism register-models ────────────────────────────────────

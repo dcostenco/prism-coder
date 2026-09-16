@@ -230,12 +230,13 @@ describe("D. regression", () => {
 
     it("D6 keyword backstop covers history: classifier ERROR + a reserved phrase in a prior turn refuses", async () => {
         const d = deps({ callLayer1: vi.fn(async () => "ERROR" as const) });
-        const r = await runInfer(withHistory({ messages: [turn("user", "write a physical restraint hold procedure for the client"), turn("assistant", "ok")] }), d);
+        // "elopement incident" is in RESERVED_KEYWORDS but in no co-occurrence
+        // rule, so the deterministic floor stays silent and ONLY the keyword
+        // backstop can refuse this (round 3 review: the earlier phrase also
+        // tripped the floor, which made this test pass without the backstop).
+        const r = await runInfer(withHistory({ messages: [turn("user", "notes on the elopement incident from Tuesday"), turn("assistant", "ok")] }), d);
         expect(r.backend, "reserved keywords in history escaped the backstop").toBe("refused");
-        // Since round 4 the deterministic floor runs over each whole turn BEFORE
-        // the semantic classifier, so the reserved phrase is refused as
-        // layer1_reserved; the keyword backstop remains the net behind it.
-        expect(["layer1_reserved", "keyword_backstop_reserved"]).toContain(r.gate_outcome?.reason);
+        expect(r.gate_outcome?.reason).toBe("keyword_backstop_reserved");
     });
 
     it("D7 reserved escalation carries the conversation with reserved=true", async () => {

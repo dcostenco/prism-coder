@@ -206,8 +206,10 @@ async function classifyHistoryWindow(
     model: string,
 ): Promise<Layer1Verdict> {
     const key = createHash("sha256").update(model).update("\0").update(window).digest("hex");
+    // performance.now() is monotonic: a wall-clock rollback must not extend
+    // a cached clearance (review round 3).
     const hit = layer1HistoryCache.get(key);
-    if (hit && hit.expiresAt > Date.now()) return hit.verdict;
+    if (hit && hit.expiresAt > performance.now()) return hit.verdict;
     if (hit) layer1HistoryCache.delete(key);
     const verdict = await l1fn(window, ollamaUrl, model);
     if (verdict !== "ERROR") {
@@ -215,7 +217,7 @@ async function classifyHistoryWindow(
             const oldest = layer1HistoryCache.keys().next().value;
             if (oldest !== undefined) layer1HistoryCache.delete(oldest);
         }
-        layer1HistoryCache.set(key, { verdict, expiresAt: Date.now() + LAYER1_HISTORY_CACHE_TTL_MS });
+        layer1HistoryCache.set(key, { verdict, expiresAt: performance.now() + LAYER1_HISTORY_CACHE_TTL_MS });
     }
     return verdict;
 }
@@ -1676,8 +1678,6 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // to cloud if available; otherwise refuse (fail-closed). Free-tier users
     // without cloud still get classified — a RESERVED verdict refuses the
     // request rather than silently routing to local.
-    // Recursion guard: skip when this call IS the Layer 1 classification
-    // (mode="route" + max_tokens<=16 is the Layer 1 call signature).
     // No recursion guard: the classifier (layer1.ts) calls Ollama directly and
     // never re-enters runInfer, so the old "mode=route + max_tokens<=16 is the
     // classifier" skip only ever served as a caller-controlled bypass of the

@@ -19,7 +19,10 @@
  * It is duplicated here (not imported) because prism is a thin client with no
  * access to the skills tree at runtime. A drift test asserts byte-for-byte match.
  *
- * Must not run when mode="route" and max_tokens<=16 — that IS a Layer 1 call.
+ * callLayer1 talks to Ollama directly and never re-enters prism_infer, so
+ * there is no call signature that must skip it (the old "mode=route +
+ * max_tokens<=16" skip was removed 2026-09-16: it was a caller-controlled
+ * bypass, never a recursion guard).
  */
 
 export type Layer1Verdict =

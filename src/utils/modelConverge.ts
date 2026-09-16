@@ -68,6 +68,13 @@ export interface TierOutcome {
     detail?: string;
 }
 
+/** Exit rule for the standalone command: one installed tier that did not
+ *  converge is a failure worth a non-zero exit, not only "every tier failed"
+ *  (a one-tier host reports three skipped_not_installed and would exit 0). */
+export function convergeFailed(outcomes: ReadonlyArray<{ action: string }>): boolean {
+    return outcomes.some(o => o.action === "failed");
+}
+
 export async function convergeModels(deps: ModelConvergeDeps): Promise<TierOutcome[]> {
     let tags: TagInfo[];
     try {

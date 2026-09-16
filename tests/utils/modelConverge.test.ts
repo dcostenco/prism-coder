@@ -168,6 +168,14 @@ describe("convergeModels — local num_ctx pins", () => {
         expect(logs.some(l => l.includes("left alone"))).toBe(true);
     });
 
+    it("convergeFailed: one failed tier on a one-tier host is a failure, even beside three skipped_not_installed", async () => {
+        const { convergeFailed } = await import("../../src/utils/modelConverge.js");
+        expect(convergeFailed([
+            { action: "failed" }, { action: "skipped_not_installed" }, { action: "skipped_not_installed" }, { action: "skipped_not_installed" },
+        ])).toBe(true);
+        expect(convergeFailed([{ action: "up_to_date" }, { action: "skipped_not_installed" }])).toBe(false);
+    });
+
     it("without tagFacts the digest rule still applies (unchanged behaviour for older hosts)", async () => {
         const state = [T("dcostenco/prism-coder:9b", "e8b71"), T("prism-coder:9b", "d48df")];
         const { deps, copies } = harness([state, state]);
