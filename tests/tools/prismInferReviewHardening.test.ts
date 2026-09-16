@@ -821,7 +821,7 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
         expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
         expect(callLayer1.mock.calls.some(c => String(c[0]).includes(A) && String(c[0]).includes(B))).toBe(true);
     });
-    it("the context read's reach IS the window: halves of an intent within 3,600 chars of each other are caught, halves further apart are never in one read (documented limit, the classifier reads at most 4,000 chars)", async () => {
+    it("the context read's reach IS the window ending at the later turn: halves inside it are caught; halves further apart, or a later half at the start of a long turn, are never in one read (documented limit, the classifier reads at most 4,000 chars)", async () => {
         const A = "ALPHA-HALF: the first half of the plan.";
         const B = "BETA-HALF: the second half of the plan.";
         const both = () => vi.fn(async (text: string) => (text.includes("ALPHA-HALF") && text.includes("BETA-HALF") ? "OBVIOUS_RESERVED" : "OBVIOUS_NOT_RESERVED") as "OBVIOUS_RESERVED" | "OBVIOUS_NOT_RESERVED");
@@ -834,6 +834,12 @@ describe("R15 rounds eighteen and twenty-two — every isolated read is kept, ev
         const far = await runInfer(conv(HISTORY_TURN_WINDOW_CHARS), deps({ callLayer1: farMock }));
         expect(far.backend).not.toBe("refused");
         expect(farMock.mock.calls.some(c => String(c[0]).includes("ALPHA-HALF") && String(c[0]).includes("BETA-HALF"))).toBe(false);
+        // the later half at the START of a long turn: the window ending at that turn is the turn's own tail
+        const headMock = both();
+        const head = await runInfer(args({ prompt: "Thanks, anything else?", messages: [
+            { role: "user", content: A }, { role: "assistant", content: "Noted." }, { role: "user", content: B + " " + pad(HISTORY_TURN_WINDOW_CHARS) }] }), deps({ callLayer1: headMock }));
+        expect(head.backend).not.toBe("refused");
+        expect(headMock.mock.calls.some(c => String(c[0]).includes("ALPHA-HALF") && String(c[0]).includes("BETA-HALF"))).toBe(false);
     });
     it("skipping the context reads once the verdict is UNCERTAIN leaves an audit marker", async () => {
         const callLayer1 = vi.fn(async (text: string) => (/^(User|Assistant): /m.test(text) ? "OBVIOUS_NOT_RESERVED" : "UNCERTAIN") as "OBVIOUS_NOT_RESERVED" | "UNCERTAIN");

@@ -163,9 +163,11 @@ export function screeningTranscript(args: PrismInferArgs): string {
  *  that turn. A context read can only RAISE the verdict: intent spread across
  *  turns that each read clean alone (measured 2026-09-16: the two halves of a
  *  restraint request in separate user turns, clean apart, reserved together)
- *  is caught by the window ending at the later half — when the parts are
- *  within HISTORY_TURN_WINDOW_CHARS of each other in the transcript; parts
- *  further apart are never in one read (the limit). No context read ever
+ *  is caught by the window ending at the later half — when both parts fall
+ *  inside one window, i.e. the last HISTORY_TURN_WINDOW_CHARS chars of the
+ *  transcript up to the END of the later part's turn; windows exist only at
+ *  turn ends, so a later part at the start of a long turn, or parts further
+ *  apart than that, are never in one read (the limit). No context read ever
  *  lowers or replaces an isolated verdict, so no window containing OTHER
  *  turns adjudicates a turn (review rounds 12–22: every "defer UNCERTAIN to
  *  context" variant was measured bypassable by a classifier-directed note in

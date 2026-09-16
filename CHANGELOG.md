@@ -49,9 +49,11 @@ it:
   treated as uncertain. Then each turn and the current prompt are classified
   in context (the tail of the role-labelled transcript ending at that turn),
   which can only raise the verdict: intent spread across turns that each read
-  clean alone is caught there when the parts are within 3,600 chars of each
-  other in the transcript; parts further apart are never in one read (the
-  window's size is the limit). The deterministic rules run per turn (the
+  clean alone is caught there when both parts fall inside one window, the
+  last 3,600 chars of the transcript up to the end of the later part's turn;
+  windows exist only at turn ends, so a later part at the start of a long
+  turn, or parts further apart than that, are never in one read (the
+  window's size and placement are the limit). The deterministic rules run per turn (the
   operational ones on user turns only), the keyword floor and
   reserved-category attribution over the whole conversation. A reserved
   phrase in a user turn is handled exactly as in a single prompt: refused for
