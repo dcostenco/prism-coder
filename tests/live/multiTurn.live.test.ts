@@ -82,8 +82,8 @@ describe.skipIf(!live)("live: multi-turn on the installed tiers", () => {
  * ALONE was clean. Fixtures must be the size of real work or they approve
  * defects that the first real conversation hits.
  *
- * Every conversation below is ordinary engineering talk that must be served
- * locally. None mentions a real system: the shapes are generic on purpose,
+ * Every conversation below is ordinary engineering talk that must be
+ * answered. None mentions a real system: the shapes are generic on purpose,
  * because this repo is public.
  */
 const REALISTIC: Array<[string, Array<{ role: "user" | "assistant"; content: string }>, string]> = [
@@ -185,9 +185,16 @@ describe.skipIf(!live)("live: realistic-size benign conversations are ANSWERED o
         expect(noCloud.backend, JSON.stringify(noCloud.attempts)).toBe("refused");
         expect(noCloud.refusal_layer, "the JOINT read is what catches it").toBe("context");
     }, 300_000);
-    it("calibration budget: every conversation answered, at most ONE via the cloud, and the same one refused when cloud is forbidden (measured 2026-09-16: the middleware conversation)", () => {
+    // Run this file with the whole "ANSWERED" describe: filtered to this one
+    // test it always fails on the first assertion, by design, because nothing
+    // was answered — that is a guard, not a flake.
+    it("calibration budget: every conversation answered; exactly the middleware conversation escalates, and it is the same one refused when cloud is forbidden, by the joint read (measured 2026-09-16)", () => {
         expect(answered, "a conversation was never answered, so the counts below are incomplete").toHaveLength(REALISTIC.length);
-        expect(cloudUsed.length, `the context layer hedged on: ${cloudUsed.join(", ")}`).toBeLessThanOrEqual(1);
-        expect(refusedNoCloud.length, `refused with cloud forbidden: ${refusedNoCloud.join(", ")}`).toBeLessThanOrEqual(1);
+        // Exact, not bounded: a different conversation hedging, or none, is a
+        // classifier change worth knowing about either way.
+        expect(cloudUsed, `the context layer hedged on: ${cloudUsed.join(", ")}`).toEqual(["middleware attaches nothing on a sub-router"]);
+        expect(refusedNoCloud, `refused with cloud forbidden: ${refusedNoCloud.join(", ")}`).toEqual(["middleware attaches nothing on a sub-router [context]"]);
+        // Identity: whatever needs the cloud is exactly what refuses without it.
+        expect(refusedNoCloud.map(x => x.split(" [")[0])).toEqual(cloudUsed);
     });
 });

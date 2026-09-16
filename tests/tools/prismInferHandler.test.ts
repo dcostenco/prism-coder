@@ -843,7 +843,7 @@ describe("runInfer — cloud fallback", () => {
         });
     });
 
-    it("route_guard=local keeps a paid route entirely on-device", async () => {
+    it("route_guard=local skips the private correction (the other two channels have their own switches)", async () => {
         const localOutput = [
             "<|tool_call|>",
             '{"name":"knowledge_search","arguments":{"query":"routing"}}',

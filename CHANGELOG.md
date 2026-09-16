@@ -14,7 +14,7 @@ approved the release attributed no refusals to the context layer, because its
 fixtures were short and synthetic.
 
 - **Behaviour change for paid plans — cloud fallback follows the plan.** A
-  paid-plan host that omitted `cloud_fallback` used to get local-only and now
+  paid-plan host that omitted `cloud_fallback` used to get no cloud inference fallback and now
   escalates an uncertain, reserved or failed local call to the Synalux cloud,
   sending the prompt and the accepted turns. Free plans are unaffected: they
   have no cloud to reach. An omitted `cloud_fallback` used to

@@ -34,8 +34,9 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
   tools the host actually advertised. Standard and higher plans can add
   authenticated deterministic correction; `route_guard: "local"` disables that
   correction only. `cloud_fallback: false` forbids cloud inference fallback and
-  `verify: false` (with no `evidence`) disables the grounding verifier; a call
-  that must make no network request needs all three.
+  `verify: false` (with no `evidence`) disables the grounding verifier. With all
+  three off, no request carries your prompt, draft or evidence; the per-call
+  entitlement check and telemetry still contact the portal and carry neither.
 - **One setup for every agent** — `prism connect` configures Claude Code,
   Claude Desktop, Cursor, Gemini CLI, and Codex while preserving unrelated
   settings.
@@ -1036,8 +1037,10 @@ The free tier runs entirely on your machine. Paid tiers add cloud sync through t
 redaction (SSNs, dates of birth, medical record numbers, phone numbers, emails,
 and clinical identifiers are stripped before storage). Cloud inference and
 route correction send the request over TLS for processing and do not store it
-as Prism memory; use `route_guard: "local"` or the **local tier** for a full
-air-gap. **Enterprise** includes a HIPAA Business Associate Agreement.
+as Prism memory. The **local tier** (no Synalux key) is the air-gap;
+`route_guard: "local"` only skips the route correction, and `cloud_fallback`
+and `verify` govern the other two channels. **Enterprise** includes a HIPAA
+Business Associate Agreement.
 
 ---
 
@@ -1055,8 +1058,9 @@ draft that may need correction—to Synalux for authenticated deterministic
 correction. Advertised custom host tools remain local. `route_guard: "local"`
 disables that correction only: cloud inference fallback is governed by
 `cloud_fallback`, and the grounding verifier is a separate channel with its
-own switch (`verify`, on by default when `evidence` is given). A route call
-that must make no network request sets all three off.
+own switch (`verify`, on by default when `evidence` is given). With all three
+off, no request carries your prompt, draft or evidence; the entitlement check
+and telemetry still contact the portal and carry neither.
 
 | Model | Ollama tag | Size | Vision | Routing accuracy¹ | Role | Automatic routing tier |
 |---|---|---|---|---|---|---|
@@ -1373,8 +1377,8 @@ prism_infer({
 })
 // → "n = countActiveUsers(data)"          (local 9b, $0)
 
-// A turn the on-device screen finds uncertain when read alone is not served
-// locally: it goes to Synalux cloud on a paid plan, or is refused with
+// A turn the on-device screen finds uncertain, alone or in context, is not
+// served locally: it goes to Synalux cloud on a paid plan, or is refused with
 // cloud_fallback: false. The result names the reason (layer1_uncertain) so
 // the host can decide what to do with the thread.
 prism_infer({

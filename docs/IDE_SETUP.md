@@ -548,8 +548,9 @@ picks the best available model automatically.
 
 Route mode validates every tool-call envelope against the host's advertised
 tool registry. Standard and higher plans can add authenticated deterministic
-correction with the default `route_guard: "auto"`; use
-`route_guard: "local"` to keep the prompt and route draft entirely on-device.
+correction with the default `route_guard: "auto"`; `route_guard: "local"`
+skips that correction only. Cloud inference fallback is governed by
+`cloud_fallback` and the grounding verifier by `verify`; each is its own switch.
 
 ### Remote Ollama (e.g., another machine on LAN)
 
