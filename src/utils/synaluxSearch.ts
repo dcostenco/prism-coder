@@ -18,6 +18,7 @@
  */
 
 import { debugLog } from "./logger.js";
+import { upgradeInsecureCloudUrl } from "./secureUrl.js";
 import { PortalHttpError } from "./portalError.js";
 import { getSynaluxJwt, invalidateSynaluxJwt } from "./synaluxJwt.js";
 import {
@@ -61,18 +62,28 @@ function isHttpUrl(value: string): boolean {
  *  uses (live env first, module-load constant as the fallback). Search and
  *  entitlements answering "is the portal usable" differently IS the defect. */
 export function resolvePortalBaseUrl(): string | undefined {
-  const baseUrl =
-    usableEnvValue(process.env.PRISM_SYNALUX_BASE_URL)
-    ?? usableEnvValue(process.env.SYNALUX_BASE_URL)
-    ?? PRISM_SYNALUX_BASE_URL;
-  if (!baseUrl || !isHttpUrl(baseUrl)) return undefined;
-  return baseUrl.replace(/\/+$/, "");
+  // Each candidate is validated in turn: a typo in one host config must fall
+  // through to the settings store rather than disabling portal search outright.
+  for (const candidate of [
+    usableEnvValue(process.env.PRISM_SYNALUX_BASE_URL),
+    usableEnvValue(process.env.SYNALUX_BASE_URL),
+    PRISM_SYNALUX_BASE_URL,
+  ]) {
+    if (!candidate || !isHttpUrl(candidate)) continue;
+    // Never hand back a cleartext transport URL for a remote host: this client
+    // sends the query and a bearer JWT over it.
+    return upgradeInsecureCloudUrl(candidate).replace(/\/+$/, "");
+  }
+  return undefined;
+}
+
+/** The subscription key, resolved the one way every portal client resolves it. */
+export function usablePortalKey(): string | undefined {
+  return usableEnvValue(process.env.PRISM_SYNALUX_API_KEY) ?? PRISM_SYNALUX_API_KEY;
 }
 
 export function synaluxSearchAvailable(): boolean {
-  const apiKey =
-    usableEnvValue(process.env.PRISM_SYNALUX_API_KEY) ?? PRISM_SYNALUX_API_KEY;
-  return !!resolvePortalBaseUrl() && !!apiKey;
+  return !!resolvePortalBaseUrl() && !!usablePortalKey();
 }
 
 /** Put the subscription key where every consumer reads it — process.env —
@@ -88,11 +99,13 @@ export async function hydrateSynaluxCredentials(
       ?? usableEnvValue(await getSetting("PRISM_SYNALUX_BASE_URL", ""))
       ?? usableEnvValue(await getSetting("SYNALUX_BASE_URL", ""))
       ?? PRISM_SYNALUX_BASE_URL;
-    // Validate before publishing. process.env is shared with storage and
-    // entitlements, so a settings row holding something that is not a URL would
-    // poison every portal client in the process, not just this one.
+    // Validate AND secure before publishing. process.env is shared with storage
+    // and entitlements, so a settings row holding a non-URL would poison every
+    // portal client in the process — and a cleartext http:// row would put the
+    // bearer JWT of every one of them on the wire in the clear.
     if (baseUrl && isHttpUrl(baseUrl)) {
-      process.env.PRISM_SYNALUX_BASE_URL = baseUrl.replace(/\/+$/, "");
+      process.env.PRISM_SYNALUX_BASE_URL =
+        upgradeInsecureCloudUrl(baseUrl).replace(/\/+$/, "");
     }
     const apiKey =
       usableEnvValue(process.env.PRISM_SYNALUX_API_KEY)

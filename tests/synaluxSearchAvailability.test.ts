@@ -27,8 +27,8 @@ vi.mock("../src/config.js", () => ({
   PRISM_SYNALUX_BASE_URL: "https://portal.test",
   PRISM_SYNALUX_API_KEY: undefined,
   SYNALUX_CONFIGURED: false,
-  // The subscriber never configured a personal provider key. This is why the
-  // fallback was not merely slower — it was a hard failure.
+  // No provider key in THIS server's environment, which is a property of the
+  // process, not of the account. That is why the fallback was a hard failure.
   BRAVE_API_KEY: undefined,
   BRAVE_ANSWERS_API_KEY: undefined,
   PRISM_DEBUG_LOGGING: false,
@@ -128,11 +128,13 @@ describe("portal search availability follows the live credentials", () => {
     expect(synaluxSearch.resolvePortalBaseUrl()).toBe("https://portal.test");
   });
 
-  it("rejects a base URL that is not http(s)", () => {
+  it("skips a base URL that is not http(s) and uses the next candidate", () => {
+    // A bad value in one host config must not disable portal search outright
+    // while a good one is configured elsewhere; it falls through instead.
     process.env.PRISM_SYNALUX_API_KEY = "test_subscription_live";
     process.env.PRISM_SYNALUX_BASE_URL = "ftp://portal.example";
-    expect(synaluxSearch.resolvePortalBaseUrl()).toBeUndefined();
-    expect(synaluxSearch.synaluxSearchAvailable()).toBe(false);
+    expect(synaluxSearch.resolvePortalBaseUrl()).toBe("https://portal.test");
+    expect(synaluxSearch.synaluxSearchAvailable()).toBe(true);
   });
 
   it("ignores whitespace-only credentials", () => {

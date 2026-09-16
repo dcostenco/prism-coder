@@ -20,13 +20,20 @@ the server's own environment. A host launched from the graphical shell carries
 none, so the search failed outright.
 
 - **Portal search availability is resolved per call, from the live
-  environment.** It uses the same resolution order `fetchEntitlements()` already
-  used, so the two can no longer disagree about whether the portal is usable.
+  environment.** `fetchEntitlements()` now calls the same two helpers, so the
+  two cannot disagree about whether the portal is usable. Four environments
+  disagreed before that, including a host where the legacy `SYNALUX_BASE_URL`
+  alias arrived after module load: search worked and the plan read as free.
   An unexpanded `${...}` template is treated as no credential, matching how
   `config.ts` has always sanitised these values.
 - **The portal request builder resolves its base URL the same way.** It read the
   module-load constant behind a non-null assertion, which would have thrown a
   `TypeError` on a host whose credentials arrive only from the settings store.
+- **A remote portal is never addressed in the clear.** Hydration published the
+  stored base URL without the plaintext upgrade the storage layer applies, so a
+  self-hosted `http://` portal would have received the query and a bearer JWT
+  over cleartext. That control now lives in one place and both paths use it.
+  Loopback is unchanged.
 - **The server hydrates the subscription key before it connects the
   transport**, from the settings cache that startup has already warmed. No new
   I/O on the Initialize handshake.
