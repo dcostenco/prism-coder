@@ -41,9 +41,10 @@ the contract:
 
 Two limits worth stating plainly. Gemini CLI writes `GEMINI.md` itself when you
 ask it to remember something, and Claude Code writes `CLAUDE.md` on `/init`, so
-these files do have another writer: the refresh replaces only the bytes between
-its own markers and re-checks the file immediately before committing, but a
-write that lands inside that final window would be overwritten. And "stale"
+these files do have another writer: the refresh replaces only its own
+marker-delimited block, marker lines included, and re-checks the file
+immediately before committing, but a write that lands inside that final window
+would be overwritten. And "stale"
 means "differs from what this binary writes", not "older", so a pinned older
 install can rewrite a block a newer one wrote.
 

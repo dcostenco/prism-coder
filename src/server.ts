@@ -1477,8 +1477,8 @@ export async function startServer() {
   // is what connect's "close your hosts first" warning is about. These files
   // do have another writer (Gemini CLI writes GEMINI.md on a remember
   // request, Claude Code writes CLAUDE.md on /init), so the refresh replaces
-  // only the bytes between its markers and re-checks immediately before
-  // committing. After the transport is connected, so the handshake is never
+  // only its own marker-delimited block, marker lines included, and re-checks
+  // immediately before committing. After the transport is connected, so the handshake is never
   // held behind disk I/O. PRISM_NO_STARTUP_REFRESH=1 opts out.
   //
   // DEFERRED, and unref'd, for two reasons. `connect.js` is a large module

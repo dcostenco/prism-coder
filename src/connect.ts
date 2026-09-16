@@ -1090,10 +1090,14 @@ function configureJsonAgentPolicy(
 export interface ManagedStartupRefresh {
   host: "claude-code" | "gemini" | "codex";
   path: string;
-  /** `unmanaged` — no instruction file, or one without a single ordered pair
-   *  of Prism ownership markers: the operator never ran connect for this host,
-   *  so nothing is written. `unchanged` / `refreshed` — a managed block was
-   *  there. `failed` — reported, never thrown. */
+  /** `unmanaged` — no instruction file, or no exact opening marker line: the
+   *  operator never ran connect for this host, so nothing is written.
+   *  `unchanged` — a managed block already matches this binary.
+   *  `refreshed` — a managed block differed and was replaced.
+   *  `would-refresh` — a dry run found a stale block; nothing was written.
+   *  `failed` — malformed markers (unpaired, duplicated, out of order), a file
+   *  shared with another host, or an I/O or write failure. Reported, never
+   *  thrown. */
   status: "unmanaged" | "unchanged" | "refreshed" | "would-refresh" | "failed";
   detail?: string;
 }
@@ -1121,9 +1125,10 @@ export interface ManagedStartupRefresh {
  *    connect's "close target hosts before registration" warning is about, since
  *    a live host rewrites its own config. These files DO have another writer —
  *    Gemini CLI writes GEMINI.md on a remember request, Claude Code writes
- *    CLAUDE.md on /init — so only the bytes between the markers are replaced
- *    and the file is re-checked immediately before committing; a write landing
- *    inside that final window would still be lost.
+ *    CLAUDE.md on /init — so only the marker-delimited block is replaced,
+ *    marker lines included, and the file is re-checked immediately before
+ *    committing; a write landing inside that final window would still be
+ *    lost.
  *  - Content-addressed, so it is a no-op once current: the block is compared
  *    byte-for-byte and only a difference writes.
  *
