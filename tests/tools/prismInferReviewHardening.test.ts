@@ -10,6 +10,7 @@ import {
     messagesProblem,
     isPrismInferArgs,
     MULTI_TURN_PROMPT_MAX_CHARS,
+    LAYER1_SCREEN_CALL_BUDGET,
     _resetLayer1HistoryCacheForTest,
     LAYER1_HISTORY_CACHE_TTL_MS,
     callSynaluxInference,
@@ -573,11 +574,40 @@ describe("R14 round thirteen", () => {
         expect(r.backend).toBe("refused");
         expect(r.gate_outcome?.reason).toBe("keyword_backstop_reserved");
     });
-    it("…and an ERROR alone on a clean turn is served through the keyword net, as a single-turn ERROR always was", async () => {
-        const callLayer1 = vi.fn(async (text: string) => (text.startsWith("User:") ? "OBVIOUS_NOT_RESERVED" : "ERROR") as "ERROR" | "OBVIOUS_NOT_RESERVED");
+    it("…an ERROR on a HISTORY turn alone (everything else clean) is kept: served through the keyword net with layer1_error recorded", async () => {
+        const callLayer1 = vi.fn(async (text: string) => (text.includes("Nightjar") && !text.startsWith("User:") ? "ERROR" : "OBVIOUS_NOT_RESERVED") as "ERROR" | "OBVIOUS_NOT_RESERVED");
         const r = await runInfer(args({ messages: HISTORY }), deps({ callLayer1 }));
         expect(r.backend).not.toBe("refused");
         expect(r.attempts.some(a => a.reason === "layer1_error")).toBe(true);
+    });
+    it("…and an ERROR on the PROMPT alone (everything else clean) is kept the same way", async () => {
+        const callLayer1 = vi.fn(async (text: string) => (text === "What is my codename?" ? "ERROR" : "OBVIOUS_NOT_RESERVED") as "ERROR" | "OBVIOUS_NOT_RESERVED");
+        const r = await runInfer(args({ messages: HISTORY }), deps({ callLayer1 }));
+        expect(r.backend).not.toBe("refused");
+        expect(r.attempts.some(a => a.reason === "layer1_error")).toBe(true);
+    });
+    it("an explicit empty messages array is single-turn for the prompt cap too", () => {
+        const huge = "x".repeat(MULTI_TURN_PROMPT_MAX_CHARS + 1);
+        expect(isPrismInferArgs({ prompt: huge, messages: [] })).toBe(true);
+    });
+    it("the screen has an aggregate call budget and fails CLOSED beyond it", async () => {
+        const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
+        _setCacheForTest({ ...ENT, multi_turn: { enabled: true, max_turns: 49, max_chars: 128_000 } }, 60_000);
+        // 30 distinct ~3,000-char turns: ~30 isolated + ~28 transcript windows, inside the budget
+        const turns = Array.from({ length: 30 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i}: ` + `item ${i} of the reading schedule moved. `.repeat(70) }));
+        const ok = await runInfer(args({ messages: turns }), deps({ callLayer1 }));
+        expect(ok.backend).not.toBe("refused");
+        expect(callLayer1.mock.calls.length).toBeLessThanOrEqual(LAYER1_SCREEN_CALL_BUDGET);
+        // 49 fragmented turns plus a 120k-char prompt, every window a cache miss: over budget → UNCERTAIN → refused (no cloud)
+        _resetLayer1HistoryCacheForTest();
+        const huge = Array.from({ length: 49 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `t${i}: ` + `item ${i} of the reading schedule moved. `.repeat(64) }));
+        // a non-repetitive prompt: identical windows would be cache hits and cost nothing
+        const bigPrompt = Array.from({ length: 3_000 }, (_, i) => `line ${i} of the pasted log; `).join("");
+        expect(bigPrompt.length).toBeGreaterThan(60_000);
+        const over = await runInfer(args({ messages: huge, prompt: bigPrompt }), deps({ callLayer1 }));
+        expect(over.backend).toBe("refused");
+        expect(over.attempts.some(a => a.reason.startsWith("layer1_screen_over_budget:"))).toBe(true);
+        expect(callLayer1.mock.calls.length).toBeLessThanOrEqual(LAYER1_SCREEN_CALL_BUDGET * 2 + 4);
     });
     it("with history the current prompt is capped structurally, and the refusal names the cap", async () => {
         const huge = "x".repeat(MULTI_TURN_PROMPT_MAX_CHARS + 1);

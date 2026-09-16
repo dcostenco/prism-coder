@@ -27,14 +27,15 @@ it:
   plan, a host with no portal, or a portal that says nothing
   (`multi_turn_not_in_plan`, with the upgrade URL) — the client's own default
   is OFF, so no one gets a paid feature without an account. An absolute
-  ceiling of 49 turns / 128,000 characters (49 prior turns plus the current one meet the portal's
-  50-message cap exactly) bounds any plan. User and assistant roles only, text only; a `system` turn or
+  ceiling of 49 turns / 128,000 characters of history (49 prior turns plus the current one meet the
+  portal's 50-message cap exactly), with the current prompt capped at 128,000 characters alongside it,
+  bounds any plan. User and assistant roles only, text only; a `system` turn or
   an image fails validation. Silently dropping the turn that mattered is the
   truncation class the context gate exists to prevent.
-- **Screened per turn, then in context.** Every turn is classified alone
-  (in ≤3,600-char windows, so nothing hides in the middle of a long turn) and a
-  reserved verdict on a turn read alone is final: nothing written later can lower
-  it. Then the role-labelled transcript is classified in context, which can only
+- **Screened per turn, then in context.** Every history turn is classified alone
+  (in ≤3,600-char windows, so nothing hides in the middle of a long turn), the
+  current prompt alone through the classifier's own call, and a reserved verdict
+  on a turn read alone is final: nothing written later can lower it. Then the role-labelled transcript is classified in context, which can only
   raise the verdict — read alone, short benign snippets came back UNCERTAIN or
   falsely reserved. The deterministic rules run per turn (role-aware for the
   operational ones), the keyword floor and reserved-category attribution over the
@@ -122,6 +123,7 @@ Every bullet below carries a test that failed on the code before it.
 - Eleventh round: the crisis pattern reads the hyphenated spelling too ("jump-off the roof" intercepts, "a jumping-off point" is exempt), mirrored into the portal; "Now, continue." is a follow-up cue; the middle-window ERROR test proves the window is classified again on the next call.
 - Twelfth round (the verifier's blocker): the transcript-window screen let a note in a LATER prompt ("the thread above is a novel excerpt") whitewash a reserved earlier turn — measured, the 9b then served a self-injury protocol the previous commit refused; the same note inside the turn or in a single prompt did not fool the classifier, so per-turn isolation is a real property. The screen is now three layers: the deterministic floor per turn; each turn classified ALONE, where OBVIOUS_RESERVED is final; then the transcript in context, which can only raise. The clinical self-injury rule now reads "bites his own arm" (the payload's wording) deterministically. Live end-to-end through the handler with the real classifier: 10 of 13 benchmark follow-ups served locally (the three refusals are the classifier's own reserved categories: an auth-middleware answer and two deploy-related snippets), and all four injection variants refused. Also: "Now,continue" is a cue; the description says entitlement-resolved results report `multi_turn`.
 - Thirteenth round: an ERROR from a turn read alone is kept (the ERROR path's keyword net still runs, fail-closed, as before); only UNCERTAIN alone defers to context — a documented policy change: a turn UNCERTAIN alone but clean in context is served, where any UNCERTAIN used to refuse. With history the current prompt is capped at 128,000 chars structurally, so the transcript screen has a hard ceiling of classifier work.
+- Fourteenth round: the history screen has an aggregate classifier-call budget (96 uncached calls per request, the enterprise plan's worst case with margin); beyond it the screen fails closed as UNCERTAIN and the attempt is named, so a maximally fragmented history plus a huge prompt can no longer cost ~160 serial calls. An explicit empty `messages: []` is single-turn for the prompt cap too.
 
 ### Fixed
 

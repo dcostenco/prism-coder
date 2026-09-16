@@ -221,6 +221,12 @@ export function historyTurnWindows(content: string): string[] {
  *  call (quadratic classifier work; review 2026-09-16). ERROR verdicts are
  *  transient and never cached; a window classified WITH images never goes
  *  through here (the key has no image bytes in it). */
+/** Aggregate classifier-call budget for one request's history screen: the
+ *  enterprise plan's worst case (96k chars of history alone + in context,
+ *  ≈60 windows) with margin. Beyond it the screen fails CLOSED (UNCERTAIN),
+ *  never runs unbounded — a maximally fragmented 128k history plus a 128k
+ *  prompt would otherwise cost ~160 serial calls (review round 13). */
+export const LAYER1_SCREEN_CALL_BUDGET = 96;
 const LAYER1_HISTORY_CACHE_MAX = 1_000;
 /** Entries expire so a classifier alias updated in place (same name, new
  *  weights) cannot keep serving a clearance the old weights gave. */
@@ -232,6 +238,7 @@ async function classifyHistoryWindow(
     window: string,
     ollamaUrl: string,
     model: string,
+    budget?: { calls: number },
 ): Promise<Layer1Verdict> {
     const key = createHash("sha256").update(model).update("\0").update(window).digest("hex");
     // performance.now() is monotonic: a wall-clock rollback must not extend
@@ -239,6 +246,8 @@ async function classifyHistoryWindow(
     const hit = layer1HistoryCache.get(key);
     if (hit && hit.expiresAt > performance.now()) return hit.verdict;
     if (hit) layer1HistoryCache.delete(key);
+    // Cache misses cost a model call; over budget the screen fails closed.
+    if (budget && ++budget.calls > LAYER1_SCREEN_CALL_BUDGET) return "UNCERTAIN";
     const verdict = await l1fn(window, ollamaUrl, model, undefined, undefined, { deterministic: false });
     if (verdict !== "ERROR") {
         if (layer1HistoryCache.size >= LAYER1_HISTORY_CACHE_MAX) {
@@ -648,7 +657,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (typeof args !== "object" || args === null) return false;
     const a = args as Record<string, unknown>;
     if (typeof a.prompt !== "string" || !a.prompt.trim()) return false;
-    if (a.messages !== undefined && a.prompt.length > MULTI_TURN_PROMPT_MAX_CHARS) return false;
+    if (Array.isArray(a.messages) && a.messages.length > 0 && a.prompt.length > MULTI_TURN_PROMPT_MAX_CHARS) return false;
     if (a.system !== undefined && typeof a.system !== "string") return false;
     if (a.images !== undefined) {
         if (!Array.isArray(a.images) || a.images.length > MAX_INFER_IMAGES) return false;
@@ -1828,10 +1837,11 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // isolated snippet are not final — context decides those (step 3).
             // Owner-visible policy: a turn that is UNCERTAIN alone but clean
             // in context is served; before, any UNCERTAIN refused.
+            const budget = { calls: 0 };
             history: for (const turn of args.messages) {
                 for (const window of historyTurnWindows(turn.content)) {
                     if (!window.trim()) continue;
-                    const alone = await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model);
+                    const alone = await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model, budget);
                     if (alone === "OBVIOUS_RESERVED") { l1 = "OBVIOUS_RESERVED"; break history; }
                     if (alone === "ERROR") l1 = worseLayer1Verdict(l1, alone);
                 }
@@ -1862,8 +1872,11 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 for (const window of historyTurnWindows(screeningTranscript(args))) {
                     if (l1 === "OBVIOUS_RESERVED") break;
                     if (!window.trim()) continue;
-                    l1 = worseLayer1Verdict(l1, await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model));
+                    l1 = worseLayer1Verdict(l1, await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model, budget));
                 }
+            }
+            if (budget.calls > LAYER1_SCREEN_CALL_BUDGET) {
+                attempts.push({ tier: "layer1", reason: `layer1_screen_over_budget:${LAYER1_SCREEN_CALL_BUDGET}` });
             }
         }
         // Null when the deterministic floor did not fire — the verdict then came
@@ -2803,7 +2816,7 @@ export async function prismInferHandler(args: unknown): Promise<{
     if (!isPrismInferArgs(args)) {
         const raw = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
         const mp = raw.messages !== undefined ? messagesProblem(raw.messages) : null;
-        const longPrompt = raw.messages !== undefined && typeof raw.prompt === "string" && raw.prompt.length > MULTI_TURN_PROMPT_MAX_CHARS;
+        const longPrompt = Array.isArray(raw.messages) && raw.messages.length > 0 && typeof raw.prompt === "string" && raw.prompt.length > MULTI_TURN_PROMPT_MAX_CHARS;
         throw new Error(mp
             ? `Invalid arguments for prism_infer: messages ${mp}`
             : longPrompt
