@@ -191,7 +191,9 @@ describe("self-healing startup blocks", () => {
         expect(readFileSync(claudeFile(), "utf8")).toBe("# not Prism's\n");
     });
 
-    it("an unwritable managed file is reported, never thrown — a self-heal cannot stop a server starting", () => {
+    // POSIX only: Windows does not enforce a directory mode this way, so the
+    // write succeeds there and the guarantee is not testable, not broken.
+    it.skipIf(process.platform === "win32")("an unwritable managed file is reported, never thrown — a self-heal cannot stop a server starting", () => {
         writeFileSync(claudeFile(), "");
         configureClaudeNativeStartup(home, false);
         writeFileSync(claudeFile(), stale(readFileSync(claudeFile(), "utf8")));
