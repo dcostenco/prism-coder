@@ -18,10 +18,16 @@ host curates the history (send only turns you accepted, as a brief, not a
 transcript); Prism bounds, screens, counts and forwards it, and never stores
 it:
 
-- **Bounded, rejected not trimmed.** ≤ 12 turns, ≤ 32,000 characters, user
-  and assistant roles only, text only. A `system` turn, an image, or an
-  over-cap history fails validation outright — silently dropping the turn that
-  mattered is the truncation class the context gate exists to prevent.
+- **Bounded by your plan, rejected not trimmed.** The turn and character caps
+  are entitlements set in the portal's plan table, not decisions the client
+  makes: Prism is a thin client. It enforces whatever the portal says (default
+  12 turns / 32,000 characters for a host with no portal; an absolute ceiling
+  of 50 turns / 128,000 characters that no plan can exceed), refuses an
+  over-cap call naming the caps (`history_over_plan_cap`), and refuses
+  outright on a plan without multi-turn (`multi_turn_not_in_plan`, with the
+  upgrade URL). User and assistant roles only, text only; a `system` turn or
+  an image fails validation. Silently dropping the turn that mattered is the
+  truncation class the context gate exists to prevent.
 - **Screened per turn.** The Layer 1 classifier runs on every turn separately,
   not once over a concatenation: the oversize excerpt keeps ~3.8k chars of head,
   middle and tail, and a position sweep showed a phrase at 20–40% or 60–80% of
@@ -48,10 +54,10 @@ the model, the validator ignored it, the safety screen saw only the current
 turn (the reserved history was served by the 9b), the context gate did not
 count it, escalation dropped it.
 
-Twenty-one tests in `tests/tools/prismInferMultiTurn.test.ts` (nine proven to
+Twenty-eight tests in `tests/tools/prismInferMultiTurn.test.ts` (nine proven to
 fail against the previous handler, one compatibility baseline, two guards, nine
 regression cases for the caps, retries, verdict severity and escalation
-payload), plus a live suite in `tests/live/multiTurn.live.test.ts` that runs
+payload, seven for the entitlement-ruled policy), plus a live suite in `tests/live/multiTurn.live.test.ts` that runs
 only when a local Ollama serves the tiers and pins what was verified by hand:
 every tier reads role history through the real local call, a no-history
 control fails, and the 9b recalls the first turn across a history past its

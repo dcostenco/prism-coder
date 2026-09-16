@@ -35,7 +35,7 @@ import { debugLog } from "../utils/logger.js";
 // Grounding verification is portal-side. Prism is a thin client.
 type EvidenceSnippet = { source: string; content: string };
 type GroundingOutcome = { action: string; finalText: string; claims: unknown[]; verifierChain: unknown[]; refusalClaim?: string };
-import { getEntitlements, clampCeiling, type PrismEntitlements, FREE_ENTITLEMENTS } from "../utils/entitlements.js";
+import { getEntitlements, clampCeiling, type PrismEntitlements, FREE_ENTITLEMENTS, multiTurnPolicy, ABSOLUTE_MULTI_TURN } from "../utils/entitlements.js";
 import { ddLog } from "../utils/ddLogger.js";
 import { stripThink } from "../utils/thinkStrip.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
@@ -122,14 +122,14 @@ export const VISION_SYSTEM_PROMPT =
 
 export const MAX_INFER_IMAGES = 8;
 
-/** Multi-turn history (owner decision 2026-09-15): the HOST curates turns;
- *  Prism bounds, screens, counts and forwards them, and never stores them.
- *  Twelve turns keeps a brief a brief. 32,000 chars (~8k tokens) fits the 32k
- *  tiers with room and exceeds the 4,096 ones, which the ctx gate handles.
- *  Over-cap is REJECTED, never trimmed: silently dropping the turn that
- *  mattered is the truncation class this handler exists to prevent. */
-export const MAX_HISTORY_TURNS = 12;
-export const MAX_HISTORY_CHARS = 32_000;
+/** Multi-turn history (owner decisions 2026-09-15): the HOST curates turns;
+ *  Prism bounds, screens, counts and forwards them, and never stores them;
+ *  and the BOUNDS are the portal's to set (Prism is a thin client). The
+ *  validator enforces only the structural ceiling (ABSOLUTE_MULTI_TURN); the
+ *  plan's caps come from entitlements and are enforced in runInfer, where an
+ *  over-cap call is REFUSED with the caps named, never trimmed: silently
+ *  dropping the turn that mattered is the truncation class this handler
+ *  exists to prevent. */
 export interface InferHistoryTurn { role: "user" | "assistant"; content: string }
 
 /** Tokens a history adds to the prompt body: content plus ~8 tokens of
@@ -286,8 +286,9 @@ export const PRISM_INFER_TOOL: Tool = {
                 description:
                     "Prior turns of THIS conversation, oldest first, each {role: 'user'|'assistant', content}. " +
                     "`prompt` stays the current user turn. The host curates: send only turns you accepted, " +
-                    "as a brief, not a transcript. Max 12 turns / 32,000 chars, text only, user and assistant " +
-                    "roles only; over-cap or malformed history is rejected, never trimmed. Every turn is " +
+                    "as a brief, not a transcript. Text only, user and assistant roles only. The turn and " +
+                    "character caps are set by your Synalux plan (default 12 turns / 32,000 chars); over-cap " +
+                    "or malformed history is refused with the caps named, never trimmed. Every turn is " +
                     "safety-screened and counted against the tier's context. History is forwarded to the " +
                     "cloud on escalation (32 KB cap) and is never stored.",
                 items: {
@@ -456,8 +457,9 @@ export interface PrismInferArgs {
      *  8: images are the dominant context cost and an unbounded list silently
      *  blows the tier context budget. */
     images?: string[];
-    /** Prior turns, oldest first. Validated: ≤ MAX_HISTORY_TURNS, ≤ MAX_HISTORY_CHARS,
-     *  user/assistant only, text only. Never persisted. */
+    /** Prior turns, oldest first. Structurally validated (≤ ABSOLUTE_MULTI_TURN,
+     *  user/assistant only, text only); the plan's caps are enforced in
+     *  runInfer from entitlements. Never persisted. */
     messages?: InferHistoryTurn[];
     max_tokens?: number;
     temperature?: number;
@@ -513,7 +515,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
         if (a.images.some((i: unknown) => typeof i !== "string" || !i.trim())) return false;
     }
     if (a.messages !== undefined) {
-        if (!Array.isArray(a.messages) || a.messages.length > MAX_HISTORY_TURNS) return false;
+        if (!Array.isArray(a.messages) || a.messages.length > ABSOLUTE_MULTI_TURN.max_turns) return false;
         let chars = 0;
         for (const m of a.messages as unknown[]) {
             if (typeof m !== "object" || m === null) return false;
@@ -527,7 +529,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
             if (Object.keys(t).some(k => k !== "role" && k !== "content")) return false;
             chars += t.content.length;
         }
-        if (chars > MAX_HISTORY_CHARS) return false;
+        if (chars > ABSOLUTE_MULTI_TURN.max_chars) return false;
     }
     if (a.max_tokens !== undefined && typeof a.max_tokens !== "number") return false;
     if (a.temperature !== undefined && typeof a.temperature !== "number") return false;
@@ -1493,6 +1495,31 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         `[prism_infer] plan=${ent.plan} ceiling=${effectiveCeiling} max_tokens=${maxTokens} ` +
         `cloud=${allowCloud} verify=${canVerify} route_guard=${canUsePrivateRouteGuard}`,
     );
+
+    // Multi-turn policy — the portal's, not ours. Enforced here (not in the
+    // validator) because the caps are entitlements, resolved per call.
+    if (args.messages?.length) {
+        const policy = multiTurnPolicy(ent);
+        const turns = args.messages.length;
+        const chars = args.messages.reduce((n, t) => n + t.content.length, 0);
+        if (!policy.enabled) {
+            attempts.push({ tier: "entitlements", reason: "multi_turn_not_in_plan" });
+            if (wantReport) return refusedResult("multi_turn_not_in_plan");
+            throw new Error(
+                `prism_infer: multi-turn history is not included in the ${ent.plan} plan. ` +
+                `Send a single prompt, or upgrade: ${ent.upgrade_url}`,
+            );
+        }
+        if (turns > policy.max_turns || chars > policy.max_chars) {
+            attempts.push({ tier: "entitlements", reason: "history_over_plan_cap" });
+            if (wantReport) return refusedResult("history_over_plan_cap");
+            throw new Error(
+                `prism_infer: history of ${turns} turn(s) / ${chars} chars exceeds the ${ent.plan} plan's ` +
+                `cap of ${policy.max_turns} turns / ${policy.max_chars} chars. Send fewer, shorter turns ` +
+                `(a brief, not a transcript); nothing was trimmed for you.`,
+            );
+        }
+    }
 
     // Log tier enforcement to Datadog for monetization visibility
     const ceilingClamped = effectiveCeiling !== (requestedCeiling ?? ent.model_ceiling);

@@ -92,9 +92,10 @@ describe("B. gaps that must close", () => {
         expect(isPrismInferArgs({ prompt: "x", messages: [{ role: "user", content: "look", images: ["/tmp/a.png"] }] })).toBe(false);
     });
 
-    it("B5 validator rejects more turns than the cap (13)", () => {
-        const turns = Array.from({ length: 13 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `t${i}` }));
+    it("B5 validator rejects more turns than the ABSOLUTE ceiling (51); the plan cap is enforced later, from entitlements", () => {
+        const turns = Array.from({ length: 51 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `t${i}` }));
         expect(isPrismInferArgs({ prompt: "x", messages: turns })).toBe(false);
+        expect(isPrismInferArgs({ prompt: "x", messages: turns.slice(0, 50) })).toBe(true);
     });
 
     it("B6 a reserved phrase in a PRIOR user turn is refused", async () => {
@@ -175,12 +176,12 @@ describe("C. guards", () => {
 describe("D. regression", () => {
     const turn = (role: "user" | "assistant", content: string) => ({ role, content });
 
-    it("D1 validator accepts a well-formed history and the exact caps (12 turns, 32,000 chars)", () => {
-        const twelve = Array.from({ length: 12 }, (_, i) => turn(i % 2 ? "assistant" : "user", "t"));
-        expect(isPrismInferArgs({ prompt: "x", messages: twelve })).toBe(true);
-        const atCap = [turn("user", "a".repeat(31_999)), turn("assistant", "b")];
+    it("D1 validator accepts a well-formed history up to the absolute ceiling (50 turns, 128,000 chars)", () => {
+        const fifty = Array.from({ length: 50 }, (_, i) => turn(i % 2 ? "assistant" : "user", "t"));
+        expect(isPrismInferArgs({ prompt: "x", messages: fifty })).toBe(true);
+        const atCap = [turn("user", "a".repeat(127_999)), turn("assistant", "b")];
         expect(isPrismInferArgs({ prompt: "x", messages: atCap })).toBe(true);
-        const overCap = [turn("user", "a".repeat(32_000)), turn("assistant", "b")];
+        const overCap = [turn("user", "a".repeat(128_000)), turn("assistant", "b")];
         expect(isPrismInferArgs({ prompt: "x", messages: overCap })).toBe(false);
     });
 
@@ -260,5 +261,67 @@ describe("D. regression", () => {
         // content alone would under-count by the framing; that under-count is what
         // makes a 4,096-token tier truncate instead of being skipped.
         expect(historyTokenEstimate(tiny)).toBeGreaterThan(12 * estimateTokens("k"));
+    });
+});
+
+// ── E. the policy is the PORTAL's: Prism enforces entitlements, never its own opinion ──
+
+import { multiTurnPolicy, DEFAULT_MULTI_TURN, ABSOLUTE_MULTI_TURN, type PrismEntitlements as Ent } from "../../src/utils/entitlements.js";
+
+describe("E. multi-turn policy comes from entitlements (thin client)", () => {
+    const turn = (role: "user" | "assistant", content: string) => ({ role, content });
+    const turns = (n: number, content = "t") => Array.from({ length: n }, (_, i) => turn(i % 2 ? "assistant" : "user", content));
+    const withPolicy = (multi_turn: Ent["multi_turn"]): Ent => ({ ...ent(false), multi_turn });
+
+    it("E1 a portal that says nothing about multi-turn gets the built-in default (12 / 32,000, enabled)", () => {
+        expect(multiTurnPolicy(ent(false))).toEqual(DEFAULT_MULTI_TURN);
+        expect(multiTurnPolicy({ ...ent(false), multi_turn: undefined })).toEqual(DEFAULT_MULTI_TURN);
+    });
+
+    it("E2 the plan cap is enforced at run time: 13 turns under the default policy is REFUSED, not trimmed", async () => {
+        const d = deps();
+        const r = await runInfer(withHistory({ messages: turns(13) }), d);
+        expect(r.backend).toBe("refused");
+        expect(r.gate_outcome?.reason).toBe("history_over_plan_cap");
+        expect(d.callLocal).not.toHaveBeenCalled();
+    });
+
+    it("E3 serve mode throws an actionable error naming the plan's caps", async () => {
+        const d = deps();
+        await expect(runInfer({ ...withHistory({ messages: turns(13) }), escalation: "serve" } as never, d))
+            .rejects.toThrow(/13 turn\(s\).*exceeds the enterprise plan's cap of 12 turns \/ 32000 chars/);
+    });
+
+    it("E4 a plan that raises the cap is honoured: 20 turns pass on a 30-turn plan", async () => {
+        _setCacheForTest(withPolicy({ enabled: true, max_turns: 30, max_chars: 96_000 }), 60_000);
+        const d = deps();
+        const r = await runInfer(withHistory({ messages: turns(20) }), d);
+        expect(r.backend).not.toBe("refused");
+        expect(d.callLocal).toHaveBeenCalled();
+    });
+
+    it("E5 a plan that disables multi-turn refuses with an upgrade path, and never reaches a model", async () => {
+        _setCacheForTest(withPolicy({ enabled: false, max_turns: 0, max_chars: 0 }), 60_000);
+        const d = deps();
+        const r = await runInfer(withHistory(), d);
+        expect(r.gate_outcome?.reason).toBe("multi_turn_not_in_plan");
+        expect(d.callLocal).not.toHaveBeenCalled();
+        await expect(runInfer({ ...withHistory(), escalation: "serve" } as never, d))
+            .rejects.toThrow(/not included in the enterprise plan.*upgrade: https:\/\/synalux\.ai\/pricing/);
+    });
+
+    it("E6 wild portal values are clamped to the absolute ceiling, and garbage falls back to the default", () => {
+        expect(multiTurnPolicy(withPolicy({ enabled: true, max_turns: 9_999, max_chars: 10_000_000 })))
+            .toEqual({ enabled: true, max_turns: ABSOLUTE_MULTI_TURN.max_turns, max_chars: ABSOLUTE_MULTI_TURN.max_chars });
+        expect(multiTurnPolicy(withPolicy({ enabled: "yes", max_turns: -3, max_chars: "lots" } as never)))
+            .toEqual(DEFAULT_MULTI_TURN);
+    });
+
+    it("E7 a single-turn call is never touched by the policy, even when the plan disables multi-turn", async () => {
+        _setCacheForTest(withPolicy({ enabled: false, max_turns: 0, max_chars: 0 }), 60_000);
+        const d = deps();
+        const r = await runInfer({ prompt: "single turn", mode: "chat", escalation: "report" }, d);
+        expect(r.backend).not.toBe("refused");
+        expect(d.callLocal).toHaveBeenCalled();
     });
 });

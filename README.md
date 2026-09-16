@@ -1272,8 +1272,9 @@ prism_infer({
 // → If quality gate fails + paid tier → auto-escalate to Gemini 3.6 Flash
 
 // Follow-ups carry the conversation. The host curates the turns; Prism bounds
-// them (≤ 12 turns / 32k chars, user+assistant text only), safety-screens each
-// turn, counts them against the tier's context, and never stores them.
+// them to your plan's caps (default 12 turns / 32k chars; user+assistant text
+// only), safety-screens each turn, counts them against the tier's context, and
+// never stores them.
 prism_infer({
     messages: [
         { role: "user",      content: "Write a binary search in Python" },
