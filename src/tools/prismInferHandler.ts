@@ -162,8 +162,44 @@ function worseLayer1Verdict(a: Layer1Verdict, b: Layer1Verdict): Layer1Verdict {
 /** Trailing history argument for the local call — present ONLY when there is
  *  history, so a single-turn call keeps the exact arity it always had (mocks
  *  and harnesses that pin the argument list stay valid). */
+/** Layer 1 classifies up to 4,000 chars in full and excerpts beyond that.
+ *  History turns are cut into overlapping windows under that limit so every
+ *  region of every turn is classified. Exported for tests. */
+export const HISTORY_TURN_WINDOW_CHARS = 3_600;
+export const HISTORY_TURN_WINDOW_OVERLAP = 200;
+export function historyTurnWindows(content: string): string[] {
+    if (content.length <= HISTORY_TURN_WINDOW_CHARS) return [content];
+    const out: string[] = [];
+    const step = HISTORY_TURN_WINDOW_CHARS - HISTORY_TURN_WINDOW_OVERLAP;
+    for (let i = 0; i < content.length; i += step) {
+        out.push(content.slice(i, i + HISTORY_TURN_WINDOW_CHARS));
+        if (i + HISTORY_TURN_WINDOW_CHARS >= content.length) break;
+    }
+    return out;
+}
+
 function historyArgs(args: PrismInferArgs): [] | [InferHistoryTurn[]] {
     return args.messages?.length ? [args.messages] : [];
+}
+
+/** Total history characters — what the plan cap and the truncation floor count. */
+function historyChars(args: PrismInferArgs): number {
+    return (args.messages ?? []).reduce((n, m) => n + m.content.length, 0);
+}
+
+/** The portal's message-count cap on /api/v1/prism/inference. The current
+ *  prompt is appended as the last message, so 50 prior turns make 51 and the
+ *  portal answers 413 — the client must refuse first (review 2026-09-16). */
+export const CLOUD_HISTORY_MAX_MESSAGES = 50;
+
+/** Byte-exact mirror of how /api/v1/prism/inference flattens `messages`
+ *  before its 32 KB check: role-labelled lines joined by newline plus the
+ *  trailing "Assistant:" cue. Any drift here re-opens the 10-byte window in
+ *  which the client accepts what the portal rejects. Exported for tests. */
+export function portalFlattenedTranscript(messages: InferHistoryTurn[]): string {
+    return messages
+        .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+        .join("\n") + "\nAssistant:";
 }
 
 function cloudHistory(args: PrismInferArgs): { messages?: InferHistoryTurn[] } {
@@ -1034,9 +1070,10 @@ export async function callSynaluxInference(
     // the JWT exchange: an oversize conversation fails loud before any network
     // call and before anything is spent.
     if (opts?.messages?.length) {
-        const flattenedBytes = opts.messages.reduce(
-            (n, m) => n + Buffer.byteLength(`${m.role.toUpperCase()}: ${m.content}\n`, "utf8"), 0);
-        if (flattenedBytes > CLOUD_HISTORY_CAP_BYTES) return { ok: false, reason: "history_over_cloud_cap" };
+        if (opts.messages.length > CLOUD_HISTORY_MAX_MESSAGES) return { ok: false, reason: "history_over_cloud_cap" };
+        if (Buffer.byteLength(portalFlattenedTranscript(opts.messages), "utf8") > CLOUD_HISTORY_CAP_BYTES) {
+            return { ok: false, reason: "history_over_cloud_cap" };
+        }
     }
     if (!PRISM_SYNALUX_BASE_URL) return { ok: false, reason: "no_synalux_base_url" };
 
@@ -1568,7 +1605,10 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // request rather than silently routing to local.
     // Recursion guard: skip when this call IS the Layer 1 classification
     // (mode="route" + max_tokens<=16 is the Layer 1 call signature).
-    const layer1RecursionGuard = mode === "route" && maxTokens <= 16;
+    // The classifier never carries history, so a call WITH history is never
+    // the classifier: history must be screened whatever the mode/max_tokens
+    // pair says (a caller-controlled pair; adversarial review 2026-09-16).
+    const layer1RecursionGuard = mode === "route" && maxTokens <= 16 && !args.messages?.length;
     // Resolved BEFORE Layer 1: the classifier must see the same images the
     // model will. Classifying only the text prompt let a screenshot of
     // clinical material through a gate that never looked at it.
@@ -1630,14 +1670,18 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
         }
         // 4th arg is fetchImpl (default), 5th is the images the classifier must see.
-        // Per TURN, not one pass over a concatenation. The oversize excerpt in
-        // layer1.ts keeps ~3.8k chars of head, middle and tail, and a position
-        // sweep (2026-09-15) showed a phrase at 20–40% or 60–80% of a 12k-char
-        // text is missed by it. Each history turn is bounded by the validator,
-        // so each is classified in full; the current prompt keeps its images.
+        // Per TURN, not one pass over a concatenation, and per WINDOW for a
+        // turn longer than the classifier reads in full: the oversize excerpt
+        // in layer1.ts keeps ~3.8k chars of head, middle and tail, and a
+        // position sweep (2026-09-15) showed a phrase at 20–40% or 60–80% of a
+        // 12k-char text is missed by it. Windows overlap so a phrase on a
+        // boundary is seen whole. The current prompt keeps its images and its
+        // existing excerpt behaviour.
         let l1: Layer1Verdict = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
         for (const turn of args.messages ?? []) {
-            l1 = worseLayer1Verdict(l1, await l1fn(turn.content, deps.ollamaUrl, l1Model));
+            for (const window of historyTurnWindows(turn.content)) {
+                l1 = worseLayer1Verdict(l1, await l1fn(window, deps.ollamaUrl, l1Model));
+            }
         }
         // Null when the deterministic floor did not fire — the verdict then came
         // from the semantic classifier, which has no per-rule attribution.
@@ -2115,10 +2159,15 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 // and strictly more permissive — it keeps short prompts out
                 // without inheriting the estimate's blind spots.
                 const halfCtx = liveCtx != null ? Math.floor(liveCtx / 2) : null;
+                // The floor is on the whole INPUT: with history, a short
+                // "continue" behind 50k chars of turns is exactly the case that
+                // collapses (adversarial review 2026-09-16), and the prompt
+                // alone would never reach the floor.
+                const inputChars = args.prompt.length + historyChars(args);
                 const looksTruncated = halfCtx != null
                     && result.promptTokens != null
                     && Math.abs(result.promptTokens - halfCtx) <= 8
-                    && args.prompt.length >= halfCtx;
+                    && inputChars >= halfCtx;
                 if (looksTruncated) {
                     debugLog(`[prism_infer] ${tier.tag} evaluated ${result.promptTokens} tokens ≈ num_ctx/2 on a ${promptTokensEst}-token estimate — prompt was truncated`);
                     attempts.push({ tier: tier.tag, reason: `input_truncated:${result.promptTokens}_of_${liveCtx}` });
@@ -2218,6 +2267,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                         CTX_TEMPLATE_MARGIN;
                     if (repairPromptTokens <= tier.ctxTokens) {
                         attempts.push({ tier: tier.tag, reason: `code_repair:${failedReason}` });
+                        // Same images and history as the first call: a repair
+                        // of a follow-up without its context "repairs" against
+                        // nothing (adversarial review 2026-09-16).
                         const repaired = await deps.callLocal(
                             deps.ollamaUrl,
                             ollamaName,
@@ -2227,6 +2279,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                             0,
                             timeout,
                             false,
+                            resolvedImages,
+                            ...historyArgs(args),
                         );
                         if (repaired.ok) {
                             const repairedStripped = stripThink(repaired.text);

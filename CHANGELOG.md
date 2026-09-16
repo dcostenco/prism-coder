@@ -62,8 +62,10 @@ carry it: the `prism_infer` description says follow-ups need `messages` and
 that a stateless follow-up fabricates; every result reports `multi_turn`
 (the plan's caps) and `history_turns` (a count, never content), so the host
 learns its budget from the first call instead of from a refusal; the startup
-display prints one line — on with the caps, or off on this plan — read from
-the entitlements cache only, never a portal fetch on the startup path; and
+display prints one line — on with the caps, or off on this plan — whenever the
+entitlements cache is warm, read from the cache only, never a portal fetch on
+the startup path (a cold cache prints nothing; the first `prism_infer` result
+carries the policy); and
 `session_task_route` returns `needs_history: true` when a task reads as a
 follow-up ("now…", "the same…", "your previous answer"), with the shared
 local-first policy telling every host to attach the accepted prior turns when
@@ -1307,6 +1309,7 @@ search result. Upgrade if you use Web Scholar at all.
 ## [Unreleased]
 
 ### Fixed
+- Multi-turn hardening from the pre-merge adversarial review: history turns longer than the Layer-1 full-read limit are classified in overlapping windows, so no region of a turn goes unscreened; a call carrying history is always screened, whatever `mode`/`max_tokens` pair it uses; the silent-truncation backstop counts the whole input (prompt plus history), not the current prompt alone; the code-repair retry carries the same images and history as the first call; and the cloud cap now mirrors the portal byte-for-byte (50 messages including the current turn, portal-exact flattening), so nothing the client accepts is refused with 413 upstream.
 - `prism_infer`'s input schema now stays under Codex's 5,000-byte schema-compaction budget (was ~5,800), so Codex sees every parameter description including the `messages` contract; the description no longer claims Codex drops parameter text unconditionally. Regression: `tests/tools/prismInferSchemaBudget.test.ts`.
 - Handoff history snapshots now retain the effective role and active branch,
   and save responses distinguish a durable primary handoff from a failed
