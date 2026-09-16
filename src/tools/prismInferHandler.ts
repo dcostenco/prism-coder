@@ -223,18 +223,22 @@ export function historyTurnWindows(content: string): string[] {
  *  through here (the key has no image bytes in it). */
 /** Aggregate classifier-call budget for one request's history screen — a
  *  safety net at the STRUCTURAL maximum (49 turns / 128k chars of history
- *  alone ≈ 87 windows + a 128k prompt in context ≈ 76 windows ≈ 163 calls),
- *  not a plan-level limit: every shape the caps allow fits under it, so a
- *  paid call never trips it, and a runaway loop cannot exceed it. Beyond it
- *  the screen fails CLOSED (UNCERTAIN). The real bounds are the plan caps
- *  (enterprise ≈ 124 calls on a cold cache, a warm follow-up pays only its
- *  tail) and the consecutive-ERROR breaker below (review rounds 13–15). */
+ *  alone: 49 base windows + 37 extra for the long ones = 86; a 128k prompt in
+ *  context: 256,594 chars of transcript = 76 windows; 162 budgeted misses,
+ *  163 calls with the prompt's own), not a plan-level limit: every shape the
+ *  caps allow fits under it with 8 calls of headroom, so a paid call never
+ *  trips it, and a runaway loop cannot exceed it. Beyond it the screen fails
+ *  CLOSED (UNCERTAIN). The real bounds are the plan caps (enterprise ≈ 124
+ *  calls on a cold cache, a warm follow-up pays only its tail) and the
+ *  consecutive-ERROR breaker below (review rounds 13–16). */
 export let LAYER1_SCREEN_CALL_BUDGET = 170;
 export function _setScreenCallBudgetForTest(n: number | null): void { LAYER1_SCREEN_CALL_BUDGET = n ?? 170; }
 /** A dead or stalled classifier answers ERROR after its 1.5 s + 5 s retry
  *  budget; across a long history that is minutes of nothing. After this many
- *  consecutive ERRORs the remaining windows are marked ERROR without a call:
- *  the ERROR path's keyword net still runs, fail-closed, as for one ERROR. */
+ *  consecutive uncached ERRORs the remaining windows are UNCERTAIN without a
+ *  call — fail-closed (cloud when allowed, else refused), NOT the ERROR path:
+ *  the regex-only keyword net must not become the sole guard for windows the
+ *  classifier never read (review round 16). */
 export const LAYER1_SCREEN_ERROR_BREAKER = 3;
 const LAYER1_HISTORY_CACHE_MAX = 1_000;
 /** Entries expire so a classifier alias updated in place (same name, new
@@ -257,7 +261,7 @@ async function classifyHistoryWindow(
     if (hit) layer1HistoryCache.delete(key);
     // Cache misses cost a model call; over budget the screen fails closed,
     // and a classifier that keeps failing is not asked again this request.
-    if (budget && budget.consecutiveErrors >= LAYER1_SCREEN_ERROR_BREAKER) return "ERROR";
+    if (budget && budget.consecutiveErrors >= LAYER1_SCREEN_ERROR_BREAKER) return "UNCERTAIN";
     if (budget && ++budget.calls > LAYER1_SCREEN_CALL_BUDGET) return "UNCERTAIN";
     const verdict = await l1fn(window, ollamaUrl, model, undefined, undefined, { deterministic: false });
     if (budget) budget.consecutiveErrors = verdict === "ERROR" ? budget.consecutiveErrors + 1 : 0;

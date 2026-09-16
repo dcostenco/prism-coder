@@ -592,11 +592,16 @@ describe("R14 round thirteen", () => {
         const huge = "x".repeat(MULTI_TURN_PROMPT_MAX_CHARS + 1);
         expect(isPrismInferArgs({ prompt: huge, messages: [] })).toBe(true);
     });
-    it("the structural worst case (49 fragmented turns / 128k history + a 128k prompt) fits under the budget: a paid call never trips it", async () => {
+    it("the structural maximum (one ~128k turn + 48 minimal turns + a 128k prompt) fits under the budget: a paid call never trips it", async () => {
         const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
         _setCacheForTest({ ...ENT, multi_turn: { enabled: true, max_turns: 49, max_chars: 128_000 } }, 60_000);
-        const huge = Array.from({ length: 49 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `t${i}: ` + `item ${i} of the reading schedule moved. `.repeat(63) }));
-        const bigPrompt = Array.from({ length: 5_800 }, (_, i) => `line ${i} of the pasted log; `).join("").slice(0, 127_000);
+        // worst distribution: 48 one-char turns (48 windows) + one turn taking the rest (≈37 windows)
+        const minimal = Array.from({ length: 48 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: String.fromCharCode(97 + (i % 26)) }));
+        const longTurn = Array.from({ length: 6_000 }, (_, i) => `entry ${i} of the pasted log; `).join("").slice(0, 128_000 - 48);
+        const huge = [...minimal, { role: "user" as const, content: longTurn }];
+        expect(huge.reduce((n, t) => n + t.content.length, 0)).toBe(128_000);
+        const bigPrompt = Array.from({ length: 6_000 }, (_, i) => `line ${i} of the pasted prompt; `).join("").slice(0, MULTI_TURN_PROMPT_MAX_CHARS);
+        expect(bigPrompt.length).toBe(MULTI_TURN_PROMPT_MAX_CHARS);
         // The screen passes; the call then dies at the context gate (no tier
         // holds 250k chars, no cloud) and throws with its attempts attached.
         let attempts: Array<{ reason: string }> = [];
@@ -621,15 +626,32 @@ describe("R14 round thirteen", () => {
             expect(callLayer1.mock.calls.filter(c => String(c[0]) !== "What is my codename?").length).toBe(4);
         } finally { _setScreenCallBudgetForTest(null); }
     });
-    it("a classifier that keeps failing is not asked again: after three consecutive ERRORs the rest are ERROR without a call", async () => {
+    it("a classifier that keeps failing is not asked again: after three consecutive ERRORs the rest are UNCERTAIN without a call — fail-closed", async () => {
         const callLayer1 = vi.fn(async () => "ERROR" as const);
         const turns = Array.from({ length: 10 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i}: ` + `item ${i} of the reading schedule moved. `.repeat(70) }));
         const r = await runInfer(args({ messages: turns }), deps({ callLayer1 }));
         // budgeted window calls stop at the breaker; the prompt's own call is separate
         expect(callLayer1.mock.calls.filter(c => String(c[0]) !== "What is my codename?").length).toBe(LAYER1_SCREEN_ERROR_BREAKER);
         expect(r.attempts.some(a => a.reason === `layer1_screen_error_breaker:${LAYER1_SCREEN_ERROR_BREAKER}`)).toBe(true);
-        // ERROR path, keyword net clean → served locally, as one ERROR always was
-        expect(r.attempts.some(a => a.reason === "layer1_error")).toBe(true);
+        // UNCERTAIN outranks ERROR: no cloud → refused (the gate names the reserved refusal,
+        // the attempt names the uncertain verdict), never the regex-only path for unread windows
+        expect(r.backend).toBe("refused");
+        expect(r.gate_outcome?.reason).toBe("layer1_reserved");
+        expect(r.attempts.some(a => a.reason === "layer1_uncertain")).toBe(true);
+        expect(r.attempts.some(a => a.reason === "layer1_error")).toBe(false);
+    });
+    it("…so semantic-only reserved content after three transient failures is never served locally", async () => {
+        let calls = 0;
+        const callLayer1 = vi.fn(async (text: string) => {
+            if (text === "What is my codename?") return "OBVIOUS_NOT_RESERVED" as const;
+            calls++;
+            return calls <= 3 ? ("ERROR" as const) : ("OBVIOUS_RESERVED" as const); // the 4th window would be reserved
+        });
+        const turns = Array.from({ length: 8 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i}: ` + `item ${i} of the reading schedule moved. `.repeat(70) }));
+        const d = deps({ callLayer1 });
+        const r = await runInfer(args({ messages: turns }), d);
+        expect(r.backend).toBe("refused");
+        expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
     });
     it("with history the current prompt is capped structurally, and the refusal names the cap", async () => {
         const huge = "x".repeat(MULTI_TURN_PROMPT_MAX_CHARS + 1);
