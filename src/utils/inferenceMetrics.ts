@@ -197,6 +197,11 @@ export function recordInference(result: {
     quality_gate_failed?: boolean;
     /** §5.2 failure contract — structured terminal disposition. */
     gate_outcome?: { status: "success" | "degraded" | "refused"; reason?: string; served_anyway: boolean };
+    /** Prior turns sent with the call, and which screen layer decided it.
+     *  Ledgered so "how often is history passed" and "which layer refused"
+     *  are queries, not transcript archaeology (2026-09-16). */
+    history_turns?: number;
+    refusal_layer?: string;
 }): void {
     if (result.backend === "safety_gate") return;
 
@@ -222,6 +227,8 @@ export function recordInference(result: {
         completion_tokens: result.completion_tokens,
         latency_ms: result.latency_ms,
         ram_free_mb: result.ram_free_mb,
+        history_turns: result.history_turns,
+        refusal_layer: result.refusal_layer,
     });
 
     // §5.2: refused results (escalation:"report") get a ledger row above but

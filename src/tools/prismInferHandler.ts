@@ -1190,6 +1190,7 @@ function makeReservedRefusal(
     attempts: Array<{ tier: string; reason: string }>,
     category: string | null = null,
     cloudWasAllowed = false,
+    ledger: { history_turns?: number; refusal_layer?: string } = {},
 ): ReservedRefusalError {
     // Ledger the refusal (fire-and-forget). No prompt content is persisted —
     // same HIPAA posture as the safety_gate exclusion. gate_outcome mirrors
@@ -1198,6 +1199,8 @@ function makeReservedRefusal(
         backend: "refused", model: null, used_cloud: false,
         gate_outcome: "refused",
         refusal_reason: "layer1_reserved",
+        history_turns: ledger.history_turns,
+        refusal_layer: ledger.refusal_layer,
     });
     return new ReservedRefusalError(verdict, attempts, category, cloudWasAllowed);
 }
@@ -1424,6 +1427,9 @@ export interface PrismInferResult {
     multi_turn?: MultiTurnEntitlement;
     /** How many prior turns this call carried (a count, never content). */
     history_turns?: number;
+    /** Which screen layer decided the call: 'rules' | 'isolated' | 'prompt' |
+     *  'context' | 'budget'. Absent when Layer 1 never raised the verdict. */
+    refusal_layer?: string;
     /** Actual token counts from Ollama, or char/4 estimates for cloud. */
     prompt_tokens?: number;
     completion_tokens?: number;
@@ -1705,6 +1711,19 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         multi_turn: multiTurnPolicy(ent),
         history_turns: args.messages?.length ?? 0,
     } as const;
+    // Which screen layer decided the call; ledgered on a refusal. Bookkeeping
+    // only: raise() is worseLayer1Verdict with a label and the assignment stays
+    // at the call site, so it changes no outcome. Declared here because
+    // refusedResult() can run before the Layer 1 block. Without it, "which
+    // layer refused this" needs a transcript replay — exactly what a benign
+    // production refusal cost on 2026-09-16.
+    let l1Layer: string | null = null;
+    const ledgerMeta = () => ({ history_turns: args.messages?.length ?? 0, refusal_layer: l1Layer ?? undefined });
+    const raise = (cur: Layer1Verdict, next: Layer1Verdict, source: string): Layer1Verdict => {
+        const merged = worseLayer1Verdict(cur, next);
+        if (merged !== cur) l1Layer = source;
+        return merged;
+    };
     const refusedResult = (reason: string): PrismInferResult => ({
         output: "",
         backend: "refused",
@@ -1715,6 +1734,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         attempts,
         ...entMeta,
         gate_outcome: { status: "refused", reason, served_anyway: false },
+        refusal_layer: l1Layer ?? undefined,
     });
 
     debugLog(
@@ -1892,7 +1912,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 // of chars away from a trigger is not the same clause.
                 for (const slice of windowsOf(turn.content, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
                     const det = classifyDeterministicLayer1(slice, { operational: isUser });
-                    if (det) l1 = worseLayer1Verdict(l1, det);
+                    if (det) l1 = raise(l1, det, "rules");
                 }
             }
             // 2. Semantic floor, per TURN in isolation; every verdict read
@@ -1920,8 +1940,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 for (const window of historyTurnWindows(turn.content)) {
                     if (!window.trim()) continue;
                     const alone = await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model, budget);
-                    if (alone === "OBVIOUS_RESERVED") { l1 = "OBVIOUS_RESERVED"; break history; }
-                    l1 = worseLayer1Verdict(l1, alone);
+                    if (alone === "OBVIOUS_RESERVED") { l1 = raise(l1, "OBVIOUS_RESERVED", "isolated"); break history; }
+                    l1 = raise(l1, alone, "isolated");
                 }
             }
             // The current prompt is a request: its deterministic floor runs
@@ -1933,7 +1953,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             let promptRoutine = true;
             for (const slice of windowsOf(args.prompt, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
                 const promptDet = classifyDeterministicLayer1(slice);
-                if (promptDet) l1 = worseLayer1Verdict(l1, promptDet);
+                if (promptDet) l1 = raise(l1, promptDet, "rules");
                 if (promptDet !== "OBVIOUS_NOT_RESERVED") promptRoutine = false;
             }
             // The classifier entry point's own whole-prompt deterministic pass
@@ -1946,7 +1966,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // (review round 19: skipping it there bypassed that floor).
             const promptFastPath = promptRoutine && args.prompt.length <= MAX_CLASSIFIER_PROMPT_LENGTH && (resolvedImages?.length ?? 0) === 0;
             if (l1 !== "OBVIOUS_RESERVED" && !promptFastPath) {
-                l1 = worseLayer1Verdict(l1, await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false }));
+                l1 = raise(l1, await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false }), "prompt");
             }
             // 3. Context, raise only: one window per turn and one for the
             // prompt (see contextWindows), cached like any window. Skipped
@@ -1960,13 +1980,13 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             } else {
                 for (const window of contextWindows(args)) {
                     if (!window.trim()) continue;
-                    l1 = worseLayer1Verdict(l1, await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model, budget));
+                    l1 = raise(l1, await classifyHistoryWindow(l1fn, window, deps.ollamaUrl, l1Model, budget), "context");
                     if (l1 === "UNCERTAIN" || l1 === "OBVIOUS_RESERVED") break;
                 }
             }
             // A budget or breaker trip raises to UNCERTAIN whatever the cache
             // held (text: cloud or refused; with an image: local only).
-            if (budget.tripped) l1 = worseLayer1Verdict(l1, "UNCERTAIN");
+            if (budget.tripped) l1 = raise(l1, "UNCERTAIN", "budget");
             if (budget.calls > LAYER1_SCREEN_CALL_BUDGET) {
                 attempts.push({ tier: "layer1", reason: `layer1_screen_over_budget:${LAYER1_SCREEN_CALL_BUDGET}` });
             }
@@ -2012,7 +2032,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             if (allowCloud && (resolvedImages?.length ?? 0) > 0) {
                 attempts.push({ tier: "synalux", reason: "reserved_escalation_refused_images_stay_local" });
                 if (wantReport) return refusedResult("layer1_reserved");
-                throw makeReservedRefusal(l1, attempts, reservedCat, true);
+                throw makeReservedRefusal(l1, attempts, reservedCat, true, ledgerMeta());
             }
             if (allowCloud) {
                 const cloudTimeout = args.timeout_ms ?? 90_000;
@@ -2027,7 +2047,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     if (weakBackend) {
                         attempts.push({ tier: "synalux", reason: `reserved_weak_backend:${cloud.backend}` });
                         if (wantReport) return refusedResult("layer1_reserved");
-                        throw makeReservedRefusal(l1, attempts, reservedCat, true);
+                        throw makeReservedRefusal(l1, attempts, reservedCat, true, ledgerMeta());
                     }
                     return await applyVerification(cloud.output, gatedArgs, deps, {
                         backend: cloud.backend ?? "synalux",
@@ -2044,7 +2064,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 attempts.push({ tier: "synalux", reason: cloud.reason ?? "unknown" });
             }
             if (wantReport) return refusedResult("layer1_reserved");
-            throw makeReservedRefusal(l1, attempts, reservedCat, allowCloud);
+            throw makeReservedRefusal(l1, attempts, reservedCat, allowCloud, ledgerMeta());
         }
         if (l1 === "UNCERTAIN_LENGTH") {
             // §5.3: prompt too long to classify in full, but the full-text
@@ -2074,7 +2094,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             if ((resolvedImages?.length ?? 0) > 0) {
                 attempts.push({ tier: "synalux", reason: "error_escalation_refused_images_stay_local" });
                 if (wantReport) return refusedResult("layer1_error");
-                throw makeReservedRefusal(l1, attempts);
+                throw makeReservedRefusal(l1, attempts, null, false, ledgerMeta());
             }
             if (allowCloud) {
                 const cloudTimeout = args.timeout_ms ?? 90_000;

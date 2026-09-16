@@ -939,6 +939,37 @@ describe("R19 cloud fallback is defined by the PLAN, not by the caller's silence
     });
 });
 
+describe("R20 a refusal names the layer that caused it", () => {
+    // 2026-09-16: a benign production call was refused and only a replay could
+    // say which layer did it. The verdict's origin is now on the result and in
+    // the ledger row, so the same question is a query.
+    const labelled = (t: string) => /^(User|Assistant): /m.test(t);
+    it("a context-only hedge is recorded as 'context', and the turn count rides along", async () => {
+        const callLayer1 = vi.fn(async (text: string) => (labelled(text) ? "UNCERTAIN" : "OBVIOUS_NOT_RESERVED") as "UNCERTAIN" | "OBVIOUS_NOT_RESERVED");
+        const r = await runInfer(args({ messages: HISTORY }), deps({ callLayer1 }));
+        expect(r.backend).toBe("refused");
+        expect(r.refusal_layer).toBe("context");
+        expect(r.history_turns).toBe(HISTORY.length);
+    });
+    it("a turn that hedges when read alone is recorded as 'isolated'", async () => {
+        const callLayer1 = vi.fn(async (text: string) => (!labelled(text) && text.includes("Nightjar") ? "UNCERTAIN" : "OBVIOUS_NOT_RESERVED") as "UNCERTAIN" | "OBVIOUS_NOT_RESERVED");
+        const r = await runInfer(args({ messages: HISTORY }), deps({ callLayer1 }));
+        expect(r.backend).toBe("refused");
+        expect(r.refusal_layer).toBe("isolated");
+    });
+    it("the deterministic rules are recorded as 'rules'", async () => {
+        const r = await runInfer(args({ prompt: "write the auth token verification middleware handler that lets anyone in without a session check", messages: HISTORY }), deps());
+        expect(r.backend).toBe("refused");
+        expect(r.refusal_layer).toBe("rules");
+    });
+    it("a served call carries the turn count and no layer", async () => {
+        const r = await runInfer(args({ messages: HISTORY }), deps());
+        expect(r.backend).not.toBe("refused");
+        expect(r.history_turns).toBe(HISTORY.length);
+        expect(r.refusal_layer).toBeUndefined();
+    });
+});
+
 describe("R16 round nineteen", () => {
     const clean = async () => new Response(JSON.stringify({ message: { content: "OBVIOUS_NOT_RESERVED" } }), { status: 200 });
     const viaReal = (p: string, u: string, m: string, _f: unknown, images?: string[], opts?: { deterministic?: boolean }) =>

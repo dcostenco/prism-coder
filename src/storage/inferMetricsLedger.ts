@@ -49,6 +49,14 @@ export interface InferMetricRow {
     ram_free_mb?: number;
     /** Stable ID supplied by external spools. Null for native MCP rows. */
     source_event_id?: string;
+    /** Prior turns sent with this call. 0 for a single-turn call. Without it,
+     *  "how often does a host actually pass history" needs a transcript scan
+     *  (2026-09-16: it did, and the answer was once). */
+    history_turns?: number;
+    /** Which screen layer produced the verdict that decided this call:
+     *  'rules' | 'isolated' | 'prompt' | 'context' | 'budget'. Names the layer
+     *  to fix when benign work is refused. */
+    refusal_layer?: string;
 }
 
 let client: ReturnType<typeof createClient> | null = null;
@@ -60,8 +68,8 @@ const LEDGER_UNAVAILABLE_ERROR = "Inference metrics ledger is unavailable";
 const INSERT_METRIC_SQL = `INSERT OR IGNORE INTO infer_metrics
     (ts, caller, mode, backend, model, used_cloud, gate_outcome,
      refusal_reason, prompt_tokens, completion_tokens, latency_ms, ram_free_mb,
-     source_event_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+     source_event_id, history_turns, refusal_layer)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 function closeClient(context: string): void {
     const activeClient = client;
@@ -100,15 +108,23 @@ function ensureTable(): Promise<void> {
                     completion_tokens INTEGER,
                     latency_ms INTEGER,
                     ram_free_mb INTEGER,
-                    source_event_id TEXT
+                    source_event_id TEXT,
+                    history_turns INTEGER,
+                    refusal_layer TEXT
                 )`);
             // Existing ledgers predate external panel-spool ingestion. SQLite has
             // no ADD COLUMN IF NOT EXISTS, so use the repository's established
             // idempotent migration pattern and reject only unexpected failures.
-            try {
-                await client.execute(`ALTER TABLE infer_metrics ADD COLUMN source_event_id TEXT`);
-            } catch (e) {
-                if (!(e instanceof Error) || !e.message.includes("duplicate column name")) throw e;
+            for (const column of [
+                "source_event_id TEXT",
+                "history_turns INTEGER",
+                "refusal_layer TEXT",
+            ]) {
+                try {
+                    await client.execute(`ALTER TABLE infer_metrics ADD COLUMN ${column}`);
+                } catch (e) {
+                    if (!(e instanceof Error) || !e.message.includes("duplicate column name")) throw e;
+                }
             }
             await client.execute(
                 `CREATE INDEX IF NOT EXISTS idx_infer_metrics_ts ON infer_metrics (ts)`);
@@ -173,6 +189,7 @@ function metricArgs(row: InferMetricRow): Array<string | number | null> {
         row.refusal_reason ?? null, row.prompt_tokens ?? null,
         row.completion_tokens ?? null, row.latency_ms ?? null,
         row.ram_free_mb ?? null, row.source_event_id ?? null,
+        row.history_turns ?? null, row.refusal_layer ?? null,
     ];
 }
 
