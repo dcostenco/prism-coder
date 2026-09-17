@@ -75,7 +75,7 @@ not correctness. clinical:opdef answers "Raising a hand to call out" as a
 NON-example of calling out, which is the target behaviour restated, and it
 grades correct because it contains "hand". That looseness is asserted on
 purpose in the self-test so nobody reads 3/3 as clinical accuracy. Full
-untruncated answers are written to multi-turn-bench.full-<date>.json; the
+untruncated answers are written to multi-turn-bench.full-<timestamp>.json; the
 stdout column is a 120-character preview.
 
 ═══════════════════════════════════════════════════════════════════

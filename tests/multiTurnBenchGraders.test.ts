@@ -31,8 +31,12 @@ describe("multi-turn bench graders", () => {
             encoding: "utf-8",
             timeout: 60_000,
         });
-        expect(out).toContain("passed");
         expect(out).not.toContain("FAIL");
+        // "0 passed" contains "passed". Parse the count and require a real one,
+        // or an empty case list would satisfy this test forever.
+        const m = out.match(/grader self-test: (\d+) passed/);
+        expect(m, `self-test printed no pass count: ${out}`).not.toBeNull();
+        expect(Number(m![1]), "the case list must not shrink silently").toBeGreaterThanOrEqual(17);
     });
 
     it("goes red and exits nonzero when the fix is reverted — a check that cannot fail is not a check", () => {
@@ -41,7 +45,7 @@ describe("multi-turn bench graders", () => {
         // self-test catches it, which is the only evidence that the guard works.
         const good = readFileSync(bench, "utf-8");
         const reverted = good.replace(
-            't => inventedNumberRe.test(t) ? "fabricated" : (declineRe.test(t) ? "correct" : "fabricated")',
+            't => hasContactSizedNumber(t) ? "fabricated" : (declineRe.test(t) ? "correct" : "fabricated")',
             't => declineRe.test(t) ? "correct" : "fabricated"',
         );
         expect(reverted, "the shipped defect must still be findable in the source").not.toBe(good);

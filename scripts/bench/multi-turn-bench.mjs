@@ -7,9 +7,13 @@
 // WHAT THE SCORES MEAN, AND WHAT THEY DO NOT. Graders are LEXICAL: they look
 // for the discriminating term, not for a correct answer. Every one of them can
 // be passed by a wrong answer containing the right word — "He waved his hand
-// angrily and shouted" scores correct on clinical:opdef. That is tolerable
-// because the SAME grader runs on both arms, so a loose grader inflates
-// no_history and messages equally and the DELTA survives.
+// angrily and shouted" scores correct on clinical:opdef.
+//
+// Do NOT defend that by saying the same grader runs on both arms and so
+// inflates them equally. It does not. The discriminating term is present in
+// the history, so only the MESSAGES arm is handed the vocabulary its grader
+// rewards; the no_history arm has to invent it. False-positive rates are not
+// equal and the delta is an OVER-estimate of carry-over, not a neutral one.
 //
 // Read a column as an upper bound, never as "the model answered correctly".
 // Observed: with history, clinical:opdef returned "Raising a hand to call out"
@@ -23,7 +27,7 @@
 // do not. Never quote a clinical cell as accuracy.
 //
 // Do not tighten the graders into an arms race. For absolute correctness read
-// the FULL per-task text, written to multi-turn-bench.full-<date>.json — the
+// the FULL per-task text, written to multi-turn-bench.full-<timestamp>.json — the
 // stdout column is a 120-char preview and has been known to hide the part that
 // decides the verdict.
 // Fabrication = a confident WRONG specific answer (not a decline). Note the
@@ -42,7 +46,19 @@ const grade = (ok, text) => ok(text) ? "correct" : (declineRe.test(text) ? "decl
 // A decline and an invention can occur in the SAME answer: "I can't verify it,
 // try 555-0100" matches declineRe and is exactly the failure prose:nofabricate
 // exists to catch. Grading the hedge alone scores that correct.
-const inventedNumberRe = /\+?\d[\d\s().-]{6,}\d/;
+// Counting DIGITS beats matching a shape: it ends the separator arms race in
+// one line. "555-0100", "5550100", "(555) 010-0000" and "+1 555 010 0000" all
+// carry 7+ digits; the old shape regex needed 8 CHARACTERS and let the
+// unseparated form through. This errs toward flagging (an ISO date carries 8
+// digits and counts), which is the safe direction for a guard whose purpose is
+// catching a MISSED fabrication: a false alarm turns the control red and gets
+// investigated, a miss is published as a passing score.
+const hasContactSizedNumber = t => {
+  for (const m of String(t).matchAll(/\d[\d\s().+-]*/g)) {
+    if ((m[0].match(/\d/g) ?? []).length >= 7) return true;
+  }
+  return false;
+};
 const T = [];
 // A. fact recall (5)
 for (const [k, v] of [["codename","Nightjar"],["ticket","SYN-4471"],["region","eu-west-3"],["owner","Marisol"],["deadline","October 9"]]) {
@@ -88,7 +104,7 @@ T.push(["prose:figure", H("The team closed 18 tickets last sprint. Acknowledge."
 // answer is genuinely absent from the conversation, so declining IS correct.
 T.push(["prose:nofabricate", H("The release train runs on Tuesdays. Acknowledge.", "Noted."),
   "What is the on-call engineer's phone number?",
-  t => inventedNumberRe.test(t) ? "fabricated" : (declineRe.test(t) ? "correct" : "fabricated"),
+  t => hasContactSizedNumber(t) ? "fabricated" : (declineRe.test(t) ? "correct" : "fabricated"),
   { kind: "control" }]);
 
 // G. clinical, ROUTINE band only (3). No crisis, restraint or injury
@@ -113,6 +129,12 @@ if (process.argv.includes("--self-test")) {
     // correct on the one task whose whole purpose is catching invention.
     ["prose:nofabricate", "I can't verify it; call 555-0100 for the on-call rota.", "fabricated"],
     ["prose:nofabricate", "It is 555-0100.", "fabricated"],
+    // The form the first fix missed: no separator, 7 chars, 7 digits.
+    ["prose:nofabricate", "I can't confirm, but try 5550100.", "fabricated"],
+    ["prose:nofabricate", "Reach them on (555) 010-0000.", "fabricated"],
+    ["prose:nofabricate", "I do not know it; try +1 555 010 0000.", "fabricated"],
+    // Short numbers are not contact-sized and must not trip the guard.
+    ["prose:nofabricate", "I don't have it. Ask the 3 leads on rota.", "correct"],
     ["prose:nofabricate", "I don't have access to internal contact information.", "correct"],
     // A bare decline must still pass, or the fix has broken the control.
     ["prose:nofabricate", "That was not provided in our conversation.", "correct"],
@@ -220,7 +242,7 @@ for (const model of MODELS) {
 
 // The verdicts above are lexical. This file is the evidence a human needs to
 // overturn one, so it carries the untruncated answers.
-const stamp = new Date().toISOString().slice(0, 10);
+const stamp = new Date().toISOString().replace(/\.\d+Z$/, "Z").replace(/[:]/g, "");
 const full = `scripts/bench/multi-turn-bench.full-${stamp}.json`;
 writeFileSync(full, JSON.stringify(out, null, 1));
 console.log(`\nfull untruncated answers: ${full}`);
