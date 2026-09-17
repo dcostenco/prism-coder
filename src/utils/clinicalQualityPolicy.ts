@@ -129,6 +129,50 @@ function aacRestrictedAsConsequence(output: string): boolean {
     return false;
 }
 
+/** Characters of real prose required near a section marker for it to count. */
+const SECTION_CONTENT_CHARS = 50;
+const SECTION_WINDOW = 400;
+
+/** Drop whole heading lines. Stripping only the `#` turns the NEXT heading into
+ *  prose, which is why ten empty headings first scored 8 of 10. */
+function proseOnly(text: string): string {
+    return text
+        .split("\n")
+        .filter(line => !/^\s*#{1,6}\s/.test(line))          // markdown headings
+        .filter(line => !/^\s*\*\*[^*]+\*\*\s*:?\s*$/.test(line)) // bold-only lines
+        .join(" ")
+        .replace(/[>#*_|]+/g, "")
+        .replace(/\[[^\]]*\]/g, "")                          // [placeholders]
+        .replace(/[-\s]+/g, " ")
+        .trim();
+}
+
+/**
+ * A section counts only when there is real prose NEAR its marker.
+ *
+ * Without this, ten empty headings scored 8 of 10: an output with no clinical
+ * content looked nearly complete, because the census matched vocabulary rather
+ * than substance. The scaffold already demands "substantive content rather than
+ * a heading alone"; this is the census checking the same thing.
+ *
+ * The window spans both directions. A first version looked only forward and
+ * dropped a legitimate credit — "we will write down how often it happens on a
+ * data sheet" puts the content BEFORE the keyword.
+ *
+ * It does not defeat every structural pass. A model that echoes the section
+ * list back as prose still scores full marks, because a description of what a
+ * plan must contain is, at this level of analysis, indistinguishable from a
+ * plan. That is a limit of presence-checking, not something to regex away, and
+ * it is one more reason nothing here may be read as an endorsement.
+ */
+function sectionHasContent(output: string, pattern: RegExp): boolean {
+    const m = new RegExp(pattern.source, pattern.flags.replace("g", "")).exec(output);
+    if (!m) return false;
+    const at = m.index ?? 0;
+    const window = output.slice(Math.max(0, at - SECTION_WINDOW), at + m[0].length + SECTION_WINDOW);
+    return proseOnly(window).length >= SECTION_CONTENT_CHARS;
+}
+
 /**
  * Raise-only structural check. `pass: true` means nothing was detected as
  * missing — it is not a clinical endorsement.
@@ -160,7 +204,9 @@ export function passesClinicalQualityGate(
 
     if (!CLINICAL_PLAN_REQUEST_RE.test(prompt)) return { pass: true };
 
-    const missing = PLAN_SECTIONS.filter(s => !s.pattern.test(output)).map(s => s.name);
+    const missing = PLAN_SECTIONS
+        .filter(s => !sectionHasContent(output, s.pattern))
+        .map(s => s.name);
     const sections: ClinicalSectionReport = {
         required: PLAN_SECTIONS.length,
         present: PLAN_SECTIONS.length - missing.length,

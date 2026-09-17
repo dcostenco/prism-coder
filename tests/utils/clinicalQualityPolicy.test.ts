@@ -413,3 +413,45 @@ describe("a section needs a strategy, not a passing mention of its vocabulary", 
         expect(passesClinicalQualityGate(PLAN_PROMPT, SPARSE_PLAN).sections?.present).toBe(2);
     });
 });
+
+describe("a section marker without prose beside it is not a section", () => {
+    /** Round 2 of adversarial review. Ten empty headings scored 8 of 10: an
+     *  output with no clinical content read as nearly complete. */
+    const P = "Draft a behavior support plan for a student who calls out.";
+    const HEADINGS = [
+        "Operational Definition", "Function", "Antecedent Strategies",
+        "Replacement Behaviour", "Consequence Strategies", "Data Collection",
+        "Decision Rules", "Generalization and Maintenance", "Caregiver Training",
+        "BCBA Review",
+    ].map(h => `### ${h}\n`).join("\n");
+
+    it("credits nothing for headings alone", () => {
+        expect(passesClinicalQualityGate(P, HEADINGS).sections?.present).toBe(0);
+    });
+
+    it("does not let a neighbouring heading count as one section's content", () => {
+        // The first version stripped only the `#`, which turned the NEXT heading
+        // into prose and left this at 6 of 10.
+        const two = "### Data Collection\n\n### Decision Rules\n";
+        expect(passesClinicalQualityGate(P, two).sections?.present).toBe(0);
+    });
+
+    it("credits content that PRECEDES the keyword", () => {
+        // A forward-only window dropped this legitimate credit.
+        const before = "We will write down how often the behaviour happens each session on a data sheet.";
+        expect(passesClinicalQualityGate(P, before).sections?.missing).not.toContain("data_collection");
+    });
+
+    it("leaves the adjudicated fixtures where they were", () => {
+        expect(passesClinicalQualityGate(PLAN_PROMPT, REAL_9B_PLAN).sections?.present).toBe(7);
+        expect(passesClinicalQualityGate(PLAN_PROMPT, SPARSE_PLAN).sections?.present).toBe(2);
+    });
+
+    it("KNOWN LIMIT: echoing the section list back still scores full marks", () => {
+        // Recorded, not fixed. A description of what a plan must contain is, to a
+        // presence check, indistinguishable from a plan. Pinned so the limit is
+        // visible rather than discovered later by someone trusting the number.
+        const echo = clinicalPlanScaffold(P) ?? "";
+        expect(passesClinicalQualityGate(P, echo).sections?.present).toBe(10);
+    });
+});
