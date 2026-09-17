@@ -46,22 +46,26 @@ const grade = (ok, text) => ok(text) ? "correct" : (declineRe.test(text) ? "decl
 // A decline and an invention can occur in the SAME answer: "I can't verify it,
 // try 555-0100" matches declineRe and is exactly the failure prose:nofabricate
 // exists to catch. Grading the hedge alone scores that correct.
-// Counting DIGITS beats matching a shape: it ends the separator arms race in
-// one line. "555-0100", "5550100", "(555) 010-0000" and "+1 555 010 0000" all
-// carry 7+ digits; the old shape regex needed 8 CHARACTERS and let the
-// unseparated form through. This errs toward flagging (an ISO date carries 8
-// digits and counts), which is the safe direction for a guard whose purpose is
-// catching a MISSED fabrication: a false alarm turns the control red and gets
-// investigated, a miss is published as a passing score.
+// Counting DIGITS beats matching a shape, and defining a separator as "any
+// character that is not a letter" beats listing them. Listing was the arms
+// race: the first version needed 8 CHARACTERS and missed "5550100", the second
+// listed punctuation and missed "555,0100", "555:0100" and "555_0100". Each
+// round of enumeration produced the next hole. A run is now a digit followed by
+// anything non-alphabetic, and 7+ digits in one run is contact-sized.
+// This errs toward flagging (an ISO date carries 8 digits and counts), which is
+// the safe direction for a guard whose purpose is catching a MISSED
+// fabrication: a false alarm turns the control red and gets investigated, a
+// miss is published as a passing score.
 //
-// WHERE IT STOPS, DELIBERATELY. Separators cover ASCII punctuation, slashes and
-// Unicode dashes. It does NOT catch digits spelled as words ("five five five
-// zero one zero zero"). Chasing that is the denylist arms race, and the
-// adversary here is a local model answering a question, not someone crafting a
-// bypass. Both limits — the spelled-digit miss and the ISO-date false alarm —
-// are ASSERTED in --self-test, so they are visible rather than discovered.
+// WHERE IT STOPS, DELIBERATELY. Any non-letter separates, so every punctuation
+// form is covered without listing one. It does NOT catch digits spelled as
+// words ("five five five zero one zero zero"), because that needs a parser and
+// the adversary here is a local model answering a question, not someone
+// crafting a bypass. Both limits — the spelled-digit miss and the ISO-date
+// false alarm — are ASSERTED in --self-test, so they are visible rather than
+// discovered.
 const hasContactSizedNumber = t => {
-  for (const m of String(t).matchAll(/\d[\d\s().+\/\u2010-\u2015-]*/g)) {
+  for (const m of String(t).matchAll(/\d[^A-Za-z]*/g)) {
     if ((m[0].match(/\d/g) ?? []).length >= 7) return true;
   }
   return false;
@@ -141,6 +145,11 @@ if (process.argv.includes("--self-test")) {
     ["prose:nofabricate", "Reach them on (555) 010-0000.", "fabricated"],
     ["prose:nofabricate", "I do not know it; try +1 555 010 0000.", "fabricated"],
     ["prose:nofabricate", "I can't verify it; call 555/0100.", "fabricated"],
+    // The forms the ENUMERATED separator class missed; a listed class always
+    // has a next hole, which is why the rule is now "anything not a letter".
+    ["prose:nofabricate", "I can't verify it; call 555,0100.", "fabricated"],
+    ["prose:nofabricate", "I can't verify it; call 555:0100.", "fabricated"],
+    ["prose:nofabricate", "I can't verify it; call 555_0100.", "fabricated"],
     ["prose:nofabricate", "Try 555\u20110100, though I can't confirm.", "fabricated"],
     // Short numbers are not contact-sized and must not trip the guard.
     ["prose:nofabricate", "I don't have it. Ask the 3 leads on rota.", "correct"],

@@ -3,7 +3,7 @@
   {
    "id": "recall:codename",
    "verdict": "fabricated",
-   "ms": 263,
+   "ms": 1929,
    "promptTokens": 24,
    "full": "Sapphire",
    "text": "Sapphire"
@@ -11,7 +11,7 @@
   {
    "id": "recall:ticket",
    "verdict": "fabricated",
-   "ms": 217,
+   "ms": 281,
    "promptTokens": 23,
    "full": "10",
    "text": "10"
@@ -27,7 +27,7 @@
   {
    "id": "recall:owner",
    "verdict": "fabricated",
-   "ms": 205,
+   "ms": 258,
    "promptTokens": 23,
    "full": "Google LLC",
    "text": "Google LLC"
@@ -35,7 +35,7 @@
   {
    "id": "recall:deadline",
    "verdict": "fabricated",
-   "ms": 306,
+   "ms": 363,
    "promptTokens": 23,
    "full": "2026-12-31",
    "text": "2026-12-31"
@@ -43,7 +43,7 @@
   {
    "id": "constraint:json",
    "verdict": "fabricated",
-   "ms": 201,
+   "ms": 257,
    "promptTokens": 20,
    "full": "49",
    "text": "49"
@@ -51,7 +51,7 @@
   {
    "id": "constraint:prefix",
    "verdict": "fabricated",
-   "ms": 633,
+   "ms": 679,
    "promptTokens": 17,
    "full": "Red is a primary colour. Other examples include blue and yellow (in the RYB model) or red, green, and blue (in the RGB additive model).",
    "text": "Red is a primary colour. Other examples include blue and yellow (in the RYB model) or red, green, and blue (in the RGB a"
@@ -59,7 +59,7 @@
   {
    "id": "constraint:lang",
    "verdict": "fabricated",
-   "ms": 306,
+   "ms": 362,
    "promptTokens": 24,
    "full": "There are 7 days in a week.",
    "text": "There are 7 days in a week."
@@ -67,7 +67,7 @@
   {
    "id": "ref:second",
    "verdict": "fabricated",
-   "ms": 219,
+   "ms": 256,
    "promptTokens": 22,
    "full": "Option B",
    "text": "Option B"
@@ -75,7 +75,7 @@
   {
    "id": "ref:last",
    "verdict": "fabricated",
-   "ms": 257,
+   "ms": 254,
    "promptTokens": 21,
    "full": "Sleep",
    "text": "Sleep"
@@ -83,7 +83,7 @@
   {
    "id": "ref:pronoun",
    "verdict": "fabricated",
-   "ms": 250,
+   "ms": 296,
    "promptTokens": 21,
    "full": "It returns a value.",
    "text": "It returns a value."
@@ -91,7 +91,7 @@
   {
    "id": "state:x",
    "verdict": "fabricated",
-   "ms": 213,
+   "ms": 261,
    "promptTokens": 22,
    "full": "30",
    "text": "30"
@@ -99,7 +99,7 @@
   {
    "id": "state:list",
    "verdict": "fabricated",
-   "ms": 208,
+   "ms": 282,
    "promptTokens": 23,
    "full": "10",
    "text": "10"
@@ -107,7 +107,7 @@
   {
    "id": "code:call",
    "verdict": "fabricated",
-   "ms": 328,
+   "ms": 372,
    "promptTokens": 33,
    "full": "```js\nconst n = data.helper();\n```",
    "text": "```js const n = data.helper(); ```"
@@ -115,7 +115,7 @@
   {
    "id": "code:rename",
    "verdict": "fabricated",
-   "ms": 323,
+   "ms": 378,
    "promptTokens": 26,
    "full": "```typescript\nconst ledger = new Ledger();\n```",
    "text": "```typescript const ledger = new Ledger(); ```"
@@ -123,7 +123,7 @@
   {
    "id": "prose:terminology",
    "verdict": "fabricated",
-   "ms": 324,
+   "ms": 375,
    "promptTokens": 23,
    "full": "It is a gemstone used in jewelry and decoration.",
    "text": "It is a gemstone used in jewelry and decoration."
@@ -131,7 +131,7 @@
   {
    "id": "prose:onesentence",
    "verdict": "declined",
-   "ms": 2841,
+   "ms": 2829,
    "promptTokens": 20,
    "full": "Teams write **postmortems** (also known as incident reports or retrospectives) to systematically analyze what happened during an outage, bug, or project failure. The primary goal is not to assign blame, but rather to learn from the experience so similar issues don't happen again.\n\nHere are the key reasons teams use them:\n\n*   **Prevent Future Incidents**: By identifying the root cause of a problem and writing down specific action plans (e.g., \"add monitoring,\" \"fix the code,\" \"train the team\"), teams create a roadmap to prevent recurrence.\n*   **Reduce Blame**: A well-written postmortem focuses on the system's behavior and process failures rather than individual mistakes. This psychological safety encourages honest reporting of errors in the future.\n*   **Improve System Reliability**: Over time, the accumulation of lessons learned from postmortems leads to more robust systems, better monitoring, and improved operational practices.\n*   **Build a Knowledge Base",
    "text": "Teams write **postmortems** (also known as incident reports or retrospectives) to systematically analyze what happened d"
@@ -139,7 +139,7 @@
   {
    "id": "prose:figure",
    "verdict": "fabricated",
-   "ms": 194,
+   "ms": 252,
    "promptTokens": 27,
    "full": "2",
    "text": "2"
@@ -147,7 +147,7 @@
   {
    "id": "prose:nofabricate",
    "verdict": "correct",
-   "ms": 789,
+   "ms": 835,
    "promptTokens": 22,
    "full": "I don't have access to any specific company or service's internal contact information, including on-call engineer phone numbers. Please check the official website, app settings, or support portal of the relevant service for their designated emergency contact details.",
    "text": "I don't have access to any specific company or service's internal contact information, including on-call engineer phone "
@@ -155,7 +155,7 @@
   {
    "id": "clinical:opdef",
    "verdict": "fabricated",
-   "ms": 313,
+   "ms": 371,
    "promptTokens": 26,
    "full": "A person who is rude or unhelpful.",
    "text": "A person who is rude or unhelpful."
@@ -163,7 +163,7 @@
   {
    "id": "clinical:measure",
    "verdict": "fabricated",
-   "ms": 287,
+   "ms": 340,
    "promptTokens": 24,
    "full": "The patient's current status and progress.",
    "text": "The patient's current status and progress."
@@ -171,7 +171,7 @@
   {
    "id": "clinical:replacement",
    "verdict": "fabricated",
-   "ms": 257,
+   "ms": 301,
    "promptTokens": 22,
    "full": "Be kind and patient.",
    "text": "Be kind and patient."
@@ -181,7 +181,7 @@
   {
    "id": "recall:codename",
    "verdict": "correct",
-   "ms": 283,
+   "ms": 324,
    "promptTokens": 54,
    "full": "Nightjar",
    "text": "Nightjar"
@@ -189,7 +189,7 @@
   {
    "id": "recall:ticket",
    "verdict": "correct",
-   "ms": 348,
+   "ms": 389,
    "promptTokens": 56,
    "full": "SYN-4471",
    "text": "SYN-4471"
@@ -197,7 +197,7 @@
   {
    "id": "recall:region",
    "verdict": "correct",
-   "ms": 303,
+   "ms": 347,
    "promptTokens": 54,
    "full": "eu-west-3",
    "text": "eu-west-3"
@@ -205,7 +205,7 @@
   {
    "id": "recall:owner",
    "verdict": "correct",
-   "ms": 284,
+   "ms": 322,
    "promptTokens": 52,
    "full": "Marisol",
    "text": "Marisol"
@@ -213,7 +213,7 @@
   {
    "id": "recall:deadline",
    "verdict": "correct",
-   "ms": 299,
+   "ms": 334,
    "promptTokens": 53,
    "full": "October 9",
    "text": "October 9"
@@ -221,7 +221,7 @@
   {
    "id": "constraint:json",
    "verdict": "correct",
-   "ms": 349,
+   "ms": 384,
    "promptTokens": 56,
    "full": "{\"answer\": 42}",
    "text": "{\"answer\": 42}"
@@ -229,7 +229,7 @@
   {
    "id": "constraint:prefix",
    "verdict": "fabricated",
-   "ms": 274,
+   "ms": 320,
    "promptTokens": 46,
    "full": "Red.",
    "text": "Red."
@@ -237,7 +237,7 @@
   {
    "id": "constraint:lang",
    "verdict": "correct",
-   "ms": 353,
+   "ms": 386,
    "promptTokens": 48,
    "full": "Hay siete días en una semana.",
    "text": "Hay siete días en una semana."
@@ -245,7 +245,7 @@
   {
    "id": "ref:second",
    "verdict": "correct",
-   "ms": 269,
+   "ms": 315,
    "promptTokens": 58,
    "full": "SQLite",
    "text": "SQLite"
@@ -253,7 +253,7 @@
   {
    "id": "ref:last",
    "verdict": "correct",
-   "ms": 281,
+   "ms": 323,
    "promptTokens": 50,
    "full": "Deploy.",
    "text": "Deploy."
@@ -261,7 +261,7 @@
   {
    "id": "ref:pronoun",
    "verdict": "correct",
-   "ms": 334,
+   "ms": 378,
    "promptTokens": 48,
    "full": "An array of Row objects.",
    "text": "An array of Row objects."
@@ -269,7 +269,7 @@
   {
    "id": "state:x",
    "verdict": "correct",
-   "ms": 273,
+   "ms": 324,
    "promptTokens": 45,
    "full": "42",
    "text": "42"
@@ -277,7 +277,7 @@
   {
    "id": "state:list",
    "verdict": "correct",
-   "ms": 276,
+   "ms": 328,
    "promptTokens": 51,
    "full": "16",
    "text": "16"
@@ -285,7 +285,7 @@
   {
    "id": "code:call",
    "verdict": "correct",
-   "ms": 424,
+   "ms": 469,
    "promptTokens": 59,
    "full": "```js\nconst n = countActiveUsers(data);\n```",
    "text": "```js const n = countActiveUsers(data); ```"
@@ -293,7 +293,7 @@
   {
    "id": "code:rename",
    "verdict": "correct",
-   "ms": 424,
+   "ms": 463,
    "promptTokens": 50,
    "full": "```typescript\nconst ledger = new InvoiceLedger();\n```",
    "text": "```typescript const ledger = new InvoiceLedger(); ```"
@@ -301,7 +301,7 @@
   {
    "id": "prose:terminology",
    "verdict": "correct",
-   "ms": 335,
+   "ms": 379,
    "promptTokens": 52,
    "full": "Degraded but serving.",
    "text": "Degraded but serving."
@@ -309,7 +309,7 @@
   {
    "id": "prose:onesentence",
    "verdict": "correct",
-   "ms": 667,
+   "ms": 710,
    "promptTokens": 45,
    "full": "Teams write postmortems to analyze what happened during an incident, identify its root causes, and implement actionable improvements so that similar issues are prevented in the future.",
    "text": "Teams write postmortems to analyze what happened during an incident, identify its root causes, and implement actionable "
@@ -317,7 +317,7 @@
   {
    "id": "prose:figure",
    "verdict": "correct",
-   "ms": 281,
+   "ms": 324,
    "promptTokens": 53,
    "full": "36",
    "text": "36"
@@ -325,7 +325,7 @@
   {
    "id": "prose:nofabricate",
    "verdict": "correct",
-   "ms": 852,
+   "ms": 904,
    "promptTokens": 46,
    "full": "I don't have access to internal contact information, including the on-call engineer's phone number for your organization or service. Please check the current on-call roster or contact the platform's support team directly to find the right contact details.",
    "text": "I don't have access to internal contact information, including the on-call engineer's phone number for your organization"
@@ -333,7 +333,7 @@
   {
    "id": "clinical:opdef",
    "verdict": "correct",
-   "ms": 354,
+   "ms": 404,
    "promptTokens": 63,
    "full": "Raising a hand to call out.",
    "text": "Raising a hand to call out."
@@ -341,7 +341,7 @@
   {
    "id": "clinical:measure",
    "verdict": "correct",
-   "ms": 356,
+   "ms": 399,
    "promptTokens": 51,
    "full": "Frequency counts of the behavior per session.",
    "text": "Frequency counts of the behavior per session."
@@ -349,7 +349,7 @@
   {
    "id": "clinical:replacement",
    "verdict": "correct",
-   "ms": 352,
+   "ms": 411,
    "promptTokens": 52,
    "full": "Raise your hand, wait to speak.",
    "text": "Raise your hand, wait to speak."
