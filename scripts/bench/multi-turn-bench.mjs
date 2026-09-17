@@ -16,17 +16,33 @@
 // — it grades correct and is semantically confused. Two of three clinical
 // answers were genuinely right on inspection; one was vocabulary.
 //
-// Do not tighten these into an arms race. If absolute correctness is the
-// question, read the per-task text, which is why it is printed.
-// Fabrication = a confident WRONG specific answer (not a decline).
+// So read the score as KEYWORD CARRY-OVER, not as clinical correctness: it
+// answers "did what the history said reach the answer", not "was the answer
+// right". For factual recall those coincide ("Nightjar" is either recalled or
+// not). For a task that asks the model to REASON over remembered content they
+// do not. Never quote a clinical cell as accuracy.
+//
+// Do not tighten the graders into an arms race. For absolute correctness read
+// the FULL per-task text, written to multi-turn-bench.full-<date>.json — the
+// stdout column is a 120-char preview and has been known to hide the part that
+// decides the verdict.
+// Fabrication = a confident WRONG specific answer (not a decline). Note the
+// declined/fabricated SPLIT is soft: declineRe matches "don't" wherever it
+// appears, so a long answer containing "issues don't happen again" reads as a
+// decline. That makes `fabricated` an UNDER-count on long answers. The
+// `correct` column is unaffected, and it is the one to quote.
 // Run from the repo root after `npm run build`:  node scripts/bench/multi-turn-bench.mjs [model ...]
-import { callOllamaGenerate } from "../../dist/tools/prismInferHandler.js";
+import { writeFileSync } from "node:fs";
 const URL = "http://localhost:11434";
 const MODELS = process.argv.slice(2).length ? process.argv.slice(2) : ["prism-coder:4b", "prism-coder:9b"];
 const H = (u, a) => [{ role: "user", content: u }, { role: "assistant", content: a }];
 // [id, history, follow-up prompt, grader(text) -> "correct"|"declined"|"fabricated"]
 const declineRe = /(don't|do not|cannot|can't|no (prior|previous|earlier)|not (been )?(provided|specified|mentioned|given)|unknown|need more|no information|not have access)/i;
 const grade = (ok, text) => ok(text) ? "correct" : (declineRe.test(text) ? "declined" : "fabricated");
+// A decline and an invention can occur in the SAME answer: "I can't verify it,
+// try 555-0100" matches declineRe and is exactly the failure prose:nofabricate
+// exists to catch. Grading the hedge alone scores that correct.
+const inventedNumberRe = /\+?\d[\d\s().-]{6,}\d/;
 const T = [];
 // A. fact recall (5)
 for (const [k, v] of [["codename","Nightjar"],["ticket","SYN-4471"],["region","eu-west-3"],["owner","Marisol"],["deadline","October 9"]]) {
@@ -61,14 +77,19 @@ T.push(["code:rename", H("The class is called InvoiceLedger. Acknowledge.", "Not
 T.push(["prose:terminology", H("In this report, status \"amber\" means degraded but serving. Acknowledge.", "Acknowledged."),
   "What does amber mean here? Under 8 words.", t => grade(x => /degrad/i.test(x), t)]);
 T.push(["prose:onesentence", H("From now on answer in exactly one sentence. Acknowledge.", "Understood."),
-  "Why do teams write postmortems?", t => grade(x => (x.trim().match(/[.!?](\s|$)/g) ?? []).length === 1, t)]);
+  // At the shared 48-token budget every answer is cut mid-thought, so counting
+  // sentence terminators measured TRUNCATION and scored correct in both arms.
+  // 200 tokens lets a non-compliant answer actually run past one sentence.
+  "Why do teams write postmortems?", t => grade(x => (x.trim().match(/[.!?](\s|$)/g) ?? []).length === 1, t),
+  { maxTokens: 200 }]);
 T.push(["prose:figure", H("The team closed 18 tickets last sprint. Acknowledge.", "Noted."),
   "At the same rate, how many across two sprints? Number only.", t => grade(x => /\b36\b/.test(x), t)]);
 // Carrying history must not make the model MORE willing to invent. Here the
 // answer is genuinely absent from the conversation, so declining IS correct.
 T.push(["prose:nofabricate", H("The release train runs on Tuesdays. Acknowledge.", "Noted."),
   "What is the on-call engineer's phone number?",
-  t => declineRe.test(t) ? "correct" : "fabricated"]);
+  t => inventedNumberRe.test(t) ? "fabricated" : (declineRe.test(t) ? "correct" : "fabricated"),
+  { kind: "control" }]);
 
 // G. clinical, ROUTINE band only (3). No crisis, restraint or injury
 // vocabulary: those never reach a local model, so benching them would measure
@@ -81,16 +102,68 @@ T.push(["clinical:replacement", H("The replacement behaviour is raising a hand a
   "What should staff reinforce? Under 8 words.", t => grade(x => /hand|wait/i.test(x), t)]);
 
 
+// --- grader self-test: `node scripts/bench/multi-turn-bench.mjs --self-test`
+// Runs the REAL graders in this file (not a copy) against answers whose
+// verdict is known, so a loosened grader fails here instead of in a report.
+// Needs no Ollama, so CI and a reviewer can both run it.
+if (process.argv.includes("--self-test")) {
+  const G = id => { const t = T.find(x => x[0] === id); if (!t) throw new Error(`no task ${id}`); return t[3]; };
+  const CASES = [
+    // The defect this file shipped with: a hedge AND an invented number scored
+    // correct on the one task whose whole purpose is catching invention.
+    ["prose:nofabricate", "I can't verify it; call 555-0100 for the on-call rota.", "fabricated"],
+    ["prose:nofabricate", "It is 555-0100.", "fabricated"],
+    ["prose:nofabricate", "I don't have access to internal contact information.", "correct"],
+    // A bare decline must still pass, or the fix has broken the control.
+    ["prose:nofabricate", "That was not provided in our conversation.", "correct"],
+    // Truncation used to satisfy this; two sentences must fail either way.
+    ["prose:onesentence", "Teams learn from failure. They also share findings.", "fabricated"],
+    ["prose:onesentence", "Teams write postmortems to learn from failure.", "correct"],
+    // Recall is unambiguous: the value is present or it is not.
+    ["recall:codename", "Nightjar", "correct"],
+    ["recall:codename", "Sapphire", "fabricated"],
+    // PINNED LOOSENESS, not an aspiration: clinical:opdef credits the keyword
+    // even when the answer is semantically wrong. "Raising a hand to call out"
+    // describes the TARGET behaviour, not a non-example, and still grades
+    // correct. Asserting it keeps the summary's carry-over caveat honest — if
+    // someone tightens this grader, this line tells them what changes.
+    ["clinical:opdef", "Raising a hand to call out.", "correct"],
+    ["clinical:opdef", "A person who is rude or unhelpful.", "fabricated"],
+    // PINNED SOFTNESS: an incidental "don't" inside a real answer reads as a
+    // decline, so the fabricated column under-counts on long answers. Observed
+    // 2026-09-17 on prose:onesentence ("issues don't happen again").
+    ["prose:onesentence", "One. Two. Bugs don't recur after this.", "declined"],
+  ];
+  let bad = 0;
+  for (const [id, text, want] of CASES) {
+    const got = G(id)(text);
+    if (got !== want) { bad++; console.error(`FAIL ${id}: expected ${want}, got ${got} for ${JSON.stringify(text)}`); }
+  }
+  // Wiring, not just regexes: an option that never reaches the runner is inert.
+  const nofab = T.find(x => x[0] === "prose:nofabricate");
+  const onesent = T.find(x => x[0] === "prose:onesentence");
+  if (nofab[4]?.kind !== "control") { bad++; console.error("FAIL prose:nofabricate is not marked a control"); }
+  if (onesent[4]?.maxTokens !== 200) { bad++; console.error("FAIL prose:onesentence lost its token budget"); }
+  console.log(bad ? `grader self-test: ${bad} FAILED` : `grader self-test: ${CASES.length + 2} passed`);
+  process.exit(bad ? 1 : 0);
+}
+
+// Imported here, not at the top: --self-test returns above this line and must
+// run on a fresh clone with no dist/.
+const { callOllamaGenerate } = await import("../../dist/tools/prismInferHandler.js");
+
 const out = {};
 for (const model of MODELS) {
   for (const cond of ["no_history", "messages"]) {
     const rows = [];
-    for (const [id, hist, prompt, grader] of T) {
+    for (const [id, hist, prompt, grader, opts = {}] of T) {
       const t0 = Date.now();
-      const r = await callOllamaGenerate(URL, model, prompt, undefined, 48, 0, 240_000, false, undefined, cond === "messages" ? hist : undefined);
+      const r = await callOllamaGenerate(URL, model, prompt, undefined, opts.maxTokens ?? 48, 0, 240_000, false, undefined, cond === "messages" ? hist : undefined);
       const ms = Date.now() - t0;
       const text = r.ok ? r.text : `ERROR ${r.reason}`;
-      rows.push({ id, verdict: r.ok ? grader(text) : "error", ms, promptTokens: r.promptTokens ?? null, text: text.slice(0, 60).replace(/\n/g, " ") });
+      // full keeps what the preview drops; the preview alone cannot support a
+      // correctness judgement and the header comment promises the full text.
+      rows.push({ id, verdict: r.ok ? grader(text) : "error", ms, promptTokens: r.promptTokens ?? null, full: text, text: text.slice(0, 120).replace(/\n/g, " ") });
     }
     out[`${model}|${cond}`] = rows;
   }
@@ -106,19 +179,43 @@ for (const [key, rows] of Object.entries(out)) {
 // Per-domain, because a regression in one domain is invisible in a total.
 const domainOf = id => { const p = id.split(":")[0];
   return p === "code" ? "code" : p === "clinical" ? "clinical" : p === "prose" ? "prose" : "mechanics"; };
-console.log("\nby domain (correct / total):");
+// A control is expected to pass WITHOUT history too — it guards against
+// history making the model worse. Counting one in the carry-over denominator
+// advertises a measurement of history that the task never makes.
+const isControl = i => (T[i][4]?.kind) === "control";
+console.log("\nby domain (correct / total), carry-over tasks only:");
 console.log("model                 condition    mechanics  code  prose  clinical");
 for (const [key, rows] of Object.entries(out)) {
   const [model, cond] = key.split("|");
   const cell = d => {
-    const inD = rows.filter((r, i) => domainOf(T[i][0]) === d);
+    const inD = rows.filter((r, i) => !isControl(i) && domainOf(T[i][0]) === d);
     return `${inD.filter(r => r.verdict === "correct").length}/${inD.length}`;
   };
   console.log(`${model.padEnd(21)} ${cond.padEnd(12)} ${cell("mechanics").padStart(9)}  ${cell("code").padStart(4)}  ${cell("prose").padStart(5)}  ${cell("clinical").padStart(8)}`);
 }
+const controls = T.map((t, i) => [t[0], i]).filter(([, i]) => isControl(i));
+if (controls.length) {
+  console.log("\ncontrols (must hold in BOTH arms; a fail here is a regression, not a miss):");
+  for (const [model] of MODELS.map(m => [m])) {
+    for (const [id, i] of controls) {
+      const a = out[`${model}|no_history`][i], b = out[`${model}|messages`][i];
+      console.log(`  ${model.padEnd(16)} ${id.padEnd(18)} ${a.verdict} / ${b.verdict}`);
+    }
+  }
+}
+console.log("\nprose and clinical cells score KEYWORD CARRY-OVER, not correctness:");
+console.log("an answer can contain the remembered word and still be wrong. Read the");
+console.log("full text before quoting either as accuracy.");
 
 console.log("\nper-task (no_history -> messages):");
 for (const model of MODELS) {
   const a = out[`${model}|no_history`], b = out[`${model}|messages`];
   for (let i = 0; i < T.length; i++) console.log(`  ${model.padEnd(16)} ${T[i][0].padEnd(18)} ${a[i].verdict.padEnd(10)} -> ${b[i].verdict.padEnd(10)} | ${JSON.stringify(a[i].text)} -> ${JSON.stringify(b[i].text)}`);
 }
+
+// The verdicts above are lexical. This file is the evidence a human needs to
+// overturn one, so it carries the untruncated answers.
+const stamp = new Date().toISOString().slice(0, 10);
+const full = `scripts/bench/multi-turn-bench.full-${stamp}.json`;
+writeFileSync(full, JSON.stringify(out, null, 1));
+console.log(`\nfull untruncated answers: ${full}`);

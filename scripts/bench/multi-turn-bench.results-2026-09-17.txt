@@ -1,11 +1,18 @@
 model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
-prism-coder:9b        no_history         2         0          20     322              23
-prism-coder:9b        messages          21         0           1     355              52
+prism-coder:9b        no_history         1         1          20     444              23
+prism-coder:9b        messages          21         0           1     362              52
 
-by domain (correct / total):
+by domain (correct / total), carry-over tasks only:
 model                 condition    mechanics  code  prose  clinical
-prism-coder:9b        no_history        0/13   0/2    2/4       0/3
-prism-coder:9b        messages         12/13   2/2    4/4       3/3
+prism-coder:9b        no_history        0/13   0/2    0/3       0/3
+prism-coder:9b        messages         12/13   2/2    3/3       3/3
+
+controls (must hold in BOTH arms; a fail here is a regression, not a miss):
+  prism-coder:9b   prose:nofabricate  correct / correct
+
+prose and clinical cells score KEYWORD CARRY-OVER, not correctness:
+an answer can contain the remembered word and still be wrong. Read the
+full text before quoting either as accuracy.
 
 per-task (no_history -> messages):
   prism-coder:9b   recall:codename    fabricated -> correct    | "Sapphire" -> "Nightjar"
@@ -14,7 +21,7 @@ per-task (no_history -> messages):
   prism-coder:9b   recall:owner       fabricated -> correct    | "Google LLC" -> "Marisol"
   prism-coder:9b   recall:deadline    fabricated -> correct    | "2026-12-31" -> "October 9"
   prism-coder:9b   constraint:json    fabricated -> correct    | "49" -> "{\"answer\": 42}"
-  prism-coder:9b   constraint:prefix  fabricated -> fabricated | "Red is a primary colour. Other examples include blue and yel" -> "Red."
+  prism-coder:9b   constraint:prefix  fabricated -> fabricated | "Red is a primary colour. Other examples include blue and yellow (in the RYB model) or red, green, and blue (in the RGB a" -> "Red."
   prism-coder:9b   constraint:lang    fabricated -> correct    | "There are 7 days in a week." -> "Hay siete días en una semana."
   prism-coder:9b   ref:second         fabricated -> correct    | "Option B" -> "SQLite"
   prism-coder:9b   ref:last           fabricated -> correct    | "Sleep" -> "Deploy."
@@ -24,12 +31,52 @@ per-task (no_history -> messages):
   prism-coder:9b   code:call          fabricated -> correct    | "```js const n = data.helper(); ```" -> "```js const n = countActiveUsers(data); ```"
   prism-coder:9b   code:rename        fabricated -> correct    | "```typescript const ledger = new Ledger(); ```" -> "```typescript const ledger = new InvoiceLedger(); ```"
   prism-coder:9b   prose:terminology  fabricated -> correct    | "It is a gemstone used in jewelry and decoration." -> "Degraded but serving."
-  prism-coder:9b   prose:onesentence  correct    -> correct    | "Teams write **postmortems** (also known as incident reports " -> "Teams write postmortems to analyze what happened during an i"
+  prism-coder:9b   prose:onesentence  declined   -> correct    | "Teams write **postmortems** (also known as incident reports or retrospectives) to systematically analyze what happened d" -> "Teams write postmortems to analyze what happened during an incident, identify its root causes, and implement actionable "
   prism-coder:9b   prose:figure       fabricated -> correct    | "2" -> "36"
-  prism-coder:9b   prose:nofabricate  correct    -> correct    | "I don't have access to any specific company or service's int" -> "I don't have access to internal contact information, includi"
+  prism-coder:9b   prose:nofabricate  correct    -> correct    | "I don't have access to any specific company or service's internal contact information, including on-call engineer phone " -> "I don't have access to internal contact information, including the on-call engineer's phone number for your organization"
   prism-coder:9b   clinical:opdef     fabricated -> correct    | "A person who is rude or unhelpful." -> "Raising a hand to call out."
   prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
   prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."
+
+full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17.json
+
+[exited with code 0]
+
+═══════════════════════════════════════════════════════════════════
+WHAT AN INDEPENDENT REVIEW CHANGED IN THESE NUMBERS
+═══════════════════════════════════════════════════════════════════
+
+The first published version of this table read prose 2/4 -> 4/4. Both of the
+two cold "correct" scores were artifacts, and an outside review found them:
+
+1. prose:onesentence scored correct in BOTH arms. Every task shared a 48-token
+   budget, which cut every answer before a second sentence could appear, so
+   counting sentence terminators measured TRUNCATION and reported it as
+   history carry-over. At 200 tokens the cold answer runs to 973 characters
+   and correctly fails. The task now discriminates.
+
+2. prose:nofabricate graded the presence of a hedge and never the absence of a
+   number. "I can't verify it; call 555-0100" scored correct — on the one task
+   whose entire purpose is catching an invented answer. It now fails any
+   answer containing a number, and it is reported as a CONTROL, because it is
+   expected to pass without history too and was padding the carry-over
+   denominator.
+
+The corrected prose column is 0/3 -> 3/3. It is a smaller denominator and a
+truthful one.
+
+Both graders are now pinned by scripts/bench/multi-turn-bench.mjs --self-test,
+which runs the real graders against known answers and needs no Ollama, and by
+tests/multiTurnBenchGraders.test.ts, which reverts the fix in a copy and
+asserts the self-test goes red.
+
+READ THE SCORE CORRECTLY. prose and clinical cells measure keyword carry-over,
+not correctness. clinical:opdef answers "Raising a hand to call out" as a
+NON-example of calling out, which is the target behaviour restated, and it
+grades correct because it contains "hand". That looseness is asserted on
+purpose in the self-test so nobody reads 3/3 as clinical accuracy. Full
+untruncated answers are written to multi-turn-bench.full-<date>.json; the
+stdout column is a 120-character preview.
 
 ═══════════════════════════════════════════════════════════════════
 NEGATIVE RESULT — prompt scaffolding does NOT fix constraint:prefix

@@ -1,0 +1,73 @@
+/**
+ * The multi-turn benchmark grades its own results, and nothing graded the grader.
+ *
+ * Measured cost, 2026-09-17: an independent review found that
+ * `prose:nofabricate` — the one task whose entire purpose is catching an
+ * invented answer — scored "correct" for "I can't verify it; call 555-0100".
+ * Its grader asked only whether the text contained a hedge, never whether it
+ * also contained a number. A second task, `prose:onesentence`, scored correct
+ * in BOTH arms because the shared 48-token budget truncated every answer before
+ * a second sentence could appear, so it measured truncation and was reported as
+ * history carry-over.
+ *
+ * Both defects lived in scripts/, which no test imported, so a green suite said
+ * nothing about them. This spawns the benchmark's own `--self-test`, which runs
+ * the REAL graders in the real file against answers whose verdict is known. It
+ * needs no Ollama.
+ */
+import { describe, it, expect } from "vitest";
+import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const bench = resolve(repoRoot, "scripts/bench/multi-turn-bench.mjs");
+
+describe("multi-turn bench graders", () => {
+    it("passes its own self-test, so a loosened grader fails here not in a report", () => {
+        const out = execFileSync(process.execPath, [bench, "--self-test"], {
+            cwd: repoRoot,
+            encoding: "utf-8",
+            timeout: 60_000,
+        });
+        expect(out).toContain("passed");
+        expect(out).not.toContain("FAIL");
+    });
+
+    it("goes red and exits nonzero when the fix is reverted — a check that cannot fail is not a check", () => {
+        // Grepping the source for the fix would pass against a file that never
+        // runs. This restores the ACTUAL defect in a copy and asserts the
+        // self-test catches it, which is the only evidence that the guard works.
+        const good = readFileSync(bench, "utf-8");
+        const reverted = good.replace(
+            't => inventedNumberRe.test(t) ? "fabricated" : (declineRe.test(t) ? "correct" : "fabricated")',
+            't => declineRe.test(t) ? "correct" : "fabricated"',
+        );
+        expect(reverted, "the shipped defect must still be findable in the source").not.toBe(good);
+
+        // Same directory, so the script's relative paths still resolve.
+        const mutant = resolve(repoRoot, "scripts/bench/.mutant-nofabricate.mjs");
+        writeFileSync(mutant, reverted);
+        try {
+            let status = 0;
+            let output = "";
+            try {
+                output = execFileSync(process.execPath, [mutant, "--self-test"], {
+                    cwd: repoRoot,
+                    encoding: "utf-8",
+                    timeout: 60_000,
+                });
+            } catch (e: unknown) {
+                const err = e as { status?: number; stdout?: string; stderr?: string };
+                status = err.status ?? -1;
+                output = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+            }
+            expect(status, "a reverted grader must exit nonzero").not.toBe(0);
+            expect(output).toContain("FAIL prose:nofabricate");
+            expect(output).toContain("555-0100");
+        } finally {
+            rmSync(mutant, { force: true });
+        }
+    });
+});
