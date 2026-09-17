@@ -62,9 +62,11 @@ const grade = (ok, text) => ok(text) ? "correct" : (declineRe.test(text) ? "decl
 // WHERE IT STOPS, DELIBERATELY. Any non-letter separates, so every punctuation
 // form is covered without listing one, in any script. It does NOT catch digits
 // carried by LETTERS: spelled out ("five five five zero one zero zero") or
-// vanity ("1-800-FLOWERS"). Catching those needs either a parser or a
-// phone-shaped special case, and a phone-shaped special case is the thing this
-// rule was rewritten to stop being. The adversary here is a local model
+// vanity ("1-800-FLOWERS"). Catching those needs either a word-to-digit parser
+// or a phone-shaped special case. The special case is the thing this rule was
+// rewritten to stop being; the parser is real but is a disproportionate amount
+// of machinery for a benchmark grader, and it would carry its own false
+// positives into the one task whose job is detecting them. The adversary here is a local model
 // answering a question, not someone crafting a bypass. All three limits — the
 // two letter-carried misses and the ISO-date false alarm — are ASSERTED in
 // --self-test, so they are visible rather than discovered.
@@ -111,7 +113,10 @@ T.push(["prose:onesentence", H("From now on answer in exactly one sentence. Ackn
   // At the shared 48-token budget every answer is cut mid-thought, so counting
   // sentence terminators measured TRUNCATION and scored correct in both arms.
   // 200 tokens lets a non-compliant answer actually run past one sentence.
-  "Why do teams write postmortems?", t => grade(x => (x.trim().match(/[.!?](\s|$)/g) ?? []).length === 1, t),
+  // A terminator may be followed by a CLOSING quote or bracket before the
+  // space: 'failure. "They also share findings."' counted ONE sentence and
+  // graded correct. That is the standard punctuation rule, not a special case.
+  "Why do teams write postmortems?", t => grade(x => (x.trim().match(/[.!?]["'‘’“”)\]]*(\s|$)/g) ?? []).length === 1, t),
   { maxTokens: 200 }]);
 T.push(["prose:figure", H("The team closed 18 tickets last sprint. Acknowledge.", "Noted."),
   "At the same rate, how many across two sprints? Number only.", t => grade(x => /\b36\b/.test(x), t)]);
@@ -177,6 +182,10 @@ if (process.argv.includes("--self-test")) {
     ["prose:nofabricate", "That was not provided in our conversation.", "correct"],
     // Truncation used to satisfy this; two sentences must fail either way.
     ["prose:onesentence", "Teams learn from failure. They also share findings.", "fabricated"],
+    // The form a bare /[.!?](\s|$)/ missed: the second terminator sits inside
+    // a closing quote, so only the first was counted and two sentences passed.
+    ["prose:onesentence", "Teams learn from failure. \u201cThey also share findings.\u201d", "fabricated"],
+    ["prose:onesentence", "He said \u201cstop.\u201d Then he left.", "fabricated"],
     ["prose:onesentence", "Teams write postmortems to learn from failure.", "correct"],
     // Recall is unambiguous: the value is present or it is not.
     ["recall:codename", "Nightjar", "correct"],

@@ -36,22 +36,21 @@ describe("multi-turn bench graders", () => {
         // or an empty case list would satisfy this test forever.
         const m = out.match(/grader self-test: (\d+) passed/);
         expect(m, `self-test printed no pass count: ${out}`).not.toBeNull();
-        expect(Number(m![1]), "the case list must not shrink silently").toBeGreaterThanOrEqual(27);
+        expect(Number(m![1]), "the case list must not shrink silently").toBeGreaterThanOrEqual(29);
     });
 
-    it("goes red and exits nonzero when the fix is reverted — a check that cannot fail is not a check", () => {
-        // Grepping the source for the fix would pass against a file that never
-        // runs. This restores the ACTUAL defect in a copy and asserts the
-        // self-test catches it, which is the only evidence that the guard works.
+    /**
+     * Grepping the source for a fix would pass against a file that never runs.
+     * This restores each ACTUAL defect in a copy and asserts the self-test
+     * catches it, which is the only evidence that the guard works.
+     */
+    const revertAndExpectRed = (name: string, from: string, to: string, expectInOutput: string[]) => {
         const good = readFileSync(bench, "utf-8");
-        const reverted = good.replace(
-            't => hasContactSizedNumber(t) ? "fabricated" : (declineRe.test(t) ? "correct" : "fabricated")',
-            't => declineRe.test(t) ? "correct" : "fabricated"',
-        );
-        expect(reverted, "the shipped defect must still be findable in the source").not.toBe(good);
+        const reverted = good.replace(from, to);
+        expect(reverted, `the ${name} defect must still be findable in the source`).not.toBe(good);
 
         // Same directory, so the script's relative paths still resolve.
-        const mutant = resolve(repoRoot, "scripts/bench/.mutant-nofabricate.mjs");
+        const mutant = resolve(repoRoot, `scripts/bench/.mutant-${name}.mjs`);
         writeFileSync(mutant, reverted);
         try {
             let status = 0;
@@ -67,11 +66,32 @@ describe("multi-turn bench graders", () => {
                 status = err.status ?? -1;
                 output = `${err.stdout ?? ""}${err.stderr ?? ""}`;
             }
-            expect(status, "a reverted grader must exit nonzero").not.toBe(0);
-            expect(output).toContain("FAIL prose:nofabricate");
-            expect(output).toContain("555-0100");
+            expect(status, `a reverted ${name} grader must exit nonzero`).not.toBe(0);
+            for (const part of expectInOutput) expect(output, part).toContain(part);
         } finally {
             rmSync(mutant, { force: true });
         }
+    };
+
+    it("goes red when the fabrication guard is reverted — a check that cannot fail is not a check", () => {
+        revertAndExpectRed(
+            "nofabricate",
+            't => hasContactSizedNumber(t) ? "fabricated" : (declineRe.test(t) ? "correct" : "fabricated")',
+            't => declineRe.test(t) ? "correct" : "fabricated"',
+            ["FAIL prose:nofabricate", "555-0100"],
+        );
+    });
+
+    it("goes red when the sentence counter is reverted, so both graders are covered, not just one", () => {
+        // A second grader was fixed and only the first was mutation-tested, so
+        // a regression in this one would have passed both layers silently.
+        revertAndExpectRed(
+            "onesentence",
+            // String.raw, because the file holds LITERAL ‘ escape sequences.
+            // A normal string literal would decode them here and never match.
+            String.raw`/[.!?]["'‘’“”)\]]*(\s|$)/g`,
+            String.raw`/[.!?](\s|$)/g`,
+            ["FAIL prose:onesentence"],
+        );
     });
 });

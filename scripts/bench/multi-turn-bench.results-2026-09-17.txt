@@ -1,5 +1,5 @@
 model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
-prism-coder:9b        no_history         1         1          20     542              23
+prism-coder:9b        no_history         1         1          20     583              23
 prism-coder:9b        messages          21         0           1     406              52
 
 by domain (correct / total), carry-over tasks only:
@@ -38,7 +38,7 @@ per-task (no_history -> messages):
   prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
   prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."
 
-full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T170421Z.json
+full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T172040Z.json
 
 ═══════════════════════════════════════════════════════════════════
 WHAT AN INDEPENDENT REVIEW CHANGED IN THESE NUMBERS
@@ -87,7 +87,7 @@ untruncated answers are written to multi-turn-bench.full-<timestamp>.json; the
 stdout column is a 120-character preview.
 
 ═══════════════════════════════════════════════════════════════════
-SIX REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
+SEVEN REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
 ═══════════════════════════════════════════════════════════════════
 
 The review did not converge on the first pass, and saying it had would have
@@ -130,14 +130,28 @@ REVIEW ROUNDS" while listing five of them out of order, an undercounted run
 total, and a deliberate-limits list that had not been updated with the newest
 accepted miss. Bookkeeping, and corrected here.
 
+ROUND 7 found a real grader defect that six rounds of attention had walked
+past: prose:onesentence counted a terminator only when whitespace or the end of
+the string followed it, so 'failure. "They also share findings."' counted ONE
+sentence and graded correct. A closing quote or bracket may sit between the two.
+Round 7 also found the vanity-number rationale here said "the only fix" while
+the source named two options, an unsupported prediction that an inline
+workaround "will not survive a model update", and that the six-run agreement
+claimed below is not auditable from the repository. All four are corrected, and
+the second grader now has its own mutation test, which it lacked while only the
+first one was covered.
+
 WHAT WAS DELIBERATELY NOT FIXED, AND WHY. Three limits are asserted in
 --self-test rather than chased:
 
   - Digits spelled as words ("five five five zero one zero zero") are missed.
   - Vanity numbers ("1-800-FLOWERS") are missed: their digits are carried by
-    LETTERS, so no separator rule reaches them. The only fix is a phone-shaped
-    special case, which is precisely what this guard was rewritten to stop
-    being, and every special case so far produced the next hole.
+    LETTERS, so no separator rule reaches them. Two things would catch them: a
+    phone-shaped special case, which is precisely what this guard was rewritten
+    to stop being and where every previous special case produced the next hole;
+    or a word-to-digit parser, which is real but disproportionate machinery for
+    a benchmark grader and would carry its own false positives into the one
+    task whose job is detecting them.
   - A date carries 7+ digits, so a decline mentioning one is called fabricated.
 
 The adversary here is a local model answering a question, not someone crafting
@@ -146,7 +160,12 @@ and gets looked at, where a miss would be published as a passing score. None of
 this makes prose:nofabricate a phone-number validator, and a `correct` verdict
 on it is not a safety guarantee.
 
-Verdicts were identical across all six runs. Only avg_ms moved.
+Verdicts were identical in every run made while fixing this, seven in all, and
+only avg_ms moved. Note what that claim rests on: only the FINAL run's
+untruncated answers are committed, because each rebuild replaced the previous
+sidecar. The repository can substantiate the run reported above and nothing
+more. Treat the six-run agreement as a note from the author, not as an
+auditable artifact.
 
 ═══════════════════════════════════════════════════════════════════
 NEGATIVE RESULT — every scaffold TESTED failed to fix constraint:prefix
@@ -181,6 +200,7 @@ did not. That one asks for CONTENT COVERAGE — "include a data collection
 section" — and the model complies from a separate block. Format adherence is a
 different capability, and this model does not have it at block distance.
 
-Treat constraint:prefix as a documented model limitation, not a product bug.
-Do not chase it by moving text onto one line: that overfits a quirk which will
-not survive a model update, and it would not generalise.
+Treat constraint:prefix as a documented limitation of this model snapshot, not
+a product bug. Do not chase it by moving text onto one line: that fits a
+measured quirk of one snapshot, and nothing here establishes whether it holds
+after a model update. Re-measure before relying on it either way.
