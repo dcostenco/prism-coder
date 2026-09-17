@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.5 — 2026-09-17
+
+### Generated TypeScript is type checked, not pattern matched
+
+The regex gate added in 20.21.4 catches one defect class. The next sample
+defeated it: a doubly-linked-list splice written `node.next?.prev = head`, which
+is TS2779 and does not compile. Extending the regex per error code is an arms
+race the compiler already wins, so the compiler now runs — in process, on
+TypeScript blocks only, at about 160 ms against a local call that takes twenty
+seconds.
+
+Checking a fragment is not the same as checking a project. A generated snippet
+has no tsconfig, no resolved imports, and no way to say whether it targets the
+browser or Node, so a naive check reports the harness rather than the code —
+pointing one at the DOM library made a snippet's own `Node` class collide with
+the DOM's and produce twelve extra diagnostics. A gate that fails correct code
+gets switched off, so only an allowlist of codes is ever reported: a generic
+with no type argument, optional chaining on the left of an assignment, a return
+value that does not match its declaration, and an implicitly `any` parameter.
+Everything else is logged and discarded.
+
+### A counter that never counts
+
+One rule no type checker can express, added because the AST was already loaded:
+a value mutated inside a `then`, `catch` or timer callback and then returned
+synchronously. The callback runs later, so the returned value never includes it.
+From the first multi-turn benchmark, where `emit()` returned 1 for three
+listeners. It is scoped to the enclosing function, because without that a nested
+helper's mutation was credited to its caller and flagged correct code.
+
+`typescript` becomes a declared dependency. It was previously present but listed
+in neither `dependencies` nor `devDependencies`, resolving only through the
+lockfile.
+
 ## 20.21.4 — 2026-09-17
 
 ### A generic with no type argument is repaired instead of shipped

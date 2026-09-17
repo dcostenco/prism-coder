@@ -33,6 +33,8 @@ const STRICT_SOURCE_REQUEST_RE =
 const CODE_SHAPE_RE =
     /(?:^|\n)\s*(?:(?:export|public|private|protected|internal|open|pub|static|final|abstract|async)\s+)*(?:class|interface|struct|enum|function|def|func|fun|fn|type)\s+[A-Za-z_$][\w$]*|(?:^|\n)\s*(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=|(?:^|\n)\s*(?:[A-Za-z_$][\w$:<>,.?*[\]&]*\s+)+[A-Za-z_$][\w$]*\s*\([^;\n]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:\{|=>)|=>\s*[{(]/m;
 
+import { analyzeTypeScript } from "./typescriptDiagnostics.js";
+
 export const INCOMPLETE_IMPLEMENTATION_PATTERNS: readonly RejectionPattern[] = [
     {
         reason: "code_placeholder",
@@ -107,8 +109,15 @@ interface MissingReceiverAssignment {
 interface ExtractedCode {
     all: string;
     python?: string;
+    /** Only TypeScript blocks. The analyzer must never be pointed at prose or at
+     *  another language's code — an earlier repair edited a python block. */
+    typescript?: string;
     hasFences: boolean;
 }
+
+/** Enough of a type-annotation or declaration signal to call a block TypeScript. */
+const TS_SIGNAL_RE =
+    /:\s*(?:string|number|boolean|void|any|unknown|never|Promise<)\b|\binterface\s+[A-Z]|\bexport\s+(?:class|interface|type|abstract)\b|\b(?:private|public|protected|readonly)\s+\w+\s*[:=]|<[A-Z]\w*(?:\s*,\s*[A-Z]\w*)*>/;
 
 function extractUnfencedPythonCode(output: string): string | undefined {
     const lines = output.trim().split(/\r?\n/);
@@ -146,9 +155,11 @@ function extractCode(output: string): ExtractedCode {
 
     if (blocks.length === 0) {
         const python = extractUnfencedPythonCode(output);
+        const bare = output.trim();
         return {
-            all: output.trim(),
+            all: bare,
             ...(python ? { python } : {}),
+            ...(!python && TS_SIGNAL_RE.test(bare) ? { typescript: bare } : {}),
             hasFences: false,
         };
     }
@@ -161,11 +172,21 @@ function extractCode(output: string): ExtractedCode {
         ))
         .map((block) => block.code);
 
+    const tsBlocks = blocks
+        .filter((block) => (
+            block.language === "typescript" ||
+            block.language === "ts" ||
+            block.language === "tsx" ||
+            (!block.language && TS_SIGNAL_RE.test(block.code))
+        ))
+        .map((block) => block.code);
+
     return {
         all: blocks.map((block) => block.code).join("\n\n"),
         ...(pythonBlocks.length > 0
             ? { python: pythonBlocks.join("\n\n") }
             : {}),
+        ...(tsBlocks.length > 0 ? { typescript: tsBlocks.join("\n\n") } : {}),
         hasFences: true,
     };
 }
@@ -597,8 +618,18 @@ export function passesCodingQualityGate(
         if (pythonFailure) return { pass: false, reason: pythonFailure };
     }
 
+    // The regex floor runs first: it is the one finding with a deterministic
+    // repair, and it works even if the compiler cannot be loaded.
     const tsFailure = tsStaticContractFailure(code);
     if (tsFailure) return { pass: false, reason: tsFailure };
+
+    // Then the compiler, over TypeScript blocks only.
+    if (extracted.typescript) {
+        const findings = analyzeTypeScript(extracted.typescript);
+        if (findings.length > 0) {
+            return { pass: false, reason: `ts_static_contract:${findings.join(",")}` };
+        }
+    }
 
     return { pass: true };
 }
@@ -626,6 +657,14 @@ const CODING_REPAIR_GUIDANCE: Readonly<Record<string, string>> = {
         "Define every directly called private self helper or replace the call with the correct defined helper.",
     constructor_attribute_missing_receiver:
         "In __init__, persist instance state as self.<attribute>; do not assign it to a discarded local variable.",
+    optional_chain_assignment:
+        "Optional chaining cannot appear on the left of an assignment. Guard with an if, or assert the value is present, before assigning to the property.",
+    type_not_assignable:
+        "Make the returned value match the declared return type, or widen the declaration to what the implementation actually produces.",
+    implicit_any_param:
+        "Annotate every parameter; under strict mode an inferred any is an error.",
+    deferred_mutation_returned_sync:
+        "A value mutated inside a then/catch/setTimeout callback is returned before that callback runs. Await the work, or return a Promise that resolves after it.",
     bare_generic:
         "Every generic needs its type argument: write Array<T>, Map<K, V>, Set<T>, Promise<T> — never a bare Array, Map, Set or Promise in a type position.",
     dict_keys_unpack:
