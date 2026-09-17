@@ -207,10 +207,13 @@ if (process.argv.includes("--self-test")) {
     ["recall:codename", "Nightjar", "correct"],
     ["recall:codename", "Sapphire", "fabricated"],
     // PINNED LOOSENESS. The grader credits any answer containing "hand", so it
-    // accepts the TARGET BEHAVIOUR ITSELF, restated verbatim from the
-    // definition, as a non-example of that behaviour. Nothing could be more
-    // wrong and it still grades correct. That is the demonstration.
-    ["clinical:opdef", "Calling out without first raising a hand.", "correct"],
+    // accepts the TARGET BEHAVIOUR ITSELF as a non-example of that behaviour.
+    // This case carries every element of the definition — audible vocalisation,
+    // during independent work, without raising a hand — so it cannot be read as
+    // describing anything else. It still grades correct. That is the
+    // demonstration. An earlier version dropped "during independent work",
+    // which left it defensible as behaviour outside that setting.
+    ["clinical:opdef", "Audible vocalisation during independent work without raising a hand.", "correct"],
     // The model's real answer, kept because it is the one a reader will see in
     // the results table. It grades correct and, unlike the case above, it is
     // also DEFENSIBLE: the definition excludes vocalising after a raised hand.

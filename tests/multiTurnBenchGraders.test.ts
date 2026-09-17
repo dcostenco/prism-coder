@@ -19,8 +19,8 @@
  * 4 of 22 graders carry cases at the time of writing, for three reasons. Two
  * were REPAIRED (prose:nofabricate, prose:onesentence), one is an unambiguous
  * BASELINE (recall:codename), and one PINS deliberate looseness
- * (clinical:opdef, which accepts the target behaviour restated verbatim as a
- * non-example of itself, because the answer contains the word "hand"). The other 18 could be loosened without failing anything
+ * (clinical:opdef, which accepts every element of the target behaviour's own
+ * definition as a non-example of that behaviour, because it contains "hand"). The other 18 could be loosened without failing anything
  * here. `--self-test` prints both lists by name on every run, so the gap is
  * checkable rather than asserted.
  */

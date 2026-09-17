@@ -1,6 +1,6 @@
 model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
-prism-coder:9b        no_history         1         1          20     568              23
-prism-coder:9b        messages          21         0           1     406              52
+prism-coder:9b        no_history         1         1          20     567              23
+prism-coder:9b        messages          21         0           1     408              52
 
 by domain (correct / total), carry-over tasks only:
 model                 condition    mechanics  code  prose  clinical
@@ -38,7 +38,7 @@ per-task (no_history -> messages):
   prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
   prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."
 
-full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T174751Z.json
+full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T175331Z.json
 
 ═══════════════════════════════════════════════════════════════════
 WHAT AN INDEPENDENT REVIEW CHANGED IN THESE NUMBERS
@@ -80,9 +80,9 @@ asserts the self-test goes red.
 
 READ THE SCORE CORRECTLY. prose and clinical cells measure keyword carry-over,
 not correctness. The clinical:opdef grader credits any answer containing the
-word "hand", so it accepts "Calling out without first raising a hand" — the
-TARGET BEHAVIOUR restated verbatim from the definition — as a NON-example of
-that behaviour. That is asserted in the self-test so nobody reads 3/3 as
+word "hand", so it accepts "Audible vocalisation during independent work
+without raising a hand" — every element of the definition, the TARGET BEHAVIOUR
+itself — as a NON-example of that behaviour. That is asserted in the self-test so nobody reads 3/3 as
 clinical accuracy.
 
 A correction worth keeping visible: for nine review rounds this document called
@@ -96,7 +96,7 @@ Full untruncated answers are written to multi-turn-bench.full-<timestamp>.json;
 the stdout column is a 120-character preview.
 
 ═══════════════════════════════════════════════════════════════════
-ELEVEN REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
+TWELVE REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
 ═══════════════════════════════════════════════════════════════════
 
 The review did not converge on the first pass, and saying it had would have
@@ -183,12 +183,21 @@ that the grader is loose. The definition excludes vocalising that FOLLOWS a
 raised hand, so the answer is a defensible non-example and the model was right.
 I judged a clinical answer without re-reading the definition it was answering,
 and then built a test case on that judgement. The looseness is still real, so
-the pin now uses an answer that cannot be defended: "Calling out without first
-raising a hand" is the target behaviour restated verbatim, and the grader
-accepts it as a non-example of itself. Round 11 also found the scaffold heading
+the pin now uses an answer that cannot be defended: "Audible vocalisation
+during independent work without
+raising a hand" carries every element of the definition, and the grader accepts
+it as a non-example of itself. Round 11 also found the scaffold heading
 said every tested scaffold failed while its own first table row shows the
 inline layout working; heading and body now distinguish separate-block from
 inline.
+
+ROUND 12 confirmed the scaffold fix and caught the round-11 replacement being
+imprecise in the same way as the thing it replaced. "Calling out without first
+raising a hand" drops "during independent work" from the definition, so it can
+still be defended as behaviour outside that setting. The pin now carries every
+element: "Audible vocalisation during independent work without raising a hand".
+Correcting a claim about a definition twice, in two rounds, by not reading the
+definition closely enough either time.
 
 WHAT WAS DELIBERATELY NOT FIXED, AND WHY. Three limits are asserted in
 --self-test rather than chased:
