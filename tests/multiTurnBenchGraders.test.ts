@@ -96,8 +96,11 @@ describe("multi-turn bench graders", () => {
         // a regression in this one would have passed both layers silently.
         revertAndExpectRed(
             "onesentence",
-            // String.raw, because the file holds LITERAL ‘ escape sequences.
-            // A normal string literal would decode them here and never match.
+            // String.raw for the BACKSLASHES: the file holds \] and \s literally,
+            // and a normal string literal would consume them. The curly quotes
+            // are literal characters in both files and need no escaping. An
+            // earlier version of this comment blamed the quotes, which was
+            // wrong once the source stopped storing them as \u escapes.
             String.raw`/[.!?]["'‘’“”)\]]*(\s|$)/g`,
             String.raw`/[.!?](\s|$)/g`,
             ["FAIL prose:onesentence"],
