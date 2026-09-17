@@ -16,10 +16,12 @@
  * needs no Ollama.
  *
  * SCOPE, because overclaiming coverage is how the original defects survived:
- * only the REPAIRED graders carry cases, 4 of 22 at the time of writing. The
- * other 18 could be loosened without failing anything here. `--self-test`
- * prints the covered and uncovered ids on every run so the gap is checkable
- * rather than asserted.
+ * 4 of 22 graders carry cases at the time of writing, for three reasons. Two
+ * were REPAIRED (prose:nofabricate, prose:onesentence), one is an unambiguous
+ * BASELINE (recall:codename), and one PINS deliberate looseness
+ * (clinical:opdef). The other 18 could be loosened without failing anything
+ * here. `--self-test` prints both lists by name on every run, so the gap is
+ * checkable rather than asserted.
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";

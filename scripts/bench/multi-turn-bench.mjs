@@ -149,9 +149,11 @@ T.push(["clinical:replacement", H("The replacement behaviour is raising a hand a
 // Runs the REAL graders in this file (not a copy) against answers whose verdict
 // is known. Needs no Ollama, so CI and a reviewer can both run it.
 //
-// IT DOES NOT COVER EVERY GRADER. Only the graders that have been repaired
-// carry cases; the rest could be loosened without failing anything here. The
-// run prints exactly which ids are covered and which are not, because a
+// IT DOES NOT COVER EVERY GRADER. Four of the twenty-two carry cases, for
+// three different reasons: prose:nofabricate and prose:onesentence were
+// REPAIRED, recall:codename is an unambiguous BASELINE, and clinical:opdef
+// PINS a looseness that is deliberate. The other eighteen could be loosened
+// without failing anything here. The run prints both lists by name, because a
 // coverage claim a reader cannot check is how the defects above survived.
 if (process.argv.includes("--self-test")) {
   const G = id => { const t = T.find(x => x[0] === id); if (!t) throw new Error(`no task ${id}`); return t[3]; };
