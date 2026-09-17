@@ -2936,6 +2936,58 @@ export async function inferText(
     }
 }
 
+/** The one-line header the host sees above the model output.
+ *
+ *  Pure and exported so the reporting contract in PRISM_INFER_TOOL.description
+ *  ("every entitlement-resolved result reports multi_turn and history_turns")
+ *  is assertable without standing up Ollama.
+ *
+ *  Both fields were set on the result and written to the ledger for a release
+ *  before anything rendered them here, so the only way to learn what a call
+ *  carried was to open the SQLite ledger. An agent benchmarking multi-turn
+ *  sent no `messages` across three turns, saw nothing in the response saying
+ *  so, and published the resulting degradation as a model defect. */
+export function inferResponseHeader(
+    result: PrismInferResult,
+    memory?: { project: string; depth: string },
+): string {
+    const tokenStr = result.prompt_tokens != null || result.completion_tokens != null
+        ? ` tokens=${result.prompt_tokens ?? "?"}in/${result.completion_tokens ?? "?"}out`
+        : "";
+    return (
+        `[prism_infer] backend=${result.backend}` +
+        ` model=${result.model_picked ?? "n/a"}` +
+        ` plan=${result.plan ?? "unknown"}` +
+        ` free_ram=${result.ram_free_mb}MB` +
+        ` latency=${result.latency_ms}ms` +
+        ` used_cloud=${result.used_cloud}` +
+        tokenStr +
+        // What this call actually carried, on every response including zero.
+        // A caller that meant to send history and did not must be able to see
+        // that here; omitting the zero is what made the failure silent.
+        (result.history_turns != null ? ` history_turns=${result.history_turns}` : "") +
+        (result.multi_turn
+            ? ` multi_turn=${result.multi_turn.enabled
+                ? `${result.multi_turn.max_turns}/${result.multi_turn.max_chars}`
+                : "off"}`
+            : "") +
+        (result.quality_gate_failed ? ` quality_gate_failed=true` : "") +
+        (result.gate_outcome && result.gate_outcome.status !== "success"
+            ? ` gate=${result.gate_outcome.status}${result.gate_outcome.reason ? `:${result.gate_outcome.reason}` : ""}`
+            : "") +
+        (result.entitlements_source && result.entitlements_source !== "portal"
+            ? ` ent_source=${result.entitlements_source}`
+            : "") +
+        (result.verification ? ` verify=${result.verification.action}` : "") +
+        (result.route_guard
+            ? ` route_guard=${result.route_guard.source}:${result.route_guard.action}` +
+                (result.route_guard.reason ? `:${result.route_guard.reason}` : "")
+            : "") +
+        (memory ? ` memory=${memory.project}:${memory.depth}` : "") +
+        (result.attempts.length ? ` attempts=${JSON.stringify(result.attempts)}` : "")
+    );
+}
+
 export async function prismInferHandler(args: unknown): Promise<{
     content: Array<{ type: "text"; text: string }>;
     isError?: boolean;
@@ -2988,31 +3040,7 @@ export async function prismInferHandler(args: unknown): Promise<{
             });
         }
 
-        const tokenStr = result.prompt_tokens != null || result.completion_tokens != null
-            ? ` tokens=${result.prompt_tokens ?? "?"}in/${result.completion_tokens ?? "?"}out`
-            : "";
-        const headerBase =
-            `[prism_infer] backend=${result.backend}` +
-            ` model=${result.model_picked ?? "n/a"}` +
-            ` plan=${result.plan ?? "unknown"}` +
-            ` free_ram=${result.ram_free_mb}MB` +
-            ` latency=${result.latency_ms}ms` +
-            ` used_cloud=${result.used_cloud}` +
-            tokenStr +
-            (result.quality_gate_failed ? ` quality_gate_failed=true` : "") +
-            (result.gate_outcome && result.gate_outcome.status !== "success"
-                ? ` gate=${result.gate_outcome.status}${result.gate_outcome.reason ? `:${result.gate_outcome.reason}` : ""}`
-                : "") +
-            (result.entitlements_source && result.entitlements_source !== "portal"
-                ? ` ent_source=${result.entitlements_source}`
-                : "") +
-            (result.verification ? ` verify=${result.verification.action}` : "") +
-            (result.route_guard
-                ? ` route_guard=${result.route_guard.source}:${result.route_guard.action}` +
-                    (result.route_guard.reason ? `:${result.route_guard.reason}` : "")
-                : "") +
-            (prepared.memory ? ` memory=${prepared.memory.project}:${prepared.memory.depth}` : "") +
-            (result.attempts.length ? ` attempts=${JSON.stringify(result.attempts)}` : "");
+        const headerBase = inferResponseHeader(result, prepared.memory);
 
         // Append periodic session-level stats to the header line.
         // compact=true is threshold-gated (PRISM_METRICS_EVERY, default every 5 calls)

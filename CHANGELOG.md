@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.3 — 2026-09-16
+
+### `prism_infer` now tells you how much history it received
+
+The tool's documentation has promised since multi-turn shipped that "every
+entitlement-resolved result reports `multi_turn` (your plan's caps) and
+`history_turns` (what was sent)". Both values were computed and recorded
+internally, but neither was ever rendered into the response, so the only way to
+learn what a call actually carried was to read the local metrics database.
+
+That gap is easy to fall into and hard to notice. A caller that intends to send
+conversation history but omits `messages` — a typo, a dropped parameter, a host
+that compacted the schema — gets a plausible-looking answer produced from the
+current turn alone, with nothing in the response indicating the history never
+arrived. Follow-up answers degrade exactly the way a weak model would degrade,
+and the cause is invisible.
+
+Every response header now ends with `history_turns=N`, including
+`history_turns=0`, plus `multi_turn=<turns>/<chars>` for the plan's caps, or
+`multi_turn=off` where the plan has no multi-turn. The zero case is reported
+deliberately: an omitted field is what made this silent.
+
+No behavior other than the header changed. The header builder is now a pure
+exported function, `inferResponseHeader`, so the reporting contract is covered
+by tests rather than by a live call.
+
 ## 20.21.2 — 2026-09-16
 
 ### Local results carried names and nothing else
