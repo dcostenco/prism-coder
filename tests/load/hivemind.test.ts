@@ -145,10 +145,25 @@ describe("Concurrent Ledger Writes", { timeout: 30_000 }, () => {
 
     const elapsed = Date.now() - startTime;
 
-    // Performance assertion: 50 writes should take < 10 seconds
-    expect(elapsed).toBeLessThan(10_000);
+    // Assert what the test is NAMED for: every write landed and is readable.
+    // This previously asserted ONLY `elapsed < 10_000`, which is the wrong
+    // thing twice over. It failed CI on 2026-09-16 because a shared Windows
+    // runner was slow — 50 writes take 8ms here, so the budget had 1,250x
+    // headroom and the failure carried no information about the code. And it
+    // would have PASSED had all fifty writes silently failed, because nothing
+    // checked that any of them persisted. A hang is already covered by the
+    // 30s suite timeout, so the wall-clock assertion guarded nothing that
+    // remained unguarded.
+    const entries = await storage.getLedgerEntries({
+      project: `eq.${TEST_PROJECT}`,
+      limit: String(BURST_SIZE + CONCURRENCY_LEVEL + 10),
+    });
+    const burst = (entries as Array<{ conversation_id?: string }>)
+      .filter((e) => e.conversation_id?.startsWith("burst-conv-"));
+    expect(burst.length).toBe(BURST_SIZE);
 
-    // Log performance for benchmarking
+    // Still logged for benchmarking; a number worth watching is not the same
+    // as a number worth failing a build over.
     console.error(
       `[Load] ${BURST_SIZE} sequential writes: ${elapsed}ms ` +
       `(${(elapsed / BURST_SIZE).toFixed(1)}ms per write)`
