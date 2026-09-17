@@ -134,10 +134,15 @@ if (process.argv.includes("--self-test")) {
     // 2026-09-17 on prose:onesentence ("issues don't happen again").
     ["prose:onesentence", "One. Two. Bugs don't recur after this.", "declined"],
   ];
+  // -v lists every case. "13 passed" tells a reader nothing about WHAT is
+  // guarded, and an unreadable guard is one nobody maintains.
+  const verbose = process.argv.includes("-v") || process.argv.includes("--verbose");
   let bad = 0;
   for (const [id, text, want] of CASES) {
     const got = G(id)(text);
-    if (got !== want) { bad++; console.error(`FAIL ${id}: expected ${want}, got ${got} for ${JSON.stringify(text)}`); }
+    const ok = got === want;
+    if (!ok) { bad++; console.error(`FAIL ${id}: expected ${want}, got ${got} for ${JSON.stringify(text)}`); }
+    else if (verbose) console.log(`  ok  ${id.padEnd(19)} ${want.padEnd(10)} <- ${JSON.stringify(text)}`);
   }
   // Wiring, not just regexes: an option that never reaches the runner is inert.
   const nofab = T.find(x => x[0] === "prose:nofabricate");
