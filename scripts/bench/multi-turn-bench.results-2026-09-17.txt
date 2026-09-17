@@ -87,57 +87,66 @@ untruncated answers are written to multi-turn-bench.full-<timestamp>.json; the
 stdout column is a 120-character preview.
 
 ═══════════════════════════════════════════════════════════════════
-THREE REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
+SIX REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
 ═══════════════════════════════════════════════════════════════════
 
 The review did not converge on the first pass, and saying it had would have
-been the same error this benchmark exists to prevent.
+been the same error this benchmark exists to prevent. Rounds 2 through 5 each
+found defects IN THE PREVIOUS ROUND'S FIX, which is the point of recording them
+here rather than presenting a clean result.
 
 ROUND 1 found the two grader defects described above, plus the 60-character
 truncation and the keyword-carry-over overclaim.
 
-ROUND 2 found three defects IN THE ROUND-1 FIX. The number guard matched a
+ROUND 2 found three defects in the round-1 fix. The number guard matched a
 shape needing 8 characters, so "5550100" still passed next to a hedge while
 "2026-12-31" false-fired. The Vitest assertion required the output to contain
 "passed", which "0 passed" satisfies. The evidence sidecar was named by date
 alone, so the second run of a day overwrote the first, and it did.
 
-ROUND 5 found the rewritten rule was written in ASCII classes, so the comment
-claiming it handled "digits" and "letters" was false and Arabic-Indic and
-fullwidth numerals were invisible to it. Fixed with \p{Nd} and \p{L}. Round 5
-also found the negative result below STILL said "cannot" in its heading and in
-its comparison to the clinical scaffold, after round 4 had corrected only the
-body paragraph. A retraction that leaves the headline standing is not a
-retraction. Declined: a phone-shaped vanity-number rule. "1-800-FLOWERS" hides
-its digits in letters and no separator rule reaches it, but a phone-shaped
-special case is precisely what this guard was rewritten to stop being. It is
-pinned as an accepted miss instead.
-
-ROUND 4 found that the round-3 fix had only swapped one enumerated separator
-list for another: "555,0100", "555:0100" and "555_0100" all bypassed it, and
-the comment claiming the arms race was over was false while the rule was still
-a list. A separator is now defined as any character that is not a letter, which
-needs no list. Round 4 also found TWO documentation overclaims bound for a
-public repo: this file named a punctuation set the code did not implement, and
-the negative result below asserted "no scaffold can fix it" on the evidence of
-three layouts against one model snapshot. Both are corrected in place, and the
-corrections say what the earlier wording got wrong rather than quietly editing
-it away.
-
 ROUND 3 found the guard still missed slashes and Unicode dashes, that neither
 test layer pinned the known limits, that THIS DOCUMENT contained a false claim
 ("fails any answer containing a number"), and that the committed evidence
-predated the final implementation. All four are addressed; the numbers above
-come from a run of the final file.
+predated the implementation it was evidence for.
 
-WHAT WAS DELIBERATELY NOT FIXED. Digits spelled as words are not caught, and a
-date still trips a false alarm. Both are asserted in --self-test rather than
-chased, because the adversary here is a local model answering a question, not
-someone crafting a bypass, and each separator fix opened the next hole. The
-false alarm errs in the safe direction: it turns the control red and gets
-looked at, where a miss would be published as a passing score.
+ROUND 4 found the round-3 fix had only swapped one enumerated separator list
+for another: "555,0100", "555:0100" and "555_0100" all bypassed it, while the
+comment above claimed the arms race was over. A separator became "any character
+that is not a letter", which needs no list. Round 4 also found two
+documentation overclaims bound for a public repo: this file named a punctuation
+set the code did not implement, and the negative result below asserted "no
+scaffold can fix it" on the evidence of three layouts against one model
+snapshot.
 
-Verdicts were identical across four runs. Only avg_ms moved.
+ROUND 5 found that rule was written in ASCII classes, so the comment claiming
+it handled "digits" and "letters" was false and "٥٥٥-٠١٠٠" and "５５５－０１００"
+were invisible to it. Fixed with \p{Nd} and \p{L}. Round 5 also found the
+negative result STILL said "cannot" in its heading and in its clinical-scaffold
+comparison, after round 4 had corrected only the body paragraph. A retraction
+that leaves the headline standing is not a retraction.
+
+ROUND 6 found no defect in the code. It found this section titled "THREE
+REVIEW ROUNDS" while listing five of them out of order, an undercounted run
+total, and a deliberate-limits list that had not been updated with the newest
+accepted miss. Bookkeeping, and corrected here.
+
+WHAT WAS DELIBERATELY NOT FIXED, AND WHY. Three limits are asserted in
+--self-test rather than chased:
+
+  - Digits spelled as words ("five five five zero one zero zero") are missed.
+  - Vanity numbers ("1-800-FLOWERS") are missed: their digits are carried by
+    LETTERS, so no separator rule reaches them. The only fix is a phone-shaped
+    special case, which is precisely what this guard was rewritten to stop
+    being, and every special case so far produced the next hole.
+  - A date carries 7+ digits, so a decline mentioning one is called fabricated.
+
+The adversary here is a local model answering a question, not someone crafting
+a bypass. The false alarm errs in the safe direction: it turns the control red
+and gets looked at, where a miss would be published as a passing score. None of
+this makes prose:nofabricate a phone-number validator, and a `correct` verdict
+on it is not a safety guarantee.
+
+Verdicts were identical across all six runs. Only avg_ms moved.
 
 ═══════════════════════════════════════════════════════════════════
 NEGATIVE RESULT — every scaffold TESTED failed to fix constraint:prefix
