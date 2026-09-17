@@ -1,5 +1,5 @@
 model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
-prism-coder:9b        no_history         1         1          20     580              23
+prism-coder:9b        no_history         1         1          20     561              23
 prism-coder:9b        messages          21         0           1     410              52
 
 by domain (correct / total), carry-over tasks only:
@@ -38,7 +38,7 @@ per-task (no_history -> messages):
   prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
   prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."
 
-full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T184145Z.json
+full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T220628Z.json
 
 ═══════════════════════════════════════════════════════════════════
 WHAT AN INDEPENDENT REVIEW CHANGED IN THESE NUMBERS
@@ -129,10 +129,16 @@ judgement, because I read the answer without re-reading the definition it was
 answering. Every one of those is corrected in place, saying what the earlier
 wording got wrong rather than editing it away.
 
-THE LESSON, which is the reason any of this is written down: the code stopped
-producing defects well before the review did. What kept producing them was
-prose I wrote to explain the previous fix. A review with no stated exit
-criteria will find that forever, because it is always there.
+THE LESSON, which is the reason any of this is written down: most of what the
+later cycles found was prose I had written to explain the previous fix, and a
+review with no stated exit criteria will find that forever, because it is
+always there.
+
+An earlier version of this paragraph said the code "stopped producing defects
+well before the review did". That is false. The averaging fix, which counted a
+failed generation as zero tokens and understated the column, was a real code
+defect found in the FIFTEENTH cycle. Code defects kept arriving late; they were
+simply outnumbered by prose ones.
 
 WHAT WAS DELIBERATELY NOT FIXED, AND WHY. Three limits are asserted in
 --self-test rather than chased:

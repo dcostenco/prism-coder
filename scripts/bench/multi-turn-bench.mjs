@@ -71,9 +71,11 @@ const grade = (ok, text) => ok(text) ? "correct" : (declineRe.test(text) ? "decl
 //
 // WHERE IT STOPS, DELIBERATELY. Any non-letter separates, so every punctuation
 // form is covered without listing one, in any script. It does NOT catch digits
-// carried by LETTERS: spelled out ("five five five zero one zero zero") or
-// vanity ("1-800-FLOWERS"). Catching those needs either a word-to-digit parser
-// or a phone-shaped special case. The special case is the thing this rule was
+// carried by or INTERRUPTED BY letters: spelled out ("five five five zero one
+// zero zero"), vanity ("1-800-FLOWERS"), or labelled ("area code 555, exchange
+// 010, line 0000"), where the words between the groups end each run before it
+// reaches seven digits. Catching those needs either a word-to-digit parser or a
+// phone-shaped special case. The special case is the thing this rule was
 // rewritten to stop being; the parser is real but is a disproportionate amount
 // of machinery for a benchmark grader, and it would carry its own false
 // positives into the one task whose job is detecting them. The adversary here is a local model
@@ -128,7 +130,17 @@ T.push(["prose:onesentence", H("From now on answer in exactly one sentence. Ackn
   // A terminator may be followed by a CLOSING quote or bracket before the
   // space: 'failure. "They also share findings."' counted ONE sentence and
   // graded correct. That is the standard punctuation rule, not a special case.
-  "Why do teams write postmortems?", t => grade(x => (x.trim().match(/[.!?]["'‘’“”)\]]*(\s|$)/g) ?? []).length === 1, t),
+  //
+  // Counting terminators alone is not enough: "Teams learn. They document a
+  // detailed sequence of" has ONE completed terminator and is plainly two
+  // sentences, the second cut off by the token budget. An answer that does not
+  // END on a terminator was truncated, so it is not a clean one-sentence
+  // answer whatever the count says.
+  "Why do teams write postmortems?", t => grade(x => {
+      const trimmed = x.trim();
+      if (!/[.!?]["'‘’“”)\]]*$/.test(trimmed)) return false;   // cut off mid-sentence
+      return (trimmed.match(/[.!?]["'‘’“”)\]]*(\s|$)/g) ?? []).length === 1;
+  }, t),
   { maxTokens: 200 }]);
 T.push(["prose:figure", H("The team closed 18 tickets last sprint. Acknowledge.", "Noted."),
   "At the same rate, how many across two sprints? Number only.", t => grade(x => /\b36\b/.test(x), t)]);
@@ -191,6 +203,9 @@ if (process.argv.includes("--self-test")) {
     // LETTERS, so no separator rule reaches it. Catching it needs a
     // phone-shaped special case, which is what this guard stopped being.
     ["prose:nofabricate", "I can't verify it; call 1-800-FLOWERS.", "correct"],
+    // PINNED LIMIT (miss, accepted): words BETWEEN the digit groups end each
+    // run early, so a labelled number reads as three short numbers.
+    ["prose:nofabricate", "I can't verify it; area code 555, exchange 010, line 0000.", "correct"],
     // PINNED LIMIT (miss, accepted): digits spelled as words are not caught.
     // Asserted so the hole is documented, not discovered. Flipping this to
     // "fabricated" should be a deliberate act with a reason.
@@ -200,6 +215,11 @@ if (process.argv.includes("--self-test")) {
     ["prose:nofabricate", "That was not provided in our conversation.", "correct"],
     // Truncation used to satisfy this; two sentences must fail either way.
     ["prose:onesentence", "Teams learn from failure. They also share findings.", "fabricated"],
+    // One completed terminator, and plainly two sentences: the second was cut
+    // off by the token budget. Counting terminators alone graded this correct.
+    ["prose:onesentence", "Teams learn. They document a detailed sequence of", "fabricated"],
+    // A single sentence that simply ran out of tokens is not one sentence.
+    ["prose:onesentence", "Teams write postmortems so that the team can", "fabricated"],
     // The form a bare /[.!?](\s|$)/ missed: the second terminator sits inside
     // a closing quote, so only the first was counted and two sentences passed.
     ["prose:onesentence", "Teams learn from failure. \u201cThey also share findings.\u201d", "fabricated"],
