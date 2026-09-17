@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## 20.21.3 — 2026-09-16
 
+### A behaviour plan is now censused against its required sections
+
+The quality gate carried three static passes for Python and none for clinical
+output, so a behaviour plan missing its decision rules or its data-collection
+procedure was served exactly like a complete one. A structural check now runs in
+every mode whenever the request is behaviour-analytic, and the response reports
+what it found: `clinical_sections=3/10 missing:operational_definition,...`.
+
+Measured on local output during development: a plan request produced 1,716
+tokens covering three of ten required sections, and an operational-definition
+request produced 920 tokens with no non-examples. Neither was previously visible
+to the caller.
+
+Two limits are deliberate and worth stating plainly. The census **raises and
+never certifies** — it counts sections, and a section can be present and still
+be clinically wrong, so nothing it reports may be read as an endorsement; a
+credentialed BCBA decides whether a plan is adequate. And it does **not** widen
+what runs locally: crisis, restraint and self-injury content is refused upstream
+before any model sees it, and that boundary is untouched. In practice a plan
+request framed around aggression is refused before this check is reached, so it
+governs the routine band only.
+
+A clinical finding is not auto-repaired. Re-prompting the same local model to
+invent a missing decision-rules section produces plausible unratified clinical
+text, which is worse than a visibly incomplete draft, so a clinical reason
+escalates instead of being patched in place.
+
+
 ### `prism_infer` now tells you how much history it received
 
 The tool's documentation has promised since multi-turn shipped that "every

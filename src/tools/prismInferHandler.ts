@@ -41,6 +41,11 @@ import { ddLog } from "../utils/ddLogger.js";
 import { stripThink } from "../utils/thinkStrip.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
 import {
+    passesClinicalQualityGate,
+    formatClinicalSections,
+    type ClinicalSectionReport,
+} from "../utils/clinicalQualityPolicy.js";
+import {
     applyDeterministicCodingRepairs,
     buildCodingRepairPrompt,
     passesCodingQualityGate,
@@ -444,7 +449,9 @@ export const PRISM_INFER_TOOL: Tool = {
         "For a FOLLOW-UP to an earlier prism_infer answer, pass the accepted prior turns as `messages` " +
         "(paid plans): without them the worker answers the follow-up from nothing and fabricates. " +
         "Every entitlement-resolved result reports `multi_turn` (your plan's caps) and `history_turns` (what was sent); " +
-        "the crisis intercept reports only `history_turns`. " +
+        "the crisis intercept reports only `history_turns`. "
+        +
+        "A behaviour-plan request also reports `clinical_sections` — how many required sections were found and which were not. That is a structural census, never a clinical endorsement: a section can be present and still be wrong, and a credentialed BCBA decides whether a plan is adequate. " +
         "History over the plan's caps is refused (history_over_plan_cap), never trimmed; a free plan " +
         "or a host with no portal is refused (multi_turn_not_in_plan). Hosts that compact large " +
         "schemas may drop parameter text, so the contract lives here.",
@@ -1433,6 +1440,10 @@ export interface PrismInferResult {
     multi_turn?: MultiTurnEntitlement;
     /** How many prior turns this call carried (a count, never content). */
     history_turns?: number;
+    /** Structural section census for clinical output. A COUNT, never a verdict:
+     *  a section can be present and still be clinically wrong. Absent unless a
+     *  clinical plan was requested. */
+    clinical_sections?: ClinicalSectionReport;
     /** Which screen layer decided the call: 'rules' | 'isolated' | 'prompt' |
      *  'context' | 'budget' | 'backstop'. Absent when nothing raised the verdict. */
     refusal_layer?: string;
@@ -2506,6 +2517,21 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     gate = passesCodingQualityGate(args.prompt, output);
                 }
 
+                // Clinical structural check runs in EVERY mode. A behaviour plan
+                // arrives as chat as readily as code, and the mode a caller picked
+                // must not decide whether clinical output is inspected. The gate
+                // self-gates on the prompt, so it is a no-op for everything else.
+                // A clinical reason does not match the repair loop's code_/python_
+                // prefixes, so it escalates instead of being locally patched —
+                // deliberate: a local model inventing a missing decision-rules
+                // section produces plausible unratified clinical text.
+                let clinicalSections: ClinicalSectionReport | undefined;
+                if (gate.pass) {
+                    const clinical = passesClinicalQualityGate(args.prompt, output);
+                    clinicalSections = clinical.sections;
+                    if (!clinical.pass) gate = { pass: false, reason: clinical.reason };
+                }
+
                 // Hard-truncation retry: the budget went on <think> and the answer
                 // was cut mid-emission. Previously this only escalated to cloud, or
                 // served the truncated text when no cloud was available — neither
@@ -2674,6 +2700,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     prompt_tokens: result.promptTokens,
                     completion_tokens: result.completionTokens,
                     quality_gate_failed: gate.pass ? undefined : true,
+                    clinical_sections: clinicalSections,
                     gate_outcome: gate.pass
                         ? { status: "success", served_anyway: false }
                         : { status: "degraded", reason: gate.reason, served_anyway: true },
@@ -2971,6 +2998,9 @@ export function inferResponseHeader(
                 ? `${result.multi_turn.max_turns}/${result.multi_turn.max_chars}`
                 : "off"}`
             : "") +
+        // Raise-only: a count of the sections found, and the names of those that
+        // were not. Never a pass/fail word — presence is not clinical soundness.
+        (result.clinical_sections ? ` ${formatClinicalSections(result.clinical_sections)}` : "") +
         (result.quality_gate_failed ? ` quality_gate_failed=true` : "") +
         (result.gate_outcome && result.gate_outcome.status !== "success"
             ? ` gate=${result.gate_outcome.status}${result.gate_outcome.reason ? `:${result.gate_outcome.reason}` : ""}`

@@ -1,0 +1,157 @@
+/**
+ * Structural gate for clinical behaviour-analytic output.
+ *
+ * The coding gate already proves the shape of this idea: a deterministic check
+ * names a concrete defect, and the named reason drives what happens next.
+ * Python has three static passes behind it. Clinical output had none, so a
+ * behaviour plan missing its decision rules or its data-collection procedure
+ * was served exactly like a complete one.
+ *
+ * Two hard constraints, both deliberate:
+ *
+ *  1. RAISE ONLY — it never certifies. A full section count is a statement
+ *     about presence, not about clinical soundness: a section can be present
+ *     and wrong. Nothing here may be read as "this plan is safe to implement".
+ *     The `bcba_ai_assistant` standard is that the checklist reports what is
+ *     present; a credentialed BCBA decides whether the plan is adequate.
+ *
+ *  2. IT DOES NOT TOUCH THE RESERVED LIST — crisis de-escalation, restraint,
+ *     SIB with injury history and risk assessment never reach a local model at
+ *     all; that boundary is enforced upstream in the Layer 1 screen and is not
+ *     relaxed, widened or re-implemented here. This gate governs the routine
+ *     band that is already local-eligible: operational definitions,
+ *     measurement, antecedent strategies, caregiver training.
+ *
+ * A failure is NOT auto-repaired. The coding repair loop re-prompts the same
+ * tier to fix a syntax defect, which is safe for code; asking a local model to
+ * invent a missing decision-rules section produces plausible unratified
+ * clinical text, which is worse than a visibly incomplete draft. A clinical
+ * reason therefore falls out of the repair loop and escalates instead.
+ */
+
+export interface ClinicalSectionReport {
+    /** Sections the request called for. */
+    required: number;
+    /** Sections detected in the output. */
+    present: number;
+    /** Names of the sections not detected, stable order. */
+    missing: string[];
+}
+
+export interface ClinicalQualityResult {
+    pass: boolean;
+    reason?: string;
+    /** Present whenever the gate RAN, pass or fail. A count, never a verdict. */
+    sections?: ClinicalSectionReport;
+}
+
+/** A full written plan was asked for — the whole section list applies. */
+const CLINICAL_PLAN_REQUEST_RE =
+    /\b(bip\b|behaou?vior(?:al)?[ -](?:intervention|support|management)[ -]plan|behaviou?r plan|treatment plan|intervention plan)\b/i;
+
+/** An operational definition specifically was asked for. */
+const OPERATIONAL_DEFINITION_REQUEST_RE =
+    /\boperational(?:ly)?[ -]?(?:defin\w*)|\bdefine the (?:target )?behaviou?r\b/i;
+
+/** Any behaviour-analytic context at all — gates the AAC safety check. */
+const CLINICAL_CONTEXT_RE =
+    /\b(aba\b|bcba\b|behaviou?r analyst|functional behaviou?r assessment|\bfba\b|\bbip\b|replacement behaviou?r|target behaviou?r|reinforcement schedule|\bfct\b|\bdro\b|\bdra\b|\bncr\b)/i;
+
+/** Ordered so the report reads the way a plan is written. */
+const PLAN_SECTIONS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+    { name: "operational_definition", pattern: /operational(?:ly)?[ -]?defin|\bdefinition\b[\s\S]{0,80}\b(observable|measurable)\b/i },
+    { name: "function_hypothesis", pattern: /\b(hypothesi[sz]ed function|function of the behaviou?r|maintained by|\ba-?b-?c\b|antecedent[\s\S]{0,40}consequence)\b/i },
+    { name: "antecedent_strategies", pattern: /\b(antecedent (?:strateg|modificat|intervention)|prevention strateg|setting event|environmental modificat)/i },
+    { name: "replacement_behaviour", pattern: /\b(replacement behaviou?r|functional communication training|\bfct\b|alternative behaviou?r|\bdra\b)/i },
+    { name: "consequence_strategies", pattern: /\b(consequence (?:strateg|procedure)|reinforcement (?:schedule|procedure|strateg)|\bdro\b|\bncr\b|extinction)/i },
+    { name: "data_collection", pattern: /\b(data collection|data sheet|measurement (?:system|procedure)|frequency count|partial interval|momentary time sampling|\bioa\b|interobserver)/i },
+    { name: "decision_rules", pattern: /\b(decision rule|mastery criteri|criteri\w+ for (?:change|modificat|advancement)|review (?:schedule|trigger)|plan review)/i },
+    { name: "generalisation_maintenance", pattern: /\b(generali[sz]|maintenance)\b/i },
+    { name: "caregiver_training", pattern: /\b((?:caregiver|staff|parent|family)[ -]?training|train(?:ing)? (?:the )?(?:caregivers?|staff|parents?))/i },
+    { name: "bcba_review_disclaimer", pattern: /\b(reviewed and individuali[sz]ed|credentialed bcba|licensed behaviou?r analyst|must be reviewed)\b/i },
+];
+
+/**
+ * AAC access may never be removed, withheld or delayed as a consequence.
+ *
+ * A correct plan states this rule explicitly ("AAC access is never restricted"),
+ * so a bare co-occurrence of an AAC term and a restriction verb fires on GOOD
+ * text. The lookback suppresses a match when the clause is negated. It is
+ * approximate by construction, which is acceptable only because this raises and
+ * never clears: an escalation costs one call, and no output is marked safe here.
+ */
+const AAC_TERM = /\b(aac\b|speech[- ]generating device|\bsgd\b|communication device|communication board|\bpecs\b|talker\b)/i;
+const RESTRICT_VERB = /\b(remov\w+|withh\w+|restrict\w+|tak\w+ away|deni\w+|deny|block\w*|delay\w*|confiscat\w+|limit\w*)\b/i;
+const NEGATOR = /\b(never|not|n't|no|avoid\w*|prohibit\w*|must not|cannot|can't|without)\b/i;
+// Asymmetric on purpose. "remove the AAC device" puts the verb BEFORE the term,
+// so a forward-only window misses the most direct phrasing of the thing this
+// check exists to catch. The backward reach is kept short because a removal
+// sentence about something else ("remove the token board") sitting a paragraph
+// above an AAC mention is not a restriction of AAC.
+const AAC_WINDOW_AFTER = 120;
+const AAC_WINDOW_BEFORE = 40;
+const NEGATION_LOOKBACK = 60;
+
+function aacRestrictedAsConsequence(output: string): boolean {
+    for (const m of output.matchAll(new RegExp(AAC_TERM.source, "gi"))) {
+        const start = m.index ?? 0;
+        const from = Math.max(0, start - AAC_WINDOW_BEFORE);
+        const window = output.slice(from, start + AAC_WINDOW_AFTER);
+        const verb = RESTRICT_VERB.exec(window);
+        if (!verb) continue;
+        const absolute = from + (verb.index ?? 0);
+        const lookback = output.slice(Math.max(0, absolute - NEGATION_LOOKBACK), absolute);
+        if (NEGATOR.test(lookback)) continue;   // "AAC access is never removed"
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Raise-only structural check. `pass: true` means nothing was detected as
+ * missing — it is not a clinical endorsement.
+ */
+export function passesClinicalQualityGate(
+    prompt: string,
+    output: string,
+): ClinicalQualityResult {
+    // An operational-definition request is clinical on its own: "write an
+    // operational definition of elopement" names no ABA vocabulary the broad
+    // pattern looks for, and was silently skipped before.
+    const clinicalContext =
+        CLINICAL_CONTEXT_RE.test(prompt)
+        || CLINICAL_PLAN_REQUEST_RE.test(prompt)
+        || OPERATIONAL_DEFINITION_REQUEST_RE.test(prompt);
+    if (!clinicalContext) return { pass: true };
+
+    if (aacRestrictedAsConsequence(output)) {
+        return { pass: false, reason: "clinical_aac_restricted_as_consequence" };
+    }
+
+    if (OPERATIONAL_DEFINITION_REQUEST_RE.test(prompt)) {
+        const hasExamples = /\bexamples?\b/i.test(output);
+        const hasNonExamples = /\bnon-?examples?\b/i.test(output);
+        if (!hasExamples || !hasNonExamples) {
+            return { pass: false, reason: "clinical_operational_definition_incomplete" };
+        }
+    }
+
+    if (!CLINICAL_PLAN_REQUEST_RE.test(prompt)) return { pass: true };
+
+    const missing = PLAN_SECTIONS.filter(s => !s.pattern.test(output)).map(s => s.name);
+    const sections: ClinicalSectionReport = {
+        required: PLAN_SECTIONS.length,
+        present: PLAN_SECTIONS.length - missing.length,
+        missing,
+    };
+    if (missing.length > 0) {
+        return { pass: false, reason: "clinical_plan_sections_missing", sections };
+    }
+    return { pass: true, sections };
+}
+
+/** Compact, raise-only header fragment. Counts only — never a verdict word. */
+export function formatClinicalSections(s: ClinicalSectionReport): string {
+    const base = `clinical_sections=${s.present}/${s.required}`;
+    return s.missing.length ? `${base} missing:${s.missing.join(",")}` : base;
+}

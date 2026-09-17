@@ -78,7 +78,7 @@ interface ResponseContract {
  */
 const RESPONSE_CONTRACTS: Record<string, ResponseContract> = {
     prism_infer: {
-        fields: ["history_turns", "multi_turn"],
+        fields: ["history_turns", "multi_turn", "clinical_sections"],
         render: () =>
             inferResponseHeader({
                 output: "ok",
@@ -91,6 +91,7 @@ const RESPONSE_CONTRACTS: Record<string, ResponseContract> = {
                 plan: "enterprise",
                 history_turns: 0,
                 multi_turn: { enabled: true, max_turns: 30, max_chars: 96_000 },
+                clinical_sections: { required: 10, present: 9, missing: ["decision_rules"] },
             } as PrismInferResult),
     },
     session_task_route: {
