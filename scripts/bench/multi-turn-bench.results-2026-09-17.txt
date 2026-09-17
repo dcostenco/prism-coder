@@ -1,5 +1,5 @@
 model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
-prism-coder:9b        no_history         1         1          20     576              23
+prism-coder:9b        no_history         1         1          20     544              23
 prism-coder:9b        messages          21         0           1     406              52
 
 by domain (correct / total), carry-over tasks only:
@@ -38,7 +38,7 @@ per-task (no_history -> messages):
   prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
   prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."
 
-full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T172826Z.json
+full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T173400Z.json
 
 ═══════════════════════════════════════════════════════════════════
 WHAT AN INDEPENDENT REVIEW CHANGED IN THESE NUMBERS
@@ -87,7 +87,7 @@ untruncated answers are written to multi-turn-bench.full-<timestamp>.json; the
 stdout column is a 120-character preview.
 
 ═══════════════════════════════════════════════════════════════════
-EIGHT REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
+NINE REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
 ═══════════════════════════════════════════════════════════════════
 
 The review did not converge on the first pass, and saying it had would have
@@ -136,8 +136,8 @@ the string followed it, so 'failure. "They also share findings."' counted ONE
 sentence and graded correct. A closing quote or bracket may sit between the two.
 Round 7 also found the vanity-number rationale here said "the only fix" while
 the source named two options, an unsupported prediction that an inline
-workaround "will not survive a model update", and that the six-run agreement
-claimed below is not auditable from the repository. All four are corrected, and
+workaround "will not survive a model update", and that the multi-run agreement
+claimed below was not auditable from the repository. All four are corrected, and
 the second grader now has its own mutation test, which it lacked while only the
 first one was covered.
 
@@ -151,6 +151,15 @@ staff calls on them" is a valid non-example that fails clinical:opdef. And the
 scaffold section below drew causal conclusions from three layouts that vary
 several things at once. It now separates what was observed from what is
 hypothesis.
+
+ROUND 9 found two statements that still did not match the code. The comments
+in three places said --self-test prints the covered AND uncovered ids; it
+printed only the uncovered ones, so the sentence describing the fix for an
+overclaim was itself an overclaim. It prints both now. And the run-agreement
+note had been edited to say "eight in all" in one sentence while the next still
+called it "the six-run agreement" — a number nobody could reproduce from the
+tree, stated twice and differently. The passage now gives NO count, says the
+table comes from one auditable run, and points at git history for the rest.
 
 WHAT WAS DELIBERATELY NOT FIXED, AND WHY. Three limits are asserted in
 --self-test rather than chased:
@@ -171,12 +180,16 @@ and gets looked at, where a miss would be published as a passing score. None of
 this makes prose:nofabricate a phone-number validator, and a `correct` verdict
 on it is not a safety guarantee.
 
-Verdicts were identical in every run made while fixing this, eight in all, and
-only avg_ms moved. Note what that claim rests on: only the FINAL run's
-untruncated answers are committed, because each rebuild replaced the previous
-sidecar. The repository can substantiate the run reported above and nothing
-more. Treat the six-run agreement as a note from the author, not as an
-auditable artifact.
+RUN AGREEMENT, and exactly what backs it. The table above comes from ONE run,
+the last one, and its untruncated answers are the committed sidecar it names.
+That single run is the only part of this a reader can audit in the working
+tree. Earlier commits on this branch carry their own sidecars, so git history
+holds several more, each from the file as it stood at that commit.
+
+Every run made while fixing this produced the same verdicts, and only avg_ms
+moved. That is a note from the author. It is not an auditable artifact, the
+count is not reproducible from the tree, and no number is given here for it
+because a number would imply a precision the evidence does not carry.
 
 ═══════════════════════════════════════════════════════════════════
 NEGATIVE RESULT — every scaffold TESTED failed to fix constraint:prefix

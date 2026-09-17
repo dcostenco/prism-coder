@@ -231,7 +231,9 @@ if (process.argv.includes("--self-test")) {
   const covered = new Set(CASES.map(c => c[0]));
   const uncovered = T.map(t => t[0]).filter(id => !covered.has(id));
   console.log(bad ? `grader self-test: ${bad} FAILED` : `grader self-test: ${CASES.length + 2} passed`);
-  console.log(`grader coverage: ${covered.size}/${T.length} graders have cases; NO cases for ${uncovered.length}: ${uncovered.join(", ")}`);
+  console.log(`grader coverage: ${covered.size}/${T.length} graders have cases.`);
+  console.log(`  covered  (${covered.size}): ${[...covered].join(", ")}`);
+  console.log(`  NO cases (${uncovered.length}): ${uncovered.join(", ")}`);
   process.exit(bad ? 1 : 0);
 }
 
