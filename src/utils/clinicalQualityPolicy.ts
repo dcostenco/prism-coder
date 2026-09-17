@@ -61,13 +61,13 @@ const CLINICAL_CONTEXT_RE =
 const PLAN_SECTIONS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
     { name: "operational_definition", pattern: /operational(?:ly)?[ -]?defin|\bdefinition\b[\s\S]{0,80}\b(observable|measurable)\b/i },
     { name: "function_hypothesis", pattern: /\b(hypothesi[sz]ed function|function of the behaviou?r|maintained by|\ba-?b-?c\b|antecedent[\s\S]{0,40}consequence)\b/i },
-    { name: "antecedent_strategies", pattern: /\b(antecedent (?:strateg|modificat|intervention)|prevention strateg|setting event|environmental modificat)/i },
+    { name: "antecedent_strategies", pattern: /\b(antecedent|prevention strateg|proactive strateg|pre-?work strateg|pre-?correct|setting event|environmental modificat|visual (?:schedule|timer|cue)|priming)/i },
     { name: "replacement_behaviour", pattern: /\b(replacement behaviou?r|functional communication training|\bfct\b|alternative behaviou?r|\bdra\b)/i },
-    { name: "consequence_strategies", pattern: /\b(consequence (?:strateg|procedure)|reinforcement (?:schedule|procedure|strateg)|\bdro\b|\bncr\b|extinction)/i },
+    { name: "consequence_strategies", pattern: /\b(consequence|reinforc\w+|planned ignoring|response to (?:the )?behaviou?r|redirect\w*|\bdro\b|\bncr\b|extinction)/i },
     { name: "data_collection", pattern: /\b(data collection|data sheet|measurement (?:system|procedure)|frequency count|partial interval|momentary time sampling|\bioa\b|interobserver)/i },
-    { name: "decision_rules", pattern: /\b(decision rule|mastery criteri|criteri\w+ for (?:change|modificat|advancement)|review (?:schedule|trigger)|plan review)/i },
+    { name: "decision_rules", pattern: /\b(decision rule|mastery criteri|criteri\w+ for (?:change|modificat|advancement)|evaluation criteri|review (?:schedule|trigger|date)|plan review|progress monitor\w*|plan will be (?:adjusted|modified|revised|changed))/i },
     { name: "generalisation_maintenance", pattern: /\b(generali[sz]|maintenance)\b/i },
-    { name: "caregiver_training", pattern: /\b((?:caregiver|staff|parent|family)[ -]?training|train(?:ing)? (?:the )?(?:caregivers?|staff|parents?))/i },
+    { name: "caregiver_training", pattern: /\b((?:caregiver|staff|parent|family|teacher|team)[ -]?training|train(?:ing|ed)? (?:the )?(?:caregivers?|staff|parents?|team)|(?:staff|caregivers?|parents?|team|teachers?)\b[^.\n]{0,30}\btrain\w+|train\w+ on the plan)/i },
     { name: "bcba_review_disclaimer", pattern: /\b(reviewed and individuali[sz]ed|credentialed bcba|licensed behaviou?r analyst|must be reviewed)\b/i },
 ];
 

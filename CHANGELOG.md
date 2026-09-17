@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.4 — 2026-09-17
+
+### The clinical census credited only its own vocabulary
+
+The section check shipped in 20.21.3 reported seven sections missing from a real
+behaviour plan. Four of those were present: antecedent strategies under the
+heading "Pre-Work Strategies", consequence strategies under "Response to
+Behavior", caregiver training as "All staff will be trained on the plan", and
+decision rules as "Evaluation Criteria: ... the plan will be adjusted". The true
+count was 7 of 10, not 3.
+
+The patterns required canonical ABA phrasing. Plans written in plain language —
+which is what a model actually produces — read as missing sections they
+contained. A raise-only check that is wrong four times in seven gets ignored,
+which costs more than the check earns.
+
+Four patterns now match the concept rather than the term. The fixtures were
+rebuilt from verbatim model output instead of authored prose: the previous
+fixture scored 10 of 10 because it had been written in the matcher's own
+vocabulary, so it measured the fixture rather than the gate. A sparse plan that
+genuinely lacks those sections is pinned alongside it, because widening a
+pattern to remove a false positive can silence a real gap.
+
 ## 20.21.3 — 2026-09-16
 
 ### A behaviour plan is now censused against its required sections
