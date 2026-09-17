@@ -191,3 +191,51 @@ describe("the repair is scoped to code, and never to values", () => {
         expect(out.output).toContain("const m: Map<string, Array<any>> = new Map();");
     });
 });
+
+describe("round 4: the repair stays inside TypeScript, and out of comments", () => {
+    const REASON = "ts_static_contract:bare_generic";
+
+    it("does not rewrite a comment warning against the defect", () => {
+        // An apostrophe in "don't" broke the string scan, so comments slipped
+        // through and `// don't use a bare Map<string, Array>` was rewritten
+        // into advice to write exactly that.
+        const src = [
+            "```ts",
+            "// don't use a bare Map<string, Array> here",
+            "const m: Map<string, Array> = new Map();",
+            "```",
+        ].join("\n");
+        const out = applyDeterministicCodingRepairs(src, REASON);
+        expect(out.output).toContain("// don't use a bare Map<string, Array> here");
+        expect(out.output).toContain("const m: Map<string, Array<any>> = new Map();");
+    });
+
+    it("leaves a non-TypeScript fence alone in a multi-language answer", () => {
+        const src = [
+            "```python",
+            "d = {}  # Map<string, Array> in a docstring",
+            "```",
+            "```ts",
+            "const m: Map<string, Array> = new Map();",
+            "```",
+        ].join("\n");
+        const out = applyDeterministicCodingRepairs(src, REASON);
+        expect(out.output).toContain("# Map<string, Array> in a docstring");
+        expect(out.output).toContain("const m: Map<string, Array<any>> = new Map();");
+    });
+
+    it("repairs an indented fence inside a list item", () => {
+        const src = "1. Example:\n\n   ```ts\n   const m: Map<string, Array> = new Map();\n   ```";
+        expect(applyDeterministicCodingRepairs(src, REASON).output).toContain("Array<any>");
+    });
+
+    it("repairs an unclosed fence rather than giving up", () => {
+        const src = "```ts\nconst m: Map<string, Array> = new Map();";
+        expect(applyDeterministicCodingRepairs(src, REASON).output).toContain("Array<any>");
+    });
+
+    it("repairs a fence with no language tag", () => {
+        const src = "```\nconst m: Map<string, Array> = new Map();\n```";
+        expect(applyDeterministicCodingRepairs(src, REASON).output).toContain("Array<any>");
+    });
+});

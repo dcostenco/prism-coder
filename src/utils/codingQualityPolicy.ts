@@ -444,15 +444,27 @@ function tsStaticContractFailure(code: string): string | null {
     return TS_BARE_GENERIC_RE.test(code) ? "ts_static_contract:bare_generic" : null;
 }
 
-/** Character ranges covered by a string or template literal on one line. A
- *  repair must never touch these: rewriting `"use Map<string, Array> carefully"`
- *  changes a RUNTIME VALUE, not a type. Found in adversarial review. */
-function stringSpans(line: string): Array<[number, number]> {
+/** Character ranges a repair must not touch on one line.
+ *
+ *  Strings, because rewriting `"use Map<string, Array> carefully"` changes a
+ *  RUNTIME VALUE rather than a type. And comments, because `// don't use a bare
+ *  Map<string, Array>` is a warning against the very thing the repair would
+ *  write, so editing it inverts the author's meaning. Both found in review. */
+function protectedSpans(line: string): Array<[number, number]> {
     const spans: Array<[number, number]> = [];
-    const re = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g;
-    for (const m of line.matchAll(re)) spans.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
+    const strings = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g;
+    for (const m of line.matchAll(strings)) spans.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
+    // A line comment runs to end of line. An apostrophe in prose ("don't")
+    // breaks the string scan, which is how comments slipped through before.
+    const comment = /\/\/|\/\*/.exec(line);
+    if (comment) spans.push([comment.index, line.length]);
     return spans;
 }
+
+/** Fence languages whose contents are TypeScript. A bare generic inside a
+ *  python or json block is not a type error to fix — the first version rewrote
+ *  a comment inside a python block in a multi-language answer. */
+const TS_FENCE_LANG = /^\s*```\s*(ts|typescript|tsx)?\s*$/i;
 
 /** `Map<string, Array>` -> `Map<string, Array<any>>`, within code only.
  *
@@ -469,9 +481,9 @@ function repairBareGenerics(code: string): { code: string; changed: boolean } {
     const spanRe = new RegExp(TS_BARE_GENERIC_RE.source, "g");
 
     const repairLine = (line: string): string => {
-        const strings = stringSpans(line);
+        const off_limits = protectedSpans(line);
         return line.replace(spanRe, (span, offset: number) => {
-            if (strings.some(([a, b]) => offset >= a && offset < b)) return span;
+            if (off_limits.some(([a, b]) => offset >= a && offset < b)) return span;
             const fixed = span.replace(
                 new RegExp(`\\b(${TS_GENERIC})\\b(?!\\s*<)`, "g"),
                 "$1<any>",
@@ -484,10 +496,15 @@ function repairBareGenerics(code: string): { code: string; changed: boolean } {
     const lines = code.split("\n");
     const hasFences = /^\s*```/m.test(code);
     let inFence = false;
+    let fenceIsTs = false;
     const out = lines.map((line) => {
-        if (/^\s*```/.test(line)) { inFence = !inFence; return line; }
+        if (/^\s*```/.test(line)) {
+            if (!inFence) fenceIsTs = TS_FENCE_LANG.test(line);
+            inFence = !inFence;
+            return line;
+        }
         // No fences at all: the whole output is the code block.
-        return (!hasFences || inFence) ? repairLine(line) : line;
+        return (!hasFences || (inFence && fenceIsTs)) ? repairLine(line) : line;
     });
     return { code: out.join("\n"), changed };
 }
