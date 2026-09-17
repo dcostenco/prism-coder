@@ -30,3 +30,36 @@ per-task (no_history -> messages):
   prism-coder:9b   clinical:opdef     fabricated -> correct    | "A person who is rude or unhelpful." -> "Raising a hand to call out."
   prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
   prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."
+
+═══════════════════════════════════════════════════════════════════
+NEGATIVE RESULT — prompt scaffolding does NOT fix constraint:prefix
+═══════════════════════════════════════════════════════════════════
+
+constraint:prefix is the one task still wrong WITH history: told "every reply
+must start with the word CHECKED", prism-coder:9b answers "Red". It carries
+the FACT and drops the standing CONSTRAINT.
+
+Restating the constraint as a scaffold was built, measured and removed. It
+changed nothing: 21/22 with and without, identical in every domain, at a cost
+of ~12 extra prompt tokens. Extraction was not the problem — it pulled exactly
+"Every reply must start with the word CHECKED." and built a correct fragment.
+
+Why no scaffold can fix it (3/3 reproducible, temperature 0):
+
+  constraint on the SAME LINE as the question   FOLLOWS  FOLLOWS  FOLLOWS
+  separated by a blank line                     ignores  ignores  ignores
+  separated by one newline                      ignores  ignores  ignores
+
+The model honours a format constraint only when it sits inline in the same
+sentence flow as the ask. A scaffold is a separate block by construction, so
+it is defeated by the thing that makes it a scaffold. Position was not the
+issue either: system and prompt placement both ignored.
+
+This also explains why the CLINICAL scaffold works (7/10 -> 10/10) while this
+one cannot. That one asks for CONTENT COVERAGE — "include a data collection
+section" — and the model complies from a separate block. Format adherence is a
+different capability, and this model does not have it at block distance.
+
+Treat constraint:prefix as a documented model limitation, not a product bug.
+Do not chase it by moving text onto one line: that overfits a quirk which will
+not survive a model update, and it would not generalise.
