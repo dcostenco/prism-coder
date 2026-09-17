@@ -444,23 +444,52 @@ function tsStaticContractFailure(code: string): string | null {
     return TS_BARE_GENERIC_RE.test(code) ? "ts_static_contract:bare_generic" : null;
 }
 
-/** `Map<string, Array>` -> `Map<string, Array<any>>`.
+/** Character ranges covered by a string or template literal on one line. A
+ *  repair must never touch these: rewriting `"use Map<string, Array> carefully"`
+ *  changes a RUNTIME VALUE, not a type. Found in adversarial review. */
+function stringSpans(line: string): Array<[number, number]> {
+    const spans: Array<[number, number]> = [];
+    const re = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g;
+    for (const m of line.matchAll(re)) spans.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
+    return spans;
+}
+
+/** `Map<string, Array>` -> `Map<string, Array<any>>`, within code only.
  *
  *  `any` rather than `unknown` on purpose: `unknown` makes the file compile and
  *  then breaks every use of the value, which trades one compile error for
- *  several. This makes the code build; it does not make it well typed. */
+ *  several. This makes the code build; it does not make it well typed.
+ *
+ *  Scoped twice, both from adversarial review. Fenced output is repaired only
+ *  INSIDE its fences, because rewriting the surrounding prose inverts sentences
+ *  like "do not write Map<string, Array>". And no match inside a string literal
+ *  is touched, because that is a value, not a type. */
 function repairBareGenerics(code: string): { code: string; changed: boolean } {
-    const spans = new RegExp(TS_BARE_GENERIC_RE.source, "g");
     let changed = false;
-    const out = code.replace(spans, (span) => {
-        const fixed = span.replace(
-            new RegExp(`\\b(${TS_GENERIC})\\b(?!\\s*<)`, "g"),
-            "$1<any>",
-        );
-        if (fixed !== span) changed = true;
-        return fixed;
+    const spanRe = new RegExp(TS_BARE_GENERIC_RE.source, "g");
+
+    const repairLine = (line: string): string => {
+        const strings = stringSpans(line);
+        return line.replace(spanRe, (span, offset: number) => {
+            if (strings.some(([a, b]) => offset >= a && offset < b)) return span;
+            const fixed = span.replace(
+                new RegExp(`\\b(${TS_GENERIC})\\b(?!\\s*<)`, "g"),
+                "$1<any>",
+            );
+            if (fixed !== span) changed = true;
+            return fixed;
+        });
+    };
+
+    const lines = code.split("\n");
+    const hasFences = /^\s*```/m.test(code);
+    let inFence = false;
+    const out = lines.map((line) => {
+        if (/^\s*```/.test(line)) { inFence = !inFence; return line; }
+        // No fences at all: the whole output is the code block.
+        return (!hasFences || inFence) ? repairLine(line) : line;
     });
-    return { code: out, changed };
+    return { code: out.join("\n"), changed };
 }
 
 export function applyDeterministicCodingRepairs(

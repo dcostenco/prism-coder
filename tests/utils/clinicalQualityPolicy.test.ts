@@ -378,3 +378,38 @@ describe("the plan scaffold is generated from the list the census verifies", () 
         }
     });
 });
+
+describe("a section needs a strategy, not a passing mention of its vocabulary", () => {
+    /**
+     * From adversarial review of the widening that fixed the false positives.
+     * Widening `antecedent_strategies` to a bare `antecedent` and
+     * `consequence_strategies` to a bare `reinforc\w+` credited assessment prose
+     * as if it were an intervention. The sparse-plan fixture did not catch it
+     * because that plan never uses either word — a gap only visible by probing
+     * the vocabulary directly.
+     */
+    const P = "Draft a behavior support plan for calling out.";
+    const missing = (text: string, section: string) =>
+        passesClinicalQualityGate(P, text).sections?.missing.includes(section);
+
+    it("does not treat A-B-C assessment data as antecedent strategies", () => {
+        expect(missing("We collected antecedent-behavior-consequence data for two weeks.", "antecedent_strategies")).toBe(true);
+    });
+
+    it("does not treat a statement of function as consequence strategies", () => {
+        expect(missing("The behavior appears maintained by reinforcement from peers.", "consequence_strategies")).toBe(true);
+    });
+
+    it("still credits real antecedent strategies written plainly", () => {
+        expect(missing("Prevention: offer a choice before each demand; use a visual timer.", "antecedent_strategies")).toBe(false);
+    });
+
+    it("still credits a real consequence plan written plainly", () => {
+        expect(missing("Response to behavior: planned ignoring, then praise the replacement.", "consequence_strategies")).toBe(false);
+    });
+
+    it("keeps the real-output and sparse fixtures at their adjudicated scores", () => {
+        expect(passesClinicalQualityGate(PLAN_PROMPT, REAL_9B_PLAN).sections?.present).toBe(7);
+        expect(passesClinicalQualityGate(PLAN_PROMPT, SPARSE_PLAN).sections?.present).toBe(2);
+    });
+});

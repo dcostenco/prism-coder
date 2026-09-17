@@ -136,3 +136,58 @@ describe("the check is scoped to implementation requests", () => {
         expect(r.pass).toBe(true);
     });
 });
+
+describe("the repair is scoped to code, and never to values", () => {
+    const REASON = "ts_static_contract:bare_generic";
+
+    it("does not rewrite a string literal — that is a value, not a type", () => {
+        // Found in adversarial review. The first version rewrote
+        // `"use Map<string, Array> carefully"`, silently changing what the
+        // program prints. A repair that alters runtime behaviour is not a repair.
+        const src = [
+            "```ts",
+            'const doc: string = "use Map<string, Array> carefully";',
+            "const m: Map<string, Array> = new Map();",
+            "```",
+        ].join("\n");
+        const out = applyDeterministicCodingRepairs(src, REASON);
+        expect(out.output).toContain('"use Map<string, Array> carefully"');
+        expect(out.output).toContain("const m: Map<string, Array<any>> = new Map();");
+        expect(out.changes).toContain("bare_generic");
+    });
+
+    it("leaves prose outside the fences alone, including sentences about the defect", () => {
+        // "Do not write Map<string, Array>" must not become
+        // "Do not write Map<string, Array<any>>", which inverts the sentence.
+        const src = [
+            "Do not write Map<string, Array> — it fails to compile.",
+            "",
+            "```ts",
+            "const m: Map<string, Array> = new Map();",
+            "```",
+        ].join("\n");
+        const out = applyDeterministicCodingRepairs(src, REASON);
+        expect(out.output).toContain("Do not write Map<string, Array> — it fails to compile.");
+        expect(out.output).toContain("const m: Map<string, Array<any>> = new Map();");
+    });
+
+    it("repairs unfenced output, where the whole answer is the code", () => {
+        const out = applyDeterministicCodingRepairs("const m: Map<string, Array> = new Map();", REASON);
+        expect(out.output).toContain("Array<any>");
+    });
+
+    it("parameterises a nested bare generic at the right depth", () => {
+        const out = applyDeterministicCodingRepairs(
+            "```ts\nconst m: Map<string, Array<Map<string, Set>>> = new Map();\n```",
+            REASON,
+        );
+        expect(out.output).toContain("Map<string, Array<Map<string, Set<any>>>>");
+    });
+
+    it("does not touch a template literal containing a type name", () => {
+        const src = "```ts\nconst msg = `avoid Map<string, Array> here`;\nconst m: Map<string, Array> = new Map();\n```";
+        const out = applyDeterministicCodingRepairs(src, REASON);
+        expect(out.output).toContain("`avoid Map<string, Array> here`");
+        expect(out.output).toContain("const m: Map<string, Array<any>> = new Map();");
+    });
+});

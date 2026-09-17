@@ -61,9 +61,9 @@ const CLINICAL_CONTEXT_RE =
 const PLAN_SECTIONS: ReadonlyArray<{ name: string; requirement: string; pattern: RegExp }> = [
     { name: "operational_definition", requirement: "an operational definition that is observable and measurable, with examples AND non-examples", pattern: /operational(?:ly)?[ -]?defin|\bdefinition\b[\s\S]{0,80}\b(observable|measurable)\b/i },
     { name: "function_hypothesis", requirement: "a hypothesised function supported by A-B-C data", pattern: /\b(hypothesi[sz]ed function|function of the behaviou?r|maintained by|\ba-?b-?c\b|antecedent[\s\S]{0,40}consequence)\b/i },
-    { name: "antecedent_strategies", requirement: "antecedent and prevention strategies", pattern: /\b(antecedent|prevention strateg|proactive strateg|pre-?work strateg|pre-?correct|setting event|environmental modificat|visual (?:schedule|timer|cue)|priming)/i },
+    { name: "antecedent_strategies", requirement: "antecedent and prevention strategies", pattern: /\b(antecedent (?:strateg|modificat|intervention|procedure|support)|prevention strateg|proactive strateg|pre-?work strateg|pre-?correct|setting event|environmental modificat|visual (?:schedule|timer|cue)|priming)/i },
     { name: "replacement_behaviour", requirement: "a functionally equivalent replacement behaviour", pattern: /\b(replacement behaviou?r|functional communication training|\bfct\b|alternative behaviou?r|\bdra\b)/i },
-    { name: "consequence_strategies", requirement: "consequence strategies, including what reinforces the replacement", pattern: /\b(consequence|reinforc\w+|planned ignoring|response to (?:the )?behaviou?r|redirect\w*|\bdro\b|\bncr\b|extinction)/i },
+    { name: "consequence_strategies", requirement: "consequence strategies, including what reinforces the replacement", pattern: /\b(consequence|reinforcement (?:schedule|procedure|strateg|plan|system|for\b)|reinforc\w+ the (?:replacement|desired|appropriate|target)|planned ignoring|response to (?:the )?behaviou?r|redirect\w*|\bpraise\b|\bdro\b|\bncr\b|extinction)/i },
     { name: "data_collection", requirement: "a data collection method", pattern: /\b(data collection|data sheet|measurement (?:system|procedure)|frequency count|partial interval|momentary time sampling|\bioa\b|interobserver)/i },
     { name: "decision_rules", requirement: "decision rules and a review schedule", pattern: /\b(decision rule|mastery criteri|criteri\w+ for (?:change|modificat|advancement)|evaluation criteri|review (?:schedule|trigger|date)|plan review|progress monitor\w*|plan will be (?:adjusted|modified|revised|changed))/i },
     { name: "generalisation_maintenance", requirement: "generalisation and maintenance", pattern: /\b(generali[sz]|maintenance)\b/i },
@@ -203,6 +203,14 @@ export function formatClinicalSections(s: ClinicalSectionReport): string {
  * drift, and a census that disagrees with the instruction is worse than a
  * census that merely confirms it — but nothing here should be read as evidence
  * that the model knows what a plan needs.
+ *
+ * LOCAL ONLY. `callCloud` takes the prompt and no system argument, so nothing
+ * here reaches an escalated request — true of VISION_SYSTEM_PROMPT as well, and
+ * pre-existing rather than introduced with this scaffold. The consequence is
+ * that a cloud-served plan is measured by the census WITHOUT having been given
+ * the list, so it can score lower than a local one for reasons that have
+ * nothing to do with the model. Threading `system` through the portal API is
+ * the real fix and is deliberately out of scope here.
  *
  * Returns undefined unless a full plan was requested, so it never touches the
  * prompt for ordinary work.
