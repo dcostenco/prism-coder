@@ -1,5 +1,5 @@
 model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
-prism-coder:9b        no_history         1         1          20     583              23
+prism-coder:9b        no_history         1         1          20     576              23
 prism-coder:9b        messages          21         0           1     406              52
 
 by domain (correct / total), carry-over tasks only:
@@ -38,7 +38,7 @@ per-task (no_history -> messages):
   prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
   prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."
 
-full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T172040Z.json
+full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T172826Z.json
 
 ═══════════════════════════════════════════════════════════════════
 WHAT AN INDEPENDENT REVIEW CHANGED IN THESE NUMBERS
@@ -87,7 +87,7 @@ untruncated answers are written to multi-turn-bench.full-<timestamp>.json; the
 stdout column is a 120-character preview.
 
 ═══════════════════════════════════════════════════════════════════
-SEVEN REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
+EIGHT REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
 ═══════════════════════════════════════════════════════════════════
 
 The review did not converge on the first pass, and saying it had would have
@@ -141,6 +141,17 @@ claimed below is not auditable from the repository. All four are corrected, and
 the second grader now has its own mutation test, which it lacked while only the
 first one was covered.
 
+ROUND 8 found no defect in the code. It found three claims that outran it.
+The self-test's own comment implied every grader was covered; four of
+twenty-two are, and --self-test now PRINTS the covered and uncovered ids on
+every run, because a coverage claim a reader cannot check is how the original
+defects survived. The header called a column an upper bound, which assumes the
+graders only over-credit; they also miss correct answers, so "Speaking after
+staff calls on them" is a valid non-example that fails clinical:opdef. And the
+scaffold section below drew causal conclusions from three layouts that vary
+several things at once. It now separates what was observed from what is
+hypothesis.
+
 WHAT WAS DELIBERATELY NOT FIXED, AND WHY. Three limits are asserted in
 --self-test rather than chased:
 
@@ -160,7 +171,7 @@ and gets looked at, where a miss would be published as a passing score. None of
 this makes prose:nofabricate a phone-number validator, and a `correct` verdict
 on it is not a safety guarantee.
 
-Verdicts were identical in every run made while fixing this, seven in all, and
+Verdicts were identical in every run made while fixing this, eight in all, and
 only avg_ms moved. Note what that claim rests on: only the FINAL run's
 untruncated answers are committed, because each rebuild replaced the previous
 sidecar. The repository can substantiate the run reported above and nothing
@@ -188,17 +199,26 @@ an earlier draft of this document claimed exactly that:
   separated by a blank line                     ignores  ignores  ignores
   separated by one newline                      ignores  ignores  ignores
 
-On this model snapshot the format constraint was honoured only when it sat
-inline in the same sentence flow as the ask. A scaffold is a separate block by
-construction, so every scaffold tested was defeated by the thing that makes it
-a scaffold. That is a measured result on one model, not a proof about all
-scaffolds. Position was not the
-issue either: system and prompt placement both ignored.
+WHAT WAS OBSERVED, stated as observation. On this model snapshot the format
+constraint was honoured in the one layout where it sat inline in the same
+sentence flow as the ask, and ignored in the two layouts where it sat in a
+separate block. System and prompt placement were both ignored. Three layouts,
+three repetitions each, temperature 0.
 
-This also explains why the CLINICAL scaffold works (7/10 -> 10/10) while these
-did not. That one asks for CONTENT COVERAGE — "include a data collection
-section" — and the model complies from a separate block. Format adherence is a
-different capability, and this model does not have it at block distance.
+WHAT THAT DOES NOT ESTABLISH. It does not establish that block separation is
+the CAUSE. The inline layout differs from the other two in more than block
+separation — token distance, the absence of an intervening newline and the
+constraint's position relative to the question all move together, and nothing
+here varies them independently. A plausible reading is that the model attends
+to a format rule only inside the immediate ask, but it is a hypothesis this
+experiment cannot separate from its alternatives.
+
+The clinical scaffold behaves differently (7/10 -> 10/10) asking for CONTENT
+COVERAGE — "include a data collection section" — from a separate block. It is
+tempting to conclude that content coverage and format adherence are different
+capabilities and that this model has one at block distance and not the other.
+That is a hypothesis too, and the two experiments differ in the task as well as
+in what they ask for, so the comparison does not isolate it.
 
 Treat constraint:prefix as a documented limitation of this model snapshot, not
 a product bug. Do not chase it by moving text onto one line: that fits a

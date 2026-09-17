@@ -14,6 +14,12 @@
  * nothing about them. This spawns the benchmark's own `--self-test`, which runs
  * the REAL graders in the real file against answers whose verdict is known. It
  * needs no Ollama.
+ *
+ * SCOPE, because overclaiming coverage is how the original defects survived:
+ * only the REPAIRED graders carry cases, 4 of 22 at the time of writing. The
+ * other 18 could be loosened without failing anything here. `--self-test`
+ * prints the covered and uncovered ids on every run so the gap is checkable
+ * rather than asserted.
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";

@@ -12,19 +12,26 @@
 // Do NOT defend that by saying the same grader runs on both arms and so
 // inflates them equally. It does not. The discriminating term is present in
 // the history, so only the MESSAGES arm is handed the vocabulary its grader
-// rewards; the no_history arm has to invent it. False-positive rates are not
-// equal and the delta is an OVER-estimate of carry-over, not a neutral one.
+// rewards; the no_history arm has to invent it. That biases the delta UPWARD.
 //
-// Read a column as an upper bound, never as "the model answered correctly".
+// But the graders also miss correct answers: "Speaking after staff calls on
+// them" is a valid non-example and fails clinical:opdef, which carries no word
+// for it. So a column is NOT an upper bound either — it errs in both
+// directions and is a lexical proxy, nothing more. The direction of the net
+// error on any given run is unknown.
+//
+// Read a column as a lexical proxy, never as "the model answered correctly".
 // Observed: with history, clinical:opdef returned "Raising a hand to call out"
 // — it grades correct and is semantically confused. Two of three clinical
 // answers were genuinely right on inspection; one was vocabulary.
 //
 // So read the score as KEYWORD CARRY-OVER, not as clinical correctness: it
 // answers "did what the history said reach the answer", not "was the answer
-// right". For factual recall those coincide ("Nightjar" is either recalled or
-// not). For a task that asks the model to REASON over remembered content they
-// do not. Never quote a clinical cell as accuracy.
+// right". Factual recall comes CLOSEST to correctness, because "Nightjar" is a
+// value the model either carried or did not, though even there a wrong answer
+// that happens to contain the term passes. For a task that asks the model to
+// REASON over remembered content the two come apart completely. Never quote a
+// clinical cell as accuracy.
 //
 // Do not tighten the graders into an arms race. For absolute correctness read
 // the FULL per-task text, written to multi-turn-bench.full-<timestamp>.json — the
@@ -139,9 +146,13 @@ T.push(["clinical:replacement", H("The replacement behaviour is raising a hand a
 
 
 // --- grader self-test: `node scripts/bench/multi-turn-bench.mjs --self-test`
-// Runs the REAL graders in this file (not a copy) against answers whose
-// verdict is known, so a loosened grader fails here instead of in a report.
-// Needs no Ollama, so CI and a reviewer can both run it.
+// Runs the REAL graders in this file (not a copy) against answers whose verdict
+// is known. Needs no Ollama, so CI and a reviewer can both run it.
+//
+// IT DOES NOT COVER EVERY GRADER. Only the graders that have been repaired
+// carry cases; the rest could be loosened without failing anything here. The
+// run prints exactly which ids are covered and which are not, because a
+// coverage claim a reader cannot check is how the defects above survived.
 if (process.argv.includes("--self-test")) {
   const G = id => { const t = T.find(x => x[0] === id); if (!t) throw new Error(`no task ${id}`); return t[3]; };
   const CASES = [
@@ -217,7 +228,10 @@ if (process.argv.includes("--self-test")) {
   const onesent = T.find(x => x[0] === "prose:onesentence");
   if (nofab[4]?.kind !== "control") { bad++; console.error("FAIL prose:nofabricate is not marked a control"); }
   if (onesent[4]?.maxTokens !== 200) { bad++; console.error("FAIL prose:onesentence lost its token budget"); }
+  const covered = new Set(CASES.map(c => c[0]));
+  const uncovered = T.map(t => t[0]).filter(id => !covered.has(id));
   console.log(bad ? `grader self-test: ${bad} FAILED` : `grader self-test: ${CASES.length + 2} passed`);
+  console.log(`grader coverage: ${covered.size}/${T.length} graders have cases; NO cases for ${uncovered.length}: ${uncovered.join(", ")}`);
   process.exit(bad ? 1 : 0);
 }
 
