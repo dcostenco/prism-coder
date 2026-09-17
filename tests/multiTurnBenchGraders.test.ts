@@ -19,7 +19,8 @@
  * 4 of 22 graders carry cases at the time of writing, for three reasons. Two
  * were REPAIRED (prose:nofabricate, prose:onesentence), one is an unambiguous
  * BASELINE (recall:codename), and one PINS deliberate looseness
- * (clinical:opdef). The other 18 could be loosened without failing anything
+ * (clinical:opdef, which accepts the target behaviour restated verbatim as a
+ * non-example of itself, because the answer contains the word "hand"). The other 18 could be loosened without failing anything
  * here. `--self-test` prints both lists by name on every run, so the gap is
  * checkable rather than asserted.
  */
@@ -44,7 +45,7 @@ describe("multi-turn bench graders", () => {
         // or an empty case list would satisfy this test forever.
         const m = out.match(/grader self-test: (\d+) passed/);
         expect(m, `self-test printed no pass count: ${out}`).not.toBeNull();
-        expect(Number(m![1]), "the case list must not shrink silently").toBeGreaterThanOrEqual(29);
+        expect(Number(m![1]), "the case list must not shrink silently").toBeGreaterThanOrEqual(30);
     });
 
     /**

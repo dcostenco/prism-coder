@@ -1,6 +1,6 @@
 model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
-prism-coder:9b        no_history         1         1          20     580              23
-prism-coder:9b        messages          21         0           1     413              52
+prism-coder:9b        no_history         1         1          20     568              23
+prism-coder:9b        messages          21         0           1     406              52
 
 by domain (correct / total), carry-over tasks only:
 model                 condition    mechanics  code  prose  clinical
@@ -38,7 +38,7 @@ per-task (no_history -> messages):
   prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
   prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."
 
-full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T174059Z.json
+full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T174751Z.json
 
 ═══════════════════════════════════════════════════════════════════
 WHAT AN INDEPENDENT REVIEW CHANGED IN THESE NUMBERS
@@ -79,15 +79,24 @@ tests/multiTurnBenchGraders.test.ts, which reverts the fix in a copy and
 asserts the self-test goes red.
 
 READ THE SCORE CORRECTLY. prose and clinical cells measure keyword carry-over,
-not correctness. clinical:opdef answers "Raising a hand to call out" as a
-NON-example of calling out, which is the target behaviour restated, and it
-grades correct because it contains "hand". That looseness is asserted on
-purpose in the self-test so nobody reads 3/3 as clinical accuracy. Full
-untruncated answers are written to multi-turn-bench.full-<timestamp>.json; the
-stdout column is a 120-character preview.
+not correctness. The clinical:opdef grader credits any answer containing the
+word "hand", so it accepts "Calling out without first raising a hand" — the
+TARGET BEHAVIOUR restated verbatim from the definition — as a NON-example of
+that behaviour. That is asserted in the self-test so nobody reads 3/3 as
+clinical accuracy.
+
+A correction worth keeping visible: for nine review rounds this document called
+the model's actual answer, "Raising a hand to call out", semantically confused.
+It is not. The definition excludes vocalising that FOLLOWS a raised hand, so
+the answer is a defensible non-example and the model was right. The looseness
+is real; that example was the wrong illustration of it, and the error came from
+reading the answer without re-reading the definition.
+
+Full untruncated answers are written to multi-turn-bench.full-<timestamp>.json;
+the stdout column is a 120-character preview.
 
 ═══════════════════════════════════════════════════════════════════
-TEN REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
+ELEVEN REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
 ═══════════════════════════════════════════════════════════════════
 
 The review did not converge on the first pass, and saying it had would have
@@ -167,6 +176,20 @@ the ones that were REPAIRED. Two were; the other two are there for different
 reasons — recall:codename as an unambiguous baseline, clinical:opdef to pin a
 looseness that is deliberate. Corrected in both files.
 
+ROUND 11 found the most substantive error of the whole review, and it was mine
+from round 1. For nine rounds this file called the model's clinical answer,
+"Raising a hand to call out", semantically confused, and used it as the proof
+that the grader is loose. The definition excludes vocalising that FOLLOWS a
+raised hand, so the answer is a defensible non-example and the model was right.
+I judged a clinical answer without re-reading the definition it was answering,
+and then built a test case on that judgement. The looseness is still real, so
+the pin now uses an answer that cannot be defended: "Calling out without first
+raising a hand" is the target behaviour restated verbatim, and the grader
+accepts it as a non-example of itself. Round 11 also found the scaffold heading
+said every tested scaffold failed while its own first table row shows the
+inline layout working; heading and body now distinguish separate-block from
+inline.
+
 WHAT WAS DELIBERATELY NOT FIXED, AND WHY. Three limits are asserted in
 --self-test rather than chased:
 
@@ -198,7 +221,7 @@ count is not reproducible from the tree, and no number is given here for it
 because a number would imply a precision the evidence does not carry.
 
 ═══════════════════════════════════════════════════════════════════
-NEGATIVE RESULT — every scaffold TESTED failed to fix constraint:prefix
+NEGATIVE RESULT — every SEPARATE-BLOCK scaffold tested failed; inline worked
 ═══════════════════════════════════════════════════════════════════
 
 constraint:prefix is the one task still wrong WITH history: told "every reply
@@ -210,9 +233,11 @@ changed nothing: 21/22 with and without, identical in every domain, at a cost
 of ~12 extra prompt tokens. Extraction was not the problem — it pulled exactly
 "Every reply must start with the word CHECKED." and built a correct fragment.
 
-Why the scaffolds TESTED could not fix it (3/3 reproducible, temperature 0).
-Three layouts against one model snapshot cannot support "no scaffold can", and
-an earlier draft of this document claimed exactly that:
+Three layouts, three repetitions each, temperature 0. Note the first line: the
+constraint IS honoured when it sits inline, so this is not "the constraint is
+unreachable" — it is "the two SEPARATE-BLOCK layouts failed while the inline
+one worked". An earlier draft of this document read the table as "no scaffold
+can fix it", which both overclaims and contradicts its own first row:
 
   constraint on the SAME LINE as the question   FOLLOWS  FOLLOWS  FOLLOWS
   separated by a blank line                     ignores  ignores  ignores

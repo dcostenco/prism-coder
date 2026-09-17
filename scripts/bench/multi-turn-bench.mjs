@@ -21,9 +21,12 @@
 // error on any given run is unknown.
 //
 // Read a column as a lexical proxy, never as "the model answered correctly".
-// Observed: with history, clinical:opdef returned "Raising a hand to call out"
-// — it grades correct and is semantically confused. Two of three clinical
-// answers were genuinely right on inspection; one was vocabulary.
+// Observed: with history, clinical:opdef returned "Raising a hand to call out",
+// which I called semantically confused for nine review rounds. It is not. The
+// definition excludes vocalising that FOLLOWS a raised hand, so that answer is
+// a defensible non-example and the model was right. Read a clinical answer
+// against the definition before calling it wrong; I did not, and the mistake
+// propagated into the test and this file.
 //
 // So read the score as KEYWORD CARRY-OVER, not as clinical correctness: it
 // answers "did what the history said reach the answer", not "was the answer
@@ -203,11 +206,14 @@ if (process.argv.includes("--self-test")) {
     // Recall is unambiguous: the value is present or it is not.
     ["recall:codename", "Nightjar", "correct"],
     ["recall:codename", "Sapphire", "fabricated"],
-    // PINNED LOOSENESS, not an aspiration: clinical:opdef credits the keyword
-    // even when the answer is semantically wrong. "Raising a hand to call out"
-    // describes the TARGET behaviour, not a non-example, and still grades
-    // correct. Asserting it keeps the summary's carry-over caveat honest — if
-    // someone tightens this grader, this line tells them what changes.
+    // PINNED LOOSENESS. The grader credits any answer containing "hand", so it
+    // accepts the TARGET BEHAVIOUR ITSELF, restated verbatim from the
+    // definition, as a non-example of that behaviour. Nothing could be more
+    // wrong and it still grades correct. That is the demonstration.
+    ["clinical:opdef", "Calling out without first raising a hand.", "correct"],
+    // The model's real answer, kept because it is the one a reader will see in
+    // the results table. It grades correct and, unlike the case above, it is
+    // also DEFENSIBLE: the definition excludes vocalising after a raised hand.
     ["clinical:opdef", "Raising a hand to call out.", "correct"],
     ["clinical:opdef", "A person who is rude or unhelpful.", "fabricated"],
     // PINNED SOFTNESS: an incidental "don't" inside a real answer reads as a
