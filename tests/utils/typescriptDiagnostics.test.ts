@@ -189,3 +189,59 @@ export class E {
         expect([...found].sort()).toEqual(found);
     });
 });
+
+describe("attacking the allowlist from the other direction", () => {
+    /**
+     * Round 1 of adversarial review on the checker itself. Two findings, both
+     * the failure the allowlist was supposed to prevent, arriving by routes the
+     * allowlist did not anticipate.
+     */
+
+    it("does not blame the snippet for an implicit any caused by an unresolved import", () => {
+        // Correct Express. `req` is implicitly any ONLY because a fragment
+        // cannot resolve `express`. Reporting it indicts the harness.
+        expect(typecheckSnippet(`
+import express from "express";
+const app = express();
+app.get("/", (req, res) => { res.send("hi"); });`)).toEqual([]);
+    });
+
+    it("still reports an implicit any when nothing failed to resolve", () => {
+        // The conditional must not silence the real case: no imports, so there
+        // is nothing to blame but the code.
+        expect(typecheckSnippet("export function g(cb): void { cb(); }"))
+            .toContain("implicit_any_param");
+    });
+
+    it("reports a parse failure, which no missing library can explain", () => {
+        for (const broken of [
+            "export class Broken { m(): void { return; ",
+            "export const x: number = ;",
+            "export function f( { return 1; }",
+        ]) {
+            expect(typecheckSnippet(broken), broken).toEqual(["syntax_error"]);
+        }
+    });
+
+    it("does not consult semantics of a file that never parsed", () => {
+        // An unparseable file produces garbage semantic diagnostics — the
+        // unclosed-paren case emits TS2391/TS7010/TS2300/TS2842 alongside the
+        // real TS1005. Only the parse failure is reported.
+        expect(typecheckSnippet("export function f( { return 1; }")).toEqual(["syntax_error"]);
+    });
+
+    it("is quiet when a model shows a before and an after block", () => {
+        // Blocks are joined before checking, so the same class can be declared
+        // twice. Duplicate-identifier is a context failure, not a defect.
+        expect(typecheckSnippet(`
+class Cache { get(k: string): string { return k; } }
+
+class Cache { get(k: string): string | undefined { return undefined; } }`)).toEqual([]);
+    });
+
+    it("is quiet assigning to a type that comes from an unresolved import", () => {
+        expect(typecheckSnippet(`
+import type { Config } from "./config.js";
+export const c: Config = { anything: true };`)).toEqual([]);
+    });
+});

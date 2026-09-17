@@ -37,13 +37,24 @@ import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 import { debugLog } from "./logger.js";
 
-/** Diagnostics that indict the SNIPPET. Each was observed on real model output. */
+/** Semantic diagnostics that indict the SNIPPET. Each observed on real output. */
 const ALLOWED_CODES = new Map<number, string>([
     [2314, "bare_generic"],               // Map<string, Array>
     [2779, "optional_chain_assignment"],  // node.next?.prev = x
     [2322, "type_not_assignable"],        // Promise<PromiseSettledResult[]> as Promise<void>
-    [7006, "implicit_any_param"],         // (listener) => ... under strict
+    [7006, "implicit_any_param"],         // (listener) => ... under strict — CONDITIONAL, see below
 ]);
+
+/**
+ * An implicit `any` only indicts the snippet once everything else resolved.
+ *
+ * `app.get("/", (req, res) => ...)` is correct Express, and `req` is implicitly
+ * any ONLY because a fragment cannot resolve `express`. Reporting that blames
+ * the harness. So TS7006 is suppressed whenever a module or name failed to
+ * resolve — found by attacking the allowlist rather than by review.
+ */
+const CONDITIONAL_ON_RESOLUTION = 7006;
+const RESOLUTION_FAILURE_CODES = new Set([2304, 2307, 2792, 2583]);
 
 /**
  * Codes already triaged as context failures rather than defects.
@@ -115,7 +126,8 @@ export function typecheckSnippet(code: string): string[] {
         readFile: sourceOf,
     };
 
-    let diagnostics: readonly import("typescript").Diagnostic[];
+    let syntactic: readonly import("typescript").Diagnostic[];
+    let semantic: readonly import("typescript").Diagnostic[];
     try {
         const program = ts.createProgram([name], {
             strict: true,
@@ -124,14 +136,24 @@ export function typecheckSnippet(code: string): string[] {
             types: [],
             skipLibCheck: true,
         }, host);
-        diagnostics = [...program.getSemanticDiagnostics(), ...program.getSyntacticDiagnostics()];
+        syntactic = program.getSyntacticDiagnostics();
+        semantic = program.getSemanticDiagnostics();
     } catch (e) {
         debugLog(`[ts-diagnostics] check failed: ${e instanceof Error ? e.message : e}`);
         return [];
     }
 
+    // A parse failure needs no allowlist. Nothing about a missing library or an
+    // unresolved import can make a brace go missing, so a syntactic diagnostic
+    // always indicts the snippet. And once the file does not parse, the semantic
+    // results describe a tree that was never valid, so they are not consulted.
+    if (syntactic.length > 0) return ["syntax_error"];
+
+    const unresolved = semantic.some(d => RESOLUTION_FAILURE_CODES.has(d.code));
+
     const found = new Set<string>();
-    for (const d of diagnostics) {
+    for (const d of semantic) {
+        if (d.code === CONDITIONAL_ON_RESOLUTION && unresolved) continue;
         const name_ = ALLOWED_CODES.get(d.code);
         if (name_) found.add(name_);
         else if (!IGNORED_CODES.has(d.code)) {

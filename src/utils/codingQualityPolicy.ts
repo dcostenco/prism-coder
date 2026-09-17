@@ -657,6 +657,8 @@ const CODING_REPAIR_GUIDANCE: Readonly<Record<string, string>> = {
         "Define every directly called private self helper or replace the call with the correct defined helper.",
     constructor_attribute_missing_receiver:
         "In __init__, persist instance state as self.<attribute>; do not assign it to a discarded local variable.",
+    syntax_error:
+        "The code does not parse. Balance every brace, bracket and parenthesis, and finish every statement.",
     optional_chain_assignment:
         "Optional chaining cannot appear on the left of an assignment. Guard with an if, or assert the value is present, before assigning to the property.",
     type_not_assignable:
