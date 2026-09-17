@@ -47,7 +47,7 @@ export interface ClinicalQualityResult {
 
 /** A full written plan was asked for — the whole section list applies. */
 const CLINICAL_PLAN_REQUEST_RE =
-    /\b(bip\b|behaou?vior(?:al)?[ -](?:intervention|support|management)[ -]plan|behaviou?r plan|treatment plan|intervention plan)\b/i;
+    /\b(bip\b|behavi(?:o|ou)r(?:al)?[ -](?:intervention|support|management)[ -]plan|behavi(?:o|ou)r plan|treatment plan|intervention plan)\b/i;
 
 /** An operational definition specifically was asked for. */
 const OPERATIONAL_DEFINITION_REQUEST_RE =
@@ -92,11 +92,33 @@ const AAC_WINDOW_AFTER = 120;
 const AAC_WINDOW_BEFORE = 40;
 const NEGATION_LOOKBACK = 60;
 
+/** Clause boundaries. The verb must act on the AAC term, not merely sit near it:
+ *  "AAC remains available at all times; remove the token board" removes a token
+ *  board, and scanning past the semicolon read it as removing AAC. */
+const CLAUSE_BREAK = /[.;:\n]|\bhowever\b|\bwhereas\b/i;
+
+function clauseAfter(text: string, from: number, limit: number): string {
+    const slice = text.slice(from, from + limit);
+    const brk = CLAUSE_BREAK.exec(slice);
+    return brk ? slice.slice(0, brk.index) : slice;
+}
+
+function clauseBefore(text: string, end: number, limit: number): string {
+    const slice = text.slice(Math.max(0, end - limit), end);
+    let last = -1;
+    for (const m of slice.matchAll(new RegExp(CLAUSE_BREAK.source, "gi"))) {
+        last = (m.index ?? 0) + m[0].length;
+    }
+    return last >= 0 ? slice.slice(last) : slice;
+}
+
 function aacRestrictedAsConsequence(output: string): boolean {
     for (const m of output.matchAll(new RegExp(AAC_TERM.source, "gi"))) {
         const start = m.index ?? 0;
-        const from = Math.max(0, start - AAC_WINDOW_BEFORE);
-        const window = output.slice(from, start + AAC_WINDOW_AFTER);
+        const before = clauseBefore(output, start, AAC_WINDOW_BEFORE);
+        const after = clauseAfter(output, start, AAC_WINDOW_AFTER);
+        const from = start - before.length;
+        const window = before + after;
         const verb = RESTRICT_VERB.exec(window);
         if (!verb) continue;
         const absolute = from + (verb.index ?? 0);
@@ -144,9 +166,17 @@ export function passesClinicalQualityGate(
         present: PLAN_SECTIONS.length - missing.length,
         missing,
     };
-    if (missing.length > 0) {
-        return { pass: false, reason: "clinical_plan_sections_missing", sections };
-    }
+
+    // An incomplete plan REPORTS; it does not fail. Failing the gate rejects the
+    // output, and when escalation is unavailable the caller receives nothing at
+    // all — measured in review: a 3-of-10 plan with cloud_fallback:true and an
+    // unreachable portal returned "no backend produced output". A draft labelled
+    // `clinical_sections=3/10 missing:...` is strictly more useful to a clinician
+    // than silence, and suppressing it contradicts the raise-only rule above.
+    //
+    // The two findings ABOVE do fail, because they are defects rather than
+    // incompleteness: AAC restricted as a consequence is a safety violation, and
+    // an operational definition without non-examples is wrong, not unfinished.
     return { pass: true, sections };
 }
 

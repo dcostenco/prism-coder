@@ -26,10 +26,17 @@ before any model sees it, and that boundary is untouched. In practice a plan
 request framed around aggression is refused before this check is reached, so it
 governs the routine band only.
 
-A clinical finding is not auto-repaired. Re-prompting the same local model to
-invent a missing decision-rules section produces plausible unratified clinical
-text, which is worse than a visibly incomplete draft, so a clinical reason
-escalates instead of being patched in place.
+An incomplete plan is reported, never suppressed. The draft is still served,
+carrying its census, because a clinician is better served by a plan labelled
+`3/10` than by silence — an earlier revision failed the quality gate on a
+missing section, and a request that could not escalate returned no output at
+all. Two findings do fail, because they are defects rather than gaps: AAC
+access restricted as a consequence, and an operational definition written
+without non-examples.
+
+Nothing here is auto-repaired. Re-prompting the same local model to invent a
+missing decision-rules section produces plausible unratified clinical text,
+which is worse than a visible gap.
 
 
 ### `prism_infer` now tells you how much history it received

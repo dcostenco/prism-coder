@@ -88,15 +88,18 @@ describe("a requested plan is censused section by section", () => {
         expect(r.pass).toBe(true);
     });
 
-    it("names the section that is absent", () => {
+    it("names the section that is absent WITHOUT suppressing the draft", () => {
         const withoutRules = COMPLETE_BIP.replace(
             /Decision rules:[\s\S]*?one instance\./,
             "",
         );
         const r = passesClinicalQualityGate(PLAN_PROMPT, withoutRules);
-        expect(r.pass).toBe(false);
-        expect(r.reason).toBe("clinical_plan_sections_missing");
         expect(r.sections?.missing).toContain("decision_rules");
+        // Incompleteness reports; it must not fail the gate. A failed gate
+        // rejects the output, and with escalation unavailable the caller gets
+        // nothing — worse for a clinician than a draft labelled 8/10.
+        expect(r.pass, "an incomplete plan must still be served, with its census").toBe(true);
+        expect(r.reason).toBeUndefined();
     });
 
     it("reports a count even when it passes, so the header states what was checked", () => {
@@ -104,6 +107,28 @@ describe("a requested plan is censused section by section", () => {
         expect(r.sections).toBeDefined();
         expect(r.sections!.required).toBeGreaterThan(5);
     });
+});
+
+describe("the plan trigger covers how a plan is actually named", () => {
+    // `behaou?vior` was a typo matching "behaovior" and never "behavior", so the
+    // whole first alternative was dead and "behavior support plan" was missed
+    // entirely; "behavior intervention plan" only matched via the separate
+    // `intervention plan` branch, which hid it. Found in adversarial review.
+    for (const name of [
+        "behavior intervention plan",
+        "behaviour intervention plan",
+        "behavior support plan",
+        "behaviour support plan",
+        "behavior management plan",
+        "behavior plan",
+        "behaviour plan",
+        "BIP",
+    ]) {
+        it(`censuses a request naming a "${name}"`, () => {
+            const r = passesClinicalQualityGate(`Draft a ${name} for a student who calls out.`, "nothing useful");
+            expect(r.sections, `"${name}" did not trigger the section census`).toBeDefined();
+        });
+    }
 });
 
 describe("AAC access may never be a consequence", () => {
@@ -128,6 +153,38 @@ describe("AAC access may never be a consequence", () => {
         );
         expect(r.reason).not.toBe("clinical_aac_restricted_as_consequence");
     });
+});
+
+describe("the AAC rule is bounded to the clause it is reading", () => {
+    // From adversarial review. The window originally ran past a clause break, so
+    // "AAC remains available at all times; remove the token board" read as a
+    // removal of AAC — a false positive on CORRECT plan text, which is the one
+    // kind of noise a raise-only check cannot afford.
+    const P = "Draft a behavior intervention plan for calling out.";
+    const raises = (out: string) =>
+        passesClinicalQualityGate(P, out).reason === "clinical_aac_restricted_as_consequence";
+
+    for (const good of [
+        "AAC access is never removed or withheld.",
+        "The device is not taken away for any behaviour.",
+        "Do not restrict access to the communication board.",
+        "AAC remains available at all times; remove the token board once mastered.",
+        "The device is charged and never removed overnight.",
+    ]) {
+        it(`stays quiet on: "${good.slice(0, 48)}"`, () => {
+            expect(raises(good), good).toBe(false);
+        });
+    }
+
+    for (const bad of [
+        "Then remove the AAC device for ten minutes.",
+        "Staff withhold the talker until the learner is compliant.",
+        "Staff may delay access to the PECS book after an outburst.",
+    ]) {
+        it(`raises on: "${bad.slice(0, 48)}"`, () => {
+            expect(raises(bad), bad).toBe(true);
+        });
+    }
 });
 
 describe("an operational definition needs both sides", () => {
