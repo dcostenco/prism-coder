@@ -130,7 +130,7 @@ function aacRestrictedAsConsequence(output: string): boolean {
 }
 
 /** Characters of real prose required near a section marker for it to count. */
-const SECTION_CONTENT_CHARS = 50;
+const SECTION_CONTENT_CHARS = 30;
 const SECTION_WINDOW = 400;
 
 /** Drop whole heading lines. Stripping only the `#` turns the NEXT heading into
@@ -159,11 +159,21 @@ function proseOnly(text: string): string {
  * dropped a legitimate credit — "we will write down how often it happens on a
  * data sheet" puts the content BEFORE the keyword.
  *
- * It does not defeat every structural pass. A model that echoes the section
- * list back as prose still scores full marks, because a description of what a
- * plan must contain is, at this level of analysis, indistinguishable from a
- * plan. That is a limit of presence-checking, not something to regex away, and
- * it is one more reason nothing here may be read as an endorsement.
+ * Two limits, both measured rather than assumed.
+ *
+ * The window is wide, so in a dense document a marker finds prose belonging to
+ * a NEIGHBOURING section and is credited for it. This is therefore closer to a
+ * document-level check than a per-section one; what it reliably catches is the
+ * empty or near-empty output, which is what it was added for.
+ *
+ * And a model that echoes the section list back as prose still scores full
+ * marks, because a description of what a plan must contain is, at this level of
+ * analysis, indistinguishable from a plan. That is a limit of the approach, not
+ * something to regex away, and one more reason nothing here is an endorsement.
+ *
+ * The floor is deliberately low. At 50 characters a legitimately terse section
+ * — "Frequency count / Daily tally / Weekly IOA" — was refused, and a false
+ * negative on real content is the more expensive error for a gap report.
  */
 function sectionHasContent(output: string, pattern: RegExp): boolean {
     const m = new RegExp(pattern.source, pattern.flags.replace("g", "")).exec(output);

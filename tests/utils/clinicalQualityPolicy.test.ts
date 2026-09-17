@@ -447,6 +447,14 @@ describe("a section marker without prose beside it is not a section", () => {
         expect(passesClinicalQualityGate(PLAN_PROMPT, SPARSE_PLAN).sections?.present).toBe(2);
     });
 
+    it("credits a legitimately terse section written as short bullets", () => {
+        // Round 3. At a 50-character floor this real content was refused. A false
+        // negative on real content is the more expensive error for a gap report,
+        // so the floor is deliberately low.
+        const terse = "### Data Collection\n- Frequency count\n- Daily tally\n- Weekly IOA";
+        expect(passesClinicalQualityGate(P, terse).sections?.missing).not.toContain("data_collection");
+    });
+
     it("KNOWN LIMIT: echoing the section list back still scores full marks", () => {
         // Recorded, not fixed. A description of what a plan must contain is, to a
         // presence check, indistinguishable from a plan. Pinned so the limit is
