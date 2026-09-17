@@ -3,6 +3,21 @@
 //   no_history : prompt only — what prism_infer sent before this change
 //   messages   : role-structured prior turns — what it sends now
 // Tasks are auto-graded (string/regex), temperature 0, num_predict small.
+//
+// WHAT THE SCORES MEAN, AND WHAT THEY DO NOT. Graders are LEXICAL: they look
+// for the discriminating term, not for a correct answer. Every one of them can
+// be passed by a wrong answer containing the right word — "He waved his hand
+// angrily and shouted" scores correct on clinical:opdef. That is tolerable
+// because the SAME grader runs on both arms, so a loose grader inflates
+// no_history and messages equally and the DELTA survives.
+//
+// Read a column as an upper bound, never as "the model answered correctly".
+// Observed: with history, clinical:opdef returned "Raising a hand to call out"
+// — it grades correct and is semantically confused. Two of three clinical
+// answers were genuinely right on inspection; one was vocabulary.
+//
+// Do not tighten these into an arms race. If absolute correctness is the
+// question, read the per-task text, which is why it is printed.
 // Fabrication = a confident WRONG specific answer (not a decline).
 // Run from the repo root after `npm run build`:  node scripts/bench/multi-turn-bench.mjs [model ...]
 import { callOllamaGenerate } from "../../dist/tools/prismInferHandler.js";
