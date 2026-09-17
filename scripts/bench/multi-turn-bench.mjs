@@ -116,7 +116,9 @@ T.push(["code:rename", H("The class is called InvoiceLedger. Acknowledge.", "Not
   "Write the TypeScript line that instantiates it into a const named ledger.", t => grade(x => /new\s+InvoiceLedger\s*\(/.test(x), t)]);
 
 // F. prose / general-request continuation (4) — the goal is not code-only.
-// `declined` is the CORRECT verdict for prose:nofabricate; see the grader.
+// prose:nofabricate scores a valid decline as `correct`, not as `declined`:
+// declining IS the right answer there, so it belongs in the correct column.
+// This comment said the opposite, left over from the grader's first version.
 T.push(["prose:terminology", H("In this report, status \"amber\" means degraded but serving. Acknowledge.", "Acknowledged."),
   "What does amber mean here? Under 8 words.", t => grade(x => /degrad/i.test(x), t)]);
 T.push(["prose:onesentence", H("From now on answer in exactly one sentence. Acknowledge.", "Understood."),

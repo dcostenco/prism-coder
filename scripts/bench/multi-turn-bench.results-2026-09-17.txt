@@ -1,6 +1,6 @@
 model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
-prism-coder:9b        no_history         1         1          20     567              23
-prism-coder:9b        messages          21         0           1     408              52
+prism-coder:9b        no_history         1         1          20     547              23
+prism-coder:9b        messages          21         0           1     410              52
 
 by domain (correct / total), carry-over tasks only:
 model                 condition    mechanics  code  prose  clinical
@@ -38,7 +38,7 @@ per-task (no_history -> messages):
   prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
   prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."
 
-full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T175331Z.json
+full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T175957Z.json
 
 ═══════════════════════════════════════════════════════════════════
 WHAT AN INDEPENDENT REVIEW CHANGED IN THESE NUMBERS
@@ -96,7 +96,7 @@ Full untruncated answers are written to multi-turn-bench.full-<timestamp>.json;
 the stdout column is a 120-character preview.
 
 ═══════════════════════════════════════════════════════════════════
-TWELVE REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
+THIRTEEN REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
 ═══════════════════════════════════════════════════════════════════
 
 The review did not converge on the first pass, and saying it had would have
@@ -198,6 +198,12 @@ still be defended as behaviour outside that setting. The pin now carries every
 element: "Audible vocalisation during independent work without raising a hand".
 Correcting a claim about a definition twice, in two rounds, by not reading the
 definition closely enough either time.
+
+ROUND 13 confirmed the clinical pin and found one stale comment: a line saying
+`declined` is the correct verdict for prose:nofabricate, left over from the
+grader's first version. That grader now returns `correct` for a valid decline,
+because declining IS the right answer there. The comment had been false since
+round 1 and survived twelve rounds of editing the lines around it.
 
 WHAT WAS DELIBERATELY NOT FIXED, AND WHY. Three limits are asserted in
 --self-test rather than chased:
