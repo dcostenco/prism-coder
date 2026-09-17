@@ -1,0 +1,32 @@
+model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
+prism-coder:9b        no_history         2         0          20     322              23
+prism-coder:9b        messages          21         0           1     355              52
+
+by domain (correct / total):
+model                 condition    mechanics  code  prose  clinical
+prism-coder:9b        no_history        0/13   0/2    2/4       0/3
+prism-coder:9b        messages         12/13   2/2    4/4       3/3
+
+per-task (no_history -> messages):
+  prism-coder:9b   recall:codename    fabricated -> correct    | "Sapphire" -> "Nightjar"
+  prism-coder:9b   recall:ticket      fabricated -> correct    | "10" -> "SYN-4471"
+  prism-coder:9b   recall:region      fabricated -> correct    | "Europe" -> "eu-west-3"
+  prism-coder:9b   recall:owner       fabricated -> correct    | "Google LLC" -> "Marisol"
+  prism-coder:9b   recall:deadline    fabricated -> correct    | "2026-12-31" -> "October 9"
+  prism-coder:9b   constraint:json    fabricated -> correct    | "49" -> "{\"answer\": 42}"
+  prism-coder:9b   constraint:prefix  fabricated -> fabricated | "Red is a primary colour. Other examples include blue and yel" -> "Red."
+  prism-coder:9b   constraint:lang    fabricated -> correct    | "There are 7 days in a week." -> "Hay siete días en una semana."
+  prism-coder:9b   ref:second         fabricated -> correct    | "Option B" -> "SQLite"
+  prism-coder:9b   ref:last           fabricated -> correct    | "Sleep" -> "Deploy."
+  prism-coder:9b   ref:pronoun        fabricated -> correct    | "It returns a value." -> "An array of Row objects."
+  prism-coder:9b   state:x            fabricated -> correct    | "30" -> "42"
+  prism-coder:9b   state:list         fabricated -> correct    | "10" -> "16"
+  prism-coder:9b   code:call          fabricated -> correct    | "```js const n = data.helper(); ```" -> "```js const n = countActiveUsers(data); ```"
+  prism-coder:9b   code:rename        fabricated -> correct    | "```typescript const ledger = new Ledger(); ```" -> "```typescript const ledger = new InvoiceLedger(); ```"
+  prism-coder:9b   prose:terminology  fabricated -> correct    | "It is a gemstone used in jewelry and decoration." -> "Degraded but serving."
+  prism-coder:9b   prose:onesentence  correct    -> correct    | "Teams write **postmortems** (also known as incident reports " -> "Teams write postmortems to analyze what happened during an i"
+  prism-coder:9b   prose:figure       fabricated -> correct    | "2" -> "36"
+  prism-coder:9b   prose:nofabricate  correct    -> correct    | "I don't have access to any specific company or service's int" -> "I don't have access to internal contact information, includi"
+  prism-coder:9b   clinical:opdef     fabricated -> correct    | "A person who is rude or unhelpful." -> "Raising a hand to call out."
+  prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
+  prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."

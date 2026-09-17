@@ -41,6 +41,31 @@ T.push(["code:call", H("We have a helper named countActiveUsers(rows). Acknowled
 T.push(["code:rename", H("The class is called InvoiceLedger. Acknowledge.", "Noted."),
   "Write the TypeScript line that instantiates it into a const named ledger.", t => grade(x => /new\s+InvoiceLedger\s*\(/.test(x), t)]);
 
+// F. prose / general-request continuation (4) — the goal is not code-only.
+// `declined` is the CORRECT verdict for prose:nofabricate; see the grader.
+T.push(["prose:terminology", H("In this report, status \"amber\" means degraded but serving. Acknowledge.", "Acknowledged."),
+  "What does amber mean here? Under 8 words.", t => grade(x => /degrad/i.test(x), t)]);
+T.push(["prose:onesentence", H("From now on answer in exactly one sentence. Acknowledge.", "Understood."),
+  "Why do teams write postmortems?", t => grade(x => (x.trim().match(/[.!?](\s|$)/g) ?? []).length === 1, t)]);
+T.push(["prose:figure", H("The team closed 18 tickets last sprint. Acknowledge.", "Noted."),
+  "At the same rate, how many across two sprints? Number only.", t => grade(x => /\b36\b/.test(x), t)]);
+// Carrying history must not make the model MORE willing to invent. Here the
+// answer is genuinely absent from the conversation, so declining IS correct.
+T.push(["prose:nofabricate", H("The release train runs on Tuesdays. Acknowledge.", "Noted."),
+  "What is the on-call engineer's phone number?",
+  t => declineRe.test(t) ? "correct" : "fabricated"]);
+
+// G. clinical, ROUTINE band only (3). No crisis, restraint or injury
+// vocabulary: those never reach a local model, so benching them would measure
+// a refusal rather than recall.
+T.push(["clinical:opdef", H("Target behaviour: calling out, defined as an audible vocalisation during independent work without first raising a hand. Acknowledge.", "Noted."),
+  "Give one NON-example of that behaviour. Under 10 words.", t => grade(x => /hand|wait|quiet|silent/i.test(x), t)]);
+T.push(["clinical:measure", H("We record this behaviour as a frequency count each session. Acknowledge.", "Noted."),
+  "What gets written down each session? Under 8 words.", t => grade(x => /count|frequen|number|tally|how many|times/i.test(x), t)]);
+T.push(["clinical:replacement", H("The replacement behaviour is raising a hand and waiting to be called on. Acknowledge.", "Noted."),
+  "What should staff reinforce? Under 8 words.", t => grade(x => /hand|wait/i.test(x), t)]);
+
+
 const out = {};
 for (const model of MODELS) {
   for (const cond of ["no_history", "messages"]) {
@@ -63,6 +88,20 @@ for (const [key, rows] of Object.entries(out)) {
   const [model, cond] = key.split("|");
   console.log(`${model.padEnd(21)} ${cond.padEnd(12)} ${String(c("correct")).padStart(7)}  ${String(c("declined")).padStart(8)}  ${String(c("fabricated")).padStart(10)}  ${String(avg(r => r.ms)).padStart(6)}  ${String(avg(r => r.promptTokens)).padStart(14)}`);
 }
+// Per-domain, because a regression in one domain is invisible in a total.
+const domainOf = id => { const p = id.split(":")[0];
+  return p === "code" ? "code" : p === "clinical" ? "clinical" : p === "prose" ? "prose" : "mechanics"; };
+console.log("\nby domain (correct / total):");
+console.log("model                 condition    mechanics  code  prose  clinical");
+for (const [key, rows] of Object.entries(out)) {
+  const [model, cond] = key.split("|");
+  const cell = d => {
+    const inD = rows.filter((r, i) => domainOf(T[i][0]) === d);
+    return `${inD.filter(r => r.verdict === "correct").length}/${inD.length}`;
+  };
+  console.log(`${model.padEnd(21)} ${cond.padEnd(12)} ${cell("mechanics").padStart(9)}  ${cell("code").padStart(4)}  ${cell("prose").padStart(5)}  ${cell("clinical").padStart(8)}`);
+}
+
 console.log("\nper-task (no_history -> messages):");
 for (const model of MODELS) {
   const a = out[`${model}|no_history`], b = out[`${model}|messages`];
