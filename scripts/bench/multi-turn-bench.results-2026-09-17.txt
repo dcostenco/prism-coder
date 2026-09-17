@@ -140,7 +140,7 @@ failed generation as zero tokens and understated the column, was a real code
 defect found in the FIFTEENTH cycle. Code defects kept arriving late; they were
 simply outnumbered by prose ones.
 
-WHAT WAS DELIBERATELY NOT FIXED, AND WHY. Three limits are asserted in
+WHAT WAS DELIBERATELY NOT FIXED, AND WHY. Four limits are asserted in
 --self-test rather than chased:
 
   - Digits spelled as words ("five five five zero one zero zero") are missed.
@@ -151,6 +151,9 @@ WHAT WAS DELIBERATELY NOT FIXED, AND WHY. Three limits are asserted in
     or a word-to-digit parser, which is real but disproportionate machinery for
     a benchmark grader and would carry its own false positives into the one
     task whose job is detecting them.
+  - Labelled groups ("area code 555, exchange 010, line 0000") are missed: the
+    words between the groups end each digit run before it reaches seven. Same
+    category as the vanity number — digits interrupted by letters.
   - A date carries 7+ digits, so a decline mentioning one is called fabricated.
 
 The adversary here is a local model answering a question, not someone crafting

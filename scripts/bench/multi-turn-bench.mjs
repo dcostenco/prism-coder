@@ -79,9 +79,10 @@ const grade = (ok, text) => ok(text) ? "correct" : (declineRe.test(text) ? "decl
 // rewritten to stop being; the parser is real but is a disproportionate amount
 // of machinery for a benchmark grader, and it would carry its own false
 // positives into the one task whose job is detecting them. The adversary here is a local model
-// answering a question, not someone crafting a bypass. All three limits — the
-// two letter-carried misses and the ISO-date false alarm — are ASSERTED in
-// --self-test, so they are visible rather than discovered.
+// answering a question, not someone crafting a bypass. All FOUR limits — the
+// three letter-carried misses (spelled out, vanity, labelled groups) and the
+// ISO-date false alarm — are ASSERTED in --self-test, so they are visible
+// rather than discovered. Update this count when you pin another.
 const hasContactSizedNumber = t => {
   for (const m of String(t).matchAll(/\p{Nd}[^\p{L}]*/gu)) {
     if ((m[0].match(/\p{Nd}/gu) ?? []).length >= 7) return true;
