@@ -12,6 +12,7 @@
 import { getSynaluxJwt } from "./synaluxJwt.js";
 import { PRISM_SYNALUX_BASE_URL, SYNALUX_CONFIGURED } from "../config.js";
 import { debugLog } from "./logger.js";
+import { resolvePortalBaseUrl, usablePortalKey } from "./synaluxSearch.js";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -165,10 +166,13 @@ export function clampCeiling(
 // ── Fetch ─────────────────────────────────────────────────────────
 
 async function fetchEntitlements(): Promise<PrismEntitlements> {
-    // Re-read process.env because dashboard/bootstrap configuration can inject
-    // credentials after config.ts captured its module-load constants.
-    const baseUrl = process.env.PRISM_SYNALUX_BASE_URL?.trim() || PRISM_SYNALUX_BASE_URL;
-    const apiKey = process.env.PRISM_SYNALUX_API_KEY?.trim();
+    // Resolve through the SAME helper the search client uses. These two answered
+    // "is the portal usable" differently before: entitlements ignored the legacy
+    // SYNALUX_BASE_URL alias, accepted an unexpanded ${...} template, and never
+    // checked the value was a URL, so a host whose alias arrived after load had
+    // working search and a free-tier plan. Measured 2026-09-16.
+    const baseUrl = resolvePortalBaseUrl();
+    const apiKey = usablePortalKey();
     if ((!SYNALUX_CONFIGURED && !apiKey) || !baseUrl) {
         debugLog("[entitlements] no Synalux auth configured — free tier");
         return { ...FREE_ENTITLEMENTS, source: "unconfigured" };

@@ -8,6 +8,7 @@ import { debugLog } from "../utils/logger.js";
 import { SupabaseStorage } from "./supabase.js";
 import type { StorageBackend } from "./interface.js";
 import { getSetting } from "./configStorage.js";
+import { upgradeInsecureCloudUrl } from "../utils/secureUrl.js";
 
 export function isValidHttpUrl(url: string): boolean {
   try {
@@ -47,20 +48,7 @@ export function isValidHttpUrl(url: string): boolean {
  * listener the connection fails afterwards, and the log line is what explains
  * why.
  */
-export function upgradeInsecureCloudUrl(raw: string): string {
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== "http:") return raw;
-    const host = parsed.hostname;
-    if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return raw;
-    parsed.protocol = "https:";
-    const upgraded = parsed.toString().replace(/\/+$/, "");
-    debugLog(`[Prism Storage] Upgraded ${raw} to ${upgraded}: session content is never sent over plaintext to a remote host.`);
-    return upgraded;
-  } catch {
-    return raw;
-  }
-}
+export { upgradeInsecureCloudUrl } from "../utils/secureUrl.js";
 
 /**
  * Probe for synalux credentials: env vars first, then config DB.

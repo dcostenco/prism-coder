@@ -33,7 +33,7 @@ import { BRAVE_API_KEY, BRAVE_ANSWERS_API_KEY } from "../config.js";
 import { debugLog } from "./logger.js";
 import { isPortalPlanRefusal } from "./portalError.js";
 import {
-  SYNALUX_SEARCH_AVAILABLE,
+  synaluxSearchAvailable,
   synaluxWebSearch,
   synaluxWebSearchRaw,
   synaluxLocalSearch,
@@ -105,6 +105,9 @@ export interface BraveLocation {
   id: string;
   name?: string;
   title?: string;
+  postal_address?: { displayAddress?: string };
+  contact?: { telephone?: string; email?: string };
+  opening_hours?: { current_day?: Array<{ opens?: string; closes?: string }> };
   address: {
     streetAddress?: string;
     addressLocality?: string;
@@ -119,8 +122,10 @@ export interface BraveLocation {
   rating?: {
     ratingValue?: number;
     ratingCount?: number;
+    reviewCount?: number;
   };
   openingHours?: string[];
+  price_range?: string;
   priceRange?: string;
 }
 
@@ -153,7 +158,7 @@ export async function performBraveAnswers(
   query: string,
   model: string = "brave"
 ) {
-  if (SYNALUX_SEARCH_AVAILABLE) {
+  if (synaluxSearchAvailable()) {
     return portalFirst(
       () => synaluxBraveAnswers(query, model),
       BRAVE_ANSWERS_API_KEY,
@@ -209,7 +214,7 @@ export async function performWebSearchRaw(
   count: number = 10,
   offset: number = 0
 ): Promise<string> {
-  if (SYNALUX_SEARCH_AVAILABLE) {
+  if (synaluxSearchAvailable()) {
     if (offset !== 0) throw new Error(SYNALUX_OFFSET_UNSUPPORTED_ERROR);
     return portalFirst(
       () => synaluxWebSearchRaw(query, count),
@@ -257,7 +262,7 @@ export async function performWebSearch(
   count: number = 10,
   offset: number = 0
 ) {
-  if (SYNALUX_SEARCH_AVAILABLE) {
+  if (synaluxSearchAvailable()) {
     if (offset !== 0) throw new Error(SYNALUX_OFFSET_UNSUPPORTED_ERROR);
     return portalFirst(
       () => synaluxWebSearch(query, count),
@@ -354,7 +359,7 @@ export async function performLocalSearchRaw(
   query: string,
   count: number = 5
 ): Promise<string> {
-  if (SYNALUX_SEARCH_AVAILABLE) {
+  if (synaluxSearchAvailable()) {
     return portalFirst(
       () => synaluxLocalSearchRaw(query, count),
       BRAVE_API_KEY,
@@ -442,7 +447,7 @@ async function braveLocalSearchRaw(
 
 // Local search API call with poi details
 export async function performLocalSearch(query: string, count: number = 5) {
-  if (SYNALUX_SEARCH_AVAILABLE) {
+  if (synaluxSearchAvailable()) {
     return portalFirst(
       () => synaluxLocalSearch(query, count),
       BRAVE_API_KEY,
@@ -480,7 +485,16 @@ export function formatLocalResults(
   return (
     (poisData.results || [])
       .map((poi) => {
+        // Brave sends postal_address.displayAddress, contact.telephone and
+        // opening_hours. The streetAddress/phone/openingHours shapes below have
+        // never appeared on a POI, which is why every venue came back N/A while
+        // the name resolved through the title fallback. Measured 2026-09-16.
+        const today = poi.opening_hours?.current_day?.[0];
+        const hours = (poi.openingHours || []).join(", ")
+          || (today?.opens && today?.closes ? `${today.opens}-${today.closes}` : "")
+          || "N/A";
         const address =
+          poi.postal_address?.displayAddress ||
           [
             poi.address?.streetAddress ?? "",
             poi.address?.addressLocality ?? "",
@@ -490,13 +504,13 @@ export function formatLocalResults(
             .filter((part) => part !== "")
             .join(", ") || "N/A";
 
-        return `Name: ${poi.name || poi.title || "N/A"}
+        return `Name: ${poi.title || poi.name || "N/A"}
 Address: ${address}
-Phone: ${poi.phone || "N/A"}
-Rating: ${poi.rating?.ratingValue ?? "N/A"} (${poi.rating?.ratingCount ?? 0
+Phone: ${poi.contact?.telephone || poi.phone || "N/A"}
+Rating: ${poi.rating?.ratingValue ?? "N/A"} (${poi.rating?.reviewCount ?? poi.rating?.ratingCount ?? 0
           } reviews)
-Price Range: ${poi.priceRange || "N/A"}
-Hours: ${(poi.openingHours || []).join(", ") || "N/A"}
+Price Range: ${poi.price_range || poi.priceRange || "N/A"}
+Hours: ${hours}
 Description: ${descData.descriptions[poi.id] || "No description available"}
 `;
       })

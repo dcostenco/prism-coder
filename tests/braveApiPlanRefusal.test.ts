@@ -1,7 +1,7 @@
 /**
  * A signed-in FREE account holding its own Brave key.
  *
- * SYNALUX_SEARCH_AVAILABLE is true for every `prism connect` login, so a
+ * Portal search is available to every `prism connect` login, so a
  * free account is routed to the portal, and the portal answers its search
  * with 403 "requires Standard plan or higher". Owner's decision: that
  * account may use the key it configured itself — the same footing as a user

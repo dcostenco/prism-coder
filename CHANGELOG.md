@@ -54,6 +54,228 @@ than in the startup path: loading the connect module is synchronous work that
 would otherwise compete with the first tool call, which on a cold host is the
 one doing a storage round trip. `PRISM_NO_STARTUP_REFRESH=1` opts out.
 
+## 20.21.5 — 2026-09-17
+
+### Generated TypeScript is type checked, not pattern matched
+
+The regex gate added in 20.21.4 catches one defect class. The next sample
+defeated it: a doubly-linked-list splice written `node.next?.prev = head`, which
+is TS2779 and does not compile. Extending the regex per error code is an arms
+race the compiler already wins, so the compiler now runs — in process, on
+TypeScript blocks only, at about 160 ms against a local call that takes twenty
+seconds.
+
+Checking a fragment is not the same as checking a project. A generated snippet
+has no tsconfig, no resolved imports, and no way to say whether it targets the
+browser or Node, so a naive check reports the harness rather than the code —
+pointing one at the DOM library made a snippet's own `Node` class collide with
+the DOM's and produce twelve extra diagnostics. A gate that fails correct code
+gets switched off, so only an allowlist of codes is ever reported: a generic
+with no type argument, optional chaining on the left of an assignment, a return
+value that does not match its declaration, and an implicitly `any` parameter.
+Everything else is logged and discarded.
+
+### A counter that never counts
+
+One rule no type checker can express, added because the AST was already loaded:
+a value mutated inside a `then`, `catch` or timer callback and then returned
+synchronously. The callback runs later, so the returned value never includes it.
+From the first multi-turn benchmark, where `emit()` returned 1 for three
+listeners. It is scoped to the enclosing function, because without that a nested
+helper's mutation was credited to its caller and flagged correct code.
+
+`typescript` becomes a declared dependency. It was previously present but listed
+in neither `dependencies` nor `devDependencies`, resolving only through the
+lockfile.
+
+## 20.21.4 — 2026-09-17
+
+### A generic with no type argument is repaired instead of shipped
+
+`prism-coder:9b` writes `Map<string, Array>` — observed in four separate
+generations of the same task, including through the live server. It is TS2314,
+so nothing it produces compiles. The coding gate carried three static passes for
+Python and none for TypeScript, so this shipped every time.
+
+Detection needs no TypeScript dependency; the shape is unambiguous when a bare
+generic sits inside a type-argument list or directly after a type annotation.
+The deterministic repair parameterises it — `Array<any>`, not `Array<unknown>`,
+because `unknown` trades one compile error for one at every use site — and the
+existing repair machinery serves the corrected code without a second generation.
+Verified against real model output: one substitution and the file compiles clean
+under `--strict`.
+
+This makes the code build. It does not make it well typed, and it does not
+address defects that need real type checking, such as a method returning
+`PromiseSettledResult[]` under a `Promise<void>` signature.
+
+### Plan requests carry the section list they will be measured against
+
+A behaviour-plan request now receives a system instruction naming every required
+section, generated from the same list the census verifies, so the list that
+instructs is the list that verifies. Measured on the live 9b: the same request
+scored 7 of 10 unscaffolded and 10 of 10 scaffolded, in fewer characters — it
+restructured rather than padded, and the previously absent sections returned
+with substantive content, including non-examples and a correctly worded review
+statement. A caller's own `system` always wins, including an explicit empty one.
+
+The cost is recorded rather than hidden: once the model is told the list, the
+census confirms that an instruction was followed rather than independently
+finding that a plan is complete. A scaffolded 10 of 10 is weaker evidence than
+an unscaffolded one.
+
+
+### The clinical census credited only its own vocabulary
+
+The section check shipped in 20.21.3 reported seven sections missing from a real
+behaviour plan. Four of those were present: antecedent strategies under the
+heading "Pre-Work Strategies", consequence strategies under "Response to
+Behavior", caregiver training as "All staff will be trained on the plan", and
+decision rules as "Evaluation Criteria: ... the plan will be adjusted". The true
+count was 7 of 10, not 3.
+
+The patterns required canonical ABA phrasing. Plans written in plain language —
+which is what a model actually produces — read as missing sections they
+contained. A raise-only check that is wrong four times in seven gets ignored,
+which costs more than the check earns.
+
+Four patterns now match the concept rather than the term. The fixtures were
+rebuilt from verbatim model output instead of authored prose: the previous
+fixture scored 10 of 10 because it had been written in the matcher's own
+vocabulary, so it measured the fixture rather than the gate. A sparse plan that
+genuinely lacks those sections is pinned alongside it, because widening a
+pattern to remove a false positive can silence a real gap.
+
+## 20.21.3 — 2026-09-16
+
+### A behaviour plan is now censused against its required sections
+
+The quality gate carried three static passes for Python and none for clinical
+output, so a behaviour plan missing its decision rules or its data-collection
+procedure was served exactly like a complete one. A structural check now runs in
+every mode whenever the request is behaviour-analytic, and the response reports
+what it found: `clinical_sections=3/10 missing:operational_definition,...`.
+
+Measured on local output during development: a plan request produced 1,716
+tokens covering three of ten required sections, and an operational-definition
+request produced 920 tokens with no non-examples. Neither was previously visible
+to the caller.
+
+Two limits are deliberate and worth stating plainly. The census **raises and
+never certifies** — it counts sections, and a section can be present and still
+be clinically wrong, so nothing it reports may be read as an endorsement; a
+credentialed BCBA decides whether a plan is adequate. And it does **not** widen
+what runs locally: crisis, restraint and self-injury content is refused upstream
+before any model sees it, and that boundary is untouched. In practice a plan
+request framed around aggression is refused before this check is reached, so it
+governs the routine band only.
+
+An incomplete plan is reported, never suppressed. The draft is still served,
+carrying its census, because a clinician is better served by a plan labelled
+`3/10` than by silence — an earlier revision failed the quality gate on a
+missing section, and a request that could not escalate returned no output at
+all. Two findings do fail, because they are defects rather than gaps: AAC
+access restricted as a consequence, and an operational definition written
+without non-examples.
+
+Nothing here is auto-repaired. Re-prompting the same local model to invent a
+missing decision-rules section produces plausible unratified clinical text,
+which is worse than a visible gap.
+
+
+### `prism_infer` now tells you how much history it received
+
+The tool's documentation has promised since multi-turn shipped that "every
+entitlement-resolved result reports `multi_turn` (your plan's caps) and
+`history_turns` (what was sent)". Both values were computed and recorded
+internally, but neither was ever rendered into the response, so the only way to
+learn what a call actually carried was to read the local metrics database.
+
+That gap is easy to fall into and hard to notice. A caller that intends to send
+conversation history but omits `messages` — a typo, a dropped parameter, a host
+that compacted the schema — gets a plausible-looking answer produced from the
+current turn alone, with nothing in the response indicating the history never
+arrived. Follow-up answers degrade exactly the way a weak model would degrade,
+and the cause is invisible.
+
+Every response header now ends with `history_turns=N`, including
+`history_turns=0`, plus `multi_turn=<turns>/<chars>` for the plan's caps, or
+`multi_turn=off` where the plan has no multi-turn. The zero case is reported
+deliberately: an omitted field is what made this silent.
+
+No behavior other than the header changed. The header builder is now a pure
+exported function, `inferResponseHeader`, so the reporting contract is covered
+by tests rather than by a live call.
+
+## 20.21.2 — 2026-09-16
+
+### Local results carried names and nothing else
+
+A live search for libraries returned three venue names and eighteen `N/A`s. The
+formatter read `name`, `address.streetAddress`, `phone`, `openingHours` and
+`rating.ratingCount`; Brave sends `title`, `postal_address.displayAddress`,
+`contact.telephone`, `opening_hours` and `rating.reviewCount`. Only the name
+survived, because it happened to fall back to `title`. The same query now
+returns the street address, the phone number and today's opening hours. Legacy
+shapes remain as fallbacks so an older cached payload still renders.
+
+- **A remote portal is never addressed in the clear.** Startup hydration
+  published the stored base URL without the plaintext upgrade the storage layer
+  applies, so a self-hosted `http://` portal would have received the query and
+  a bearer token over cleartext. That control now lives in one place and every
+  path that yields a transport URL uses it. Loopback is unchanged.
+- **Search and entitlements resolve the portal identically.** They did not:
+  entitlements ignored the legacy `SYNALUX_BASE_URL` alias, accepted an
+  unexpanded `${...}` template and never checked the value parsed as a URL.
+  Four environments disagreed, the worst giving a paying subscriber working
+  search and a free-tier plan.
+- **A malformed base URL falls through instead of disabling search.** One
+  character wrong in a host config used to route every query to the direct
+  provider in silence.
+
+## 20.21.1 — 2026-09-16
+
+### Search asked for a Brave key from subscribers who had already paid
+
+A paying subscriber's every web search failed with `BRAVE_API_KEY is not
+configured`, while the same account's entitlements correctly reported its plan.
+Portal search availability was a module-load constant derived from
+`SYNALUX_CONFIGURED`, which reads `process.env` at import time. `prism connect`
+copies `PRISM_SYNALUX_API_KEY` into a host's MCP env block only when that key
+already happens to be in the environment; a machine that signed in through
+Prism's settings store got a base URL and no key. The key did reach
+`process.env` later during startup, which is why entitlements resolved the paid
+plan — but the search constant had already frozen `false` for the life of the
+process, so every query skipped the portal and fell back to a provider key in
+the server's own environment. A host launched from the graphical shell carries
+none, so the search failed outright.
+
+- **Portal search availability is resolved per call, from the live
+  environment.** `fetchEntitlements()` now calls the same two helpers, so the
+  two cannot disagree about whether the portal is usable. Four environments
+  disagreed before that, including a host where the legacy `SYNALUX_BASE_URL`
+  alias arrived after module load: search worked and the plan read as free.
+  An unexpanded `${...}` template is treated as no credential, matching how
+  `config.ts` has always sanitised these values.
+- **The portal request builder resolves its base URL the same way.** It read the
+  module-load constant behind a non-null assertion, which would have thrown a
+  `TypeError` on a host whose credentials arrive only from the settings store.
+- **A remote portal is never addressed in the clear.** Hydration published the
+  stored base URL without the plaintext upgrade the storage layer applies, so a
+  self-hosted `http://` portal would have received the query and a bearer JWT
+  over cleartext. That control now lives in one place and both paths use it.
+  Loopback is unchanged.
+- **The server hydrates the subscription key before it connects the
+  transport**, from the settings cache that startup has already warmed. No new
+  I/O on the Initialize handshake.
+- **`prism connect` hydrates before it writes host config**, so a machine that
+  signed in once keeps its subscription across re-registration instead of
+  silently dropping to unauthenticated search. A stored value that is not a URL
+  is never published to `process.env`, which storage and entitlements share.
+
+Nothing changes for an account with no subscription: search still uses
+`BRAVE_API_KEY`, and still says so when there is none.
+
 ## 20.21.0 — 2026-09-16
 
 ### The multi-turn screen refused real work

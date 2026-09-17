@@ -97,9 +97,10 @@ import { SKILL_SAVE_TOOL, SKILL_MANAGE_TOOL, skillSaveHandler, skillManageHandle
 // error wrapper. Now uses getStorage() which routes through the
 // correct backend (Supabase or SQLite) with proper error handling.
 import { getStorage } from "./storage/index.js";
-import { getSettingSync, initConfigStorage } from "./storage/configStorage.js";
+import { getSetting, getSettingSync, initConfigStorage } from "./storage/configStorage.js";
 import { sanitizeMcpOutput } from "./utils/sanitizer.js";
-import { sanitizeForLog } from "./utils/logger.js";
+import { debugLog, sanitizeForLog } from "./utils/logger.js";
+import { hydrateSynaluxCredentials } from "./utils/synaluxSearch.js";
 import { getTracer, initTelemetry } from "./utils/telemetry.js";
 import { context as otelContext, trace, SpanStatusCode } from "@opentelemetry/api";
 import { ddInfo, ddError as ddLogError } from "./utils/ddLogger.js";
@@ -1450,6 +1451,19 @@ export async function startServer() {
   // synchronously. This is a synchronous call — no await needed.
   // No-op when otel_enabled=false (the default).
   initTelemetry();
+
+  // Put the subscription key in process.env before anything asks whether the
+  // portal is reachable. `prism connect` copies it into the host's MCP env
+  // block only if it was in the environment when connect ran; otherwise it is
+  // in the settings store, and a paid subscriber's searches were failing on a
+  // Brave key in the server's own environment, which a host launched from the
+  // graphical shell does not carry.
+  // getSetting reads the cache initConfigStorage() just warmed, so this adds
+  // no I/O to the path the Initialize handshake waits on.
+  const portalSearchReady = await hydrateSynaluxCredentials(getSetting);
+  if (!portalSearchReady) {
+    debugLog("[Prism] no Synalux subscription key in the environment or the settings store — search falls back to BRAVE_API_KEY");
+  }
 
   const server = createServer();
   const transport = new StdioServerTransport();

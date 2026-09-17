@@ -270,6 +270,17 @@ program
   .option('--no-models', 'Skip model convergence; keep whatever model versions are installed')
   .action(async (options: { host?: string; all?: boolean; dryRun?: boolean; refresh?: boolean; selfUpdate?: boolean; models?: boolean }) => {
     try {
+      // Take the subscription key from the settings store when the environment
+      // does not carry it. connect writes into each host's MCP env block only
+      // what it can see, so without this a machine that logged in once lost its
+      // subscription on the next re-registration and every search fell through
+      // to a Brave key in the server's own environment, which a host launched
+      // from the graphical shell does not carry.
+      {
+        const { hydrateSynaluxCredentials } = await import('./utils/synaluxSearch.js');
+        const { getSetting } = await import('./storage/configStorage.js');
+        await hydrateSynaluxCredentials(getSetting);
+      }
       // ── Converge the PACKAGE first, then the configs ──────────────
       // connect is the one command the operator runs to make a machine
       // current; leaving it configuring with stale code produced the

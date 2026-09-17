@@ -2,7 +2,7 @@
  * synaluxSearch.ts + braveApi.ts Synalux-routing tests
  *
  * Pins:
- *   • SYNALUX_SEARCH_AVAILABLE reflects SYNALUX_CONFIGURED
+ *   • synaluxSearchAvailable() reflects the live credentials
  *   • synaluxWebSearch returns formatted text matching performWebSearch shape
  *   • synaluxWebSearchRaw returns Brave-compatible JSON envelope
  *   • synaluxScrape returns content string
@@ -57,13 +57,29 @@ vi.mock("../src/utils/synaluxJwt.js", () => ({
 const fetchMock = vi.fn();
 const origFetch = globalThis.fetch;
 
+// Portal credentials now resolve from the live environment, so a test that
+// writes one must not leak it into the next test — or into another suite that
+// shares this process.
+const ENV_KEYS = [
+  "PRISM_SYNALUX_BASE_URL",
+  "SYNALUX_BASE_URL",
+  "PRISM_SYNALUX_API_KEY",
+] as const;
+let savedEnv: Record<string, string | undefined> = {};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+  for (const k of ENV_KEYS) delete process.env[k];
   globalThis.fetch = fetchMock as unknown as typeof fetch;
   mockGetJwt.mockResolvedValue("jwt-valid-token");
 });
 
 afterEach(() => {
+  for (const [k, v] of Object.entries(savedEnv)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
   globalThis.fetch = origFetch;
 });
 
@@ -76,10 +92,15 @@ describe("synaluxSearch", () => {
     synaluxSearch = await import("../src/utils/synaluxSearch.js");
   });
 
-  describe("SYNALUX_SEARCH_AVAILABLE", () => {
-    it("reflects SYNALUX_CONFIGURED from config", () => {
-      expect(synaluxSearch.SYNALUX_SEARCH_AVAILABLE).toBe(true);
+  describe("synaluxSearchAvailable", () => {
+    it("is true when a base URL and a subscription key are both configured", () => {
+      expect(synaluxSearch.synaluxSearchAvailable()).toBe(true);
     });
+
+    // The host that has NO key at module load — the one that produced the
+    // "BRAVE_API_KEY is not configured" field failure — and the settings-store
+    // hydration path are covered in synaluxSearchAvailability.test.ts and
+    // synaluxSearchHydratedHost.test.ts, which mock config as that host.
   });
 
   describe("synaluxWebSearch", () => {

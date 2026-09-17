@@ -17,7 +17,7 @@ import { searchYahooFree, scrapeArticleLocal } from "./freeSearch.js";
 // The same capability flag performWebSearchRaw itself branches on, imported
 // from the same module so the gate and the transport cannot disagree about
 // whether a web search is possible.
-import { SYNALUX_SEARCH_AVAILABLE } from "../utils/synaluxSearch.js";
+import { synaluxSearchAvailable } from "../utils/synaluxSearch.js";
 
 // ─── Hivemind Integration Helpers ────────────────────────────
 
@@ -210,7 +210,7 @@ export async function runWebScholar(overrideTopic?: string, overrideProject?: st
     //
     // Google Custom Search used to take priority over both; now removed
     // because Google discontinues that API on 2027-01-01.
-    const useWebSearch = SYNALUX_SEARCH_AVAILABLE || !!BRAVE_API_KEY;
+    const useWebSearch = synaluxSearchAvailable() || !!BRAVE_API_KEY;
 
     const topic = overrideTopic || await selectTopic();
     const project = overrideProject || SCHOLAR_PROJECT;

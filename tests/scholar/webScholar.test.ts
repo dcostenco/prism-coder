@@ -98,13 +98,12 @@ vi.mock("../../src/storage/index.js", () => ({
   getStorage: vi.fn().mockResolvedValue(mockStorage),
 }));
 
-// SYNALUX_SEARCH_AVAILABLE is a module-load const in the real module, so it
-// cannot be flipped per test. A getter over the shared mock config lets each
-// case choose whether portal credentials are present.
+// The real module resolves portal availability at call time, from the live
+// environment. Mirroring that here — a function over the shared mock flag —
+// lets each case choose whether portal credentials are present, and keeps the
+// mock's shape identical to the module it stands in for.
 vi.mock("../../src/utils/synaluxSearch.js", () => ({
-  get SYNALUX_SEARCH_AVAILABLE() {
-    return mockConfig.SYNALUX_SEARCH_AVAILABLE;
-  },
+  synaluxSearchAvailable: () => mockConfig.SYNALUX_SEARCH_AVAILABLE,
 }));
 
 vi.mock("../../src/utils/braveApi.js", () => ({
@@ -349,7 +348,7 @@ describe("Web Scholar — Discovery Provider Selection", () => {
   /**
    * THE REGRESSION the capability gate would otherwise introduce.
    *
-   * SYNALUX_SEARCH_AVAILABLE is true for every `prism connect` login, free
+   * Portal search is available to every `prism connect` login, free
    * plans included, and the portal answers a free plan's search with
    * 403 "Cloud Search requires Standard plan or higher". Before the gate
    * change such an account never reached the portal from Scholar — it took
