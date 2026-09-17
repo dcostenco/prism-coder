@@ -99,8 +99,16 @@ function readLib(libDir: string, file: string): string | undefined {
     return libCache.get(file);
 }
 
-/** Allowed findings only, de-duplicated, stable order. Empty when unavailable. */
-export function typecheckSnippet(code: string): string[] {
+/**
+ * Allowed findings only, de-duplicated, stable order. Empty when unavailable.
+ *
+ * `fenced` says the text was inside a ``` block, i.e. the model MEANT it as
+ * code. Only then is a parse failure attributable to the snippet. Unfenced
+ * output is ambiguous: "the function takes a value: string and returns a
+ * formatted result" is a sentence, and reporting it as a syntax error rejects a
+ * correct answer. Ambiguity favours the caller.
+ */
+export function typecheckSnippet(code: string, fenced = true): string[] {
     const ts = loadTypeScript();
     if (!ts) return [];
     const libDir = dirname(createRequire(import.meta.url).resolve("typescript"));
@@ -147,7 +155,7 @@ export function typecheckSnippet(code: string): string[] {
     // unresolved import can make a brace go missing, so a syntactic diagnostic
     // always indicts the snippet. And once the file does not parse, the semantic
     // results describe a tree that was never valid, so they are not consulted.
-    if (syntactic.length > 0) return ["syntax_error"];
+    if (syntactic.length > 0) return fenced ? ["syntax_error"] : [];
 
     const unresolved = semantic.some(d => RESOLUTION_FAILURE_CODES.has(d.code));
 
@@ -240,6 +248,6 @@ export function findDeferredMutationReturnedSync(code: string): string[] {
 }
 
 /** Every TypeScript finding for a snippet, type errors and the AST rule. */
-export function analyzeTypeScript(code: string): string[] {
-    return [...typecheckSnippet(code), ...findDeferredMutationReturnedSync(code)].sort();
+export function analyzeTypeScript(code: string, fenced = true): string[] {
+    return [...typecheckSnippet(code, fenced), ...findDeferredMutationReturnedSync(code)].sort();
 }

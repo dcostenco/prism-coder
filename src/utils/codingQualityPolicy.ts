@@ -625,7 +625,7 @@ export function passesCodingQualityGate(
 
     // Then the compiler, over TypeScript blocks only.
     if (extracted.typescript) {
-        const findings = analyzeTypeScript(extracted.typescript);
+        const findings = analyzeTypeScript(extracted.typescript, extracted.hasFences);
         if (findings.length > 0) {
             return { pass: false, reason: `ts_static_contract:${findings.join(",")}` };
         }

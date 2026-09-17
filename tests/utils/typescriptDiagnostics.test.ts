@@ -245,3 +245,43 @@ import type { Config } from "./config.js";
 export const c: Config = { anything: true };`)).toEqual([]);
     });
 });
+
+describe("a parse failure indicts only what was meant as code", () => {
+    /**
+     * Round 2 of adversarial review. Adding `syntax_error` made the UNFENCED
+     * path dangerous: prose that happens to contain a type annotation is
+     * classified as TypeScript, fails to parse, and the whole answer is
+     * rejected. That is a rejection of a CORRECT answer, the worst class of
+     * false positive, and it did not exist before syntax reporting was added.
+     *
+     * A fenced block was meant as code, so failing to parse indicts it.
+     * Unfenced text is ambiguous, so it must not. Ambiguity favours the caller.
+     */
+    for (const prose of [
+        "The function takes a value: string and returns a formatted result.",
+        "Declare it as `private total: number` and initialise it before the loop.",
+        "Each handler receives a payload: string that it must not mutate.",
+    ]) {
+        it(`does not call prose a syntax error: "${prose.slice(0, 44)}"`, () => {
+            expect(typecheckSnippet(prose, false), prose).toEqual([]);
+        });
+    }
+
+    it("still reports a fenced block that does not parse", () => {
+        expect(typecheckSnippet("export function fmt(v: number): string { return v.toFixed(2);", true))
+            .toEqual(["syntax_error"]);
+    });
+
+    it("still finds real defects in UNFENCED code that parses", () => {
+        // The fenced flag must gate only parse failures. Unfenced code that
+        // parses is still checked, or the whole unfenced path goes blind.
+        expect(typecheckSnippet("const m: Map<string, Array> = new Map();", false))
+            .toContain("bare_generic");
+    });
+
+    it("defaults to treating input as fenced", () => {
+        // Callers that do not know are treated as code; the gate passes the
+        // real answer from extractCode.
+        expect(typecheckSnippet("export const x: number = ;")).toEqual(["syntax_error"]);
+    });
+});
