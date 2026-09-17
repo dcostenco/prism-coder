@@ -4,7 +4,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "prism-mcp-server@20.21.5"
+        "prism-mcp-server@20.21.6"
       ],
       "env": {
         "npm_config_ignore_scripts": "true"

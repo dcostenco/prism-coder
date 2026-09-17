@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 20.21.6 — 2026-09-17
 
 ### A stale startup block heals itself when a session starts
 
