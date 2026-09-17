@@ -274,7 +274,14 @@ for (const model of MODELS) {
 console.log("model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok");
 for (const [key, rows] of Object.entries(out)) {
   const c = v => rows.filter(r => r.verdict === v).length;
-  const avg = f => Math.round(rows.reduce((n, r) => n + (f(r) ?? 0), 0) / rows.length);
+  // Average over the rows that HAVE a value. `?? 0` counted a failed
+  // generation's null promptTokens as a real zero and divided by every row, so
+  // one Ollama error silently understated the column and a run where all of
+  // them failed reported 0 tokens rather than "no data".
+  const avg = f => {
+    const vals = rows.map(f).filter(v => v != null);
+    return vals.length ? Math.round(vals.reduce((n, v) => n + v, 0) / vals.length) : "n/a";
+  };
   const [model, cond] = key.split("|");
   console.log(`${model.padEnd(21)} ${cond.padEnd(12)} ${String(c("correct")).padStart(7)}  ${String(c("declined")).padStart(8)}  ${String(c("fabricated")).padStart(10)}  ${String(avg(r => r.ms)).padStart(6)}  ${String(avg(r => r.promptTokens)).padStart(14)}`);
 }

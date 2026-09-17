@@ -1,5 +1,5 @@
 model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
-prism-coder:9b        no_history         1         1          20     547              23
+prism-coder:9b        no_history         1         1          20     580              23
 prism-coder:9b        messages          21         0           1     410              52
 
 by domain (correct / total), carry-over tasks only:
@@ -38,7 +38,7 @@ per-task (no_history -> messages):
   prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
   prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."
 
-full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T175957Z.json
+full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T184145Z.json
 
 ═══════════════════════════════════════════════════════════════════
 WHAT AN INDEPENDENT REVIEW CHANGED IN THESE NUMBERS
