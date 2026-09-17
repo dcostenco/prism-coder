@@ -10,6 +10,7 @@
 import { describe, it, expect } from "vitest";
 import {
     passesClinicalQualityGate,
+    clinicalPlanScaffold,
     formatClinicalSections,
 } from "../../src/utils/clinicalQualityPolicy.js";
 
@@ -320,5 +321,60 @@ describe("it raises but never certifies", () => {
         expect(
             formatClinicalSections({ required: 10, present: 8, missing: ["decision_rules", "caregiver_training"] }),
         ).toBe("clinical_sections=8/10 missing:decision_rules,caregiver_training");
+    });
+});
+
+describe("the plan scaffold is generated from the list the census verifies", () => {
+    const PLAN = "Draft a behavior support plan for a student who calls out.";
+
+    it("is absent for anything that is not a plan request", () => {
+        for (const prompt of [
+            "Write a TypeScript EventEmitter.",
+            "What does DRO stand for?",
+            "Write an operational definition of elopement.",
+        ]) {
+            expect(clinicalPlanScaffold(prompt), prompt).toBeUndefined();
+        }
+    });
+
+    for (const name of [
+        "behavior intervention plan", "behaviour intervention plan",
+        "behavior support plan", "behaviour support plan",
+        "behavior management plan", "behavior plan", "behaviour plan", "BIP",
+    ]) {
+        it(`is produced for a request naming a "${name}"`, () => {
+            expect(clinicalPlanScaffold(`Draft a ${name} for a student.`)).toBeDefined();
+        });
+    }
+
+    it("names exactly as many requirements as the census requires — one list, not two", () => {
+        // The invariant that makes the shared list real. Adding a section to the
+        // census without a requirement, or vice versa, breaks this rather than
+        // silently producing a scaffold that cannot satisfy the check.
+        const bullets = (clinicalPlanScaffold(PLAN) ?? "").split("\n").filter(l => l.startsWith("- ")).length;
+        const required = passesClinicalQualityGate(PLAN, "").sections?.required;
+        expect(bullets).toBe(required);
+    });
+
+    it("asks for the two things the 9b most often omits", () => {
+        const sc = clinicalPlanScaffold(PLAN) ?? "";
+        expect(sc).toMatch(/non-examples/i);
+        expect(sc).toMatch(/credentialed BCBA/i);
+    });
+
+    it("carries the AAC rule, which no section census can enforce", () => {
+        const sc = clinicalPlanScaffold(PLAN) ?? "";
+        expect(sc).toMatch(/never restrict, remove or delay access to an AAC/i);
+    });
+
+    it("demands substance rather than headings", () => {
+        expect(clinicalPlanScaffold(PLAN) ?? "").toMatch(/substantive content rather than a heading alone/i);
+    });
+
+    it("does not itself assert the plan is adequate", () => {
+        const sc = (clinicalPlanScaffold(PLAN) ?? "").toLowerCase();
+        for (const verdict of ["approved", "is safe", "complete and correct", "ready to implement"]) {
+            expect(sc).not.toContain(verdict);
+        }
     });
 });

@@ -58,17 +58,17 @@ const CLINICAL_CONTEXT_RE =
     /\b(aba\b|bcba\b|behaviou?r analyst|functional behaviou?r assessment|\bfba\b|\bbip\b|replacement behaviou?r|target behaviou?r|reinforcement schedule|\bfct\b|\bdro\b|\bdra\b|\bncr\b)/i;
 
 /** Ordered so the report reads the way a plan is written. */
-const PLAN_SECTIONS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
-    { name: "operational_definition", pattern: /operational(?:ly)?[ -]?defin|\bdefinition\b[\s\S]{0,80}\b(observable|measurable)\b/i },
-    { name: "function_hypothesis", pattern: /\b(hypothesi[sz]ed function|function of the behaviou?r|maintained by|\ba-?b-?c\b|antecedent[\s\S]{0,40}consequence)\b/i },
-    { name: "antecedent_strategies", pattern: /\b(antecedent|prevention strateg|proactive strateg|pre-?work strateg|pre-?correct|setting event|environmental modificat|visual (?:schedule|timer|cue)|priming)/i },
-    { name: "replacement_behaviour", pattern: /\b(replacement behaviou?r|functional communication training|\bfct\b|alternative behaviou?r|\bdra\b)/i },
-    { name: "consequence_strategies", pattern: /\b(consequence|reinforc\w+|planned ignoring|response to (?:the )?behaviou?r|redirect\w*|\bdro\b|\bncr\b|extinction)/i },
-    { name: "data_collection", pattern: /\b(data collection|data sheet|measurement (?:system|procedure)|frequency count|partial interval|momentary time sampling|\bioa\b|interobserver)/i },
-    { name: "decision_rules", pattern: /\b(decision rule|mastery criteri|criteri\w+ for (?:change|modificat|advancement)|evaluation criteri|review (?:schedule|trigger|date)|plan review|progress monitor\w*|plan will be (?:adjusted|modified|revised|changed))/i },
-    { name: "generalisation_maintenance", pattern: /\b(generali[sz]|maintenance)\b/i },
-    { name: "caregiver_training", pattern: /\b((?:caregiver|staff|parent|family|teacher|team)[ -]?training|train(?:ing|ed)? (?:the )?(?:caregivers?|staff|parents?|team)|(?:staff|caregivers?|parents?|team|teachers?)\b[^.\n]{0,30}\btrain\w+|train\w+ on the plan)/i },
-    { name: "bcba_review_disclaimer", pattern: /\b(reviewed and individuali[sz]ed|credentialed bcba|licensed behaviou?r analyst|must be reviewed)\b/i },
+const PLAN_SECTIONS: ReadonlyArray<{ name: string; requirement: string; pattern: RegExp }> = [
+    { name: "operational_definition", requirement: "an operational definition that is observable and measurable, with examples AND non-examples", pattern: /operational(?:ly)?[ -]?defin|\bdefinition\b[\s\S]{0,80}\b(observable|measurable)\b/i },
+    { name: "function_hypothesis", requirement: "a hypothesised function supported by A-B-C data", pattern: /\b(hypothesi[sz]ed function|function of the behaviou?r|maintained by|\ba-?b-?c\b|antecedent[\s\S]{0,40}consequence)\b/i },
+    { name: "antecedent_strategies", requirement: "antecedent and prevention strategies", pattern: /\b(antecedent|prevention strateg|proactive strateg|pre-?work strateg|pre-?correct|setting event|environmental modificat|visual (?:schedule|timer|cue)|priming)/i },
+    { name: "replacement_behaviour", requirement: "a functionally equivalent replacement behaviour", pattern: /\b(replacement behaviou?r|functional communication training|\bfct\b|alternative behaviou?r|\bdra\b)/i },
+    { name: "consequence_strategies", requirement: "consequence strategies, including what reinforces the replacement", pattern: /\b(consequence|reinforc\w+|planned ignoring|response to (?:the )?behaviou?r|redirect\w*|\bdro\b|\bncr\b|extinction)/i },
+    { name: "data_collection", requirement: "a data collection method", pattern: /\b(data collection|data sheet|measurement (?:system|procedure)|frequency count|partial interval|momentary time sampling|\bioa\b|interobserver)/i },
+    { name: "decision_rules", requirement: "decision rules and a review schedule", pattern: /\b(decision rule|mastery criteri|criteri\w+ for (?:change|modificat|advancement)|evaluation criteri|review (?:schedule|trigger|date)|plan review|progress monitor\w*|plan will be (?:adjusted|modified|revised|changed))/i },
+    { name: "generalisation_maintenance", requirement: "generalisation and maintenance", pattern: /\b(generali[sz]|maintenance)\b/i },
+    { name: "caregiver_training", requirement: "caregiver and staff training", pattern: /\b((?:caregiver|staff|parent|family|teacher|team)[ -]?training|train(?:ing|ed)? (?:the )?(?:caregivers?|staff|parents?|team)|(?:staff|caregivers?|parents?|team|teachers?)\b[^.\n]{0,30}\btrain\w+|train\w+ on the plan)/i },
+    { name: "bcba_review_disclaimer", requirement: "a statement that a credentialed BCBA must review and individualise the plan before implementation", pattern: /\b(reviewed and individuali[sz]ed|credentialed bcba|licensed behaviou?r analyst|must be reviewed)\b/i },
 ];
 
 /**
@@ -184,4 +184,37 @@ export function passesClinicalQualityGate(
 export function formatClinicalSections(s: ClinicalSectionReport): string {
     const base = `clinical_sections=${s.present}/${s.required}`;
     return s.missing.length ? `${base} missing:${s.missing.join(",")}` : base;
+}
+
+/**
+ * A system instruction naming every section a plan must contain, generated from
+ * PLAN_SECTIONS so the list that INSTRUCTS is the list that VERIFIES.
+ *
+ * Measured on prism-coder:9b: the same plan request scored 7/10 unscaffolded and
+ * 10/10 scaffolded, in FEWER characters — it restructured rather than padded,
+ * and the previously absent sections came back with substantive content
+ * (a real observable definition with non-examples, real generalisation content,
+ * a correctly worded review statement).
+ *
+ * KNOWN EPISTEMIC COST, recorded rather than hidden: once the model is told the
+ * list, the census stops being independent confirmation and becomes a check
+ * that the instruction was followed. A scaffolded 10/10 is weaker evidence than
+ * an unscaffolded one. Sharing one list is still the right trade — two lists
+ * drift, and a census that disagrees with the instruction is worse than a
+ * census that merely confirms it — but nothing here should be read as evidence
+ * that the model knows what a plan needs.
+ *
+ * Returns undefined unless a full plan was requested, so it never touches the
+ * prompt for ordinary work.
+ */
+export function clinicalPlanScaffold(prompt: string): string | undefined {
+    if (!CLINICAL_PLAN_REQUEST_RE.test(prompt)) return undefined;
+    const items = PLAN_SECTIONS.map(s => `- ${s.requirement}`).join("\n");
+    return (
+        "A behaviour plan must contain all of the following, each with substantive "
+        + "content rather than a heading alone:\n" + items
+        + "\n\nUse least restrictive, dignity-preserving, function-based procedures. "
+        + "Never restrict, remove or delay access to an AAC or communication device "
+        + "as a consequence."
+    );
 }

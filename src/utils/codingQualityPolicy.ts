@@ -419,10 +419,62 @@ function pythonStaticContractFailure(code: string): string | undefined {
         : undefined;
 }
 
+/**
+ * A generic used with no type argument, e.g. `Map<string, Array>`.
+ *
+ * prism-coder:9b emits this repeatedly — observed in four separate generations
+ * of the same EventEmitter task — and it is a hard compile error (TS2314), so
+ * the file never builds. Detecting it needs no TypeScript dependency: the shape
+ * is unambiguous when the bare name sits inside a type-argument list or
+ * directly after a type annotation.
+ *
+ * Deliberately narrow. Prose mentioning "the Array, then the Map" must not
+ * match, so a bare name is only a finding when it is syntactically in a type
+ * position; a bare `Promise` as a lone return type with no delimiter after it
+ * is missed, which is the conservative direction.
+ */
+const TS_GENERIC = "(?:Array|Map|Set|Promise|Record|Partial|Readonly|WeakMap|WeakSet)";
+const TS_BARE_GENERIC_RE = new RegExp(
+    `<[^<>]*\\b${TS_GENERIC}\\b(?!\\s*<)[^<>]*>` +
+    `|:\\s*${TS_GENERIC}\\b(?!\\s*<)\\s*[={;,)\\]]`,
+);
+
+/** Null when the code carries no TypeScript static-contract defect. */
+function tsStaticContractFailure(code: string): string | null {
+    return TS_BARE_GENERIC_RE.test(code) ? "ts_static_contract:bare_generic" : null;
+}
+
+/** `Map<string, Array>` -> `Map<string, Array<any>>`.
+ *
+ *  `any` rather than `unknown` on purpose: `unknown` makes the file compile and
+ *  then breaks every use of the value, which trades one compile error for
+ *  several. This makes the code build; it does not make it well typed. */
+function repairBareGenerics(code: string): { code: string; changed: boolean } {
+    const spans = new RegExp(TS_BARE_GENERIC_RE.source, "g");
+    let changed = false;
+    const out = code.replace(spans, (span) => {
+        const fixed = span.replace(
+            new RegExp(`\\b(${TS_GENERIC})\\b(?!\\s*<)`, "g"),
+            "$1<any>",
+        );
+        if (fixed !== span) changed = true;
+        return fixed;
+    });
+    return { code: out, changed };
+}
+
 export function applyDeterministicCodingRepairs(
     output: string,
     reason: string,
 ): DeterministicCodingRepairResult {
+    if (reason.startsWith("ts_static_contract:")) {
+        if (!reason.includes("bare_generic")) return { output, changes: [] };
+        const repaired = repairBareGenerics(output);
+        return repaired.changed
+            ? { output: repaired.code, changes: ["bare_generic"] }
+            : { output, changes: [] };
+    }
+
     if (!reason.startsWith("python_static_contract:")) {
         return { output, changes: [] };
     }
@@ -499,6 +551,9 @@ export function passesCodingQualityGate(
         if (pythonFailure) return { pass: false, reason: pythonFailure };
     }
 
+    const tsFailure = tsStaticContractFailure(code);
+    if (tsFailure) return { pass: false, reason: tsFailure };
+
     return { pass: true };
 }
 
@@ -525,6 +580,8 @@ const CODING_REPAIR_GUIDANCE: Readonly<Record<string, string>> = {
         "Define every directly called private self helper or replace the call with the correct defined helper.",
     constructor_attribute_missing_receiver:
         "In __init__, persist instance state as self.<attribute>; do not assign it to a discarded local variable.",
+    bare_generic:
+        "Every generic needs its type argument: write Array<T>, Map<K, V>, Set<T>, Promise<T> — never a bare Array, Map, Set or Promise in a type position.",
     dict_keys_unpack:
         "When unpacking key and value, iterate dictionary .items(); .keys() yields one key per iteration.",
 } as const;

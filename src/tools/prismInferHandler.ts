@@ -42,6 +42,7 @@ import { stripThink } from "../utils/thinkStrip.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
 import {
     passesClinicalQualityGate,
+    clinicalPlanScaffold,
     formatClinicalSections,
     type ClinicalSectionReport,
 } from "../utils/clinicalQualityPolicy.js";
@@ -2283,9 +2284,13 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         // their own — never override an explicit instruction.
         // `=== undefined`, not falsy: `system: ""` is a caller explicitly asking
         // for no system prompt, and overriding that is still an override.
-        const effectiveSystem = (resolvedImages?.length ?? 0) > 0 && args.system === undefined
-            ? VISION_SYSTEM_PROMPT
-            : args.system;
+        // A caller's own `system` always wins, including `system: ""`, which is an
+        // explicit request for none. Defaults apply only when it is undefined.
+        const defaultSystem = [
+            (resolvedImages?.length ?? 0) > 0 ? VISION_SYSTEM_PROMPT : undefined,
+            clinicalPlanScaffold(args.prompt),
+        ].filter(Boolean).join("\n\n") || undefined;
+        const effectiveSystem = args.system === undefined ? defaultSystem : args.system;
 
         // Walk order for images.
         //
@@ -2584,7 +2589,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                         !gate.pass &&
                         mode === "code" &&
                         (gate.reason?.startsWith("code_") === true ||
-                            gate.reason?.startsWith("python_") === true);
+                            gate.reason?.startsWith("python_") === true ||
+                            gate.reason?.startsWith("ts_") === true);
                     if (!codingGateFailure) break;
 
                     const failedReason = gate.reason ?? "code_quality";
