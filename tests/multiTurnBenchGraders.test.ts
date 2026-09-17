@@ -36,7 +36,7 @@ describe("multi-turn bench graders", () => {
         // or an empty case list would satisfy this test forever.
         const m = out.match(/grader self-test: (\d+) passed/);
         expect(m, `self-test printed no pass count: ${out}`).not.toBeNull();
-        expect(Number(m![1]), "the case list must not shrink silently").toBeGreaterThanOrEqual(17);
+        expect(Number(m![1]), "the case list must not shrink silently").toBeGreaterThanOrEqual(21);
     });
 
     it("goes red and exits nonzero when the fix is reverted — a check that cannot fail is not a check", () => {

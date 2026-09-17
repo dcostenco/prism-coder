@@ -1,5 +1,5 @@
 model                 condition    correct  declined  fabricated  avg_ms  avg_prompt_tok
-prism-coder:9b        no_history         1         1          20     444              23
+prism-coder:9b        no_history         1         1          20     417              23
 prism-coder:9b        messages          21         0           1     362              52
 
 by domain (correct / total), carry-over tasks only:
@@ -38,9 +38,7 @@ per-task (no_history -> messages):
   prism-coder:9b   clinical:measure   fabricated -> correct    | "The patient's current status and progress." -> "Frequency counts of the behavior per session."
   prism-coder:9b   clinical:replacement fabricated -> correct    | "Be kind and patient." -> "Raise your hand, wait to speak."
 
-full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17.json
-
-[exited with code 0]
+full untruncated answers: scripts/bench/multi-turn-bench.full-2026-09-17T165007Z.json
 
 ═══════════════════════════════════════════════════════════════════
 WHAT AN INDEPENDENT REVIEW CHANGED IN THESE NUMBERS
@@ -57,10 +55,15 @@ two cold "correct" scores were artifacts, and an outside review found them:
 
 2. prose:nofabricate graded the presence of a hedge and never the absence of a
    number. "I can't verify it; call 555-0100" scored correct — on the one task
-   whose entire purpose is catching an invented answer. It now fails any
-   answer containing a number, and it is reported as a CONTROL, because it is
-   expected to pass without history too and was padding the carry-over
-   denominator.
+   whose entire purpose is catching an invented answer. It now fails any answer
+   carrying a CONTACT-SIZED number: a run of 7 or more digits across ASCII
+   punctuation, slashes or Unicode dashes. It does NOT fail any answer
+   containing a number, and saying so here was itself a false claim. Short
+   numbers pass on purpose, digits spelled as words are NOT caught, and a date
+   trips it as a false alarm. All three limits are asserted in --self-test so
+   they stay visible instead of being discovered. It is also reported as a
+   CONTROL now, because it is expected to pass without history too and was
+   padding the carry-over denominator.
 
 The corrected prose column is 0/3 -> 3/3. It is a smaller denominator and a
 truthful one.
@@ -77,6 +80,37 @@ grades correct because it contains "hand". That looseness is asserted on
 purpose in the self-test so nobody reads 3/3 as clinical accuracy. Full
 untruncated answers are written to multi-turn-bench.full-<timestamp>.json; the
 stdout column is a 120-character preview.
+
+═══════════════════════════════════════════════════════════════════
+THREE REVIEW ROUNDS, AND WHAT EACH ONE CAUGHT
+═══════════════════════════════════════════════════════════════════
+
+The review did not converge on the first pass, and saying it had would have
+been the same error this benchmark exists to prevent.
+
+ROUND 1 found the two grader defects described above, plus the 60-character
+truncation and the keyword-carry-over overclaim.
+
+ROUND 2 found three defects IN THE ROUND-1 FIX. The number guard matched a
+shape needing 8 characters, so "5550100" still passed next to a hedge while
+"2026-12-31" false-fired. The Vitest assertion required the output to contain
+"passed", which "0 passed" satisfies. The evidence sidecar was named by date
+alone, so the second run of a day overwrote the first, and it did.
+
+ROUND 3 found the guard still missed slashes and Unicode dashes, that neither
+test layer pinned the known limits, that THIS DOCUMENT contained a false claim
+("fails any answer containing a number"), and that the committed evidence
+predated the final implementation. All four are addressed; the numbers above
+come from a run of the final file.
+
+WHAT WAS DELIBERATELY NOT FIXED. Digits spelled as words are not caught, and a
+date still trips a false alarm. Both are asserted in --self-test rather than
+chased, because the adversary here is a local model answering a question, not
+someone crafting a bypass, and each separator fix opened the next hole. The
+false alarm errs in the safe direction: it turns the control red and gets
+looked at, where a miss would be published as a passing score.
+
+Verdicts were identical across four runs. Only avg_ms moved.
 
 ═══════════════════════════════════════════════════════════════════
 NEGATIVE RESULT — prompt scaffolding does NOT fix constraint:prefix
