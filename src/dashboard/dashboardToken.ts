@@ -42,12 +42,18 @@ export function resolveDashboardToken(cfg: DashboardTokenConfig): string | null 
 }
 
 /** Extract the prism_dashboard_token cookie value, if present. */
-export function tokenFromCookie(cookieHeader: string | undefined): string | null {
+export function dashboardTokenCookieName(port: number): string {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid dashboard port');
+  return `prism_dashboard_token_${port}`;
+}
+
+export function tokenFromCookie(cookieHeader: string | undefined, cookieName = 'prism_dashboard_token'): string | null {
   // Capture the whole value (any run of non-";", non-space) so pinned tokens
   // with hyphens/underscores match; the name is anchored to start-or-"; " so a
   // look-alike cookie (evil_prism_dashboard_token=…) cannot match.
-  const m = (cookieHeader || "").match(/(?:^|;\s*)prism_dashboard_token=([^;\s]+)/);
-  return m ? m[1] : null;
+  const entry = (cookieHeader || '').split(';').map(c => c.trim()).find(c => c.startsWith(`${cookieName}=`));
+  const value = entry?.slice(cookieName.length + 1);
+  return value && !/\s/.test(value) ? value : null;
 }
 
 /**
@@ -59,15 +65,16 @@ export function requestHasToken(
   headers: { cookie?: string; headerToken?: string | null },
   queryToken: string | null,
   activeToken: string,
+  cookieName = 'prism_dashboard_token',
 ): boolean {
-  const candidates = [tokenFromCookie(headers.cookie), headers.headerToken ?? null, queryToken];
+  const candidates = [tokenFromCookie(headers.cookie, cookieName), tokenFromCookie(headers.cookie), headers.headerToken ?? null, queryToken];
   return candidates.some((c) => c !== null && safeCompare(c, activeToken));
 }
 
 /** Build the Set-Cookie value that stores the token for a browser session. */
-export function buildTokenCookie(token: string, maxAgeMs: number, secure: boolean): string {
+export function buildTokenCookie(token: string, maxAgeMs: number, secure: boolean, cookieName = 'prism_dashboard_token'): string {
   return (
-    `prism_dashboard_token=${token}; Path=/; HttpOnly; SameSite=Strict; ` +
+    `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; ` +
     `Max-Age=${Math.floor(maxAgeMs / 1000)}${secure ? "; Secure" : ""}`
   );
 }

@@ -41,6 +41,7 @@ import {
   resolveDashboardToken,
   requestHasToken,
   buildTokenCookie,
+  dashboardTokenCookieName,
 } from "./dashboardToken.js";
 import {
   safeCompare,
@@ -280,7 +281,7 @@ return false;}
         reqUrl.searchParams.delete("token");
         const cleanTarget = reqUrl.pathname + (reqUrl.search ? reqUrl.search : "");
         res.writeHead(302, {
-          "Set-Cookie": buildTokenCookie(DASHBOARD_TOKEN, SESSION_TTL_MS, COOKIE_SECURE),
+          "Set-Cookie": buildTokenCookie(DASHBOARD_TOKEN, SESSION_TTL_MS, COOKIE_SECURE, dashboardTokenCookieName(req.socket.localPort!)),
           Location: cleanTarget,
         });
         return res.end();
@@ -295,6 +296,7 @@ return false;}
           },
           qToken,
           DASHBOARD_TOKEN,
+          dashboardTokenCookieName(req.socket.localPort!),
         )
       ) {
         res.writeHead(401, { "Content-Type": "application/json" });

@@ -7,14 +7,41 @@
  * that matching is exact and constant-time-safe (length-mismatch → false).
  */
 import { describe, expect, it } from "vitest";
+import { CookieJar } from 'jsdom';
 import {
   resolveDashboardToken,
   requestHasToken,
   tokenFromCookie,
   buildTokenCookie,
+  dashboardTokenCookieName,
 } from "../../src/dashboard/dashboardToken.js";
 
 describe("dashboard token gate (GHSA-9cvx-7x8q-3g6m #2)", () => {
+  it('keeps both dashboard instances authorized when a browser opens a second localhost port', () => {
+    const jar = new CookieJar();
+    const first = dashboardTokenCookieName(33001);
+    const second = dashboardTokenCookieName(33002);
+    jar.setCookieSync(buildTokenCookie('first-token', 60000, false, first), 'http://localhost:33001/');
+    jar.setCookieSync(buildTokenCookie('second-token', 60000, false, second), 'http://localhost:33002/');
+    // Cookies share a hostname across ports. A second bootstrap must not replace
+    // the first instance's credential, nor authorize it with the other token.
+    const cookie = jar.getCookieStringSync('http://localhost:33001/');
+    expect(requestHasToken({ cookie }, null, 'first-token', first)).toBe(true);
+    expect(requestHasToken({ cookie }, null, 'second-token', second)).toBe(true);
+    expect(requestHasToken({ cookie }, null, 'first-token', second)).toBe(false);
+  });
+
+  it('still accepts an exact legacy cookie without trusting another instance token', () => {
+    const name = dashboardTokenCookieName(33001);
+    expect(requestHasToken({ cookie: 'prism_dashboard_token=active' }, null, 'active', name)).toBe(true);
+    expect(requestHasToken({ cookie: 'prism_dashboard_token_33002=active' }, null, 'active', name)).toBe(false);
+    expect(tokenFromCookie('evil_prism_dashboard_token_33001=active', name)).toBeNull();
+  });
+
+  it.each([0, -1, 65536, 3001.5, NaN])('rejects an invalid instance port %s', (port) => {
+    expect(() => dashboardTokenCookieName(port)).toThrow('Invalid dashboard port');
+  });
+
   describe("resolveDashboardToken", () => {
     it("mints a random 64-hex token on a default (no-auth) install", () => {
       const t = resolveDashboardToken({ authEnabled: false });
