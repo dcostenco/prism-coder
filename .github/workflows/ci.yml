@@ -99,7 +99,6 @@ jobs:
         run: |
           # Scan every file git tracks — extension-based grep misses dotfiles,
           # Dockerfiles, .gitignore, LICENSE, smithery.yaml, etc.
-          # Split each term so this file doesn't self-match.
           #
           # 2026-08-02: this guard checked ONE term and stayed green while a
           # private Vercel team slug and a private client project name shipped
@@ -118,11 +117,11 @@ jobs:
           FAILED=0
           for TERM in "${TERMS[@]}"; do
             HITS=$(git ls-files | xargs grep -ln "$TERM" 2>/dev/null \
-              | grep -v "package-lock.json" | grep -v ".github/workflows/ci.yml" || true)
+              | grep -v "package-lock.json" || true)
             if [ -n "$HITS" ]; then
               echo "ERROR: private identifier '$TERM' leaked in tracked files:"
               git ls-files | xargs grep -n "$TERM" 2>/dev/null \
-                | grep -v "package-lock.json" | grep -v ".github/workflows/ci.yml"
+                | grep -v "package-lock.json"
               FAILED=1
             fi
           done

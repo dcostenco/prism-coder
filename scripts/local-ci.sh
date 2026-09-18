@@ -36,7 +36,7 @@ leak_guard() {
   for TERM in "${TERMS[@]}"; do
     local HITS
     HITS=$(git ls-files | xargs grep -ln "$TERM" 2>/dev/null \
-      | grep -v "package-lock.json" | grep -v ".github/workflows/ci.yml" || true)
+      | grep -v "package-lock.json" || true)
     if [ -n "$HITS" ]; then
       echo "ERROR: private identifier '$TERM' leaked in tracked files:"
       echo "$HITS"
