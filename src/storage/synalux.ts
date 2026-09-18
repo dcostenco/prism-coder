@@ -573,7 +573,9 @@ export class SynaluxStorage extends SupabaseStorage {
         || new Date(params.createdAfter).toISOString() !== params.createdAfter)) {
       throw new Error("Invalid dashboard graph timestamp");
     }
-    if (params.minImportance !== undefined && !Number.isFinite(params.minImportance)) {
+    if (params.minImportance !== undefined
+      && (!Number.isInteger(params.minImportance)
+        || params.minImportance < -2147483648 || params.minImportance > 2147483647)) {
       throw new Error("Invalid dashboard graph importance");
     }
     if (params.keywords !== undefined

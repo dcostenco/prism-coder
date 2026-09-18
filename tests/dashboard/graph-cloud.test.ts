@@ -14,6 +14,30 @@ function responseRecorder() {
 }
 
 describe("cloud dashboard graph reads", () => {
+  it("preserves direct graph reads when the optional cloud method is absent", async () => {
+    const getLedgerEntries = vi.fn().mockResolvedValue([
+      { project: "example-project", keywords: ["debugging"], created_at: "2026-09-18T00:00:00.000Z" },
+    ]);
+    const recorder = responseRecorder();
+
+    await handleGraphRoutes(
+      new URL("http://localhost:3000/api/graph"),
+      { method: "GET" } as any,
+      recorder.response,
+      async () => ({ getLedgerEntries }) as any,
+    );
+
+    expect(recorder.read().statusCode).toBe(200);
+    expect(getLedgerEntries).toHaveBeenCalledWith({
+      order: "created_at.desc",
+      select: "project,keywords,created_at,importance,last_accessed_at",
+      limit: "30",
+    });
+    expect(JSON.parse(recorder.read().body).nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "example-project", group: "project" }),
+    ]));
+  });
+
   it("uses the portal graph projection for the all-project view", async () => {
     const getDashboardGraphEntries = vi.fn().mockResolvedValue([
       {

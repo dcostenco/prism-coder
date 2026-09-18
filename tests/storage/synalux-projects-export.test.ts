@@ -332,6 +332,8 @@ describe("SynaluxStorage — dashboard graph ledger", () => {
     const s = new SynaluxStorage();
     await expect(s.getDashboardGraphEntries({ limit: 10, createdAfter: "bad" })).rejects.toThrow("timestamp");
     await expect(s.getDashboardGraphEntries({ limit: 10, createdAfter: "1" })).rejects.toThrow("timestamp");
+    await expect(s.getDashboardGraphEntries({ limit: 10, minImportance: 1.5 })).rejects.toThrow("importance");
+    await expect(s.getDashboardGraphEntries({ limit: 10, minImportance: 2147483648 })).rejects.toThrow("importance");
     await expect(s.getDashboardGraphEntries({ limit: 10, keywords: [] })).rejects.toThrow("keywords");
     expect(fetchMock).not.toHaveBeenCalled();
   });
