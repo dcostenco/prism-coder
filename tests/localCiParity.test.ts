@@ -61,8 +61,28 @@ const workflowStepBlocks = (): Array<{ name: string | null; body: string }> => {
     const flush = () => {
         if (!current) return;
         const body = current.join("\n");
-        const m = body.match(/^\s*-?\s*name:\s*(.+?)\s*$/m);
-        blocks.push({ name: m ? m[1] : null, body });
+        // The step's OWN name, at the step's key column. A second review found
+        // that any `name:` in the block counted, so
+        //     - uses: actions/upload-artifact@v4
+        //       with:
+        //         name: Build TypeScript
+        // was read as a step called "Build TypeScript". That name is already in
+        // COVERAGE, duplicates are dropped, and an unmapped step stayed
+        // invisible — the exact hole the block parser was meant to close.
+        const key = " ".repeat(indent + 4);
+        const dash = `${" ".repeat(indent + 2)}- `;
+        let name: string | null = null;
+        for (const line of current) {
+            const own = line.startsWith(dash)
+                ? line.slice(dash.length)
+                : line.startsWith(key) && line[indent + 4] !== " "
+                    ? line.slice(key.length)
+                    : null;
+            if (own === null) continue;
+            const m = own.match(/^name:\s*(.+?)\s*$/);
+            if (m) { name = m[1]; break; }
+        }
+        blocks.push({ name, body });
         current = null;
     };
     for (const line of lines) {
