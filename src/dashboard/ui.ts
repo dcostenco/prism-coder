@@ -2923,7 +2923,9 @@ function loadGraph() {
                     }
                     MAX_NODES = 200;
                     if (data.nodes.length > MAX_NODES) {
-                        priority = { project: 0, category: 1, keyword: 2 };
+                        // Keep the project/category/keyword ordering truthy because the
+                        // comparator falls back with a high priority for unknown groups.
+                        priority = { project: 1, category: 2, keyword: 3 };
                         data.nodes.sort(function (a, b) { return (priority[a.group] || 9) - (priority[b.group] || 9); });
                         kept = new Set(data.nodes.slice(0, MAX_NODES).map(function (n) { return n.id; }));
                         data.nodes = data.nodes.slice(0, MAX_NODES);
