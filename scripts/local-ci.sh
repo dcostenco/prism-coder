@@ -21,19 +21,22 @@ step() {
   fi
 }
 
+# The term list is NOT duplicated here. It had four entries while the workflow
+# had five, so this script passed while CI failed on prism-aac""-internal.
+# Both now read scripts/private-identifier-terms.mjs.
 leak_guard() {
-  local TERMS=(
-    "synalux""-private"
-    "dcostencos""-projects"
-    "bcba""-private"
-    "/Users/""admin"
-  )
+  local TERMS=()
+  while IFS= read -r line; do [ -n "$line" ] && TERMS+=("$line"); done \
+    < <(node scripts/private-identifier-terms.mjs)
+  if [ "${#TERMS[@]}" -eq 0 ]; then
+    echo "ERROR: no private identifier terms loaded — the guard would pass on anything"
+    return 1
+  fi
   local failed=0
   for TERM in "${TERMS[@]}"; do
     local HITS
     HITS=$(git ls-files | xargs grep -ln "$TERM" 2>/dev/null \
-      | grep -v "package-lock.json" | grep -v ".github/workflows/ci.yml" \
-      | grep -v "scripts/local-ci.sh" || true)
+      | grep -v "package-lock.json" | grep -v ".github/workflows/ci.yml" || true)
     if [ -n "$HITS" ]; then
       echo "ERROR: private identifier '$TERM' leaked in tracked files:"
       echo "$HITS"
@@ -62,6 +65,11 @@ npm_ci_linux() {
   docker run --rm -v "$PWD":/w -w /w node:22-slim sh -c 'npm ci --dry-run' >/dev/null 2>&1
 }
 
+# These two are the FIRST CI job. local-ci.sh ran neither, so a local pass
+# said nothing about the guard that exists because training data reached this
+# public repo twice.
+step "Check for private content" node scripts/check-no-private-content.mjs
+step "Check lock file drift"     node scripts/check-lockfile-drift.mjs
 step "npm ci parity (linux)"     npm_ci_linux
 step "Audit Dependencies"        npm audit --audit-level=high
 step "Private repo leak guard"   leak_guard

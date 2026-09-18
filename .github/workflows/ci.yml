@@ -105,13 +105,16 @@ jobs:
           # private Vercel team slug and a private client project name shipped
           # in the published npm package. One term is not a guard, it is a
           # single tripwire — every class of private identifier needs one.
-          TERMS=(
-            "synalux""-private"        # private repo name
-            "dcostencos""-projects"    # private Vercel team slug
-            "bcba""-private"           # private client project name
-            "prism-aac""-internal"     # private application repo name
-            "/Users/""admin"           # maintainer-local absolute paths
-          )
+          # The list lives in scripts/private-identifier-terms.mjs, not here.
+          # It was duplicated in scripts/local-ci.sh with one term missing, so a
+          # local run passed while this job failed. One source, no drift.
+          TERMS=()
+          while IFS= read -r line; do [ -n "$line" ] && TERMS+=("$line"); done \
+            < <(node scripts/private-identifier-terms.mjs)
+          if [ "${#TERMS[@]}" -eq 0 ]; then
+            echo "ERROR: no terms loaded — this guard would pass on anything"
+            exit 1
+          fi
           FAILED=0
           for TERM in "${TERMS[@]}"; do
             HITS=$(git ls-files | xargs grep -ln "$TERM" 2>/dev/null \
