@@ -550,6 +550,52 @@ export class SynaluxStorage extends SupabaseStorage {
     return entries as Array<{ id: string; summary: string; decisions?: string[]; project: string }>;
   }
 
+  /**
+   * Read the bounded, authenticated ledger projection used by the dashboard
+   * graph. This is deliberately separate from getLedgerEntries: the latter
+   * has many PostgREST callers that are not representable by the portal API.
+   */
+  async getDashboardGraphEntries(params: {
+    project?: string;
+    createdAfter?: string;
+    minImportance?: number;
+    keywords?: string[];
+    limit: number;
+  }): Promise<unknown[]> {
+    if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 200) {
+      throw new Error("Invalid dashboard graph limit");
+    }
+    if (params.project !== undefined && (!params.project.trim() || params.project.length > 100)) {
+      throw new Error("Invalid dashboard graph project");
+    }
+    if (params.createdAfter !== undefined
+      && (Number.isNaN(new Date(params.createdAfter).getTime())
+        || new Date(params.createdAfter).toISOString() !== params.createdAfter)) {
+      throw new Error("Invalid dashboard graph timestamp");
+    }
+    if (params.minImportance !== undefined && !Number.isFinite(params.minImportance)) {
+      throw new Error("Invalid dashboard graph importance");
+    }
+    if (params.keywords !== undefined
+      && (params.keywords.length === 0 || params.keywords.length > 50
+        || params.keywords.some((keyword) => !keyword || keyword.length > 200))) {
+      throw new Error("Invalid dashboard graph keywords");
+    }
+
+    const result = await this.portalPost("/api/v1/prism/memory", {
+      action: "dashboard_ledger",
+      ...(params.project !== undefined ? { project: params.project.trim() } : {}),
+      ...(params.createdAfter !== undefined ? { created_after: params.createdAfter } : {}),
+      ...(params.minImportance !== undefined ? { min_importance: params.minImportance } : {}),
+      ...(params.keywords !== undefined ? { keywords: params.keywords } : {}),
+      limit: params.limit,
+    });
+    if (!Array.isArray(result.ledger)) {
+      throw new Error("Dashboard graph contract drift: ledger[] is required");
+    }
+    return result.ledger;
+  }
+
   // ─── Project inventory + export ──────────────────────────────
   // Both portal actions shipped in Phase 3 but the client was never
   // wired: listProjects and the export path fell through to

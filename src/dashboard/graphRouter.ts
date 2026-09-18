@@ -99,15 +99,25 @@ export async function handleGraphRoutes(
       params.limit = "200"; // Bump limit when exploring specific filters
     }
 
+    let createdAfter: string | undefined;
     if (project) params.project = `eq.${project}`;
     if (days) {
       const past = new Date();
       past.setDate(past.getDate() - parseInt(days, 10));
-      params.created_at = `gte.${past.toISOString()}`;
+      createdAfter = past.toISOString();
+      params.created_at = `gte.${createdAfter}`;
     }
     if (min_importance) params.importance = `gte.${parseInt(min_importance, 10)}`;
 
-    const entries = await s.getLedgerEntries(params);
+    const graphLimit = !project && !days && !min_importance ? 30 : 200;
+    const entries = s.getDashboardGraphEntries
+      ? await s.getDashboardGraphEntries({
+        ...(project ? { project } : {}),
+        ...(createdAfter ? { createdAfter } : {}),
+        ...(min_importance ? { minImportance: parseInt(min_importance, 10) } : {}),
+        limit: graphLimit,
+      })
+      : await s.getLedgerEntries(params);
     const now = Date.now();
 
     // ── Decay tracking: aggregate per-keyword and per-project ──

@@ -323,6 +323,19 @@ export interface StorageBackend {
   getLedgerEntries(params: Record<string, any>): Promise<unknown[]>;
 
   /**
+   * Optional authenticated graph read for cloud backends. The method keeps
+   * graph filters in the backend query so a bounded result is selected after
+   * user/deleted/filter predicates, rather than truncating before filtering.
+   */
+  getDashboardGraphEntries?(params: {
+    project?: string;
+    createdAfter?: string;
+    minImportance?: number;
+    keywords?: string[];
+    limit: number;
+  }): Promise<unknown[]>;
+
+  /**
    * Delete ledger entries matching filter criteria.
    * Used by knowledge_forget to prune old entries.
    */

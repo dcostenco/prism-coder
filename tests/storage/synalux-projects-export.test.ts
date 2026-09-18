@@ -286,3 +286,61 @@ describe("Dashboard ledger backend contract", () => {
     expect(storage.getDashboardLedger).not.toHaveBeenCalled();
   });
 });
+
+describe("SynaluxStorage — dashboard graph ledger", () => {
+  const fetchMock = vi.fn();
+  let SynaluxStorage: typeof import("../../src/storage/synalux.js")["SynaluxStorage"];
+
+  beforeEach(async () => {
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+    SynaluxStorage = await importFreshSynaluxStorage();
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("uses the authenticated portal projection instead of inherited Supabase reads", async () => {
+    const rows = [{ project: "example-project", keywords: ["debugging"], created_at: "2026-09-18" }];
+    fetchMock.mockResolvedValueOnce(freshJwtResp()).mockResolvedValueOnce(jsonResponse(200, {
+      status: "success", action: "dashboard_ledger", ledger: rows,
+    }));
+
+    const s = new SynaluxStorage();
+    await expect(s.getDashboardGraphEntries({
+      project: " example-project ",
+      createdAfter: "2026-09-01T00:00:00.000Z",
+      minImportance: 1,
+      keywords: ["debugging"],
+      limit: 200,
+    })).resolves.toEqual(rows);
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+      action: "dashboard_ledger",
+      project: "example-project",
+      created_after: "2026-09-01T00:00:00.000Z",
+      min_importance: 1,
+      keywords: ["debugging"],
+      limit: 200,
+    });
+  });
+
+  it.each([0, -1, 201, 1.5])("rejects unsafe graph limit %s before network access", async limit => {
+    const s = new SynaluxStorage();
+    await expect(s.getDashboardGraphEntries({ limit })).rejects.toThrow("Invalid dashboard graph limit");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed filters before network access", async () => {
+    const s = new SynaluxStorage();
+    await expect(s.getDashboardGraphEntries({ limit: 10, createdAfter: "bad" })).rejects.toThrow("timestamp");
+    await expect(s.getDashboardGraphEntries({ limit: 10, createdAfter: "1" })).rejects.toThrow("timestamp");
+    await expect(s.getDashboardGraphEntries({ limit: 10, keywords: [] })).rejects.toThrow("keywords");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails loudly when the portal response omits ledger[]", async () => {
+    fetchMock.mockResolvedValueOnce(freshJwtResp()).mockResolvedValueOnce(jsonResponse(200, {
+      status: "success", rows: [],
+    }));
+    const s = new SynaluxStorage();
+    await expect(s.getDashboardGraphEntries({ limit: 30 })).rejects.toThrow("ledger[] is required");
+  });
+});
