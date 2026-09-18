@@ -604,6 +604,29 @@ export class SynaluxStorage extends SupabaseStorage {
     return rows;
   }
 
+  /** Read the requested dashboard window without the backup's 10k-row cap. */
+  async getDashboardLedger(project: string, order: "created_at.asc" | "created_at.desc", limit: number): Promise<unknown[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error("Invalid dashboard ledger limit");
+    let offset = 0;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const result = await this.portalPost("/api/v1/prism/memory", {
+        action: "export_memory", project, offset, limit,
+      });
+      const page = result.page as { total?: number } | undefined;
+      const total = page?.total;
+      if (!Array.isArray(result.ledger) || typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) {
+        throw new Error("Dashboard export contract drift: ledger and total are required");
+      }
+      const target = order === "created_at.desc" ? Math.max(0, total - limit) : 0;
+      if (offset !== target) { offset = target; continue; }
+      const rows = result.ledger as Array<Record<string, unknown>>;
+      const direction = order === "created_at.asc" ? 1 : -1;
+      return [...rows].sort((a, b) => direction * (String(a.created_at).localeCompare(String(b.created_at))
+        || String(a.id).localeCompare(String(b.id))));
+    }
+    throw new Error("Dashboard ledger changed during read; retry");
+  }
+
   // ─── Time Travel ─────────────────────────────────────────────
   // Phase 3 Tier B: route memory_history through portal instead of
   // falling through to SupabaseStorage (which requires a direct

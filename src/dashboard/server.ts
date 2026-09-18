@@ -24,7 +24,8 @@ import * as fs from "fs";
 
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { createServer, getAllPossibleTools } from "../server.js";
-import { getStorage } from "../storage/index.js";
+import { getStorage, activeStorageBackend } from "../storage/index.js";
+import { readDashboardLedger } from "./ledgerReader.js";
 import { PRISM_USER_ID, SERVER_CONFIG } from "../config.js";
 import { renderDashboardHTML } from "./ui.js";
 import { computeIntentHealth } from "./intentHealth.js";
@@ -541,11 +542,7 @@ return false;}
         const s = await getStorageSafe();
         if (!s) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: "Storage initializing..." })); }
         const context = await s.loadContext(projectName, "deep", PRISM_USER_ID);
-        const ledger = await s.getLedgerEntries({
-          project: `eq.${projectName}`,
-          order: "created_at.desc",
-          limit: "20",
-        });
+        const ledger = await readDashboardLedger(s, activeStorageBackend, projectName, "created_at.desc", 20);
         let history: unknown[] = [];
         try {
           history = await s.getHistory(projectName, PRISM_USER_ID, 10);
@@ -875,11 +872,7 @@ return false;}
 
           // Gather data (mirrors sessionExportMemoryHandler)
           const ctx = await s.loadContext(projectName, "deep", PRISM_USER_ID) as Record<string, unknown> | null;
-          const rawLedger = await s.getLedgerEntries({
-            project: `eq.${projectName}`,
-            order: "created_at.asc",
-            limit: "1000",
-          }) as Array<Record<string, unknown>>;
+          const rawLedger = await readDashboardLedger(s, activeStorageBackend, projectName, "created_at.asc", 1000) as Array<Record<string, unknown>>;
 
           // Strip binary embedding fields
           const cleanLedger = rawLedger.map(({ embedding: _e, embedding_compressed: _ec, ...rest }) => rest);

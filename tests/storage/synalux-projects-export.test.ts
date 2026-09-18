@@ -9,6 +9,7 @@
  * were dead on exactly the tier that pays for them (2026-08-18 audit).
  */
 
+import { readDashboardLedger } from "../../src/dashboard/ledgerReader.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const PORTAL_URL = "https://portal.test";
@@ -195,5 +196,93 @@ describe("SynaluxStorage — exportLedger (action=export_memory)", () => {
     expect(rows).toHaveLength(10);
     // 1 JWT call + 10 export pages, then the cap stops it.
     expect(fetchMock.mock.calls.length).toBe(11);
+  });
+});
+
+describe("Dashboard ledger backend contract", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("shows the newest completed cloud checkpoint without direct Supabase credentials", async () => {
+    fetchMock.mockResolvedValueOnce(freshJwtResp())
+      .mockResolvedValueOnce(jsonResponse(200, {
+        status: "success", ledger: [{ id: "older", created_at: "2026-01-01" }],
+        page: { total: 12001, has_more: true, next_offset: 1 },
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        status: "success", ledger: [{ id: "completed-checkpoint", created_at: "2026-09-18" }],
+        page: { total: 12001, has_more: false, next_offset: null },
+      }));
+    const Storage = await importFreshSynaluxStorage();
+    const rows = await readDashboardLedger(new Storage(), "synalux", "checkpoint-project", "created_at.desc", 1);
+    expect(rows).toEqual([{ id: "completed-checkpoint", created_at: "2026-09-18" }]);
+    expect(fetchMock.mock.calls.slice(1).map(call => JSON.parse(call[1].body))).toEqual([
+      { action: "export_memory", project: "checkpoint-project", offset: 0, limit: 1 },
+      { action: "export_memory", project: "checkpoint-project", offset: 12000, limit: 1 },
+    ]);
+    expect(fetchMock.mock.calls.slice(1).every(call => call[1].headers.Authorization === "Bearer jwt-1")).toBe(true);
+  });
+
+  it("keeps cloud vault exports in chronological order", async () => {
+    fetchMock.mockResolvedValueOnce(freshJwtResp()).mockResolvedValueOnce(jsonResponse(200, {
+      status: "success", ledger: [{ id: "latest", created_at: "2026-09-18" }, { id: "earliest", created_at: "2026-01-01" }], page: { total: 2 },
+    }));
+    const Storage = await importFreshSynaluxStorage();
+    expect(await readDashboardLedger(new Storage(), "synalux", "checkpoint-project", "created_at.asc", 1000)).toEqual([
+      { id: "earliest", created_at: "2026-01-01" }, { id: "latest", created_at: "2026-09-18" },
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).offset).toBe(0);
+  });
+
+  it("rechecks the tail when another checkpoint completes during the read", async () => {
+    fetchMock.mockResolvedValueOnce(freshJwtResp());
+    for (const total of [12001, 12002, 12002]) {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, {
+        status: "success", ledger: [{ id: `checkpoint-${total}`, created_at: "2026-09-18" }], page: { total },
+      }));
+    }
+    const Storage = await importFreshSynaluxStorage();
+    expect(await readDashboardLedger(new Storage(), "synalux", "checkpoint-project", "created_at.desc", 1))
+      .toEqual([{ id: "checkpoint-12002", created_at: "2026-09-18" }]);
+    expect(fetchMock.mock.calls.slice(1).map(call => JSON.parse(call[1].body).offset)).toEqual([0, 12000, 12001]);
+  });
+
+  it("refuses a continuously changing tail instead of certifying stale recent sessions", async () => {
+    fetchMock.mockResolvedValueOnce(freshJwtResp());
+    for (const total of [12001, 12002, 12003, 12004]) {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { status: "success", ledger: [], page: { total } }));
+    }
+    const Storage = await importFreshSynaluxStorage();
+    await expect(readDashboardLedger(new Storage(), "synalux", "checkpoint-project", "created_at.desc", 1)).rejects.toThrow("changed during read");
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  it("surfaces a changed export contract instead of hiding recent checkpoints", async () => {
+    fetchMock.mockResolvedValueOnce(freshJwtResp())
+      .mockResolvedValueOnce(jsonResponse(200, { status: "success", ledger: [], page: { has_more: false } }));
+    const Storage = await importFreshSynaluxStorage();
+    await expect(readDashboardLedger(new Storage(), "synalux", "checkpoint-project", "created_at.desc", 20)).rejects.toThrow("contract drift");
+  });
+
+  it.each([0, -1, 1001, 1.5])("rejects unsafe window limit %s before reading cloud data", async limit => {
+    const Storage = await importFreshSynaluxStorage();
+    await expect(readDashboardLedger(new Storage(), "synalux", "checkpoint-project", "created_at.desc", limit)).rejects.toThrow("Invalid dashboard ledger limit");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a refused cloud read instead of showing an empty recent list", async () => {
+    fetchMock.mockResolvedValueOnce(freshJwtResp())
+      .mockResolvedValueOnce(jsonResponse(403, { status: "error", error: "Cloud read refused" }));
+    const Storage = await importFreshSynaluxStorage();
+    await expect(readDashboardLedger(new Storage(), "synalux", "checkpoint-project", "created_at.desc", 20)).rejects.toThrow("Cloud read refused");
+  });
+
+  it.each(["local", "supabase"])("preserves %s dashboard query semantics", async backend => {
+    const rows = [{ id: "existing-row" }];
+    const storage = { getDashboardLedger: vi.fn(), getLedgerEntries: vi.fn().mockResolvedValue(rows) };
+    expect(await readDashboardLedger(storage, backend, "checkpoint-project", "created_at.desc", 20)).toBe(rows);
+    expect(storage.getLedgerEntries).toHaveBeenCalledWith({ project: "eq.checkpoint-project", order: "created_at.desc", limit: "20" });
+    expect(storage.getDashboardLedger).not.toHaveBeenCalled();
   });
 });

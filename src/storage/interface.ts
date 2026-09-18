@@ -291,6 +291,7 @@ export interface HealthStats {
  * direct Supabase REST API calls.
  */
 export interface StorageBackend {
+  getDashboardLedger?(project: string, order: "created_at.asc" | "created_at.desc", limit: number): Promise<unknown[]>;
   updateLastAccessed(ids: string[]): Promise<void>;
   // ─── Lifecycle ─────────────────────────────────────────────
 
