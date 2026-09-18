@@ -839,6 +839,196 @@ describe("prism connect", () => {
     expect(readFileSync(configPath(homeDir, "codex"), "utf8")).toBe(codexText);
   });
 
+  it("also registers Antigravity MCP config paths when their parent directories exist", () => {
+    const homeDir = makeHome();
+    const serverPath = "/opt/prism-mcp-server/dist/server.js";
+    const nodePath = "/opt/node/bin/node";
+    const antigravityPaths = [
+      join(homeDir, ".gemini", "config", "mcp_config.json"),
+      join(homeDir, ".gemini", "antigravity", "mcp_config.json"),
+      join(homeDir, ".gemini", "antigravity-ide", "mcp_config.json"),
+    ];
+    for (const path of antigravityPaths) {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, `${JSON.stringify({
+        mcpServers: {
+          "user-owned": { command: "keep-me", env: { KEEP: "yes" } },
+        },
+      }, null, 2)}\n`);
+    }
+
+    const result = connectHosts({
+      hosts: ["gemini"],
+      homeDir,
+      platform: "darwin",
+      serverPath,
+      nodePath,
+      env: { PRISM_STORAGE: "synalux", PRISM_SYNALUX_API_KEY: "fixture-connect-token" },
+    });
+
+    expect(result.results).toHaveLength(1);
+    for (const path of antigravityPaths) {
+      const config = readConfig(path);
+      expect(config.mcpServers["user-owned"]).toEqual({ command: "keep-me", env: { KEEP: "yes" } });
+      expect(config.mcpServers["prism-mcp"]).toEqual({
+        command: nodePath,
+        args: [serverPath],
+        env: {
+          PRISM_INSTANCE: "prism-mcp",
+          PRISM_AGENT_POLICY: "local-first",
+          PRISM_SYNALUX_BASE_URL: "https://synalux.ai",
+          PRISM_STORAGE: "synalux",
+          PRISM_SYNALUX_API_KEY: "fixture-connect-token",
+        },
+      });
+    }
+    expect(result.results[0].message).toContain("also registered");
+  });
+
+  it("refreshes Prism-owned Antigravity entries while preserving their custom env and servers", () => {
+    const homeDir = makeHome();
+    const path = join(homeDir, ".gemini", "config", "mcp_config.json");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify({
+      mcpServers: {
+        "user-owned": { command: "keep-me" },
+        "prism-mcp": {
+          command: "/old/node",
+          args: ["/old/server.js"],
+          env: {
+            PRISM_INSTANCE: "prism-mcp",
+            PRISM_STORAGE: "local",
+            KEEP_ME: "yes",
+          },
+        },
+      },
+      keepAtRoot: true,
+    }, null, 2)}\n`);
+
+    const result = connectHosts({
+      hosts: ["gemini"],
+      homeDir,
+      platform: "darwin",
+      serverPath: "/new/prism-mcp-server/dist/server.js",
+      nodePath: "/new/node",
+      refresh: true,
+      env: { PRISM_STORAGE: "synalux", PRISM_SYNALUX_API_KEY: "fixture-refresh-token" },
+    });
+
+    expect(result.results[0].status).toBe("registered");
+    expect(result.results[0].startupCompatible).toBe(true);
+    expect(result.results[0].message).toContain("refreshed");
+    expect(readConfig(path)).toMatchObject({
+      keepAtRoot: true,
+      mcpServers: {
+        "user-owned": { command: "keep-me" },
+        "prism-mcp": {
+          command: "/new/node",
+          args: ["/new/prism-mcp-server/dist/server.js"],
+          env: {
+            PRISM_STORAGE: "synalux",
+            PRISM_SYNALUX_API_KEY: "fixture-refresh-token",
+            KEEP_ME: "yes",
+          },
+        },
+      },
+    });
+  });
+
+  it("leaves existing Antigravity files byte-identical during a dry run", () => {
+    const homeDir = makeHome();
+    const path = join(homeDir, ".gemini", "config", "mcp_config.json");
+    mkdirSync(dirname(path), { recursive: true });
+    const original = `${JSON.stringify({
+      mcpServers: {
+        "prism-mcp": {
+          command: "/old/node",
+          args: ["/old/server.js"],
+          env: { PRISM_INSTANCE: "prism-mcp", PRISM_STORAGE: "local" },
+        },
+      },
+    }, null, 2)}\n`;
+    writeFileSync(path, original);
+
+    const result = connectHosts({
+      hosts: ["gemini"],
+      homeDir,
+      platform: "darwin",
+      serverPath: "/new/server.js",
+      nodePath: "/new/node",
+      refresh: true,
+      dryRun: true,
+      env: { PRISM_STORAGE: "synalux" },
+    });
+
+    expect(result.results[0].message).toContain("would-refresh");
+    expect(readFileSync(path, "utf8")).toBe(original);
+  });
+
+  it("does not create Antigravity directories for a Gemini CLI-only home", () => {
+    const homeDir = makeHome();
+    connectHosts({
+      hosts: ["gemini"],
+      homeDir,
+      platform: "darwin",
+      serverPath: "/pkg/server.js",
+      nodePath: "/pkg/node",
+      env: {},
+    });
+
+    expect(existsSync(join(homeDir, ".gemini", "settings.json"))).toBe(true);
+    expect(existsSync(join(homeDir, ".gemini", "config"))).toBe(false);
+    expect(existsSync(join(homeDir, ".gemini", "antigravity"))).toBe(false);
+    expect(existsSync(join(homeDir, ".gemini", "antigravity-ide"))).toBe(false);
+  });
+
+  it("fails loudly when an existing additional Antigravity config is malformed", () => {
+    const homeDir = makeHome();
+    const path = join(homeDir, ".gemini", "config", "mcp_config.json");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "{ malformed\n");
+
+    const result = connectHosts({
+      hosts: ["gemini"],
+      homeDir,
+      platform: "darwin",
+      serverPath: "/pkg/server.js",
+      nodePath: "/pkg/node",
+      env: {},
+    });
+
+    expect(result.results[0].status).toBe("error");
+    expect(result.results[0].message).toContain(path);
+    expect(readFileSync(path, "utf8")).toBe("{ malformed\n");
+  });
+
+  it("does not take over an unmanaged Antigravity Prism entry", () => {
+    const homeDir = makeHome();
+    const path = join(homeDir, ".gemini", "config", "mcp_config.json");
+    mkdirSync(dirname(path), { recursive: true });
+    const original = `${JSON.stringify({
+      mcpServers: {
+        "user-owned": { command: "keep-me" },
+        "prism-mcp": { command: "operator-owned", args: ["--keep"] },
+      },
+    }, null, 2)}\n`;
+    writeFileSync(path, original);
+
+    const result = connectHosts({
+      hosts: ["gemini"],
+      homeDir,
+      platform: "darwin",
+      serverPath: "/pkg/new-server.js",
+      nodePath: "/pkg/new-node",
+      refresh: true,
+      env: { PRISM_STORAGE: "synalux" },
+    });
+
+    expect(result.results[0].startupCompatible).toBe(false);
+    expect(result.results[0].message).toContain("incompatible or unmanaged");
+    expect(readFileSync(path, "utf8")).toBe(original);
+  });
+
   it.skipIf(process.platform === "win32")(
     "uses owner-only permissions for new Codex configs and preserves existing POSIX modes",
     () => {

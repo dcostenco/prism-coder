@@ -115,6 +115,8 @@ interface HostDefinition {
   label: string;
   format: "json" | "codex-toml";
   configPath: string;
+  /** Additional host-owned config paths that use the same JSON MCP schema. */
+  additionalConfigPaths?: string[];
   detectionPaths: string[];
   executables: string[];
   configurationError?: string;
@@ -1525,6 +1527,7 @@ function getHostDefinitions(
       label: "Gemini CLI",
       format: "json",
       configPath: join(homeDir, ".gemini", "settings.json"),
+      additionalConfigPaths: antigravityMcpConfigPaths(homeDir),
       detectionPaths: [join(homeDir, ".gemini")],
       executables: ["gemini"],
     },
@@ -1589,6 +1592,23 @@ function executableExists(name: string, platform: NodeJS.Platform, pathEnv: stri
   return false;
 }
 
+/**
+ * Antigravity has used three user-level MCP locations across releases. Keep
+ * the Gemini CLI settings registration as the primary result, and converge
+ * only Antigravity paths whose parent directory already exists. That avoids
+ * creating an unrelated host config on a Gemini-CLI-only installation while
+ * repairing an existing Antigravity installation, including the legacy IDE
+ * path that can otherwise continue launching an old server indefinitely.
+ */
+function antigravityMcpConfigPaths(homeDir: string): string[] {
+  const geminiDir = join(homeDir, ".gemini");
+  return [
+    join(geminiDir, "config", "mcp_config.json"),
+    join(geminiDir, "antigravity", "mcp_config.json"),
+    join(geminiDir, "antigravity-ide", "mcp_config.json"),
+  ].filter((configPath) => existsSync(configPath) || existsSync(dirname(configPath)));
+}
+
 function buildMcpEntry(nodePath: string, serverPath: string, env: NodeJS.ProcessEnv): JsonObject {
   const storage = env.PRISM_STORAGE ?? "auto";
   if (!CONNECT_STORAGE_BACKENDS.includes(storage as (typeof CONNECT_STORAGE_BACKENDS)[number])) {
@@ -1627,10 +1647,42 @@ function registerHost(
   if (definition.configurationError) {
     return result(definition, "error", definition.configurationError);
   }
-  if (definition.format === "codex-toml") {
-    return registerCodexTomlHost(definition, entry, dryRun, refresh, beforeCommit);
+  const configDefinitions = [
+    definition,
+    ...(definition.additionalConfigPaths ?? []).map((configPath) => ({ ...definition, configPath })),
+  ];
+  const registerOne = (configDefinition: HostDefinition): ConnectResult => {
+    if (configDefinition.format === "codex-toml") {
+      return registerCodexTomlHost(configDefinition, entry, dryRun, refresh, beforeCommit);
+    }
+    return registerJsonHost(configDefinition, entry, dryRun, refresh, beforeCommit);
+  };
+  const primary = registerOne(configDefinitions[0]);
+  if (primary.status === "error") return primary;
+  const registrations = [primary, ...configDefinitions.slice(1).map(registerOne)];
+  const failures = registrations.slice(1).filter((registration) => registration.status === "error");
+  if (failures.length > 0) {
+    return {
+      ...primary,
+      status: "error",
+      startupCompatible: false,
+      message: `additional config registration failed: ${failures.map((failure) => `${failure.path}: ${failure.message || "unknown error"}`).join("; ")}`,
+    };
   }
-  return registerJsonHost(definition, entry, dryRun, refresh, beforeCommit);
+
+  const additionalChanges = registrations.slice(1).filter((registration) => registration.status !== "existing");
+  const incompatible = registrations.filter((registration) => !registration.startupCompatible);
+  const additionalMessage = additionalChanges.length > 0
+    ? `also ${additionalChanges.map((registration) => `${registration.status} ${registration.path}`).join(", ")}`
+    : undefined;
+  const incompatibleMessage = incompatible.length > 0
+    ? `retained incompatible or unmanaged registration(s): ${incompatible.map((registration) => registration.path).join(", ")}`
+    : undefined;
+  return {
+    ...primary,
+    startupCompatible: registrations.every((registration) => registration.startupCompatible),
+    message: [primary.message, additionalMessage, incompatibleMessage].filter(Boolean).join("; ") || undefined,
+  };
 }
 
 function registerJsonHost(
