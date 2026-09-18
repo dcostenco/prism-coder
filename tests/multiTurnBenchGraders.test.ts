@@ -132,4 +132,33 @@ describe("multi-turn bench graders", () => {
             ["FAIL prose:onesentence", "Dr. Smith"],
         );
     });
+
+    it("goes red when the decline detector loses a negator, which invented failures", () => {
+        // The detector was a LIST of exact phrases: it matched "not provided"
+        // and missed "never provided", so a model declining correctly scored as
+        // FABRICATING. Dropping one negator from the replacement reproduces
+        // that class exactly, and the self-test must notice.
+        revertAndExpectRed(
+            "decline",
+            String.raw`|\bnever\b`,
+            "",
+            ["FAIL prose:nofabricate", "never provided"],
+        );
+    });
+
+    it("goes red when the decline detector drops its proximity requirement", () => {
+        // The other half. A bare negator anywhere used to count, so a long
+        // answer containing "issues don't happen again" read as a refusal.
+        // Matching a negator alone brings that back.
+        revertAndExpectRed(
+            "declineloose",
+            // A PLAIN string, not String.raw: raw keeps backslashes but still
+            // interpolates ${...}, and this text is nothing but dollar-braces.
+            // The first attempt used String.raw and died on "DECLINE_NEG is
+            // not defined" — the test file has no such variable.
+            "${DECLINE_NEG}[^.!?]{0,40}?${DECLINE_KNOW}|${DECLINE_KNOW}[^.!?]{0,20}?${DECLINE_NEG}",
+            "${DECLINE_NEG}",
+            ["FAIL prose:"],
+        );
+    });
 });

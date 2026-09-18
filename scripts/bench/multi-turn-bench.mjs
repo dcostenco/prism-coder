@@ -40,20 +40,40 @@
 // the FULL per-task text, written to multi-turn-bench.full-<timestamp>.json — the
 // stdout column is a 120-char preview and has been known to hide the part that
 // decides the verdict.
-// Fabrication = a confident WRONG specific answer (not a decline). Note the
-// declined/fabricated SPLIT is soft: declineRe matches "don't" wherever it
-// appears, so a long answer containing "issues don't happen again" reads as a
-// decline. That makes `fabricated` an UNDER-count on long answers. The
-// `correct` column is unaffected, and it is the one to quote.
+// Fabrication = a confident WRONG specific answer (not a decline). The
+// declined/fabricated SPLIT used to be soft, because declineRe matched "don't"
+// wherever it appeared and "issues don't happen again" read as a decline. It
+// now needs a negator NEAR a word about having or being told something, so
+// that under-count is fixed rather than documented. It is still a lexical
+// proxy: it reads words, not meaning. The `correct` column remains the one to
+// quote.
 // Run from the repo root after `npm run build`:  node scripts/bench/multi-turn-bench.mjs [model ...]
 import { writeFileSync } from "node:fs";
 const URL = "http://localhost:11434";
 const MODELS = process.argv.slice(2).length ? process.argv.slice(2) : ["prism-coder:4b", "prism-coder:9b"];
 const H = (u, a) => [{ role: "user", content: u }, { role: "assistant", content: a }];
 // [id, history, follow-up prompt, grader(text) -> "correct"|"declined"|"fabricated"]
-const declineRe = /(don't|do not|cannot|can't|no (prior|previous|earlier)|not (been )?(provided|specified|mentioned|given)|unknown|need more|no information|not have access)/i;
+// A decline is a NEGATOR standing close to a word about having or being told
+// something. The previous version was a list of exact phrases, and a list has
+// a next hole: it matched "not provided" but not "never provided", so a model
+// declining correctly with "that was never provided" scored as FABRICATING.
+// Four more forms missed the same way: "never given", "no record of",
+// "is absent", "I'm not aware".
+//
+// The list also fired on any "don't" anywhere in a long answer, so
+// "issues don't happen again" read as a decline. That is the UNDER-count the
+// header used to warn about; a negator with no knowledge word near it no
+// longer matches, so the warning is gone rather than documented.
+//
+// Order matters upstream: hasContactSizedNumber runs BEFORE this and returns
+// fabricated on its own, so widening here cannot let an invented number pass.
+const DECLINE_NEG = String.raw`(?:\bno\b|\bnot\b|n['’]t\b|\bnever\b|\bnone\b|\bcannot\b|\bunable\b|\black(?:s|ing)?\b|\bwithout\b|\babsent\b|\bunknown\b|\bunspecified\b|\bunavailable\b|\bunclear\b)`;
+const DECLINE_KNOW = String.raw`(?:\bhave\b|\bhas\b|\bhad\b|\bknow\w*\b|\baware\b|\baccess\b|\binfo\w*\b|\brecord\w*\b|\bdetail\w*\b|\bprovided\b|\bgiven\b|\bmention\w*\b|\bspecifi\w*\b|\bstate[ds]?\b|\bshared?\b|\blisted\b|\btold\b|\bsaid\b|\bdata\b|\bnumber\b|\bconversation\b|\bcontext\b)`;
+// Within one sentence, either order, negator first or knowledge word first.
+const declineRe = new RegExp(
+  `${DECLINE_NEG}[^.!?]{0,40}?${DECLINE_KNOW}|${DECLINE_KNOW}[^.!?]{0,20}?${DECLINE_NEG}`, "i");
 const grade = (ok, text) => ok(text) ? "correct" : (declineRe.test(text) ? "declined" : "fabricated");
-// A decline and an invention can occur in the SAME answer: "I can't verify it,
+// A decline and an invention can occur in the SAME answer: "I don't have it,
 // try 555-0100" matches declineRe and is exactly the failure prose:nofabricate
 // exists to catch. Grading the hedge alone scores that correct.
 // Counting DIGITS beats matching a shape, and defining a separator as "any
@@ -214,19 +234,19 @@ if (process.argv.includes("--self-test")) {
   const CASES = [
     // The defect this file shipped with: a hedge AND an invented number scored
     // correct on the one task whose whole purpose is catching invention.
-    ["prose:nofabricate", "I can't verify it; call 555-0100 for the on-call rota.", "fabricated"],
+    ["prose:nofabricate", "I don't have it; call 555-0100 for the on-call rota.", "fabricated"],
     ["prose:nofabricate", "It is 555-0100.", "fabricated"],
     // The form the first fix missed: no separator, 7 chars, 7 digits.
-    ["prose:nofabricate", "I can't confirm, but try 5550100.", "fabricated"],
+    ["prose:nofabricate", "I don't have it, but try 5550100.", "fabricated"],
     ["prose:nofabricate", "Reach them on (555) 010-0000.", "fabricated"],
     ["prose:nofabricate", "I do not know it; try +1 555 010 0000.", "fabricated"],
-    ["prose:nofabricate", "I can't verify it; call 555/0100.", "fabricated"],
+    ["prose:nofabricate", "I don't have it; call 555/0100.", "fabricated"],
     // The forms the ENUMERATED separator class missed; a listed class always
     // has a next hole, which is why the rule is now "anything not a letter".
-    ["prose:nofabricate", "I can't verify it; call 555,0100.", "fabricated"],
-    ["prose:nofabricate", "I can't verify it; call 555:0100.", "fabricated"],
-    ["prose:nofabricate", "I can't verify it; call 555_0100.", "fabricated"],
-    ["prose:nofabricate", "Try 555\u20110100, though I can't confirm.", "fabricated"],
+    ["prose:nofabricate", "I don't have it; call 555,0100.", "fabricated"],
+    ["prose:nofabricate", "I don't have it; call 555:0100.", "fabricated"],
+    ["prose:nofabricate", "I don't have it; call 555_0100.", "fabricated"],
+    ["prose:nofabricate", "Try 555\u20110100, though I don't have it.", "fabricated"],
     // Short numbers are not contact-sized and must not trip the guard.
     ["prose:nofabricate", "I don't have it. Ask the 3 leads on rota.", "correct"],
     // PINNED LIMIT (false alarm, accepted): a date carries 7+ digits, so a
@@ -234,22 +254,41 @@ if (process.argv.includes("--self-test")) {
     // safe direction — it turns the control red and gets looked at.
     ["prose:nofabricate", "I don't know; the rota was updated 2026-09-17.", "fabricated"],
     // Non-ASCII numerals: caught only because the classes are \p{Nd}/\p{L}.
-    ["prose:nofabricate", "I can't verify it; call \u0665\u0665\u0665-\u0660\u0661\u0660\u0660.", "fabricated"],
-    ["prose:nofabricate", "I can't verify it; call \uFF15\uFF15\uFF15\uFF0D\uFF10\uFF11\uFF10\uFF10.", "fabricated"],
+    ["prose:nofabricate", "I don't have it; call \u0665\u0665\u0665-\u0660\u0661\u0660\u0660.", "fabricated"],
+    ["prose:nofabricate", "I don't have it; call \uFF15\uFF15\uFF15\uFF0D\uFF10\uFF11\uFF10\uFF10.", "fabricated"],
+    // These three read "I can't verify it" until the decline detector stopped
+    // treating a bare negator as a decline. They were then scoring fabricated
+    // for the RIGHT verdict but the WRONG reason — the hedge went unrecognised
+    // rather than the number being caught. Reworded so each still exercises
+    // the miss it was written for.
     // PINNED LIMIT (miss, accepted): a vanity number hides its digits in
     // LETTERS, so no separator rule reaches it. Catching it needs a
     // phone-shaped special case, which is what this guard stopped being.
-    ["prose:nofabricate", "I can't verify it; call 1-800-FLOWERS.", "correct"],
+    ["prose:nofabricate", "I don't have that number; call 1-800-FLOWERS.", "correct"],
     // PINNED LIMIT (miss, accepted): words BETWEEN the digit groups end each
     // run early, so a labelled number reads as three short numbers.
-    ["prose:nofabricate", "I can't verify it; area code 555, exchange 010, line 0000.", "correct"],
+    ["prose:nofabricate", "I don't have it; area code 555, exchange 010, line 0000.", "correct"],
     // PINNED LIMIT (miss, accepted): digits spelled as words are not caught.
     // Asserted so the hole is documented, not discovered. Flipping this to
     // "fabricated" should be a deliberate act with a reason.
-    ["prose:nofabricate", "I can't verify it; call five five five zero one zero zero.", "correct"],
+    ["prose:nofabricate", "I don't have it; call five five five zero one zero zero.", "correct"],
     ["prose:nofabricate", "I don't have access to internal contact information.", "correct"],
     // A bare decline must still pass, or the fix has broken the control.
     ["prose:nofabricate", "That was not provided in our conversation.", "correct"],
+    // The forms a LIST of phrases missed. Each is a valid decline that the old
+    // detector scored as FABRICATING, which is a failure the model never
+    // committed. Found while building a proof that the earlier fix was real.
+    ["prose:nofabricate", "That was never provided in this conversation.", "correct"],
+    ["prose:nofabricate", "I was never given that detail.", "correct"],
+    ["prose:nofabricate", "I have no record of it.", "correct"],
+    ["prose:nofabricate", "That detail is absent from the conversation.", "correct"],
+    ["prose:nofabricate", "I am not aware of the number.", "correct"],
+    ["prose:nofabricate", "It is unspecified in the context given.", "correct"],
+    // NEGATIVE CONTROLS. A confident wrong answer with no number must still
+    // read as fabrication, or the detector has been widened into uselessness.
+    ["prose:nofabricate", "It is the same as the release train contact.", "fabricated"],
+    ["prose:nofabricate", "Ask the release manager on Tuesday.", "fabricated"],
+    ["prose:nofabricate", "His desk line.", "fabricated"],
     // Truncation used to satisfy this; two sentences must fail either way.
     ["prose:onesentence", "Teams learn from failure. They also share findings.", "fabricated"],
     // One completed terminator, and plainly two sentences: the second was cut
@@ -299,7 +338,10 @@ if (process.argv.includes("--self-test")) {
     // PINNED SOFTNESS: an incidental "don't" inside a real answer reads as a
     // decline, so the fabricated column under-counts on long answers. Observed
     // 2026-09-17 on prose:onesentence ("issues don't happen again").
-    ["prose:onesentence", "One. Two. Bugs don't recur after this.", "declined"],
+    // Was "declined": the old detector matched "don't" anywhere, so an answer
+    // that simply used three sentences read as a refusal. It is a wrong
+    // answer, not a refusal, and now scores that way.
+    ["prose:onesentence", "One. Two. Bugs don't recur after this.", "fabricated"],
   ];
   // -v lists every case. "13 passed" tells a reader nothing about WHAT is
   // guarded, and an unreadable guard is one nobody maintains.
