@@ -83,6 +83,37 @@ const grade = (ok, text) => ok(text) ? "correct" : (declineRe.test(text) ? "decl
 // three letter-carried misses (spelled out, vanity, labelled groups) and the
 // ISO-date false alarm — are ASSERTED in --self-test, so they are visible
 // rather than discovered. Update this count when you pin another.
+/**
+ * Sentence endings in `t`.
+ *
+ * A terminator ends a sentence when it finishes the text, or when a new
+ * sentence starts after it: whitespace, an optional opening quote or bracket,
+ * then a capital or a digit. An
+ * abbreviation fails that test whenever lowercase follows, which covers
+ * "U.S. process" and "e.g. about". When a capital DOES follow, the token
+ * before the dot decides — one or two characters is a title or an initial,
+ * as in "Dr. Smith", "J. Smith" and "U.S. Mail", not the end of a sentence.
+ *
+ * KNOWN GAP, pinned in --self-test: a genuine sentence ending in a word of two
+ * characters or fewer is undercounted, so "I am. Then he left." reads as one.
+ * That direction is deliberate. The rule it replaces erred the other way and
+ * marked correct answers as failures; undercounting only makes the grader
+ * lenient, which under-reports a model failure rather than inventing one.
+ */
+const sentenceEndings = t => {
+  const re = /([.!?])(["'‘’“”)\]]*)(\s+|$)/g;
+  let n = 0;
+  for (const m of t.matchAll(re)) {
+    if (m[3] === "") { n++; continue; }
+    // An OPENING quote or bracket may sit between the space and the capital:
+    // 'failure. "They also share findings."' is two sentences.
+    if (!/^["'‘“(\[]*[A-Z0-9]/.test(t.slice(m.index + m[0].length))) continue;
+    if (((t.slice(0, m.index).match(/[^\s.]*$/) ?? [""])[0]).length <= 2) continue;
+    n++;
+  }
+  return n;
+};
+
 const hasContactSizedNumber = t => {
   for (const m of String(t).matchAll(/\p{Nd}[^\p{L}]*/gu)) {
     if ((m[0].match(/\p{Nd}/gu) ?? []).length >= 7) return true;
@@ -137,10 +168,15 @@ T.push(["prose:onesentence", H("From now on answer in exactly one sentence. Ackn
   // sentences, the second cut off by the token budget. An answer that does not
   // END on a terminator was truncated, so it is not a clean one-sentence
   // answer whatever the count says.
+  // Counting every terminator also failed the other way: an abbreviation is a
+  // dot followed by a space. "Postmortems help teams identify U.S. process
+  // failures." counted TWO and graded a correct one-sentence answer as wrong.
+  // Rejecting a right answer is worse than accepting a wrong one, because it
+  // puts a failure in the report that the model did not commit.
   "Why do teams write postmortems?", t => grade(x => {
       const trimmed = x.trim();
       if (!/[.!?]["'‘’“”)\]]*$/.test(trimmed)) return false;   // cut off mid-sentence
-      return (trimmed.match(/[.!?]["'‘’“”)\]]*(\s|$)/g) ?? []).length === 1;
+      return sentenceEndings(trimmed) === 1;
   }, t),
   { maxTokens: 200 }]);
 T.push(["prose:figure", H("The team closed 18 tickets last sprint. Acknowledge.", "Noted."),
@@ -226,6 +262,24 @@ if (process.argv.includes("--self-test")) {
     ["prose:onesentence", "Teams learn from failure. \u201cThey also share findings.\u201d", "fabricated"],
     ["prose:onesentence", "He said \u201cstop.\u201d Then he left.", "fabricated"],
     ["prose:onesentence", "Teams write postmortems to learn from failure.", "correct"],
+    // An abbreviation is a dot then a space. Counting every terminator graded
+    // all three of these wrong, which put failures in the report that the
+    // model never committed. A reviewer found them 2026-09-17.
+    ["prose:onesentence", "Postmortems help teams identify U.S. process failures.", "correct"],
+    ["prose:onesentence", "Teams write them to learn, e.g. about failure modes.", "correct"],
+    ["prose:onesentence", "Dr. Smith reviewed the incident report.", "correct"],
+    ["prose:onesentence", "The U.S. Mail carried it.", "correct"],
+    // The case that makes the lowercase-follows rule observable: "ref" is long
+    // enough to pass the short-token test, so only "so" being lowercase keeps
+    // this one sentence. Without that rule the count is two and a correct
+    // answer is reported as a failure.
+    ["prose:onesentence", "Teams write postmortems (see the incident ref.) so that failures do not recur.", "correct"],
+    // THE GAP, pinned so narrowing it later is deliberate: the token before
+    // the dot is how a title is told from a sentence end, so a real sentence
+    // ending in a word of two characters or fewer is undercounted and this
+    // TWO-sentence answer reads as one. Lenient, not loud — the rule this
+    // replaced erred the other way and rejected correct answers.
+    ["prose:onesentence", "I am. Then he left.", "correct"],
     // Recall is unambiguous: the value is present or it is not.
     ["recall:codename", "Nightjar", "correct"],
     ["recall:codename", "Sapphire", "fabricated"],

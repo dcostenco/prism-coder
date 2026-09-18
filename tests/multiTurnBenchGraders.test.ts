@@ -101,9 +101,35 @@ describe("multi-turn bench graders", () => {
             // are literal characters in both files and need no escaping. An
             // earlier version of this comment blamed the quotes, which was
             // wrong once the source stopped storing them as \u escapes.
-            String.raw`/[.!?]["'‘’“”)\]]*(\s|$)/g`,
-            String.raw`/[.!?](\s|$)/g`,
+            String.raw`/([.!?])(["'‘’“”)\]]*)(\s+|$)/g`,
+            String.raw`/([.!?])()(\s+|$)/g`,
             ["FAIL prose:onesentence"],
+        );
+    });
+
+    it("goes red when the abbreviation rule is reverted, which rejected correct answers", () => {
+        // The third grader defect, found by review 2026-09-17. Counting every
+        // terminator made "U.S.", "e.g." and "Dr." read as sentence breaks, so
+        // a correct one-sentence answer was reported as a model failure. That
+        // direction matters: it does not miss a fault, it invents one.
+        revertAndExpectRed(
+            "abbreviation",
+            String.raw`if (!/^["'‘“(\[]*[A-Z0-9]/.test(t.slice(m.index + m[0].length))) continue;`,
+            "",
+            ["FAIL prose:onesentence", "incident ref."],
+        );
+    });
+
+    it("goes red when the short-token rule is reverted, which broke titles", () => {
+        // The other half of the abbreviation fix. A capital DOES follow "Dr.",
+        // so only the length of the token before the dot separates a title
+        // from the end of a sentence. Both halves are mutated, because a rule
+        // nothing can turn red is not a rule.
+        revertAndExpectRed(
+            "shorttoken",
+            String.raw`if (((t.slice(0, m.index).match(/[^\s.]*$/) ?? [""])[0]).length <= 2) continue;`,
+            "",
+            ["FAIL prose:onesentence", "Dr. Smith"],
         );
     });
 });
