@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { privateIdentifierTerms } from "../scripts/private-identifier-terms.mjs";
 
@@ -146,6 +147,30 @@ describe("the private-identifier list has one source", () => {
         const terms = privateIdentifierTerms();
         expect(terms.length).toBeGreaterThanOrEqual(5);
         expect(terms.every((t) => t.length > 4)).toBe(true);
+    });
+
+    /**
+     * RUN IT, the way CI does. Importing the module proves the array is there;
+     * it says nothing about whether the script PRINTS when executed. Those came
+     * apart: `import.meta.url === `file://${process.argv[1]}`` is true on macOS
+     * and false on Windows, where argv[1] is a backslash path. The script
+     * printed nothing, both Windows legs loaded an empty list, and only the
+     * callers' empty-list check stopped the guard from passing every file.
+     * Mutation-checked, and the result is only half of what it looks like.
+     * Making the script print nothing turns this red HERE. Putting the
+     * Windows-fragile form back leaves it GREEN here, because on macOS that
+     * form is correct. So this test would not have caught the defect on my
+     * machine; it catches it on the Windows legs, which is where the defect
+     * lives. Do not read a local pass as coverage of the platform it is for.
+     */
+    it("prints its terms when executed, not only when imported", () => {
+        const r = spawnSync(process.execPath,
+            [resolve(root, "scripts/private-identifier-terms.mjs")],
+            { encoding: "utf8", timeout: 30_000 });
+        expect(r.status, r.stderr).toBe(0);
+        const printed = (r.stdout ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+        expect(printed, "executed output must not be empty").not.toEqual([]);
+        expect(printed).toEqual(privateIdentifierTerms());
     });
 
     it("both the workflow and local-ci.sh read it rather than copying it", () => {

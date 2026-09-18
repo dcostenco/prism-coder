@@ -23,6 +23,8 @@
  * passed while CI failed, which is the drift this file removes. Asserted by
  * tests/localCiParity.test.ts.
  */
+import { pathToFileURL } from "node:url";
+
 const TERMS = [
     ["synalux", "-private"],        // private repo name
     ["dcostencos", "-projects"],    // private Vercel team slug
@@ -33,6 +35,13 @@ const TERMS = [
 
 export const privateIdentifierTerms = () => TERMS.map(parts => parts.join(""));
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL, NOT `file://${process.argv[1]}`. On Windows argv[1] is
+// D:\a\repo\scripts\x.mjs while import.meta.url is file:///D:/a/repo/...,
+// so the string form never matches, the script prints nothing, and the caller
+// loads an empty term list. That is exactly what happened: both Windows legs
+// went red on the first push, caught by the empty-list check in the callers
+// rather than by silently passing every file. Asserted in
+// tests/localCiParity.test.ts by running this script the way CI does.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     console.log(privateIdentifierTerms().join("\n"));
 }
