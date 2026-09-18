@@ -39,13 +39,67 @@ const COVERAGE: Record<string, string | null> = {
     "Process-Level CLI Tests": "Process-Level CLI Tests",
 };
 
-const workflowSteps = [...workflow.matchAll(/^\s*-\s*name:\s*(.+?)\s*$/gm)]
-    .map((m) => m[1])
+/**
+ * Every step in the workflow, as blocks, NOT as `- name:` matches.
+ *
+ * A reviewer pointed out that matching names only means an UNNAMED step —
+ * `- run: npm run extra-check` is valid YAML — is invisible here, and the
+ * coverage check below passes while CI runs something nobody mapped. So the
+ * file is split into step blocks first, and a step without a name is itself a
+ * failure rather than a silent gap.
+ *
+ * Line-based on purpose: this repository has no YAML parser and a test is not
+ * a reason to add a dependency. It is asserted to find a plausible number of
+ * steps, so a parse that quietly matched nothing cannot pass.
+ */
+const workflowStepBlocks = (): Array<{ name: string | null; body: string }> => {
+    const lines = workflow.split("\n");
+    const blocks: Array<{ name: string | null; body: string }> = [];
+    let inSteps = false;
+    let indent = -1;
+    let current: string[] | null = null;
+    const flush = () => {
+        if (!current) return;
+        const body = current.join("\n");
+        const m = body.match(/^\s*-?\s*name:\s*(.+?)\s*$/m);
+        blocks.push({ name: m ? m[1] : null, body });
+        current = null;
+    };
+    for (const line of lines) {
+        const steps = line.match(/^(\s*)steps:\s*$/);
+        if (steps) { flush(); inSteps = true; indent = steps[1].length; continue; }
+        if (!inSteps) continue;
+        const item = line.match(/^(\s*)-\s/);
+        // A non-blank line at or left of `steps:` ends the block list.
+        if (line.trim() && !line.startsWith(" ".repeat(indent + 1))) { flush(); inSteps = false; continue; }
+        if (item && item[1].length === indent + 2) { flush(); current = [line]; continue; }
+        if (current) current.push(line);
+    }
+    flush();
+    return blocks;
+};
+
+const stepBlocks = workflowStepBlocks();
+const workflowSteps = stepBlocks
+    .map((b) => b.name)
+    .filter((n): n is string => n !== null)
     .filter((v, i, a) => a.indexOf(v) === i);
 
 describe("local-ci.sh runs what CI runs", () => {
     it("the workflow has steps to compare, so this suite is not vacuous", () => {
         expect(workflowSteps.length).toBeGreaterThan(8);
+    });
+
+    it("finds step blocks, not just names, so an unnamed step is visible", () => {
+        expect(stepBlocks.length).toBeGreaterThanOrEqual(workflowSteps.length);
+        expect(stepBlocks.length).toBeGreaterThan(8);
+    });
+
+    it("every workflow step has a name, or COVERAGE cannot see it", () => {
+        const unnamed = stepBlocks
+            .filter((b) => b.name === null)
+            .map((b) => b.body.trim().split("\n")[0]);
+        expect(unnamed, "an unnamed step runs in CI with nothing mapping it").toEqual([]);
     });
 
     it("every CI step is either covered locally or declared impossible", () => {
@@ -58,7 +112,10 @@ describe("local-ci.sh runs what CI runs", () => {
     it("every step declared covered actually appears in local-ci.sh", () => {
         const missing = Object.entries(COVERAGE)
             .filter(([, local]) => local !== null)
-            .filter(([, local]) => !localCi.includes(`"${local}"`))
+            // An INVOCATION at the start of a line, not the label anywhere in
+            // the file. `# temporarily disabled: "Build TypeScript"` satisfied
+            // a plain includes() while the step was gone.
+            .filter(([, local]) => !new RegExp(`^\\s*step\\s+"${local.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`, "m").test(localCi))
             .map(([ci, local]) => `${ci} -> ${local}`);
         expect(missing, "declared covered but no such step in local-ci.sh").toEqual([]);
     });

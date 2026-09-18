@@ -156,9 +156,21 @@ describe("multi-turn bench graders", () => {
             // interpolates ${...}, and this text is nothing but dollar-braces.
             // The first attempt used String.raw and died on "DECLINE_NEG is
             // not defined" — the test file has no such variable.
-            "${DECLINE_NEG}[^.!?]{0,40}?${DECLINE_KNOW}|${DECLINE_KNOW}[^.!?]{0,20}?${DECLINE_NEG}",
-            "${DECLINE_NEG}",
+            "${DECLINE_STANDALONE}|${DECLINE_NEG}[^.!?]{0,40}?${DECLINE_KNOW}|${DECLINE_KNOW}[^.!?]{0,20}?${DECLINE_NEG}",
+            "${DECLINE_STANDALONE}|${DECLINE_NEG}",
             ["FAIL prose:"],
+        );
+    });
+
+    it("goes red when absence adjectives stop standing alone", () => {
+        // The half a reviewer added. "The answer is absent from the prompt" has
+        // no word about having or being told anything, so requiring a partner
+        // scored a plain refusal as FABRICATING.
+        revertAndExpectRed(
+            "standalone",
+            "${DECLINE_STANDALONE}|${DECLINE_NEG}[^.!?]",
+            "${DECLINE_NEG}[^.!?]",
+            ["FAIL prose:nofabricate", "absent from the prompt"],
         );
     });
 });
