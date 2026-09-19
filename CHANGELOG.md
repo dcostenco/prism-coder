@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.7 — 2026-09-18
+
+### Cloud dashboards show the state the agent actually saved
+
+Paid clients authenticate through the Synalux Portal, but the Mind Palace
+dashboard still used direct Supabase reads for its checkpoint ledger and neural
+graph. Those credentials are deliberately absent on the thin client. The
+project selector could succeed while the selected project showed an old
+handoff, an empty graph, or a generic load failure.
+
+The dashboard now reads both views through bounded, authenticated Portal
+contracts. The recent-checkpoint reader locates the actual tail of a paginated
+ledger and retries if a checkpoint completes during the read, so a successful
+save cannot be hidden behind the export window. Graph filters are validated
+before they reach the Portal, and the 200-node display cap retains project hubs
+before trimming lower-priority nodes.
+
+Multiple local dashboards now use port-scoped cookies, so opening one IDE's
+instance does not overwrite another instance's credential. Project-list errors
+are displayed instead of being rendered as “No projects found.” `prism
+connect` also refreshes the active Antigravity MCP configuration locations
+when those host directories already exist, without creating them on a
+Gemini-only installation or taking over unmanaged entries.
+
+This release also corrects the multi-turn benchmark graders that miscounted
+abbreviations, incomplete prose, and fabricated numeric answers. The local CI
+script is now checked against every portable GitHub workflow step so a local
+pass cannot silently omit a remote gate.
+
 ## 20.21.6 — 2026-09-17
 
 ### A stale startup block heals itself when a session starts
