@@ -70,6 +70,13 @@ Prism works locally without an account, API key, or cloud subscription. Add a
 Synalux subscription when you want cloud memory, paid-tier skills, or team
 features.
 
+To check your plan, open **⚙ Account & Settings → Account** in the dashboard.
+Free users see **Start 14-day trial**; paid users see **Manage subscription**.
+During a trial, the same panel shows the paid tier and exact end date. No card
+is required to start. Add payment details before the end date to continue; if
+you do not, the subscription cancels and local Prism Free remains available.
+You can also compare plans directly at [synalux.ai/pricing#prism-plans](https://synalux.ai/pricing#prism-plans).
+
 After a few sessions, ask what it's been worth:
 
 ```bash
@@ -150,6 +157,17 @@ or by re-enabling after each run.
 
 <details>
 <summary>Release history (optional)</summary>
+
+## What's New in v20.21.13
+
+### Paid plans and trials are clear in Account & Settings
+
+- Free users can open the Prism plan comparison and start a 14-day trial.
+- Trial users see their paid tier, exact end date, and the action to add payment
+  details before automatic cancellation.
+- Active and payment-recovery states lead to the correct hosted billing action;
+  an unavailable verification is labeled instead of being presented as paid.
+- Local Prism Free remains available without an account or subscription.
 
 ## What's New in v20.21.12
 
@@ -1311,7 +1329,11 @@ All on-device models are free to run locally via Ollama on every tier. A subscri
 | Analytics dashboard | -- | ✅ | ✅ | ✅ |
 | HIPAA BAA | -- | -- | -- | ✅ |
 
-14-day free trial on paid plans. 25+ seats: [contact sales](https://synalux.ai/support)
+Paid plans start with a 14-day trial. No card is required to start; add payment
+details before the trial ends to continue, or the subscription cancels
+automatically and local Prism Free remains available. View the exact deadline
+under **⚙ Account & Settings → Account** in `prism dashboard`. 25+ seats:
+[contact sales](https://synalux.ai/support)
 
 ---
 

@@ -15,7 +15,10 @@ type AccountFixture = {
   name: string | null;
   role_key: string | null;
   plan: string;
+  subscription_plan?: string | null;
   plan_source?: string;
+  billing_status?: string;
+  trial_ends_at?: string | null;
   billing: { action: string; url: string | null };
   auth_url: string;
 };
@@ -27,8 +30,11 @@ function fixture(plan = "free", overrides: Partial<AccountFixture> = {}): Accoun
     name: "Dmitri Costenco",
     role_key: "BCBA",
     plan,
+    subscription_plan: plan === "free" ? null : plan,
     plan_source: "stripe",
-    billing: { action: plan === "free" ? "upgrade" : "manage", url: plan === "free" ? "https://synalux.ai/pricing" : null },
+    billing_status: plan === "free" ? "free" : "active",
+    trial_ends_at: null,
+    billing: { action: plan === "free" ? "upgrade" : "manage", url: plan === "free" ? "https://synalux.ai/pricing#prism-plans" : null },
     auth_url: "https://synalux.ai/auth?source=prism",
     ...overrides,
   };
@@ -121,7 +127,7 @@ describe("dashboard Account & Subscription UX", () => {
     const accountText = doc.getElementById("accountPanel")?.textContent || "";
     expect(accountText).toContain("Dmitri Costenco");
     expect(accountText).toContain("BCBA");
-    expect(accountText).toContain("Upgrade plan");
+    expect(accountText).toContain("Start 14-day trial");
     expect(accountText).toContain("Sign out");
   });
 
@@ -132,6 +138,73 @@ describe("dashboard Account & Subscription UX", () => {
     expect(text).toContain("Dmitri Costenco");
     expect(text).toContain("Manage subscription");
     expect(doc.querySelector(`.plan-step.current strong`)?.textContent?.toLowerCase()).toBe(plan);
+  });
+
+  it("shows the paid tier, exact trial deadline, consequence, and payment action", async () => {
+    const { doc } = await openDashboard(fixture("standard", {
+      billing_status: "trialing",
+      trial_ends_at: "2026-10-04T16:00:00.000Z",
+    }));
+    const chip = doc.getElementById("identityChip")?.textContent || "";
+    const text = doc.getElementById("accountPanel")?.textContent || "";
+    expect(chip).toContain("Standard trial");
+    expect(text).toContain("Trial active");
+    expect(text).toContain("Standard trial is active through");
+    expect(text).toContain("2026");
+    expect(text).toContain("otherwise it cancels automatically");
+    expect(text).toContain("Add payment details");
+  });
+
+  it.each(["past_due", "unpaid", "incomplete", "paused"])("makes %s billing state actionable", async billingStatus => {
+    const { doc } = await openDashboard(fixture("advanced", { billing_status: billingStatus }));
+    expect(doc.getElementById("identityChip")?.textContent).toContain("Advanced payment due");
+    expect(doc.querySelector("#identityChip .plan-mini.attention")).not.toBeNull();
+    const text = doc.getElementById("accountPanel")?.textContent || "";
+    expect(text).toContain("Payment needs attention");
+    expect(text).toContain("Update payment details");
+  });
+
+  it("keeps billing recovery clear when Stripe plan lookup is temporarily unavailable", async () => {
+    const { doc } = await openDashboard(fixture("free", {
+      subscription_plan: "standard",
+      billing_status: "unpaid",
+      billing: { action: "manage", url: null },
+    }));
+    expect(doc.getElementById("identityChip")?.textContent).toContain("Payment due");
+    const text = doc.getElementById("accountPanel")?.textContent || "";
+    expect(text).toContain("Your Standard plan needs billing attention");
+    expect(text).toContain("Update payment details");
+    expect(text).not.toContain("Your Free plan needs billing attention");
+  });
+
+  it("shows a recovered subscription as pending without claiming paid entitlement", async () => {
+    const { doc } = await openDashboard(fixture("free", {
+      subscription_plan: "standard",
+      billing_status: "sync_pending",
+      billing: { action: "manage", url: null },
+    }));
+    expect(doc.getElementById("identityChip")?.textContent).toContain("Standard syncing");
+    expect(doc.querySelector("#identityChip .plan-mini.attention")).not.toBeNull();
+    const text = doc.getElementById("accountPanel")?.textContent || "";
+    expect(text).toContain("Access update pending");
+    expect(text).toContain("Stripe confirms your Standard subscription");
+    expect(text).toContain("current access remains Free");
+    expect(text).toContain("Manage subscription");
+    expect(text).not.toContain("Paid");
+  });
+
+  it("labels an unverified subscription without claiming the account is paid or trialing", async () => {
+    const { doc } = await openDashboard(fixture("standard", {
+      billing_status: "unknown",
+      billing: { action: "manage", url: null },
+    }));
+    expect(doc.getElementById("identityChip")?.textContent).toContain("Standard status unavailable");
+    const text = doc.getElementById("accountPanel")?.textContent || "";
+    expect(text).toContain("Billing status unavailable");
+    expect(text).toContain("could not verify the current trial or payment status");
+    expect(text).toContain("Manage subscription");
+    expect(text).not.toContain("Trial active");
+    expect(text).not.toContain("Paid");
   });
 
   it("distinguishes a managed paid plan from Stripe self-service", async () => {

@@ -8,6 +8,11 @@ import { upgradeInsecureCloudUrl } from "../utils/secureUrl.js";
 const DEFAULT_PORTAL_URL = "https://synalux.ai";
 const MAX_BODY_BYTES = 16 * 1024;
 const VALID_PLANS = new Set(["free", "standard", "advanced", "enterprise"]);
+const VALID_BILLING_STATUSES = new Set([
+  "free", "trialing", "active", "past_due", "unpaid", "canceled",
+  "incomplete", "incomplete_expired", "paused", "managed", "unknown", "sync_pending",
+]);
+const VALID_PAID_PLANS = new Set(["standard", "advanced", "enterprise"]);
 let accountMutationQueue: Promise<void> = Promise.resolve();
 
 async function serializeAccountMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -32,7 +37,10 @@ export interface DashboardAccount {
   name: string | null;
   role_key: string | null;
   plan: "free" | "standard" | "advanced" | "enterprise";
+  subscription_plan?: "standard" | "advanced" | "enterprise" | null;
   plan_source?: "stripe" | "managed";
+  billing_status?: "free" | "trialing" | "active" | "past_due" | "unpaid" | "canceled" | "incomplete" | "incomplete_expired" | "paused" | "managed" | "unknown" | "sync_pending";
+  trial_ends_at?: string | null;
   billing: { action: "upgrade" | "manage" | "included"; url: string | null };
   auth_url: string;
 }
@@ -126,7 +134,10 @@ function signedOutAccount(origin: string): DashboardAccount {
     name: null,
     role_key: null,
     plan: "free",
-    billing: { action: "upgrade", url: `${origin}/pricing` },
+    subscription_plan: null,
+    billing_status: "free",
+    trial_ends_at: null,
+    billing: { action: "upgrade", url: `${origin}/pricing#prism-plans` },
     auth_url: authUrl(origin),
   };
 }
@@ -144,13 +155,28 @@ function normalizeAccount(value: unknown, origin: string): DashboardAccount {
   const url = typeof billingRaw.url === "string" && isAllowedBillingUrl(billingRaw.url, origin)
     ? billingRaw.url
     : null;
+  const rawBillingStatus = typeof raw.billing_status === "string" && VALID_BILLING_STATUSES.has(raw.billing_status)
+    ? raw.billing_status as DashboardAccount["billing_status"]
+    : plan === "free" ? "free" : "unknown";
+  const subscriptionPlan = typeof raw.subscription_plan === "string" && VALID_PAID_PLANS.has(raw.subscription_plan)
+    ? raw.subscription_plan as DashboardAccount["subscription_plan"]
+    : null;
+  const billingStatus = rawBillingStatus === "sync_pending" && subscriptionPlan === null
+    ? "unknown"
+    : rawBillingStatus;
+  const trialEndsAt = typeof raw.trial_ends_at === "string" && Number.isFinite(Date.parse(raw.trial_ends_at))
+    ? new Date(raw.trial_ends_at).toISOString()
+    : null;
   return {
     signed_in: raw.signed_in === true,
     configured: true,
     name: typeof raw.name === "string" ? raw.name.slice(0, 160) : null,
     role_key: typeof raw.role_key === "string" ? raw.role_key.slice(0, 80) : null,
     plan: plan as DashboardAccount["plan"],
+    subscription_plan: subscriptionPlan,
     plan_source: raw.plan_source === "managed" ? "managed" : "stripe",
+    billing_status: billingStatus,
+    trial_ends_at: billingStatus === "trialing" || billingStatus === "sync_pending" ? trialEndsAt : null,
     billing: { action, url },
     auth_url: authUrl(origin),
   };
@@ -260,7 +286,7 @@ export async function openDashboardBilling(overrides: Partial<AccountRouterDeps>
   const deps = { ...defaultDeps, ...overrides };
   const origin = await portalOrigin(deps);
   if (await applyStoredSignOut(deps) || !deps.usablePortalKey()) {
-    return { url: `${origin}/pricing`, action: "upgrade" };
+    return { url: `${origin}/pricing#prism-plans`, action: "upgrade" };
   }
   let jwt = await deps.getJwt();
   if (!jwt || isSynaluxSignedOut()) throw new Error("Synalux sign-in expired. Sign in again.");

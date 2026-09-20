@@ -18,8 +18,11 @@ function account(plan = "free") {
     name: "Dashboard User",
     role_key: "BCBA",
     plan,
+    subscription_plan: plan === "free" ? null : plan,
     plan_source: "stripe",
-    billing: { action: plan === "free" ? "upgrade" : "manage", url: plan === "free" ? `${ORIGIN}/pricing` : null },
+    billing_status: plan === "free" ? "free" : "active",
+    trial_ends_at: null,
+    billing: { action: plan === "free" ? "upgrade" : "manage", url: plan === "free" ? `${ORIGIN}/pricing#prism-plans` : null },
   };
 }
 
@@ -66,7 +69,7 @@ describe("dashboard account service", () => {
       configured: false,
       plan: "free",
       auth_url: `${ORIGIN}/auth?source=prism`,
-      billing: { action: "upgrade", url: `${ORIGIN}/pricing` },
+      billing: { action: "upgrade", url: `${ORIGIN}/pricing#prism-plans` },
     });
     expect(h.fetcher).not.toHaveBeenCalled();
   });
@@ -83,6 +86,68 @@ describe("dashboard account service", () => {
     const h = harness({ PRISM_SYNALUX_API_KEY: TOKEN });
     h.fetcher.mockResolvedValue(new Response(JSON.stringify({ error: "unavailable" }), { status: 503 }));
     await expect(loadDashboardAccount(h.deps)).rejects.toThrow("HTTP 503");
+  });
+
+  it("preserves a valid trial state and normalizes its end date", async () => {
+    const h = harness({ PRISM_SYNALUX_API_KEY: TOKEN });
+    h.fetcher.mockResolvedValue(new Response(JSON.stringify({
+      ...account("standard"),
+      billing_status: "trialing",
+      trial_ends_at: "2026-10-04T12:00:00-04:00",
+    }), { status: 200 }));
+
+    await expect(loadDashboardAccount(h.deps)).resolves.toMatchObject({
+      plan: "standard",
+      billing_status: "trialing",
+      trial_ends_at: "2026-10-04T16:00:00.000Z",
+    });
+  });
+
+  it("preserves a verified paid plan separately while entitlement sync is pending", async () => {
+    const h = harness({ PRISM_SYNALUX_API_KEY: TOKEN });
+    h.fetcher.mockResolvedValue(new Response(JSON.stringify({
+      ...account("free"),
+      subscription_plan: "standard",
+      billing_status: "sync_pending",
+      trial_ends_at: "2026-10-04T12:00:00-04:00",
+      billing: { action: "manage", url: null },
+    }), { status: 200 }));
+
+    await expect(loadDashboardAccount(h.deps)).resolves.toMatchObject({
+      plan: "free",
+      subscription_plan: "standard",
+      billing_status: "sync_pending",
+      trial_ends_at: "2026-10-04T16:00:00.000Z",
+    });
+  });
+
+  it("does not trust an unknown billing state or malformed trial deadline", async () => {
+    const h = harness({ PRISM_SYNALUX_API_KEY: TOKEN });
+    h.fetcher.mockResolvedValue(new Response(JSON.stringify({
+      ...account("advanced"),
+      billing_status: "attacker-controlled",
+      trial_ends_at: "not-a-date",
+    }), { status: 200 }));
+
+    await expect(loadDashboardAccount(h.deps)).resolves.toMatchObject({
+      billing_status: "unknown",
+      trial_ends_at: null,
+    });
+  });
+
+  it("does not trust an unknown subscription plan", async () => {
+    const h = harness({ PRISM_SYNALUX_API_KEY: TOKEN });
+    h.fetcher.mockResolvedValue(new Response(JSON.stringify({
+      ...account("free"),
+      subscription_plan: "attacker-controlled",
+      billing_status: "sync_pending",
+    }), { status: 200 }));
+
+    await expect(loadDashboardAccount(h.deps)).resolves.toMatchObject({
+      plan: "free",
+      subscription_plan: null,
+      billing_status: "unknown",
+    });
   });
 
   it("exchanges a one-time Prism code, stores the credential, and loads the account", async () => {
@@ -132,7 +197,7 @@ describe("dashboard account service", () => {
 
   it("opens public pricing while signed out", async () => {
     const h = harness();
-    await expect(openDashboardBilling(h.deps)).resolves.toEqual({ url: `${ORIGIN}/pricing`, action: "upgrade" });
+    await expect(openDashboardBilling(h.deps)).resolves.toEqual({ url: `${ORIGIN}/pricing#prism-plans`, action: "upgrade" });
     expect(h.fetcher).not.toHaveBeenCalled();
   });
 

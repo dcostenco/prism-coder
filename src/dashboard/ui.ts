@@ -451,6 +451,8 @@ export function renderDashboardHTML(version: string): string {
     .identity-chip .role-icon { font-size: 0.9rem; }
     .identity-chip .identity-label { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .identity-chip .plan-mini { font-size: 0.58rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-green); }
+    .identity-chip .plan-mini.trial { color: var(--accent-amber); }
+    .identity-chip .plan-mini.attention { color: #fb7185; }
     .main-tabs { overflow-x: auto; scrollbar-width: thin; }
     .main-tabs .s-tab { flex: 0 0 auto; }
     /* Settings modal tab bar */
@@ -551,6 +553,8 @@ export function renderDashboardHTML(version: string): string {
     }
     .account-badge.role { color: var(--accent-cyan); background: rgba(6,182,212,0.1); border-color: rgba(6,182,212,0.22); }
     .account-badge.managed { color: var(--accent-amber); background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.22); }
+    .account-badge.trial { color: var(--accent-green); background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.3); }
+    .account-badge.attention { color: #fb7185; background: rgba(244,63,94,0.1); border-color: rgba(244,63,94,0.3); }
     .account-name { font-size: 1.35rem; line-height: 1.2; font-weight: 700; color: var(--text-primary); }
     .account-summary { margin-top: 0.45rem; color: var(--text-secondary); font-size: 0.82rem; line-height: 1.55; max-width: 540px; }
     .account-actions { display: flex; flex-wrap: wrap; gap: 0.65rem; margin-top: 1rem; }
@@ -2120,6 +2124,49 @@ function accountPlanSummary(plan) {
     };
     return summaries[plan] || summaries.free;
 }
+function accountTrialEndLabel(value) {
+    if (!value) return '';
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+function accountBillingBadge(account) {
+    if (account.billing_status === 'trialing') return '<span class="account-badge trial">Trial active</span>';
+    if (account.billing_status === 'sync_pending') return '<span class="account-badge attention">Access update pending</span>';
+    if (['past_due', 'unpaid', 'incomplete', 'paused'].indexOf(account.billing_status) >= 0) {
+        return '<span class="account-badge attention">Payment needs attention</span>';
+    }
+    if (account.billing_status === 'unknown') return '<span class="account-badge attention">Billing status unavailable</span>';
+    if (account.billing_status === 'active') return '<span class="account-badge trial">Paid</span>';
+    return '';
+}
+function accountSubscriptionSummary(account) {
+    if (account.billing_status === 'trialing') {
+        var end = accountTrialEndLabel(account.trial_ends_at);
+        return accountPlanLabel(account.plan) + ' trial is active' + (end ? ' through ' + end : '') +
+            '. Add payment details before the trial ends to continue; otherwise it cancels automatically.';
+    }
+    if (['past_due', 'unpaid', 'incomplete', 'paused'].indexOf(account.billing_status) >= 0) {
+        var billedPlan = account.subscription_plan
+            ? accountPlanLabel(account.subscription_plan) + ' plan'
+            : account.plan === 'free' ? 'paid subscription' : accountPlanLabel(account.plan) + ' plan';
+        return 'Your ' + billedPlan + ' needs billing attention. Update payment details to restore or keep cloud features active.';
+    }
+    if (account.billing_status === 'sync_pending') {
+        var syncingPlan = accountPlanLabel(account.subscription_plan || account.plan);
+        var syncTrialEnd = accountTrialEndLabel(account.trial_ends_at);
+        return 'Stripe confirms your ' + syncingPlan + ' subscription' +
+            (syncTrialEnd ? ' with a trial through ' + syncTrialEnd : '') +
+            '. Synalux is updating access; current access remains ' + accountPlanLabel(account.plan) + '. Retry shortly or manage the subscription.';
+    }
+    if (account.billing_status === 'canceled' || account.billing_status === 'incomplete_expired') {
+        return 'This paid subscription is no longer active. Local Prism Free remains available.';
+    }
+    if (account.billing_status === 'unknown') {
+        return 'Prism could not verify the current trial or payment status. Open billing to review the subscription; local features remain available.';
+    }
+    return accountPlanSummary(account.plan);
+}
 function renderPlanLadder(plan) {
     var tiers = [
         ['free', 'Free', 'Local'],
@@ -2134,14 +2181,29 @@ function renderPlanLadder(plan) {
 }
 function renderAccountChip(account, error) {
     var chip = document.getElementById('identityChip');
+    var planStatus;
+    var planStatusClass;
     if (!chip)
         return;
     if (error) {
         chip.innerHTML = '<span class="role-icon">⚠️</span><span class="identity-label">Account</span>';
     }
     else if (account && account.signed_in) {
+        planStatus = account.billing_status === 'sync_pending'
+            ? accountPlanLabel(account.subscription_plan || account.plan) + ' syncing'
+            : account.billing_status === 'trialing' ? ' trial' :
+            ['past_due', 'unpaid', 'incomplete', 'paused'].indexOf(account.billing_status) >= 0
+                ? (account.plan === 'free' ? 'Payment due' : ' payment due') :
+                account.billing_status === 'unknown' ? ' status unavailable' : '';
+        planStatusClass = account.billing_status === 'trialing' ? ' trial' :
+            ['past_due', 'unpaid', 'incomplete', 'paused', 'unknown', 'sync_pending'].indexOf(account.billing_status) >= 0 ? ' attention' : '';
+        var chipPlanLabel = account.billing_status === 'sync_pending'
+            ? planStatus
+            : account.plan === 'free' && planStatus === 'Payment due'
+                ? planStatus
+                : accountPlanLabel(account.plan) + planStatus;
         chip.innerHTML = '<span class="role-icon">🤖</span><span class="identity-label">' + escapeHtml(account.name || 'Synalux user') + '</span>' +
-            '<span class="plan-mini">' + escapeHtml(accountPlanLabel(account.plan)) + '</span>';
+            '<span class="plan-mini' + planStatusClass + '">' + escapeHtml(chipPlanLabel) + '</span>';
     }
     else {
         chip.innerHTML = '<span class="role-icon">🆓</span><span class="identity-label">Free</span>';
@@ -2182,14 +2244,17 @@ function renderAccountPanel(account, error) {
         return;
     }
     role = account.role_key || 'user';
-    billingLabel = account.billing && account.billing.action === 'manage' ? 'Manage subscription' :
-        account.billing && account.billing.action === 'included' ? 'View plans' : 'Upgrade plan';
+    billingLabel = account.billing_status === 'trialing' ? 'Add payment details' :
+        account.billing_status === 'sync_pending' ? 'Manage subscription' :
+        ['past_due', 'unpaid', 'incomplete', 'paused'].indexOf(account.billing_status) >= 0 ? 'Update payment details' :
+        account.billing && account.billing.action === 'manage' ? 'Manage subscription' :
+        account.billing && account.billing.action === 'included' ? 'View plans' : 'Start 14-day trial';
     managedBadge = account.plan_source === 'managed' ? '<span class="account-badge managed">Managed</span>' : '';
     panel.innerHTML = '<div class="account-card"><div class="account-card-head"><div>' +
         '<div class="account-badges"><span class="account-badge">' + escapeHtml(accountPlanLabel(account.plan)) + '</span>' +
-        '<span class="account-badge role">' + escapeHtml(role) + '</span>' + managedBadge + '</div>' +
+        '<span class="account-badge role">' + escapeHtml(role) + '</span>' + managedBadge + accountBillingBadge(account) + '</div>' +
         '<div class="account-name">' + escapeHtml(account.name || 'Synalux user') + '</div>' +
-        '<div class="account-summary">' + accountPlanSummary(account.plan) + '</div></div></div>' +
+        '<div class="account-summary">' + escapeHtml(accountSubscriptionSummary(account)) + '</div></div></div>' +
         '<div class="account-actions"><button class="account-action" id="accountBillingButton" onclick="openAccountBilling()">' + billingLabel + '</button>' +
         '<button class="account-action danger" id="accountSignOutButton" onclick="signOutAccount()">Sign out</button></div>' +
         '<div class="account-status" id="accountStatus"></div></div>' + renderPlanLadder(account.plan);

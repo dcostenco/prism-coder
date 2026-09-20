@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.13 — 2026-09-20
+
+### Paid plans are discoverable and actionable in the dashboard
+
+The dashboard account panel previously showed a plan name without explaining
+whether a paid trial was active, when it ended, or what the user needed to do
+next. Free users could also reach generic pricing without a clear Prism plan
+entry point.
+
+Account & Settings now shows the verified billing state from Synalux. Free
+users get a direct **Start 14-day trial** action; trial users see their paid
+tier, exact end date, and **Add payment details**; customers with a recoverable
+payment issue get **Update payment details**; active customers retain
+**Manage subscription**. If billing verification is unavailable, Prism says so
+instead of claiming the account is paid or trialing. Local Prism Free remains
+usable throughout.
+
 ## 20.21.12 — 2026-09-20
 
 ### Dashboard discovery survives multiple MCP hosts
