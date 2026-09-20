@@ -17,8 +17,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockGetEntitlements = vi.hoisted(() => vi.fn());
+const mockGetSynaluxJwt = vi.hoisted(() => vi.fn());
+const testSynaluxKey = (suffix: string) => ["synalux", "sk", suffix].join("_");
 vi.mock("../src/utils/entitlements.js", () => ({
   getEntitlements: mockGetEntitlements,
+}));
+vi.mock("../src/utils/synaluxJwt.js", () => ({
+  getSynaluxJwt: mockGetSynaluxJwt,
+  isUsableSynaluxApiKey: (value: string) =>
+    value.startsWith(["synalux", "sk", ""].join("_")) && value.length <= 512,
 }));
 
 function entitlement(plan: string, memory: boolean, source = "portal") {
@@ -48,6 +55,7 @@ vi.mock("../src/storage/configStorage.js", () => ({
 const sqliteInstances: object[] = [];
 const supabaseInstances: object[] = [];
 const synaluxInstances: object[] = [];
+const synaluxCapturedKeys: Array<string | undefined> = [];
 
 vi.mock("../src/storage/sqlite.js", () => ({
   SqliteStorage: class {
@@ -71,7 +79,10 @@ vi.mock("../src/storage/supabase.js", () => ({
 vi.mock("../src/storage/synalux.js", () => ({
   SynaluxStorage: class {
     tag = "synalux";
-    constructor() { synaluxInstances.push(this); }
+    constructor() {
+      synaluxInstances.push(this);
+      synaluxCapturedKeys.push(process.env.PRISM_SYNALUX_API_KEY);
+    }
     async initialize() {}
     async close() {}
   },
@@ -109,8 +120,11 @@ beforeEach(() => {
   sqliteInstances.length = 0;
   supabaseInstances.length = 0;
   synaluxInstances.length = 0;
+  synaluxCapturedKeys.length = 0;
   mockGetEntitlements.mockReset();
   mockGetEntitlements.mockResolvedValue(entitlement("standard", true));
+  mockGetSynaluxJwt.mockReset();
+  mockGetSynaluxJwt.mockResolvedValue(null);
   vi.resetModules();
 });
 
@@ -151,6 +165,41 @@ describe("getStorage — synalux dashboard-config fallback", () => {
     expect((storage as { tag?: string }).tag).toBe("synalux");
     expect(process.env.PRISM_SYNALUX_BASE_URL).toBe("https://portal.synalux.example");
     expect(mockGetEntitlements).not.toHaveBeenCalled();
+  });
+
+  it("heals a rejected launcher key before explicit Synalux storage captures it", async () => {
+    process.env.PRISM_STORAGE = "synalux";
+    process.env.PRISM_SYNALUX_BASE_URL = "https://portal.synalux.example";
+    process.env.PRISM_SYNALUX_API_KEY = testSynaluxKey("revoked_launcher");
+    mockSettings.PRISM_SYNALUX_BASE_URL = "https://portal.synalux.example";
+    mockSettings.PRISM_SYNALUX_API_KEY = testSynaluxKey("persisted_account");
+    mockSettings.PRISM_SYNALUX_SIGNED_OUT = "false";
+    mockGetSynaluxJwt.mockImplementation(async () => {
+      process.env.PRISM_SYNALUX_API_KEY = mockSettings.PRISM_SYNALUX_API_KEY;
+      return "persisted-jwt";
+    });
+
+    const storage = await freshGetStorage();
+
+    expect((storage as { tag?: string }).tag).toBe("synalux");
+    expect(mockGetSynaluxJwt).toHaveBeenCalledTimes(1);
+    expect(synaluxCapturedKeys).toEqual([testSynaluxKey("persisted_account")]);
+  });
+
+  it("fails closed before storage captures an unvalidated launcher key", async () => {
+    process.env.PRISM_STORAGE = "synalux";
+    process.env.PRISM_SYNALUX_BASE_URL = "https://portal.synalux.example";
+    process.env.PRISM_SYNALUX_API_KEY = testSynaluxKey("revoked_launcher");
+    mockSettings.PRISM_SYNALUX_BASE_URL = "https://portal.synalux.example";
+    mockSettings.PRISM_SYNALUX_API_KEY = testSynaluxKey("persisted_account");
+    mockSettings.PRISM_SYNALUX_SIGNED_OUT = "false";
+    mockGetSynaluxJwt.mockResolvedValue(null);
+
+    await expect(freshGetStorage()).rejects.toThrow(/could not validate.*Synalux.*credential/i);
+
+    expect(synaluxInstances).toHaveLength(0);
+    expect(sqliteInstances).toHaveLength(0);
+    expect(supabaseInstances).toHaveLength(0);
   });
 
   it("uses local storage after deliberate sign-out even when synalux is explicitly configured", async () => {

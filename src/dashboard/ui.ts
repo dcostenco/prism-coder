@@ -35,12 +35,12 @@ export function renderDashboardLocalOpenHTML(): string {
 </head>
 <body>
   <main>
-    <div class="eyebrow">Local Prism Free</div>
-    <h1>No account is required.</h1>
-    <p>This browser needs the current local dashboard link after Prism starts. Run this command in Terminal; it opens the dashboard directly without Synalux sign-in or plan redemption.</p>
+    <div class="eyebrow">Local dashboard access</div>
+    <h1>Open the current Prism dashboard.</h1>
+    <p>This browser does not have the current local dashboard link. Run this command in Terminal to open the active dashboard securely. Your Synalux account and plan remain unchanged.</p>
     <code>prism dashboard</code>
     <button type="button" onclick="navigator.clipboard.writeText('prism dashboard').then(() => { this.textContent = 'Copied'; })">Copy command</button>
-    <p class="note">Synalux sign-in remains optional for cloud sync, billing, and paid features.</p>
+    <p class="note">This local browser access check is separate from Synalux sign-in.</p>
   </main>
 </body>
 </html>`;

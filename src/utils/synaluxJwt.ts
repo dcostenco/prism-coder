@@ -41,9 +41,86 @@ interface CacheEntry {
     expiresAt: number; // epoch ms — wall clock
 }
 
+type ExchangeAttempt =
+    | { kind: "success"; jwt: string; ttlMs: number }
+    | { kind: "http_error"; status: number }
+    | { kind: "invalid_response" }
+    | { kind: "network_error" };
+
 let cache: CacheEntry | null = null;
 let inFlight: Promise<string | null> | null = null;
 let generation = 0;
+
+async function exchangeJwt(baseUrl: string, apiKey: string): Promise<ExchangeAttempt> {
+    try {
+        const res = await fetch(`${baseUrl}/api/v1/auth/jwt`, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+            },
+            signal: AbortSignal.timeout(10_000),
+            redirect: "error",
+        });
+
+        if (!res.ok) {
+            debugLog(`[synaluxJwt] exchange HTTP ${res.status}`);
+            return { kind: "http_error", status: res.status };
+        }
+
+        const data = (await res.json()) as ExchangeResponse;
+        if (!data?.jwt) {
+            debugLog(`[synaluxJwt] exchange returned no jwt (status=${data?.status})`);
+            return { kind: "invalid_response" };
+        }
+
+        return {
+            kind: "success",
+            jwt: data.jwt,
+            ttlMs: Math.max(MIN_CACHE_MS, (data.expires_in ?? 900) * 1000),
+        };
+    } catch (err) {
+        debugLog(`[synaluxJwt] exchange error: ${err instanceof Error ? err.message : String(err)}`);
+        return { kind: "network_error" };
+    }
+}
+
+interface PersistedCredentialState {
+    signedOut: boolean;
+    baseUrl: string;
+    apiKey: string;
+}
+
+async function readPersistedCredentialState(): Promise<PersistedCredentialState | null> {
+    try {
+        const { getSetting } = await import("../storage/configStorage.js");
+        const signedOut = (await getSetting("PRISM_SYNALUX_SIGNED_OUT", "")) === "true";
+        const baseUrl = normalizePortalBaseUrl(await getSetting("PRISM_SYNALUX_BASE_URL", ""));
+        const apiKey = (await getSetting("PRISM_SYNALUX_API_KEY", "")).trim();
+        return { signedOut, baseUrl, apiKey };
+    } catch (err) {
+        debugLog(`[synaluxJwt] persisted credential lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+    }
+}
+
+function normalizePortalBaseUrl(raw: string): string {
+    try {
+        const parsed = new URL(raw.trim());
+        const loopback = parsed.hostname === "localhost" ||
+            parsed.hostname === "127.0.0.1" || parsed.hostname === "::1" || parsed.hostname === "[::1]";
+        if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) return "";
+        return parsed.origin;
+    } catch {
+        return "";
+    }
+}
+
+const SYNALUX_API_KEY_PREFIX = ["synalux", "sk", ""].join("_");
+
+export function isUsableSynaluxApiKey(apiKey: string): boolean {
+    return apiKey.startsWith(SYNALUX_API_KEY_PREFIX) && apiKey.length <= 512;
+}
 
 /**
  * Returns a usable JWT, exchanging from the sk_ token if needed.
@@ -73,26 +150,53 @@ export async function getSynaluxJwt(): Promise<string | null> {
     let exchange!: Promise<string | null>;
     exchange = (async () => {
         try {
-            const url = `${baseUrl}/api/v1/auth/jwt`;
-            const res = await fetch(url, {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${apiKey}`,
-                    "Content-Type": "application/json",
-                },
-                signal: AbortSignal.timeout(10_000),
-                redirect: "error",
-            });
+            let attempt = await exchangeJwt(baseUrl, apiKey);
+            const requestOrigin = normalizePortalBaseUrl(baseUrl);
 
-            if (!res.ok) {
-                debugLog(`[synaluxJwt] exchange HTTP ${res.status}`);
-                cache = null;
-                return null;
+            // MCP launchers can keep an older environment snapshot after the
+            // dashboard saves a freshly-linked account token. A valid explicit
+            // environment token remains authoritative; only an authentication
+            // rejection may try the newer persisted token, and only once.
+            if (attempt.kind === "http_error" && (attempt.status === 401 || attempt.status === 403)) {
+                const persisted = await readPersistedCredentialState();
+                if (
+                    persisted &&
+                    !persisted.signedOut &&
+                    !isSynaluxSignedOut() &&
+                    !!persisted.baseUrl &&
+                    persisted.baseUrl === requestOrigin &&
+                    isUsableSynaluxApiKey(persisted.apiKey) &&
+                    persisted.apiKey !== apiKey
+                ) {
+                    // The saved key may only recover the same portal origin.
+                    // Callers can resolve their request URL before this helper
+                    // returns, so cross-origin recovery would expose either the
+                    // refresh key or its short-lived JWT to the launcher URL.
+                    const recovered = await exchangeJwt(persisted.baseUrl, persisted.apiKey);
+                    if (recovered.kind === "success") {
+                        // Re-read after the network boundary. A sign-out or a
+                        // newer account link must win over this older retry.
+                        const current = await readPersistedCredentialState();
+                        if (
+                            current &&
+                            !current.signedOut &&
+                            !isSynaluxSignedOut() &&
+                            generation === requestGeneration &&
+                            current.baseUrl === persisted.baseUrl &&
+                            current.apiKey === persisted.apiKey
+                        ) {
+                            process.env.PRISM_SYNALUX_API_KEY = persisted.apiKey;
+                            attempt = recovered;
+                            debugLog("[synaluxJwt] recovered from a stale launcher credential");
+                        } else {
+                            cache = null;
+                            return null;
+                        }
+                    }
+                }
             }
 
-            const data = (await res.json()) as ExchangeResponse;
-            if (!data?.jwt) {
-                debugLog(`[synaluxJwt] exchange returned no jwt (status=${data?.status})`);
+            if (attempt.kind !== "success") {
                 cache = null;
                 return null;
             }
@@ -104,10 +208,9 @@ export async function getSynaluxJwt(): Promise<string | null> {
                 return null;
             }
 
-            const ttlMs = Math.max(MIN_CACHE_MS, (data.expires_in ?? 900) * 1000);
-            cache = { jwt: data.jwt, expiresAt: Date.now() + ttlMs };
-            debugLog(`[synaluxJwt] exchanged ok, ttl=${ttlMs}ms`);
-            return data.jwt;
+            cache = { jwt: attempt.jwt, expiresAt: Date.now() + attempt.ttlMs };
+            debugLog(`[synaluxJwt] exchanged ok, ttl=${attempt.ttlMs}ms`);
+            return attempt.jwt;
         } catch (err) {
             debugLog(`[synaluxJwt] exchange error: ${err instanceof Error ? err.message : String(err)}`);
             cache = null;

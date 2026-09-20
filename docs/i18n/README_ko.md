@@ -151,6 +151,19 @@ or by re-enabling after each run.
 <details>
 <summary>Release history (optional)</summary>
 
+## What's New in v20.21.11
+
+### Linked accounts persist across dashboard refreshes
+
+- A host process with an obsolete launch credential now recovers from the
+  newer account saved by the dashboard after the obsolete credential is
+  rejected.
+- Valid host credentials remain authoritative; sign-out, concurrent account
+  changes, network failures, and server failures do not trigger an unsafe
+  credential switch.
+- `prism dashboard` opens the active local dashboard without relabeling a
+  linked Standard, Advanced, or Enterprise account as Free.
+
 ## What's New in v20.21.10
 
 ### Signed-out Free dashboards keep working locally

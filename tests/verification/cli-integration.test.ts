@@ -264,7 +264,9 @@ describe('CLI Integration — accountless Prism Free dashboard', { timeout: 30_0
     const coldPage = await fetch(`http://127.0.0.1:${port}/`);
     expect(coldPage.status).toBe(200);
     const coldHtml = await coldPage.text();
-    expect(coldHtml).toContain('No account is required');
+    expect(coldHtml).toContain('Open the current Prism dashboard');
+    expect(coldHtml).toContain('account and plan remain unchanged');
+    expect(coldHtml).not.toContain('Local Prism Free');
     expect(coldHtml).toContain('prism dashboard');
     expect(coldHtml).not.toContain(localToken);
     expect(dashboardStderr).not.toContain(localToken);

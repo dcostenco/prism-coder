@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.11 — 2026-09-20
+
+### Linked dashboard accounts survive refreshes and host restarts
+
+Some MCP hosts retain the credential environment they launched with. After a
+user linked or refreshed a Synalux account in the dashboard, that older host
+credential could continue overriding the newer saved account and make a page
+refresh appear signed out or Free.
+
+Prism now keeps a valid explicit host credential authoritative, but after an
+authentication rejection it can recover once from the current saved account
+on the same validated portal origin. The saved portal URL and credential are
+validated as a pair, deliberate
+sign-out always wins, and a concurrent account change cannot be overwritten by
+an older retry. Cloud storage resolves that recovery before capturing its
+credential, so Project View and account status use the same linked account.
+
+The local browser-access page no longer labels the session as “Local Prism
+Free.” It explains that `prism dashboard` opens the active local dashboard and
+that the browser-access check does not change the user's Synalux account or
+plan.
+
 ## 20.21.10 — 2026-09-20
 
 ### Signed-out Free dashboards retain local projects and recent activity

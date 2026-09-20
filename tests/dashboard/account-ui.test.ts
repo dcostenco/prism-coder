@@ -76,9 +76,11 @@ async function openDashboard(account: AccountFixture | { error: string }, accoun
 describe("dashboard Account & Subscription UX", () => {
   it("explains local browser access without presenting account redemption as a Free requirement", () => {
     const html = renderDashboardLocalOpenHTML();
-    expect(html).toContain("No account is required");
+    expect(html).toContain("Local dashboard access");
+    expect(html).toContain("Open the current Prism dashboard");
     expect(html).toContain("prism dashboard");
-    expect(html).toContain("without Synalux sign-in or plan redemption");
+    expect(html).toContain("account and plan remain unchanged");
+    expect(html).not.toContain("Local Prism Free");
     expect(html).not.toContain("synalux_code_");
   });
 
