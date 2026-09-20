@@ -28,7 +28,7 @@ import { activeStorageBackend } from "../storage/index.js";
 import { readDashboardLedger } from "./ledgerReader.js";
 import { PRISM_USER_ID, SERVER_CONFIG } from "../config.js";
 import { renderDashboardHTML, renderDashboardLocalOpenHTML } from "./ui.js";
-import { writeDashboardAccessUrl } from "./dashboardAccess.js";
+import { registerDashboardAccessUrl } from "./dashboardAccess.js";
 import {
   createDashboardProbeResponse,
   DASHBOARD_PROBE_PATH,
@@ -1595,7 +1595,13 @@ self.addEventListener('message', (e) => {
     // Non-fatal — just means the user has to know the port
   }
   try {
-    writeDashboardAccessUrl(dashboardUrl, os.homedir(), DASHBOARD_PROBE_KEY);
+    const registration = registerDashboardAccessUrl(dashboardUrl, os.homedir(), DASHBOARD_PROBE_KEY);
+    const unregister = registration.unregister;
+    httpServer.once("close", () => {
+      unregister();
+      process.removeListener("exit", unregister);
+    });
+    process.once("exit", unregister);
   } catch (error) {
     console.error(`[Dashboard] Could not save local opener link: ${error instanceof Error ? error.message : String(error)}`);
   }

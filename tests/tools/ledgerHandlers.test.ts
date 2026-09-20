@@ -219,6 +219,7 @@ import {
   sessionSaveExperienceHandler,
   sessionLoadContextHandler,
   sessionBootstrapHandler,
+  readDashboardUrlForStartup,
   capNativeStartupText,
   renderProtectedFloorDigestForHook,
   sessionForgetMemoryHandler,
@@ -1353,6 +1354,61 @@ describe("ledgerHandlers", () => {
       } finally {
         if (originalPort === undefined) delete process.env.PRISM_DASHBOARD_PORT;
         else process.env.PRISM_DASHBOARD_PORT = originalPort;
+      }
+    });
+
+    it("keeps startup dashboard availability when the newest instance stops", async () => {
+      const home = await mkdtemp(join(tmpdir(), "prism-startup-dashboard-registry-"));
+      const originalPort = process.env.PRISM_DASHBOARD_PORT;
+      delete process.env.PRISM_DASHBOARD_PORT;
+      const http = await import("node:http");
+      const { registerDashboardAccessUrl } = await import("../../src/dashboard/dashboardAccess.js");
+      const { createDashboardProbeResponse, generateDashboardProbeKey } = await import(
+        "../../src/dashboard/dashboardProbe.js"
+      );
+      const olderKey = generateDashboardProbeKey();
+      const newerKey = generateDashboardProbeKey();
+      const serveProbe = async (probeKey: string) => {
+        const server = http.createServer((req, res) => {
+          const requested = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+          const nonce = requested.searchParams.get("nonce") || "";
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            name: "Prism Mind Palace",
+            nonce,
+            proof: createDashboardProbeResponse(probeKey, nonce),
+          }));
+        });
+        const port: number = await new Promise((done) => {
+          server.listen(0, "127.0.0.1", () => done((server.address() as any).port));
+        });
+        return { server, port };
+      };
+      const older = await serveProbe(olderKey);
+      const newer = await serveProbe(newerKey);
+
+      try {
+        registerDashboardAccessUrl(
+          `http://localhost:${older.port}/?token=older-capability`,
+          home,
+          olderKey,
+          { instanceId: "3".repeat(32), registeredAtMs: 1_000, pid: 2_000_000_003 },
+        );
+        registerDashboardAccessUrl(
+          `http://localhost:${newer.port}/?token=newer-capability`,
+          home,
+          newerKey,
+          { instanceId: "4".repeat(32), registeredAtMs: 2_000, pid: 2_000_000_004 },
+        );
+        await new Promise<void>((done) => newer.server.close(() => done()));
+
+        await expect(readDashboardUrlForStartup(home)).resolves.toBe(`http://localhost:${older.port}`);
+      } finally {
+        if (older.server.listening) await new Promise<void>((done) => older.server.close(() => done()));
+        if (newer.server.listening) await new Promise<void>((done) => newer.server.close(() => done()));
+        if (originalPort === undefined) delete process.env.PRISM_DASHBOARD_PORT;
+        else process.env.PRISM_DASHBOARD_PORT = originalPort;
+        await rm(home, { recursive: true, force: true });
       }
     });
 

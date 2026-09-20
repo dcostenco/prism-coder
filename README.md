@@ -151,6 +151,16 @@ or by re-enabling after each run.
 <details>
 <summary>Release history (optional)</summary>
 
+## What's New in v20.21.12
+
+### Multiple MCP hosts keep a working dashboard link
+
+- Each running Prism host now registers its local dashboard independently.
+- `prism dashboard` and the startup message verify the newest candidates and
+  fall back to an older live dashboard when a newer host stops.
+- Instance cleanup cannot remove another host's registration, and the open
+  message preserves the linked account and plan description.
+
 ## What's New in v20.21.11
 
 ### Linked accounts persist across dashboard refreshes

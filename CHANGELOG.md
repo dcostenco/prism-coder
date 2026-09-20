@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.12 — 2026-09-20
+
+### Dashboard discovery survives multiple MCP hosts
+
+Prism previously stored one shared dashboard link and port for every running
+MCP host. Starting a second host replaced the first host's discovery state. If
+the newer host stopped, `prism dashboard` and the startup message could report
+that no dashboard was running even while an older dashboard was still live.
+
+Prism now registers each local dashboard independently, verifies candidates
+newest first with the signed local probe, and falls back to an older live
+instance. Cleanup removes only the record owned by the stopping host. Registry
+files remain owner-only, and older singleton-only installations remain
+discoverable.
+
+The dashboard-open message now describes the active local dashboard without
+relabeling a linked paid account as Free or changing its account, plan, or
+workspace.
+
 ## 20.21.11 — 2026-09-20
 
 ### Linked dashboard accounts survive refreshes and host restarts

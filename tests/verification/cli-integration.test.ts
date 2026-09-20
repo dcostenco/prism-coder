@@ -8,7 +8,11 @@ import { mkdtempSync } from 'node:fs';
 import * as os from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { SqliteStorage } from '../../src/storage/sqlite.js';
-import { readDashboardAccessUrl } from '../../src/dashboard/dashboardAccess.js';
+import {
+  readDashboardAccessUrl,
+  registerDashboardAccessUrl,
+} from '../../src/dashboard/dashboardAccess.js';
+import { createDashboardProbeResponse, generateDashboardProbeKey } from '../../src/dashboard/dashboardProbe.js';
 
 const exec = promisify(execCb);
 const execFile = promisify(execFileCb);
@@ -335,5 +339,63 @@ describe('CLI Integration — accountless Prism Free dashboard', { timeout: 30_0
       body: JSON.stringify({ code: 'synalux_code_not_a_real_code' }),
     });
     expect(accountCodeCannotUnlockLocalAccess.status).toBe(401);
+  });
+});
+
+describe('CLI Integration — concurrent dashboard discovery', { timeout: 30_000 }, () => {
+  it('falls back to a surviving instance after the newest dashboard stops', async () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), 'prism-dashboard-registry-'));
+    const cliPath = path.resolve(__dirname, '../../dist/cli.js');
+    const olderKey = generateDashboardProbeKey();
+    const newerKey = generateDashboardProbeKey();
+    const makeProbeServer = (probeKey: string) => createHttpServer((req, res) => {
+      const requested = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      const nonce = requested.searchParams.get('nonce') || '';
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({
+        name: 'Prism Mind Palace',
+        nonce,
+        proof: createDashboardProbeResponse(probeKey, nonce),
+      }));
+    });
+    const olderServer = makeProbeServer(olderKey);
+    const newerServer = makeProbeServer(newerKey);
+
+    try {
+      await new Promise<void>((resolve) => olderServer.listen(0, '127.0.0.1', resolve));
+      await new Promise<void>((resolve) => newerServer.listen(0, '127.0.0.1', resolve));
+      const olderAddress = olderServer.address();
+      const newerAddress = newerServer.address();
+      if (!olderAddress || typeof olderAddress === 'string' || !newerAddress || typeof newerAddress === 'string') {
+        throw new Error('Could not bind dashboard discovery fixtures');
+      }
+
+      const olderUrl = `http://localhost:${olderAddress.port}/?token=older-capability`;
+      const newerUrl = `http://localhost:${newerAddress.port}/?token=newer-capability`;
+      const older = registerDashboardAccessUrl(olderUrl, home, olderKey, {
+        instanceId: '1'.repeat(32),
+        registeredAtMs: 1_000,
+        pid: 2_000_000_001,
+      });
+      const newer = registerDashboardAccessUrl(newerUrl, home, newerKey, {
+        instanceId: '2'.repeat(32),
+        registeredAtMs: 2_000,
+        pid: 2_000_000_002,
+      });
+      await new Promise<void>((resolve) => newerServer.close(() => resolve()));
+
+      const { stdout } = await execFile(process.execPath, [cliPath, 'dashboard', '--print'], {
+        cwd: path.resolve(__dirname, '../..'),
+        env: { ...process.env, HOME: home, USERPROFILE: home },
+      });
+
+      expect(stdout.trim()).toBe(olderUrl);
+      await expect(fs.access(older.recordPath)).resolves.toBeUndefined();
+      await expect(fs.access(newer.recordPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      if (olderServer.listening) await new Promise<void>((resolve) => olderServer.close(() => resolve()));
+      if (newerServer.listening) await new Promise<void>((resolve) => newerServer.close(() => resolve()));
+      await fs.rm(home, { recursive: true, force: true });
+    }
   });
 });
