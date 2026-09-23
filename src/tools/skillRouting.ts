@@ -418,6 +418,11 @@ export function stripQuotedEvidenceForRouting(
     if (!Array.isArray(list)) continue;
     for (const n of list) if (typeof n === "string") names.add(n);
   }
+  // Protected skills are never prompt-routed, so the table above does not name
+  // them, but every pasted startup log lists them and a protected name can
+  // carry another skill's trigger word: "aba-precision-protocol" satisfied the
+  // clinical \baba\b trigger. They are exact names, not English.
+  for (const n of REQUIRED_PROTECTED_SKILL_NAMES) names.add(n);
   // Longest first, so a name that contains another is removed whole.
   for (const name of [...names].sort((a, b) => b.length - a.length)) {
     // Bounds mirror the routing table's own name policy (≤128 chars). An

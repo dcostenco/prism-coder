@@ -317,3 +317,29 @@ describe('WIRING — the real routing entry point, not just the helper', () => {
     expect(names).toContain('acme-xyz-billing');
   });
 });
+
+/**
+ * Protected skills are never prompt-routed, so the strip above never knew
+ * their names — yet every pasted startup log lists them, and a protected name
+ * can carry ANOTHER skill's trigger word. Real false fire: the clinical
+ * trigger `\baba\b` matched inside "aba-precision-protocol" in a pasted
+ * "Core/protected skills provisioned" line.
+ */
+describe('pasted protected skill names do not activate other skills', () => {
+  const CLINICAL: Record<string, string[]> = { '\\b(?<!data)aba\\b': ['clinical-assistant'] };
+  const routeClinical = (prompt: string): string[] =>
+    _applyPromptRouting([], stripQuotedEvidenceForRouting(prompt, CLINICAL), CLINICAL).map((s) => s.name);
+
+  it('a pasted protected-skill list routes nothing', () => {
+    const pasted = 'why is startup slow?\nCore/protected skills provisioned: prime-directive, aba-precision-protocol, evidence-first-protocol';
+    expect(routeClinical(pasted)).toEqual([]);
+  });
+
+  it('typed clinical text still routes', () => {
+    expect(routeClinical('Draft an ABA behavior plan for elopement')).toEqual(['clinical-assistant']);
+  });
+
+  it('hyphenated clinical English that is not a skill name still routes', () => {
+    expect(routeClinical('Suggest ABA-based strategies for transitions')).toEqual(['clinical-assistant']);
+  });
+});
