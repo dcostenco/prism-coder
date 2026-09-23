@@ -136,6 +136,34 @@ const HOST_TOOL_ACTION_GROUPS = [
   },
 ] as const;
 
+/**
+ * Requirements the host states about its own task. Hosts write the task
+ * description, and many say outright that the work needs host tools or
+ * reserved judgment ("Needs host tools to inspect…", "Reserved security
+ * judgment: …"). The local worker cannot run tools, so these are hard host
+ * boundaries. The tool pattern must start at host/repository/filesystem so
+ * "open-source tools" does not count, and a requirement negated earlier in its
+ * own clause ("needs no host tools") does not count either.
+ */
+const SELF_DECLARED_HOST_REQUIREMENTS = [
+  /\b(?:host|repository|repo|filesystem)(?:[- ](?:side|repository|filesystem|source|shell|git|browser|test|and))*[- ]tools?\b/gi,
+  /\breserved\b[^.;:,!?\n]{0,60}\bjudge?ment\b/gi,
+  /\b(?:security|compliance|tenant[- ]isolation)[- ]judge?ment\b/gi,
+];
+const CLAUSE_DELIMITERS = [".", ";", ":", ",", "!", "?", "\n"];
+const CLAUSE_NEGATION = /\b(?:no|not|without|never|zero)\b/i;
+
+function hasSelfDeclaredHostRequirement(description: string): boolean {
+  for (const pattern of SELF_DECLARED_HOST_REQUIREMENTS) {
+    for (const match of description.matchAll(pattern)) {
+      const before = description.slice(0, match.index);
+      const clauseStart = Math.max(...CLAUSE_DELIMITERS.map((d) => before.lastIndexOf(d))) + 1;
+      if (!CLAUSE_NEGATION.test(before.slice(clauseStart))) return true;
+    }
+  }
+  return false;
+}
+
 /** Complexity signals that should select 27B when the task is bounded. */
 const HIGH_COMPLEXITY_KEYWORDS = [
   "complex logic", "algorithm", "dynamic programming", "constraint solver",
@@ -230,6 +258,7 @@ function assessDelegability(args: SessionTaskRouteArgs): DelegabilityAssessment 
   const reasons: string[] = [];
   if (boundaryKeywordHits > 0) reasons.push("reserved host judgment");
   if (toolWorkflowHits > 0) reasons.push("host tools or external state required");
+  if (hasSelfDeclaredHostRequirement(description)) reasons.push("host requirement stated in the task");
   if (toolActionGroups.length >= HOST_TOOL_ACTION_GROUP_THRESHOLD) {
     reasons.push(`host workflow actions: ${toolActionGroups.join(", ")}`);
   }

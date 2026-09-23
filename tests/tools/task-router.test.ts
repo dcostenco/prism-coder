@@ -308,6 +308,76 @@ describe("computeRoute routing logic", () => {
   });
 });
 
+// ─── Self-declared host requirements ─────────────────────────
+// Hosts write the task description, and they often say outright that the
+// work needs host tools or reserved judgment. Replayed over two months of
+// real routes, 16 of 69 claw routes said exactly that; the local worker cannot
+// run tools, and every one whose outcome was logged came back refused,
+// rejected, or redone by the host. These are paraphrases of those descriptions.
+describe("computeRoute self-declared host requirements", () => {
+  it.each([
+    {
+      label: "needs host tools",
+      task_description: "Independent accessibility and navigation-state review for a shared sidebar change. Needs host tools to inspect app-shell tests and focus management.",
+      estimated_scope: "minor_edit" as const,
+    },
+    {
+      label: "bounded but requiring host tools",
+      task_description: "Bounded independent adversarial review requiring host tools to inspect the exact current worktree source.",
+      estimated_scope: "minor_edit" as const,
+    },
+    {
+      label: "host filesystem tools",
+      task_description: "Inspect the duration recovery implementation with host filesystem tools; identify the exact state and persistence path.",
+      estimated_scope: "minor_edit" as const,
+    },
+    {
+      label: "repository tools",
+      task_description: "Read-only visual-system pass requiring repository tools: identify the actual current component references.",
+      estimated_scope: "minor_edit" as const,
+    },
+    {
+      label: "reserved security judgment",
+      task_description: "Reserved security judgment: adversarial read-only pass over the refund idempotency path.",
+      estimated_scope: "minor_edit" as const,
+    },
+  ])("routes '$label' to the host", (args) => {
+    const result = computeRoute(args);
+
+    expect(result.target).toBe("host");
+    expect(result._hardHostBoundary).toBe(true);
+    expect(result.recommended_tool).toBeNull();
+  });
+
+  it("does not treat a negated requirement as a host boundary", () => {
+    const result = computeRoute({
+      task_description: "Draft a reminder checklist from the notes below; this needs no host tools and no security judgment.",
+      estimated_scope: "minor_edit",
+    });
+
+    expect(result._hardHostBoundary).toBe(false);
+  });
+
+  it("keeps the requirement when a later clause is negated", () => {
+    const result = computeRoute({
+      task_description: "Requires reserved security judgment, not a routine mechanical edit.",
+      estimated_scope: "minor_edit",
+    });
+
+    expect(result._hardHostBoundary).toBe(true);
+    expect(result.target).toBe("host");
+  });
+
+  it("leaves an ordinary bounded task alone", () => {
+    const result = computeRoute({
+      task_description: "Write a JSDoc comment for a function that debounces a callback",
+      estimated_scope: "minor_edit",
+    });
+
+    expect(result._hardHostBoundary).toBe(false);
+  });
+});
+
 // ─── Cold Start & Edge Cases ─────────────────────────────────
 
 describe("computeRoute edge cases", () => {
