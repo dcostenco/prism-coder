@@ -339,6 +339,16 @@ describe('pasted protected skill names do not activate other skills', () => {
     expect(routeClinical('Draft an ABA behavior plan for elopement')).toEqual(['clinical-assistant']);
   });
 
+  it('a trigger formed by typed words on both sides of a name still routes', () => {
+    // Adversarial review, round 1: replacing the name with a line break cut
+    // this proximity window even though both words were typed by the user.
+    const window: Record<string, string[]> = { '\\baba\\b.{0,40}\\bplan\\b': ['clinical-assistant'] };
+    const names = _applyPromptRouting(
+      [], stripQuotedEvidenceForRouting('Draft an ABA evidence-first-protocol plan for elopement', window), window,
+    ).map((s) => s.name);
+    expect(names).toEqual(['clinical-assistant']);
+  });
+
   it('hyphenated clinical English that is not a skill name still routes', () => {
     expect(routeClinical('Suggest ABA-based strategies for transitions')).toEqual(['clinical-assistant']);
   });

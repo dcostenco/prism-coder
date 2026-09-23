@@ -368,6 +368,48 @@ describe("computeRoute self-declared host requirements", () => {
     expect(result.target).toBe("host");
   });
 
+  // Adversarial review, round 1: negation belongs to the words next to the
+  // requirement, not to the whole clause, and it can come after the phrase.
+  it("does not let an unrelated earlier negation cancel a requirement", () => {
+    const result = computeRoute({
+      task_description: "This is not a mechanical edit and requires tenant-isolation judgment.",
+      estimated_scope: "minor_edit",
+    });
+
+    expect(result._hardHostBoundary).toBe(true);
+    expect(result.target).toBe("host");
+  });
+
+  it("reads a negation placed after the requirement", () => {
+    const result = computeRoute({
+      task_description: "Host tools are not required for this bounded summary.",
+      estimated_scope: "minor_edit",
+    });
+
+    expect(result._hardHostBoundary).toBe(false);
+  });
+
+  it("treats 'not only' as affirmative", () => {
+    const result = computeRoute({
+      task_description: "This needs not only host tools but also security judgment.",
+      estimated_scope: "minor_edit",
+    });
+
+    expect(result._hardHostBoundary).toBe(true);
+    expect(result.target).toBe("host");
+  });
+
+  it("stays linear on a long, repetitive description", () => {
+    // The first version rescanned the whole prefix for every match:
+    // 110,003 characters took 945 ms in review.
+    const repeated = "no " + "host tools ".repeat(20_000);
+    const allNegated = "no host tools; ".repeat(15_000);
+    const t0 = performance.now();
+    computeRoute({ task_description: repeated });
+    computeRoute({ task_description: allNegated });
+    expect(performance.now() - t0).toBeLessThan(1_000);
+  });
+
   it("leaves an ordinary bounded task alone", () => {
     const result = computeRoute({
       task_description: "Write a JSDoc comment for a function that debounces a callback",

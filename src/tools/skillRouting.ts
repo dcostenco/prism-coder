@@ -382,7 +382,8 @@ export function stripQuotedEvidenceForRouting(
   // text (adversarial review, confirmed with a repro). Line-anchoring means
   // eating text now requires two line-start fences — which IS a fenced block.
   //
-  // Replacement must sever BOTH proximity-window classes in the real table:
+  // A removed FENCED BLOCK must sever BOTH proximity-window classes in the
+  // real table:
   //   - `.{0,N}` windows: `.` does not cross \n (no pattern uses the s-flag),
   //     so a newline severs them.
   //   - `\s*`/`\s+`-glued windows (34 of 58 live patterns, e.g.
@@ -392,7 +393,15 @@ export function stripQuotedEvidenceForRouting(
   //     includes \x1F (unit separator): non-space (blocks \s runs), non-word
   //     (leaves \b semantics as a space would), and severed from dot-windows
   //     by the flanking newlines.
+  // A removed skill NAME is replaced differently — see INERT below.
   const SEVER = '\n\x1f\n';
+  // Each character of a stripped name becomes \x1F: non-word, so no trigger
+  // word survives inside the name; non-space, so a \s-glued window cannot span
+  // it (the name's own letters blocked it too); and the SAME LENGTH, so a
+  // `.{0,N}` window between typed words on either side matches exactly when it
+  // matched on the raw text — neither bridged nor severed. The earlier SEVER
+  // replacement cut "Draft an ABA <name> plan" apart (review round 1).
+  const INERT = '\x1f';
   let out = prompt
     .replace(/^[ \t]*```[^\n]*\n[\s\S]*?\n[ \t]*```[ \t]*$/gm, SEVER)
     .replace(/^[ \t]*~~~[^\n]*\n[\s\S]*?\n[ \t]*~~~[ \t]*$/gm, SEVER);
@@ -454,7 +463,7 @@ export function stripQuotedEvidenceForRouting(
     if (!/[-_]/.test(name)) continue;
     try {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      out = out.replace(new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, 'gi'), SEVER);
+      out = out.replace(new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, 'gi'), (m) => INERT.repeat(m.length));
     } catch { /* skip unbuildable names — same policy as the matcher */ }
   }
   return out;

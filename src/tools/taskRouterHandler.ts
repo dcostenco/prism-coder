@@ -142,23 +142,33 @@ const HOST_TOOL_ACTION_GROUPS = [
  * reserved judgment ("Needs host tools to inspect…", "Reserved security
  * judgment: …"). The local worker cannot run tools, so these are hard host
  * boundaries. The tool pattern must start at host/repository/filesystem so
- * "open-source tools" does not count, and a requirement negated earlier in its
- * own clause ("needs no host tools") does not count either.
+ * "open-source tools" does not count.
+ *
+ * Negation is read in a short window on each side of the requirement, never
+ * across the whole clause: "is not a mechanical edit and requires … judgment"
+ * still requires it, "host tools are not required" does not, and "not only
+ * host tools" is affirmative. The bounded windows also keep the scan linear —
+ * rescanning the whole prefix per match took 945 ms on 110k characters.
  */
 const SELF_DECLARED_HOST_REQUIREMENTS = [
   /\b(?:host|repository|repo|filesystem)(?:[- ](?:side|repository|filesystem|source|shell|git|browser|test|and))*[- ]tools?\b/gi,
   /\breserved\b[^.;:,!?\n]{0,60}\bjudge?ment\b/gi,
   /\b(?:security|compliance|tenant[- ]isolation)[- ]judge?ment\b/gi,
 ];
-const CLAUSE_DELIMITERS = [".", ";", ":", ",", "!", "?", "\n"];
-const CLAUSE_NEGATION = /\b(?:no|not|without|never|zero)\b/i;
+const NEGATION_WINDOW = 48;
+const NEGATED_BEFORE = /\b(?:no|not|without|never|zero)\s+(?:[\w/-]+\s+){0,2}$/i;
+const NOT_ONLY_BEFORE = /\bnot\s+only\s+(?:[\w/-]+\s+){0,2}$/i;
+const NEGATED_AFTER = /^\s+(?:(?:are|is|were|was|be)\s+)?(?:not|never)\s+(?:required|needed|necessary|used)\b/i;
 
 function hasSelfDeclaredHostRequirement(description: string): boolean {
   for (const pattern of SELF_DECLARED_HOST_REQUIREMENTS) {
     for (const match of description.matchAll(pattern)) {
-      const before = description.slice(0, match.index);
-      const clauseStart = Math.max(...CLAUSE_DELIMITERS.map((d) => before.lastIndexOf(d))) + 1;
-      if (!CLAUSE_NEGATION.test(before.slice(clauseStart))) return true;
+      const start = match.index ?? 0;
+      const end = start + match[0].length;
+      const before = description.slice(Math.max(0, start - NEGATION_WINDOW), start);
+      const after = description.slice(end, end + NEGATION_WINDOW);
+      const negatedBefore = NEGATED_BEFORE.test(before) && !NOT_ONLY_BEFORE.test(before);
+      if (!negatedBefore && !NEGATED_AFTER.test(after)) return true;
     }
   }
   return false;
