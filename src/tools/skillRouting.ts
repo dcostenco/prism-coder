@@ -395,14 +395,16 @@ export function stripQuotedEvidenceForRouting(
   //     by the flanking newlines.
   // A removed skill NAME is replaced differently — see neutralize below.
   const SEVER = '\n\x1f\n';
-  // A stripped name keeps its length and each character's regex class: word
-  // characters become "_" and everything else (the hyphens) stays as it was.
-  // \b, \w, \s and . therefore read the same at every position as on the raw
-  // text, so no window between typed words on either side is bridged or
-  // severed; only the literal letters that could spell a trigger word are
-  // gone. A line-break replacement cut "Draft an ABA <name> plan" apart
-  // (review round 1); a non-word \x1F run cut [-\w] windows (round 3).
-  const neutralize = (name: string): string => name.replace(/\w/g, '_');
+  // A stripped name keeps its length and each character's kind: lowercase
+  // letters become "q", uppercase "Q", digits "0", and separators stay as they
+  // were. \b, \w, \d, \s, ., [a-z] and the like read the same at every
+  // position as on the raw text, so a trigger stops matching only if it needs
+  // the name's actual letters — which is what stripping exists to remove.
+  // Earlier masks leaked: a line break cut "Draft an ABA <name> plan" apart
+  // (review round 1), a non-word \x1F run cut [-\w] windows (round 3), and
+  // "_" cut [ a-z-] windows (round 4).
+  const neutralize = (name: string): string =>
+    name.replace(/[a-z]/g, 'q').replace(/[A-Z]/g, 'Q').replace(/[0-9]/g, '0');
   let out = prompt
     .replace(/^[ \t]*```[^\n]*\n[\s\S]*?\n[ \t]*```[ \t]*$/gm, SEVER)
     .replace(/^[ \t]*~~~[^\n]*\n[\s\S]*?\n[ \t]*~~~[ \t]*$/gm, SEVER);

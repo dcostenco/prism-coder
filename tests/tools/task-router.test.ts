@@ -382,6 +382,25 @@ describe("computeRoute self-declared host requirements", () => {
     expect(result._hardHostBoundary).toBe(false);
   });
 
+  it("does not read ordinary prose about reserving judgment as a requirement", () => {
+    const result = computeRoute({
+      task_description: "Write a simple summary of the sentence: She reserved her judgment until Friday.",
+      estimated_scope: "minor_edit",
+    });
+
+    expect(result._hardHostBoundary).toBe(false);
+  });
+
+  it("stays linear on a near-miss modifier chain", () => {
+    // Review round 4: an unbounded modifier chain restarted at every
+    // "repository", so this input grew quadratically (460 ms at 176k chars).
+    const nearMiss = "repository-".repeat(40_000) + "not-a-tool";
+    const t0 = performance.now();
+    const result = computeRoute({ task_description: nearMiss });
+    expect(performance.now() - t0).toBeLessThan(1_000);
+    expect(result._hardHostBoundary).toBe(false);
+  });
+
   it("stays linear on a long description", () => {
     // An earlier version rescanned the whole prefix for every match (945 ms at
     // 110k characters in review). noMatch forces a scan of the entire input.

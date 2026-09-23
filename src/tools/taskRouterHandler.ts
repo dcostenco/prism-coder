@@ -151,9 +151,15 @@ const HOST_TOOL_ACTION_GROUPS = [
  * back refused or rejected. On two months of real routes, ignoring negation
  * changed no decision.
  */
+// Modifier chains are bounded ({0,3}): an unbounded chain restarted at every
+// "repository" and made a near-miss input quadratic. Modifiers and "reserved
+// … judgment" qualifiers are the closed sets seen in two months of real task
+// descriptions, so prose like "she reserved her judgment" does not match, and
+// "and" counts only before another modifier ("host git and shell tools", not
+// "the host and tools").
 const SELF_DECLARED_HOST_REQUIREMENTS = [
-  /\b(?:host|repository|repo|filesystem)(?:[- ](?:side|repository|filesystem|source|shell|git|browser|test))*[- ]tools?\b/i,
-  /\breserved\b[^.;:,!?\n]{0,60}\bjudge?ment\b/i,
+  /\b(?:host|repository|repo|filesystem)(?:[- /](?:and[- ])?(?:side|repository|filesystem|file|source|shell|git|browser|test|web|docker|documentation|ci|process|external|deployment)){0,3}[- ]tools?\b/i,
+  /\breserved(?:[- /](?:adversarial|security|compliance|release|review|clinical|product|host|auth|phi|safety|tenant|lifecycle|isolation)){0,3}[- ]judge?ment\b/i,
   /\b(?:security|compliance|tenant[- ]isolation)[- ]judge?ment\b/i,
 ];
 

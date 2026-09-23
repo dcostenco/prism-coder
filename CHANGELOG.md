@@ -21,8 +21,9 @@ Prompt routing already ignored skill names pasted into a prompt, but only the
 names it could route. Protected skill names were not stripped, and one of them
 contains a trigger word for a different skill, so pasting Prism's startup
 output could load that skill into an unrelated question. Protected names are
-now stripped too. Text outside a skill name routes as before; a protected
-name itself, typed or pasted, no longer triggers another skill.
+now stripped too. Stripping keeps each character's kind (letter, digit,
+separator), so only a trigger that needs the actual letters of a protected
+name stops matching.
 
 ## 20.21.13 — 2026-09-20
 

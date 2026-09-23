@@ -367,3 +367,16 @@ describe('stripped names keep each character\'s regex class', () => {
     expect(names).toEqual(['outside-skill']);
   });
 });
+
+describe('stripped names keep each character\'s kind', () => {
+  it('a letter-class window across a protected name still matches (review round 4)', () => {
+    // "_" is outside [a-z], so an underscore mask cut this window. Letters now
+    // become "q"/"Q" and digits "0": only a trigger that needs the name's
+    // actual letters stops matching.
+    const t: Record<string, string[]> = { '\\bfoo\\b[ a-z-]{0,40}\\bbar\\b': ['outside-skill'] };
+    const names = _applyPromptRouting(
+      [], stripQuotedEvidenceForRouting('foo aba-precision-protocol bar', t), t,
+    ).map((s) => s.name);
+    expect(names).toEqual(['outside-skill']);
+  });
+});
