@@ -144,30 +144,21 @@ const HOST_TOOL_ACTION_GROUPS = [
  * boundaries. The tool pattern must start at host/repository/filesystem so
  * "open-source tools" does not count.
  *
- * Only a directly negated noun phrase suppresses a requirement: "no host
- * tools", "without (any) host tools". Every other wording — "host tools are
- * not required", "do not skip host tools", a later "but … required" — fails
- * toward the host on purpose. A wrong host route costs one host turn; a wrong
- * claw route costs a delegation that comes back refused or rejected. The
- * fixed look-behind window keeps the scan linear.
+ * Any occurrence counts — negated, contrasted, or merely mentioned. Reading
+ * English negation with patterns kept misrouting ("do not skip host tools",
+ * "no host tools should be omitted"), and the costs are lopsided: a wrong
+ * host route costs one host turn, a wrong claw route a delegation that comes
+ * back refused or rejected. On two months of real routes, ignoring negation
+ * changed no decision.
  */
 const SELF_DECLARED_HOST_REQUIREMENTS = [
-  /\b(?:host|repository|repo|filesystem)(?:[- ](?:side|repository|filesystem|source|shell|git|browser|test))*[- ]tools?\b/gi,
-  /\breserved\b[^.;:,!?\n]{0,60}\bjudge?ment\b/gi,
-  /\b(?:security|compliance|tenant[- ]isolation)[- ]judge?ment\b/gi,
+  /\b(?:host|repository|repo|filesystem)(?:[- ](?:side|repository|filesystem|source|shell|git|browser|test))*[- ]tools?\b/i,
+  /\breserved\b[^.;:,!?\n]{0,60}\bjudge?ment\b/i,
+  /\b(?:security|compliance|tenant[- ]isolation)[- ]judge?ment\b/i,
 ];
-const DIRECT_NEGATION_WINDOW = 16;
-const DIRECTLY_NEGATED = /\b(?:no|without(?:\s+any)?)\s+$/i;
 
 function hasSelfDeclaredHostRequirement(description: string): boolean {
-  for (const pattern of SELF_DECLARED_HOST_REQUIREMENTS) {
-    for (const match of description.matchAll(pattern)) {
-      const start = match.index ?? 0;
-      const before = description.slice(Math.max(0, start - DIRECT_NEGATION_WINDOW), start);
-      if (!DIRECTLY_NEGATED.test(before)) return true;
-    }
-  }
-  return false;
+  return SELF_DECLARED_HOST_REQUIREMENTS.some((pattern) => pattern.test(description));
 }
 
 /** Complexity signals that should select 27B when the task is bounded. */

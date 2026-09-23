@@ -353,3 +353,17 @@ describe('pasted protected skill names do not activate other skills', () => {
     expect(routeClinical('Suggest ABA-based strategies for transitions')).toEqual(['clinical-assistant']);
   });
 });
+
+describe('stripped names keep each character\'s regex class', () => {
+  it('a word-class window across a protected name still matches (review round 3)', () => {
+    // \x1F is not a word character, so replacing a name with it cut [-\w]
+    // windows that the raw text satisfied. Word characters now become "_"
+    // and hyphens stay hyphens: \b, \w, \s and . read the same at every
+    // position; only the literal letters that could form a trigger are gone.
+    const t: Record<string, string[]> = { '\\bfoo\\b[-\\w]{0,30}\\bbar\\b': ['outside-skill'] };
+    const names = _applyPromptRouting(
+      [], stripQuotedEvidenceForRouting('foo-aba-precision-protocol-bar', t), t,
+    ).map((s) => s.name);
+    expect(names).toEqual(['outside-skill']);
+  });
+});

@@ -393,15 +393,16 @@ export function stripQuotedEvidenceForRouting(
   //     includes \x1F (unit separator): non-space (blocks \s runs), non-word
   //     (leaves \b semantics as a space would), and severed from dot-windows
   //     by the flanking newlines.
-  // A removed skill NAME is replaced differently — see INERT below.
+  // A removed skill NAME is replaced differently — see neutralize below.
   const SEVER = '\n\x1f\n';
-  // Each character of a stripped name becomes \x1F: non-word, so no trigger
-  // word survives inside the name; non-space, so a \s-glued window cannot span
-  // it (the name's own letters blocked it too); and the SAME LENGTH, so a
-  // `.{0,N}` window between typed words on either side matches exactly when it
-  // matched on the raw text — neither bridged nor severed. The earlier SEVER
-  // replacement cut "Draft an ABA <name> plan" apart (review round 1).
-  const INERT = '\x1f';
+  // A stripped name keeps its length and each character's regex class: word
+  // characters become "_" and everything else (the hyphens) stays as it was.
+  // \b, \w, \s and . therefore read the same at every position as on the raw
+  // text, so no window between typed words on either side is bridged or
+  // severed; only the literal letters that could spell a trigger word are
+  // gone. A line-break replacement cut "Draft an ABA <name> plan" apart
+  // (review round 1); a non-word \x1F run cut [-\w] windows (round 3).
+  const neutralize = (name: string): string => name.replace(/\w/g, '_');
   let out = prompt
     .replace(/^[ \t]*```[^\n]*\n[\s\S]*?\n[ \t]*```[ \t]*$/gm, SEVER)
     .replace(/^[ \t]*~~~[^\n]*\n[\s\S]*?\n[ \t]*~~~[ \t]*$/gm, SEVER);
@@ -463,7 +464,7 @@ export function stripQuotedEvidenceForRouting(
     if (!/[-_]/.test(name)) continue;
     try {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      out = out.replace(new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, 'gi'), (m) => INERT.repeat(m.length));
+      out = out.replace(new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, 'gi'), neutralize);
     } catch { /* skip unbuildable names — same policy as the matcher */ }
   }
   return out;

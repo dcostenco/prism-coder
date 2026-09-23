@@ -349,60 +349,28 @@ describe("computeRoute self-declared host requirements", () => {
     expect(result.recommended_tool).toBeNull();
   });
 
-  it("does not treat a negated requirement as a host boundary", () => {
-    const result = computeRoute({
-      task_description: "Draft a reminder checklist from the notes below; this needs no host tools and no security judgment.",
-      estimated_scope: "minor_edit",
-    });
-
-    expect(result._hardHostBoundary).toBe(false);
-  });
-
-  it("keeps the requirement when a later clause is negated", () => {
-    const result = computeRoute({
-      task_description: "Requires reserved security judgment, not a routine mechanical edit.",
-      estimated_scope: "minor_edit",
-    });
-
-    expect(result._hardHostBoundary).toBe(true);
-    expect(result.target).toBe("host");
-  });
-
-  // Adversarial review, round 1: negation belongs to the words next to the
-  // requirement, not to the whole clause, and it can come after the phrase.
-  it("does not let an unrelated earlier negation cancel a requirement", () => {
-    const result = computeRoute({
-      task_description: "This is not a mechanical edit and requires tenant-isolation judgment.",
-      estimated_scope: "minor_edit",
-    });
-
-    expect(result._hardHostBoundary).toBe(true);
-    expect(result.target).toBe("host");
-  });
-
-  // Only a directly negated noun phrase ("no host tools", "without any host
-  // tools") suppresses a requirement. Any other wording fails toward the host
-  // on purpose: a wrong host route costs one host turn, a wrong claw route a
-  // delegation that comes back refused or rejected. Review round 2 showed that
-  // reading negation more loosely misroutes double negatives and contrasts.
+  // Any occurrence of a requirement phrase routes to the host — negated,
+  // double-negated, contrasted, or merely mentioned. Reading English negation
+  // with patterns did not converge across three review rounds, and the costs
+  // are lopsided: a wrong host route costs one host turn, a wrong claw route a
+  // delegation that comes back refused or rejected. On two months of real
+  // routes, dropping negation handling changed no decision.
   it.each([
+    "Draft a reminder checklist from the notes below; this needs no host tools and no security judgment.",
+    "Summarize the pasted notes without any host tools.",
+    "No host tools should be omitted for this simple summary.",
     "Host tools are not required for this bounded summary.",
     "Do not skip host tools for this simple bounded summary.",
     "Host tools are not required for drafting, but are required for source inspection.",
-  ])("fails toward the host for %s", (task_description) => {
+    "This needs not only host tools but also security judgment.",
+    "This is not a mechanical edit and requires tenant-isolation judgment.",
+    "Requires reserved security judgment, not a routine mechanical edit.",
+    "Write a short glossary entry explaining what host tools means.",
+  ])("routes %s to the host", (task_description) => {
     const result = computeRoute({ task_description, estimated_scope: "minor_edit" });
 
     expect(result._hardHostBoundary).toBe(true);
     expect(result.target).toBe("host");
-  });
-
-  it("accepts 'without any host tools' as a direct negation", () => {
-    const result = computeRoute({
-      task_description: "Summarize the pasted notes without any host tools.",
-      estimated_scope: "minor_edit",
-    });
-
-    expect(result._hardHostBoundary).toBe(false);
   });
 
   it("does not read 'host and tools' as a tool requirement", () => {
@@ -414,30 +382,16 @@ describe("computeRoute self-declared host requirements", () => {
     expect(result._hardHostBoundary).toBe(false);
   });
 
-  it("treats 'not only' as affirmative", () => {
-    const result = computeRoute({
-      task_description: "This needs not only host tools but also security judgment.",
-      estimated_scope: "minor_edit",
-    });
-
-    expect(result._hardHostBoundary).toBe(true);
-    expect(result.target).toBe("host");
-  });
-
-  it("stays linear on a long, repetitive description", () => {
-    // The first version rescanned the whole prefix for every match:
-    // 110,003 characters took 945 ms in review.
-    // allNegated forces a scan of every match (each is directly negated), so a
-    // skipped or truncated scan changes its result, not just its time.
-    const repeated = "no " + "host tools ".repeat(20_000);
-    const allNegated = "no host tools; ".repeat(15_000);
+  it("stays linear on a long description", () => {
+    // An earlier version rescanned the whole prefix for every match (945 ms at
+    // 110k characters in review). noMatch forces a scan of the entire input.
+    const noMatch = "open-source tools and browser tools; ".repeat(6_000);
     const t0 = performance.now();
-    const repeatedResult = computeRoute({ task_description: repeated });
-    const allNegatedResult = computeRoute({ task_description: allNegated + "then requires host tools." });
+    const clean = computeRoute({ task_description: noMatch });
+    const late = computeRoute({ task_description: noMatch + "then requires host tools." });
     expect(performance.now() - t0).toBeLessThan(1_000);
-    expect(repeatedResult._hardHostBoundary).toBe(true);
-    expect(allNegatedResult._hardHostBoundary).toBe(true);
-    expect(computeRoute({ task_description: allNegated })._hardHostBoundary).toBe(false);
+    expect(clean._hardHostBoundary).toBe(false);
+    expect(late._hardHostBoundary).toBe(true);
   });
 
   it("leaves an ordinary bounded task alone", () => {
