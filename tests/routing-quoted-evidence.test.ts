@@ -381,7 +381,7 @@ describe('stripped names keep each character\'s kind', () => {
   });
 });
 
-describe('documented limitation: a trigger that names the mask can see it', () => {
+describe('documented limitation: a trigger that singles out letters can see the mask', () => {
   it('a trigger written against the mask literal is not protected (review round 5)', () => {
     // Any finite mask is visible to a regex that names it: \bqqqqq\b matches
     // the masked "prime-directive", and (?!qqqqq) would be cut by it. Triggers
@@ -393,5 +393,17 @@ describe('documented limitation: a trigger that names the mask can see it', () =
       [], stripQuotedEvidenceForRouting('see prime-directive here', t), t,
     ).map((s) => s.name);
     expect(names).toEqual(['mask-watcher']);
+  });
+
+  it('a letter range containing q can match a masked name the raw text did not (Fable review)', () => {
+    // "precision" has letters outside [n-s]; its mask "qqqqqqqqq" does not.
+    // Pinned so that narrowing it later is a deliberate change.
+    const t: Record<string, string[]> = { '\\b[n-s]{9}\\b': ['range-watcher'] };
+    const raw = _applyPromptRouting([], 'note aba-precision-protocol here', t).map((s) => s.name);
+    const stripped = _applyPromptRouting(
+      [], stripQuotedEvidenceForRouting('note aba-precision-protocol here', t), t,
+    ).map((s) => s.name);
+    expect(raw).toEqual([]);
+    expect(stripped).toEqual(['range-watcher']);
   });
 });

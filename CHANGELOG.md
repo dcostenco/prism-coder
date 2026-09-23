@@ -22,8 +22,9 @@ names it could route. Protected skill names were not stripped, and one of them
 contains a trigger word for a different skill, so pasting Prism's startup
 output could load that skill into an unrelated question. Protected names are
 now stripped too. Stripping keeps each character's kind (letter, digit,
-separator), so only a trigger that needs the actual letters of a protected
-name stops matching.
+separator). A trigger that singles out particular letters or digits (a word,
+or a range such as [n-s]) may match a stripped name differently; any other
+trigger matches exactly as it does on the raw text.
 
 ## 20.21.13 — 2026-09-20
 

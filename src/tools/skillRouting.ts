@@ -403,10 +403,13 @@ export function stripQuotedEvidenceForRouting(
   // Earlier masks leaked: a line break cut "Draft an ABA <name> plan" apart
   // (review round 1), a non-word \x1F run cut [-\w] windows (round 3), and
   // "_" cut [ a-z-] windows (round 4).
-  // Known limitation (round 5): a trigger that names the mask itself
-  // ("qqqqq", or a lookahead excluding it) can still see it. Triggers come
-  // from the routing table and account owners, so this is disclosed and
-  // pinned in a test rather than defended.
+  // Known limitation: a trigger that singles out particular letters or
+  // digits can see the mask — the literal "qqqqq", a lookahead excluding
+  // it, or a character range such as [n-s] that contains q but not the
+  // replaced letters. Such a trigger may match differently on a stripped
+  // name, in either direction; no fixed mask alphabet avoids that. Triggers
+  // come from the routing table and account owners, so this is disclosed
+  // and pinned in tests rather than defended.
   const neutralize = (name: string): string =>
     name.replace(/[a-z]/g, 'q').replace(/[A-Z]/g, 'Q').replace(/[0-9]/g, '0');
   let out = prompt

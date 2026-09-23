@@ -141,7 +141,7 @@ const HOST_TOOL_ACTION_GROUPS = [
  * description, and many say outright that the work needs host tools or
  * reserved judgment ("Needs host tools to inspect…", "Reserved security
  * judgment: …"). The local worker cannot run tools, so these are hard host
- * boundaries. The tool pattern must start at host/repository/filesystem so
+ * boundaries. The tool pattern must start at host/repository/repo/filesystem so
  * "open-source tools" does not count.
  *
  * Any occurrence counts — negated, contrasted, or merely mentioned. Reading
