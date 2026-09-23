@@ -457,13 +457,17 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
 
   // ── Cold-start / edge case: insufficient input ──
   if (!task_description || task_description.trim().length < 10) {
+    // A stated host requirement is a hard boundary on this path too: the
+    // handler's experience bias and local tie-break both gate on the flag.
+    const hostRequirement = hasSelfDeclaredHostRequirement(task_description ?? "");
     return {
       target: "host",
-      confidence: 0.5,
+      confidence: hostRequirement ? HARD_HOST_BOUNDARY_CONFIDENCE : 0.5,
       needs_history: false,
       complexity_score: 5,
       rationale: "Insufficient information for confident routing. Defaulting to host model.",
       recommended_tool: null,
+      ...(hostRequirement ? { _hardHostBoundary: true } : {}),
     };
   }
 

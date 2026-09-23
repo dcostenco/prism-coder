@@ -357,9 +357,9 @@ describe('pasted protected skill names do not activate other skills', () => {
 describe('stripped names keep each character\'s regex class', () => {
   it('a word-class window across a protected name still matches (review round 3)', () => {
     // \x1F is not a word character, so replacing a name with it cut [-\w]
-    // windows that the raw text satisfied. Word characters now become "_"
-    // and hyphens stay hyphens: \b, \w, \s and . read the same at every
-    // position; only the literal letters that could form a trigger are gone.
+    // windows that the raw text satisfied. The mask now keeps each
+    // character's kind (letters -> q/Q, digits -> 0, separators unchanged),
+    // so \b, \w and . read the same at every position.
     const t: Record<string, string[]> = { '\\bfoo\\b[-\\w]{0,30}\\bbar\\b': ['outside-skill'] };
     const names = _applyPromptRouting(
       [], stripQuotedEvidenceForRouting('foo-aba-precision-protocol-bar', t), t,
@@ -378,5 +378,20 @@ describe('stripped names keep each character\'s kind', () => {
       [], stripQuotedEvidenceForRouting('foo aba-precision-protocol bar', t), t,
     ).map((s) => s.name);
     expect(names).toEqual(['outside-skill']);
+  });
+});
+
+describe('documented limitation: a trigger that names the mask can see it', () => {
+  it('a trigger written against the mask literal is not protected (review round 5)', () => {
+    // Any finite mask is visible to a regex that names it: \bqqqqq\b matches
+    // the masked "prime-directive", and (?!qqqqq) would be cut by it. Triggers
+    // are authored by the routing table and account owners, not by an
+    // adversary of their own routing, so this is disclosed, not defended.
+    // Pinned so that narrowing it later is a deliberate change.
+    const t: Record<string, string[]> = { '\\bqqqqq\\b': ['mask-watcher'] };
+    const names = _applyPromptRouting(
+      [], stripQuotedEvidenceForRouting('see prime-directive here', t), t,
+    ).map((s) => s.name);
+    expect(names).toEqual(['mask-watcher']);
   });
 });

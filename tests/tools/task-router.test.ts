@@ -382,6 +382,19 @@ describe("computeRoute self-declared host requirements", () => {
     expect(result._hardHostBoundary).toBe(false);
   });
 
+  it("marks the boundary on the short-input path too", () => {
+    // Review round 5: inputs under 10 characters returned before the rule
+    // ran, leaving _hardHostBoundary unset, so experience bias or the local
+    // tie-break (both gate on that flag) could still flip them to claw.
+    for (const task_description of ["host tool", "repo tool"]) {
+      const result = computeRoute({ task_description });
+      expect(result.target).toBe("host");
+      expect(result._hardHostBoundary).toBe(true);
+      expect(result.confidence).toBeGreaterThanOrEqual(0.95);
+    }
+    expect(computeRoute({ task_description: "fix typo" })._hardHostBoundary).toBeUndefined();
+  });
+
   it("does not read ordinary prose about reserving judgment as a requirement", () => {
     const result = computeRoute({
       task_description: "Write a simple summary of the sentence: She reserved her judgment until Friday.",
