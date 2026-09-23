@@ -59,7 +59,8 @@ describe('pasted evidence does not activate skills', () => {
     // are >20 chars apart, so \bacme\b.{0,20}\b(billing|invoice)\b does NOT
     // match the raw text. Replacing the name with a SPACE brought them within
     // the window and CREATED a match (adversarial review, reproduced). The
-    // newline replacement severs the window instead: still no match.
+    // name is now masked in place at its full length, so the distance stays
+    // above 20 characters: still no match.
     const LONG = 'acme-xyz-billing-extra-longer';
     const triggers = { ...TRIGGERS, ['\\bacme\\b.{0,20}\\b(billing|invoice)\\b']: ['acme-xyz-billing'] };
     const prompt = `acme ${LONG} invoice`;
@@ -124,11 +125,11 @@ describe('real symptoms still route — the regression risk of the fix', () => {
 });
 
 describe('round-2 review regressions', () => {
-  it('\\s-glued windows are severed too — the real-table bridging repro', () => {
+  it('\\s-glued windows cannot span a stripped name — the real-table bridging repro', () => {
     // 34/58 live patterns glue words with \s* (e.g. \bui\s*test\b). \n IS \s,
     // so the round-1 newline replacement did NOT sever them: stripping a name
-    // from 'ui <name> test' routed xcuitest-ios-watch. The \x1F in the
-    // separator is non-space, so \s runs cannot span it.
+    // from 'ui <name> test' routed xcuitest-ios-watch. The name is now masked
+    // in place with non-space letters, so \s runs cannot span it.
     const t: Record<string, string[]> = {
       '\\bui\\s*test\\b': ['xcuitest-ios-watch'],
       zz: ['gh-fix-ci'],
@@ -415,5 +416,23 @@ describe('documented limitation: a trigger that can tell letters apart can see t
     const stripped = _applyPromptRouting([], stripQuotedEvidenceForRouting(prompt, t), t).map((s) => s.name);
     expect(raw).toEqual([]);
     expect(stripped).toEqual(['backref-watcher']);
+  });
+});
+
+describe('a protected name with a suffix (Fable review, cycle 3)', () => {
+  const CLINICAL: Record<string, string[]> = { '\\baba\\b': ['clinical-assistant'] };
+  const routeClinical = (prompt: string): string[] =>
+    _applyPromptRouting([], stripQuotedEvidenceForRouting(prompt, CLINICAL), CLINICAL).map((s) => s.name);
+
+  it('a plural protected name is stripped too', () => {
+    expect(routeClinical('the aba-precision-protocols are loaded')).toEqual([]);
+  });
+
+  it('documented limitation: any other glued letter or digit hides the name', () => {
+    // A name glued to a following letter or digit (other than a plural "s")
+    // is not recognized as the name, so its trigger word still routes. The
+    // segment anchor exists so "fix-ci" never fires inside "prefix-ci".
+    // Pinned so that narrowing it later is a deliberate change.
+    expect(routeClinical('skills: aba-precision-protocol7')).toEqual(['clinical-assistant']);
   });
 });

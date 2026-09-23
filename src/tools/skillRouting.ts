@@ -411,6 +411,10 @@ export function stripQuotedEvidenceForRouting(
   // tell them apart matches exactly as on the raw text. No mask smaller than
   // the alphabet avoids this; triggers come from the routing table and
   // account owners, so it is disclosed and pinned in tests, not defended.
+  // Also disclosed: a name glued to a following letter or digit other than
+  // a plural "s" ("…-protocol7") is not recognized as the name, so its
+  // trigger words still route; the segment anchor below is what keeps
+  // "fix-ci" from firing inside "prefix-ci".
   const neutralize = (name: string): string =>
     name.replace(/[a-z]/g, 'q').replace(/[A-Z]/g, 'Q').replace(/[0-9]/g, '0');
   let out = prompt
@@ -474,7 +478,7 @@ export function stripQuotedEvidenceForRouting(
     if (!/[-_]/.test(name)) continue;
     try {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      out = out.replace(new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, 'gi'), neutralize);
+      out = out.replace(new RegExp(`(?<![A-Za-z0-9])${escaped}s?(?![A-Za-z0-9])`, 'gi'), neutralize);
     } catch { /* skip unbuildable names — same policy as the matcher */ }
   }
   return out;
