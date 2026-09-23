@@ -436,3 +436,19 @@ describe('a protected name with a suffix (Fable review, cycle 3)', () => {
     expect(routeClinical('skills: aba-precision-protocol7')).toEqual(['clinical-assistant']);
   });
 });
+
+describe('overlapping names are masked as one span (new review, cycle 1)', () => {
+  it('a longer name that overlaps a protected name cannot expose its tail', () => {
+    // Masking name by name let "quarterly-review-acme-aba" consume the head
+    // of "aba-precision-protocol", which then no longer matched, so its
+    // unmasked tail routed. Spans are now found on the unmasked text and
+    // masked once, as a union.
+    const t: Record<string, string[]> = {
+      zz: ['quarterly-review-acme-aba'],
+      '\\bprecision\\b': ['precision-tuner'],
+    };
+    const prompt = 'log line: quarterly-review-acme-aba-precision-protocol loaded';
+    const names = _applyPromptRouting([], stripQuotedEvidenceForRouting(prompt, t), t).map((s) => s.name);
+    expect(names).toEqual([]);
+  });
+});

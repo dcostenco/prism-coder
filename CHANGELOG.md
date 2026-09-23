@@ -21,8 +21,9 @@ Prompt routing already ignored skill names pasted into a prompt, but only the
 names it could route. Protected skill names were not stripped, and one of them
 contains a trigger word for a different skill, so pasting Prism's startup
 output could load that skill into an unrelated question. Protected names are
-now stripped too. Stripping keeps each character's kind (letter, digit,
-separator) but not its identity. A trigger that can tell one letter or digit
+now stripped too. Stripping replaces each ASCII letter with q/Q and each
+digit with 0, keeping its kind but not its identity; other characters are
+left as they are. A trigger that can tell one letter or digit
 from another (a word, a range such as [n-s], or a backreference) may match a
 stripped name differently; a trigger that cannot matches exactly as it does
 on the raw text.

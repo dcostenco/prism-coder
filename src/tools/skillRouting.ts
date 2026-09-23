@@ -395,16 +395,16 @@ export function stripQuotedEvidenceForRouting(
   //     by the flanking newlines.
   // A removed skill NAME is replaced differently — see neutralize below.
   const SEVER = '\n\x1f\n';
-  // A stripped name keeps its length and each character's kind: lowercase
-  // letters become "q", uppercase "Q", digits "0", and separators stay as they
-  // were. \b, \w, \d, \s, ., [a-z] and the like read the same at every
+  // A stripped name keeps its length and each character's kind: ASCII
+  // lowercase letters become "q", ASCII uppercase "Q", ASCII digits "0", and
+  // every other character (separators, non-ASCII letters) stays as it was. \b, \w, \d, \s, ., [a-z] and the like read the same at every
   // position as on the raw text, so a trigger stops matching only if it needs
   // the identity of the name's letters — which is what stripping exists to remove.
   // Earlier masks leaked: a line break cut "Draft an ABA <name> plan" apart
   // (review round 1), a non-word \x1F run cut [-\w] windows (round 3), and
   // "_" cut [ a-z-] windows (round 4).
-  // Known limitation, stated as a class: the mask keeps every character's
-  // kind but not its identity. A trigger that can tell one letter (or one
+  // Known limitation, stated as a class: the mask keeps each ASCII letter's
+  // and digit's kind but not its identity. A trigger that can tell one letter (or one
   // digit) from another — a word, a letter range such as [n-s], the mask
   // letters themselves, or a backreference such as (\w)\1 — may match a
   // stripped name differently, in either direction. A trigger that cannot
@@ -447,8 +447,14 @@ export function stripQuotedEvidenceForRouting(
   // carry another skill's trigger word: "aba-precision-protocol" satisfied the
   // clinical \baba\b trigger. They are exact names, not English.
   for (const n of REQUIRED_PROTECTED_SKILL_NAMES) names.add(n);
-  // Longest first, so a name that contains another is removed whole.
-  for (const name of [...names].sort((a, b) => b.length - a.length)) {
+  // Every name is matched against the SAME unmasked text and the union of
+  // the spans is masked once below. Masking name by name let a longer name
+  // consume the head of an overlapping one, which then no longer matched and
+  // left its tail — and its trigger words — unmasked (new review, cycle 1).
+  // A contained name is covered by the union, so order does not matter.
+  const source = out;
+  const masked = new Uint8Array(source.length);
+  for (const name of names) {
     // Bounds mirror the routing table's own name policy (≤128 chars). An
     // overlong or hostile name from a poisoned table must degrade to
     // "not stripped", never to a thrown SyntaxError that kills routing for
@@ -478,10 +484,15 @@ export function stripQuotedEvidenceForRouting(
     if (!/[-_]/.test(name)) continue;
     try {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      out = out.replace(new RegExp(`(?<![A-Za-z0-9])${escaped}s?(?![A-Za-z0-9])`, 'gi'), neutralize);
+      const re = new RegExp(`(?<![A-Za-z0-9])${escaped}s?(?![A-Za-z0-9])`, 'gi');
+      for (const m of source.matchAll(re)) masked.fill(1, m.index, m.index + m[0].length);
     } catch { /* skip unbuildable names — same policy as the matcher */ }
   }
-  return out;
+  if (!masked.includes(1)) return source;
+  // split('') indexes UTF-16 code units, the same units matchAll reports.
+  const units = source.split('');
+  for (let i = 0; i < units.length; i++) if (masked[i]) units[i] = neutralize(units[i]);
+  return units.join('');
 }
 
 /**
