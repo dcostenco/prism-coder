@@ -452,3 +452,14 @@ describe('overlapping names are masked as one span (new review, cycle 1)', () =>
     expect(names).toEqual([]);
   });
 });
+
+describe('a name that overlaps itself is fully masked (new review, cycle 2)', () => {
+  it('a later occurrence overlapping an earlier one of the same name is masked too', () => {
+    // matchAll finds only non-overlapping occurrences, so in "aba-aba-aba"
+    // the second "aba-aba" was never found and its tail routed.
+    const t: Record<string, string[]> = { zz: ['aba-aba'], '\\baba\\b': ['clinical-assistant'] };
+    const stripped = stripQuotedEvidenceForRouting('log: aba-aba-aba loaded', t);
+    expect(stripped).toBe('log: qqq-qqq-qqq loaded');
+    expect(_applyPromptRouting([], stripped, t).map((s) => s.name)).toEqual([]);
+  });
+});

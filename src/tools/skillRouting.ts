@@ -485,7 +485,14 @@ export function stripQuotedEvidenceForRouting(
     try {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const re = new RegExp(`(?<![A-Za-z0-9])${escaped}s?(?![A-Za-z0-9])`, 'gi');
-      for (const m of source.matchAll(re)) masked.fill(1, m.index, m.index + m[0].length);
+      // exec, restarting one unit after each match START, so an occurrence
+      // that overlaps an earlier one of the same name ("aba-aba" twice in
+      // "aba-aba-aba") is found too; matchAll skips it. lastIndex strictly
+      // increases, so this stays linear for a bounded name length.
+      for (let m = re.exec(source); m; m = re.exec(source)) {
+        masked.fill(1, m.index, m.index + m[0].length);
+        re.lastIndex = m.index + 1;
+      }
     } catch { /* skip unbuildable names — same policy as the matcher */ }
   }
   if (!masked.includes(1)) return source;
