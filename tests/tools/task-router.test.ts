@@ -380,9 +380,34 @@ describe("computeRoute self-declared host requirements", () => {
     expect(result.target).toBe("host");
   });
 
-  it("reads a negation placed after the requirement", () => {
+  // Only a directly negated noun phrase ("no host tools", "without any host
+  // tools") suppresses a requirement. Any other wording fails toward the host
+  // on purpose: a wrong host route costs one host turn, a wrong claw route a
+  // delegation that comes back refused or rejected. Review round 2 showed that
+  // reading negation more loosely misroutes double negatives and contrasts.
+  it.each([
+    "Host tools are not required for this bounded summary.",
+    "Do not skip host tools for this simple bounded summary.",
+    "Host tools are not required for drafting, but are required for source inspection.",
+  ])("fails toward the host for %s", (task_description) => {
+    const result = computeRoute({ task_description, estimated_scope: "minor_edit" });
+
+    expect(result._hardHostBoundary).toBe(true);
+    expect(result.target).toBe("host");
+  });
+
+  it("accepts 'without any host tools' as a direct negation", () => {
     const result = computeRoute({
-      task_description: "Host tools are not required for this bounded summary.",
+      task_description: "Summarize the pasted notes without any host tools.",
+      estimated_scope: "minor_edit",
+    });
+
+    expect(result._hardHostBoundary).toBe(false);
+  });
+
+  it("does not read 'host and tools' as a tool requirement", () => {
+    const result = computeRoute({
+      task_description: "Compare the host and tools used by this simple parser.",
       estimated_scope: "minor_edit",
     });
 
@@ -402,12 +427,17 @@ describe("computeRoute self-declared host requirements", () => {
   it("stays linear on a long, repetitive description", () => {
     // The first version rescanned the whole prefix for every match:
     // 110,003 characters took 945 ms in review.
+    // allNegated forces a scan of every match (each is directly negated), so a
+    // skipped or truncated scan changes its result, not just its time.
     const repeated = "no " + "host tools ".repeat(20_000);
     const allNegated = "no host tools; ".repeat(15_000);
     const t0 = performance.now();
-    computeRoute({ task_description: repeated });
-    computeRoute({ task_description: allNegated });
+    const repeatedResult = computeRoute({ task_description: repeated });
+    const allNegatedResult = computeRoute({ task_description: allNegated + "then requires host tools." });
     expect(performance.now() - t0).toBeLessThan(1_000);
+    expect(repeatedResult._hardHostBoundary).toBe(true);
+    expect(allNegatedResult._hardHostBoundary).toBe(true);
+    expect(computeRoute({ task_description: allNegated })._hardHostBoundary).toBe(false);
   });
 
   it("leaves an ordinary bounded task alone", () => {

@@ -11,8 +11,9 @@ description said outright that it needed host tools or reserved judgment
 ("Needs host tools to inspect…", "requiring host filesystem tools",
 "Reserved security judgment: …"). The local worker cannot run tools, so those
 delegations came back refused, rejected, or redone by the host. The router now
-treats such a stated requirement as a hard host boundary. A requirement negated
-in its own clause ("needs no host tools") does not count.
+treats such a stated requirement as a hard host boundary. Only a directly
+negated phrase ("no host tools", "without any host tools") does not count;
+any other wording keeps the task on the host, where a wrong call costs least.
 
 ### A pasted skill list no longer loads unrelated skills
 
@@ -20,7 +21,8 @@ Prompt routing already ignored skill names pasted into a prompt, but only the
 names it could route. Protected skill names were not stripped, and one of them
 contains a trigger word for a different skill, so pasting Prism's startup
 output could load that skill into an unrelated question. Protected names are
-now stripped too; typed requests route exactly as before.
+now stripped too. Text outside a skill name routes as before; a protected
+name itself, typed or pasted, no longer triggers another skill.
 
 ## 20.21.13 — 2026-09-20
 
