@@ -391,6 +391,7 @@ describe("computeRoute self-declared host requirements", () => {
       expect(result.target).toBe("host");
       expect(result._hardHostBoundary).toBe(true);
       expect(result.confidence).toBeGreaterThanOrEqual(0.95);
+      expect(result.rationale).toContain("host requirement stated in the task");
     }
     expect(computeRoute({ task_description: "fix typo" })._hardHostBoundary).toBeUndefined();
   });

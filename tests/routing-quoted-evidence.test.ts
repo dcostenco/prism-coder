@@ -381,7 +381,7 @@ describe('stripped names keep each character\'s kind', () => {
   });
 });
 
-describe('documented limitation: a trigger that singles out letters can see the mask', () => {
+describe('documented limitation: a trigger that can tell letters apart can see the mask', () => {
   it('a trigger written against the mask literal is not protected (review round 5)', () => {
     // Any finite mask is visible to a regex that names it: \bqqqqq\b matches
     // the masked "prime-directive", and (?!qqqqq) would be cut by it. Triggers
@@ -405,5 +405,15 @@ describe('documented limitation: a trigger that singles out letters can see the 
     ).map((s) => s.name);
     expect(raw).toEqual([]);
     expect(stripped).toEqual(['range-watcher']);
+  });
+
+  it('a backreference can match a masked name the raw text did not (Fable review, cycle 2)', () => {
+    // "evidence" != "protocol" in the raw name; both are "qqqqqqqq" masked.
+    const t: Record<string, string[]> = { '\\b(\\w+)-\\w+-\\1\\b': ['backref-watcher'] };
+    const prompt = 'apply evidence-first-protocol now';
+    const raw = _applyPromptRouting([], prompt, t).map((s) => s.name);
+    const stripped = _applyPromptRouting([], stripQuotedEvidenceForRouting(prompt, t), t).map((s) => s.name);
+    expect(raw).toEqual([]);
+    expect(stripped).toEqual(['backref-watcher']);
   });
 });

@@ -465,7 +465,9 @@ export function computeRoute(args: SessionTaskRouteArgs): TaskRouteResult {
       confidence: hostRequirement ? HARD_HOST_BOUNDARY_CONFIDENCE : 0.5,
       needs_history: false,
       complexity_score: 5,
-      rationale: "Insufficient information for confident routing. Defaulting to host model.",
+      rationale: hostRequirement
+        ? "Host boundary: host requirement stated in the task."
+        : "Insufficient information for confident routing. Defaulting to host model.",
       recommended_tool: null,
       ...(hostRequirement ? { _hardHostBoundary: true } : {}),
     };

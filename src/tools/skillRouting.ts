@@ -399,17 +399,18 @@ export function stripQuotedEvidenceForRouting(
   // letters become "q", uppercase "Q", digits "0", and separators stay as they
   // were. \b, \w, \d, \s, ., [a-z] and the like read the same at every
   // position as on the raw text, so a trigger stops matching only if it needs
-  // the name's actual letters — which is what stripping exists to remove.
+  // the identity of the name's letters — which is what stripping exists to remove.
   // Earlier masks leaked: a line break cut "Draft an ABA <name> plan" apart
   // (review round 1), a non-word \x1F run cut [-\w] windows (round 3), and
   // "_" cut [ a-z-] windows (round 4).
-  // Known limitation: a trigger that singles out particular letters or
-  // digits can see the mask — the literal "qqqqq", a lookahead excluding
-  // it, or a character range such as [n-s] that contains q but not the
-  // replaced letters. Such a trigger may match differently on a stripped
-  // name, in either direction; no fixed mask alphabet avoids that. Triggers
-  // come from the routing table and account owners, so this is disclosed
-  // and pinned in tests rather than defended.
+  // Known limitation, stated as a class: the mask keeps every character's
+  // kind but not its identity. A trigger that can tell one letter (or one
+  // digit) from another — a word, a letter range such as [n-s], the mask
+  // letters themselves, or a backreference such as (\w)\1 — may match a
+  // stripped name differently, in either direction. A trigger that cannot
+  // tell them apart matches exactly as on the raw text. No mask smaller than
+  // the alphabet avoids this; triggers come from the routing table and
+  // account owners, so it is disclosed and pinned in tests, not defended.
   const neutralize = (name: string): string =>
     name.replace(/[a-z]/g, 'q').replace(/[A-Z]/g, 'Q').replace(/[0-9]/g, '0');
   let out = prompt
