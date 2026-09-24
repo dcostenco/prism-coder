@@ -85,6 +85,19 @@ describe("extractSkillTriggers — frontmatter shapes", () => {
     expect(Object.keys(triggers)).toEqual(["\\binvoice\\b"]);
     expect(errors).toEqual([]);
   });
+
+  it("reads a skill saved with Windows line endings exactly as the same skill with \\n", () => {
+    // The frontmatter match required `---\n`, so a CRLF file matched nothing:
+    // no triggers, no error. Old Mac `\r` endings are normalized the same way.
+    const lf = skill('prompt_triggers:\n  - "\\binvoice\\b"\n  - "quarterly close"');
+    const lfResult = extractSkillTriggers("acme-billing", lf);
+    for (const eol of ["\r\n", "\r"]) {
+      const { triggers, errors } = extractSkillTriggers("acme-billing", lf.replace(/\n/g, eol));
+      expect(Object.keys(triggers)).toEqual(Object.keys(lfResult.triggers));
+      expect(errors).toEqual([]);
+    }
+    expect(Object.keys(lfResult.triggers)).toEqual(["\\binvoice\\b", "quarterly close"]);
+  });
 });
 
 describe("safety — user-authored patterns run on the startup path", () => {
