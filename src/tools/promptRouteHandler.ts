@@ -81,6 +81,46 @@ export interface PromptRouteResult {
 }
 
 /**
+ * Turns a host delivers as if a person typed them, although no person wrote
+ * them. Measured 2026-09-23 over 30 days of Claude Code sessions: most of the
+ * prompt hook's skill loads came from these turns, and few of those loads
+ * helped the task. A reviewer agent's report that mentions Supabase is not a
+ * request for the Supabase skill.
+ *
+ * Matched at the START only, never as a substring: a person who pastes a
+ * notification after their own words still routes. Tags are matched without
+ * their closing ">" so attributes do not hide them, and the relay line needs
+ * its colon so a sentence that merely begins with the same words still
+ * routes. The known cost is the reverse: a message that BEGINS with one of
+ * these markers, such as a raw notification pasted with nothing before it, is
+ * treated as machine-written.
+ */
+const MACHINE_TURN_PREFIXES = [
+  "<task-notification",
+  "<agent-message",
+  "Another Claude session sent a message:",
+  "<cross-session-message",
+  "This session is being continued from a previous conversation",
+] as const;
+
+/**
+ * The part of a turn that routing reads. A person's text passes through
+ * unchanged, and a machine-written turn yields "". The exception is a finished
+ * BACKGROUND COMMAND: its one-line summary names the command the agent itself
+ * chose to run ("Build the app for the simulator"), so the summary routes.
+ * Its output never does.
+ */
+export function routableText(prompt: string): string {
+  const text = (prompt || "").trimStart();
+  if (text.startsWith("<task-notification")) {
+    const head = text.split("<result>")[0];
+    const summary = /<summary>([\s\S]*?)<\/summary>/.exec(head)?.[1]?.trim() ?? "";
+    return summary.startsWith("Background command") ? summary : "";
+  }
+  return MACHINE_TURN_PREFIXES.some((marker) => text.startsWith(marker)) ? "" : prompt;
+}
+
+/**
  * Match a prompt and return ONLY skills the caller does not already have.
  *
  * Pure over its deps so the tests exercise real matching rather than mocks of
@@ -91,9 +131,13 @@ export async function routePrompt(
   loaded: string[],
   deps: PromptRouteDeps,
 ): Promise<PromptRouteResult> {
-  const trimmed = (prompt || "").trim();
-  if (!trimmed) {
+  const supplied = (prompt || "").trim();
+  if (!supplied) {
     return { names: [], alreadyLoaded: [], overflow: [], text: "No prompt supplied — nothing to route." };
+  }
+  const trimmed = routableText(supplied).trim();
+  if (!trimmed) {
+    return { names: [], alreadyLoaded: [], overflow: [], text: "Machine-written turn — not routed." };
   }
 
   const scoped = await deps.collectTriggers().catch(() => undefined);

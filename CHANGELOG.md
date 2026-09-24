@@ -28,6 +28,21 @@ from another (a word, a range such as [n-s], or a backreference) may match a
 stripped name differently; a trigger that cannot matches exactly as it does
 on the raw text.
 
+### Notifications and agent reports no longer load skills
+
+Hosts deliver some turns to the prompt hook that no person wrote: background
+task notifications, reports from other agents, and continuation summaries.
+Prompt routing treated them like typed requests, so a word inside an agent's
+report ("Supabase", "screenshot", "unit test") loaded that skill in the middle
+of a task. In our own sessions, most hook skill loads came from these turns,
+and few of those loads helped the task. Such turns are now recognised by how
+they start and are not routed. The exception
+is a finished background command: its one-line summary, which names the
+command the agent chose to run, is still routed, but its output is not. The
+markers are matched only at the start, so a person who pastes a notification
+after their own words is routed as before. A message that begins with a
+pasted notification is not routed.
+
 ## 20.21.13 — 2026-09-20
 
 ### Paid plans are discoverable and actionable in the dashboard
