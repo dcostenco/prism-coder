@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 20.21.14 — 2026-09-23
+## 20.21.14 — 2026-09-24
 
 ### Tasks that say they need host tools stay with the host
 
@@ -55,6 +55,18 @@ is shown when no public table was available and only a skill's own triggers
 could match; when the hook re-injects skills after compaction or a skill
 update, which is not routing; or on skills that `session_load_context` adds to
 a project's context for the prompt, which carry no routed-skills header.
+
+### Skills with their own triggers load even when the file is formatted unusually
+
+A skill that declares its own `prompt_triggers` could be delivered and still
+never load, with no error, in two cases. If a line of its description ended in
+the text "prompt_triggers:", the parser started reading the trigger list there,
+met the real key on the next line, and stopped with nothing. If its SKILL.md
+was saved with Windows (CRLF) or old Mac (CR) line endings, the frontmatter
+never matched at all. Both skills now read exactly as the same file written
+plainly. A new end-to-end test runs such a skill through manifest sync, the
+local cache, routing and a fresh `prism route-prompt` process, and checks that
+it loads and that the injection names the routing table.
 
 ## 20.21.13 — 2026-09-20
 

@@ -158,6 +158,24 @@ or by re-enabling after each run.
 <details>
 <summary>Release history (optional)</summary>
 
+## What's New in v20.21.14
+
+### Skills load when they help, and you can see why they loaded
+
+- Background task notifications, reports from other agents and continuation
+  summaries no longer load skills in the middle of a task, so a word inside an
+  agent's report cannot pull in unrelated rules.
+- Pasting Prism's startup output into a prompt no longer loads skills that
+  happen to share a word with it.
+- Tasks that say they need host tools or reserved judgment stay with the host
+  instead of failing on the local worker.
+- Every routed-skills header ends with the routing table version (for example
+  "Routing table v41."), so a past skill load can be checked against the exact
+  rules that chose it.
+- Skills with their own triggers now load even when their file uses Windows
+  line endings or mentions `prompt_triggers:` in its description; before, they
+  were delivered but silently never loaded.
+
 ## What's New in v20.21.13
 
 ### Paid plans and trials are clear in Account & Settings
