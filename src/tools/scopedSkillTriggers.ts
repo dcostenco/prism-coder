@@ -133,7 +133,9 @@ export function extractSkillTriggers(skillName: string, content: string): Trigge
   } else {
     const blockStart = body.match(/^prompt_triggers:\s*$/m);
     if (blockStart) {
-      const after = body.slice(body.indexOf(blockStart[0]) + blockStart[0].length);
+      // The match's own index, not indexOf: the key text can also end an
+      // earlier line (a description), and indexOf would start there.
+      const after = body.slice((blockStart.index ?? 0) + blockStart[0].length);
       for (const line of after.split("\n")) {
         // Stop at the next top-level key: an unterminated list must not swallow
         // the rest of the frontmatter and turn `description:` into a trigger.

@@ -71,6 +71,20 @@ describe("extractSkillTriggers — frontmatter shapes", () => {
     );
     expect(Object.keys(triggers)).toEqual(["real"]);
   });
+
+  it("reads the block that starts the line, not an earlier mention of the key", () => {
+    // The block start was found with a line-anchored regex, then located again
+    // with indexOf on the matched text — which finds the FIRST occurrence
+    // anywhere. A description ending in "prompt_triggers:" moved the start
+    // into the description; the next line is the real key, which ends the
+    // list at once. The skill loaded with no triggers and no error.
+    const { triggers, errors } = extractSkillTriggers(
+      "acme-billing",
+      `---\nname: acme-billing\ndescription: routes on its own prompt_triggers:\nprompt_triggers:\n  - "\\binvoice\\b"\n---\n# x`,
+    );
+    expect(Object.keys(triggers)).toEqual(["\\binvoice\\b"]);
+    expect(errors).toEqual([]);
+  });
 });
 
 describe("safety — user-authored patterns run on the startup path", () => {
