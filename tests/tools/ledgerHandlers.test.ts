@@ -1160,6 +1160,34 @@ describe("ledgerHandlers", () => {
       expect(miss).not.toContain("Symptom-triggered skills:");
     });
 
+    it("stamps the routing table's version under the symptom-triggered skills", async () => {
+      // A recorded load is only attributable if the transcript says which table
+      // produced it. The persisted table matches the manifest's version, so it
+      // is served with no network.
+      const table = JSON.stringify({ version: 77, prompt_keywords: { "\\bledger drift\\b": ["ledger-skill"] } });
+      mockGetSetting.mockImplementation(async (key: string, fallback = "") => ({
+        autoload_projects: "alpha",
+        default_context_depth: "standard",
+        "skill_manifest:tier": "enterprise",
+        "skill_manifest:names": JSON.stringify(["ledger-skill"]),
+        "skill_manifest:routing_version": "77",
+        "skill:ledger-skill": "# ledger-skill\nCheck the rows first.",
+        routing_keywords: table,
+      }[key] ?? fallback));
+      mockGetAllSettings.mockResolvedValue({ "skill:ledger-skill": "# ledger-skill\nCheck the rows first." });
+      const storage = makeStorageStub();
+      storage.loadContext.mockResolvedValue({ last_summary: "ctx", version: 1 });
+      vi.mocked(getStorage).mockResolvedValue(storage as never);
+
+      const hit = (await sessionBootstrapHandler({ prompt: "why is there ledger drift in the report?" }))
+        .content[0].text as string;
+      expect(hit).toContain("**Symptom-triggered skills:** ledger-skill\n");
+      expect(hit).toMatch(/proposing any change\.\nRouting table v77\.\n/);
+
+      const miss = (await sessionBootstrapHandler({ prompt: "rename the helper" })).content[0].text as string;
+      expect(miss).not.toContain("Routing table");
+    });
+
     it("never inlines the frontmatter of a scoped skill whose closing fence is its last line", async () => {
       // Round-7 review: the inline path had its own fence parser that returned
       // the WHOLE document when nothing followed the closing fence (indexOf of

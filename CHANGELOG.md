@@ -43,6 +43,19 @@ markers are matched only at the start, so a person who pastes a notification
 after their own words is routed as before. A message that begins with a
 pasted notification is not routed.
 
+### Routed skills name the routing table that chose them
+
+The routing table changes over time, and a transcript recorded which skills
+loaded but not which version of the table picked them, so a past load could
+not be judged against the rules that produced it. The routed-skills header
+from the prompt hook and `session_route_prompt`, and the symptom-triggered
+skills line from `session_bootstrap`, now end with the table's version, for
+example "Routing table v41.". The skills line itself is unchanged. No version
+is shown when no public table was available and only a skill's own triggers
+could match; when the hook re-injects skills after compaction or a skill
+update, which is not routing; or on skills that `session_load_context` adds to
+a project's context for the prompt, which carry no routed-skills header.
+
 ## 20.21.13 — 2026-09-20
 
 ### Paid plans are discoverable and actionable in the dashboard

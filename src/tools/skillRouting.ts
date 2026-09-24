@@ -566,14 +566,34 @@ export async function resolvePromptSkillNames(
   expectVersion?: number,
   scopedTriggers?: Record<string, string[]>,
 ): Promise<string[]> {
-  if (!prompt) return [];
+  return (await resolvePromptRouting(prompt, expectVersion, scopedTriggers)).names;
+}
+
+/** Matched skill names, and the version of the public table they were matched against. */
+export interface PromptRouting {
+  names: string[];
+  /** Absent when no public table was available (scoped triggers only, or nothing). */
+  tableVersion?: number;
+}
+
+/**
+ * resolvePromptSkillNames, plus which routing table produced the match. A load
+ * recorded without its table version cannot be attributed after the table
+ * changes, so callers that show routed skills also show the version.
+ */
+export async function resolvePromptRouting(
+  prompt: string,
+  expectVersion?: number,
+  scopedTriggers?: Record<string, string[]>,
+): Promise<PromptRouting> {
+  if (!prompt) return { names: [] };
   const kw = await fetchKeywordTable(expectVersion);
   // Scoped triggers must still route when the PUBLIC table is unavailable:
   // they are declared in skill bodies already on this machine and owe nothing
   // to a network fetch. Returning [] here would make a private skill's routing
   // depend on a public file it can never appear in.
   const publicKeywords = kw?.prompt_keywords ?? {};
-  if (!kw && !scopedTriggers) return [];
+  if (!kw && !scopedTriggers) return { names: [] };
 
   // NULL-PROTOTYPE, not a literal (round-4 review): with a plain object, a
   // scoped pattern whose TEXT is an inherited property name made both sides
@@ -595,7 +615,10 @@ export async function resolvePromptSkillNames(
     if (clean.length === 0) continue;
     combined[pattern] = [...(combined[pattern] ?? []), ...clean];
   }
-  return _applyPromptRouting([], stripQuotedEvidenceForRouting(prompt, combined), combined).map((s) => s.name);
+  return {
+    names: _applyPromptRouting([], stripQuotedEvidenceForRouting(prompt, combined), combined).map((s) => s.name),
+    tableVersion: kw?.version,
+  };
 }
 
 /**

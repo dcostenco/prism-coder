@@ -53,6 +53,13 @@ export interface PromptRouteDeps {
     manifestVersion?: number,
     scopedTriggers?: Record<string, string[]>,
   ) => Promise<string[]>;
+  /** The same match plus the routing table's version. Preferred when wired:
+   *  the version is stamped on the routed-skills header. */
+  resolvePromptRouting?: (
+    prompt: string,
+    manifestVersion?: number,
+    scopedTriggers?: Record<string, string[]>,
+  ) => Promise<{ names: string[]; tableVersion?: number }>;
   /** Delivered + local frontmatter triggers collected on this machine. */
   collectTriggers: () => Promise<
     { triggers: Record<string, string[]>; localNames: Set<string>; localBodies?: Map<string, string> } | undefined
@@ -144,8 +151,15 @@ export async function routePrompt(
   const version = await deps.manifestVersion().catch(() => undefined);
 
   let matched: string[] = [];
+  let tableVersion: number | undefined;
   try {
-    matched = await deps.resolvePromptSkillNames(trimmed, version, scoped?.triggers);
+    if (deps.resolvePromptRouting) {
+      const routed = await deps.resolvePromptRouting(trimmed, version, scoped?.triggers);
+      matched = routed.names;
+      tableVersion = routed.tableVersion;
+    } else {
+      matched = await deps.resolvePromptSkillNames(trimmed, version, scoped?.triggers);
+    }
   } catch (error) {
     // Routing must never take down the turn that asked for it.
     debugLog(`[session_route_prompt] match failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -217,10 +231,13 @@ export async function routePrompt(
     overflow.length > 0
       ? `\n\nAlso matched, not injected: ${overflowShown.join(", ")}${overflow.length > overflowShown.length ? ` (+${overflow.length - overflowShown.length} more)` : ""}.`
       : "";
+  // The table version makes a recorded load attributable after the table
+  // changes; without it, a transcript cannot say which rules produced a load.
+  const versionNote = typeof tableVersion === "number" ? `\n\nRouting table v${tableVersion}.` : "";
   const header =
     `**Skills now active for this task:** ${delivered.join(", ")}\n\n` +
     `These apply to the work you are about to do. Read and follow them before proceeding.` +
-    overflowNote;
+    overflowNote + versionNote;
 
   return { names: delivered, alreadyLoaded, overflow, header, blocks, text: `${header}\n\n${blocks.join("\n\n")}` };
 }

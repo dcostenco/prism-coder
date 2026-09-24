@@ -533,7 +533,8 @@ describe('skill routing — native path (bootstrap)', () => {
     );
     // Window must cover the whole block; it is mostly comment, so keep it wide.
     const block = src.split('Symptom-triggered skills (on-device prompt routing)')[1]?.slice(0, 3000) ?? '';
-    expect(block).toMatch(/resolvePromptSkillNames/);
+    // resolvePromptRouting is resolvePromptSkillNames plus the table version.
+    expect(block).toMatch(/resolvePromptRouting/);
     expect(block, 'matched names must be filtered by entitlement').toMatch(/entitledSkillNames\.has/);
   });
 });
@@ -789,6 +790,23 @@ describe("keyword table — persisted-first (the route-prompt CLI is a fresh pro
     try {
       const names = await resolvePromptSkillNames("the totals are not sticky", 99);
       expect(names).toContain("visual-screenshot-verification");
+    } finally {
+      globalThis.fetch = realFetch;
+      _setStorage(null as never, null as never);
+    }
+  });
+
+  it("reports which table version produced the match", async () => {
+    const { _setStorage, resolvePromptRouting } = await import("../src/tools/skillRouting.js");
+    const table = JSON.stringify({ version: 98, prompt_keywords: { "\\bnot sticky\\b": ["visual-screenshot-verification"] } });
+    _setStorage(async () => {}, async (key) => (key === "routing_keywords" ? table : ""));
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (() => { throw new Error("network must not be touched"); }) as never;
+    try {
+      const routed = await resolvePromptRouting("the totals are not sticky", 98);
+      expect(routed.names).toContain("visual-screenshot-verification");
+      expect(routed.tableVersion).toBe(98);
+      expect(await resolvePromptRouting("", 98)).toEqual({ names: [] });
     } finally {
       globalThis.fetch = realFetch;
       _setStorage(null as never, null as never);

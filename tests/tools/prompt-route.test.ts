@@ -165,6 +165,27 @@ describe("injection", () => {
     expect(r.text).toContain("Render it and look at it.");
   });
 
+  it("stamps the routing table's version on the header, so a recorded load can be attributed", async () => {
+    const r = await routePrompt("the totals are not sticky", [], deps({
+      resolvePromptRouting: async () => ({ names: ["visual-screenshot-verification"], tableVersion: 41 }),
+      resolvePromptSkillNames: async () => { throw new Error("the versioned resolver must be preferred"); },
+    }));
+    expect(r.names).toEqual(["visual-screenshot-verification"]);
+    expect(r.header).toMatch(/\n\nRouting table v41\.$/);
+    expect(r.text).toContain("Routing table v41.");
+    // The skills line itself stays a plain list: transcript readers parse it.
+    expect(r.text).toMatch(/^\*\*Skills now active for this task:\*\* visual-screenshot-verification\n/);
+  });
+
+  it("states no version when no public table was matched", async () => {
+    const noTable = await routePrompt("the totals are not sticky", [], deps({
+      resolvePromptRouting: async () => ({ names: ["visual-screenshot-verification"] }),
+    }));
+    expect(noTable.text).not.toContain("Routing table");
+    const unwired = await routePrompt("the totals are not sticky", [], deps());
+    expect(unwired.text).not.toContain("Routing table");
+  });
+
   it("caps how many bodies one call can inject", async () => {
     const many = Array.from({ length: 9 }, (_, i) => `skill${i}`);
     const r = await routePrompt("ui/ux", [], deps({
