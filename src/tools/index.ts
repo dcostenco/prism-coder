@@ -19,8 +19,8 @@
 // These are the 7 base tools that are always available.
 // Definitions = tool schemas (name, description, input parameters)
 // Handlers = the actual implementation logic
-export { WEB_SEARCH_TOOL, BRAVE_WEB_SEARCH_CODE_MODE_TOOL, LOCAL_SEARCH_TOOL, BRAVE_LOCAL_SEARCH_CODE_MODE_TOOL, CODE_MODE_TRANSFORM_TOOL, BRAVE_ANSWERS_TOOL, RESEARCH_PAPER_ANALYSIS_TOOL } from "./definitions.js";
-export { webSearchHandler, braveWebSearchCodeModeHandler, localSearchHandler, braveLocalSearchCodeModeHandler, codeModeTransformHandler, braveAnswersHandler, researchPaperAnalysisHandler } from "./handlers.js";
+export { WEB_SEARCH_TOOL, BRAVE_WEB_SEARCH_CODE_MODE_TOOL, LOCAL_SEARCH_TOOL, BRAVE_LOCAL_SEARCH_CODE_MODE_TOOL, CODE_MODE_TRANSFORM_TOOL, BRAVE_ANSWERS_TOOL, RESEARCH_PAPER_ANALYSIS_TOOL, YOUCOM_WEB_SEARCH_TOOL } from "./definitions.js";
+export { webSearchHandler, braveWebSearchCodeModeHandler, localSearchHandler, braveLocalSearchCodeModeHandler, codeModeTransformHandler, braveAnswersHandler, researchPaperAnalysisHandler, youcomWebSearchHandler } from "./handlers.js";
 
 // ── Session Memory Tools (Optional) ──
 // These tools are only active when Supabase is configured (SUPABASE_URL + SUPABASE_KEY).
