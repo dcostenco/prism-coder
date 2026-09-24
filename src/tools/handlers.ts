@@ -322,7 +322,7 @@ export async function researchPaperAnalysisHandler(args: unknown) {
 }
 
 // ─── You.com Web Search Handler (Optional) ───────────────────
-// Registered only when YOUCOM_API_KEY is set.
+// Registered only when YDC_API_KEY is set.
 
 /** Performs a web search via You.com and returns formatted results. */
 export async function youcomWebSearchHandler(args: unknown) {

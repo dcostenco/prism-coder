@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
  *                            is needed. Get one at https://brave.com/search/api/
  *   GOOGLE_API_KEY         — (optional) API key for Google AI Studio / Gemini. Enables paper analysis.
  *   BRAVE_ANSWERS_API_KEY  — (optional) API key for Brave Answers (AI grounding). Enables brave_answers tool.
- *   YOUCOM_API_KEY         — (optional) API key for You.com Search. When set, the optional
+ *   YDC_API_KEY            — (optional) API key for You.com Search. When set, the optional
  *                            youcom_web_search tool is registered as an alternative web search
  *                            provider. Get one at https://you.com/platform/api-keys
  *   SUPABASE_URL           — (optional) Your Supabase project URL. Enables session memory tools.
@@ -89,11 +89,12 @@ if (!BRAVE_ANSWERS_API_KEY && process.env.PRISM_DEBUG_LOGGING === "true") {
 // Used by the youcom_web_search tool. When set, registers an optional
 // web search tool that uses You.com's search API.
 // Get a key at https://you.com/platform/api-keys
+// You.com's own docs use YDC_API_KEY: https://you.com/docs/using-the-api/authentication
 
-export const YOUCOM_API_KEY = process.env.YOUCOM_API_KEY;
+export const YDC_API_KEY = process.env.YDC_API_KEY;
 if (process.env.PRISM_DEBUG_LOGGING === "true") {
   // Log presence or absence — non-critical, just informational
-  console.error(`[Prism] You.com search: ${YOUCOM_API_KEY ? "configured" : "not configured (youcom_web_search tool disabled)"}`);
+  console.error(`[Prism] You.com search: ${YDC_API_KEY ? "configured" : "not configured (youcom_web_search tool disabled)"}`);
 }
 
 // ─── Optional: Voyage AI Embeddings ──────────────────────────

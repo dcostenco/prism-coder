@@ -106,7 +106,7 @@ export const WEB_SEARCH_TOOL: Tool = {
 };
 
 // ─── You.com Web Search Tool (Optional) ───────────────────────
-// Registered only when YOUCOM_API_KEY is set. Provides an alternative
+// Registered only when YDC_API_KEY is set. Provides an alternative
 // web search provider alongside the built-in Brave search tools.
 // You.com allows up to 20 results per request.
 
@@ -115,7 +115,7 @@ export const YOUCOM_WEB_SEARCH_TOOL: Tool = {
   description:
     "Performs a web search using the You.com Search API, ideal for general queries, news, articles, and current events. " +
     "Returns formatted results with titles, URLs, and descriptions. " +
-    "Configure with the YOUCOM_API_KEY environment variable. " +
+    "Configure with the YDC_API_KEY environment variable. " +
     "Get a key at https://you.com/platform/api-keys",
   inputSchema: {
     type: "object",

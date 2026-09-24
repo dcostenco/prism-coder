@@ -79,7 +79,7 @@ import {
   PRISM_HDC_ENABLED,
   PRISM_TASK_ROUTER_ENABLED_ENV,
   PRISM_DARK_FACTORY_ENABLED,
-  YOUCOM_API_KEY,
+  YDC_API_KEY,
 } from "./config.js";
 import { startWatchdog, drainAlerts } from "./hivemindWatchdog.js";
 import { startScheduler } from "./backgroundScheduler.js";
@@ -285,8 +285,8 @@ const BASE_TOOLS: Tool[] = [
   BRAVE_ANSWERS_TOOL,                 // brave_answers — AI-grounded answers
   RESEARCH_PAPER_ANALYSIS_TOOL,       // gemini_research_paper_analysis — paper analysis
   PRISM_INFER_TOOL,                   // prism_infer — local-first inference (token-saving cascade)
-  // youcom_web_search — optional You.com web search, gated on YOUCOM_API_KEY
-  ...(YOUCOM_API_KEY ? [YOUCOM_WEB_SEARCH_TOOL] : []),
+  // youcom_web_search — optional You.com web search, gated on YDC_API_KEY
+  ...(YDC_API_KEY ? [YOUCOM_WEB_SEARCH_TOOL] : []),
 ];
 
 // Hook-free first-turn startup is owned by session_bootstrap. Its static tool
@@ -911,7 +911,7 @@ export function createServer() {
           case "prism_infer":
             result = await prismInferHandler(args); break;
 
-          // ── Optional You.com Web Search (only when YOUCOM_API_KEY is set) ──
+          // ── Optional You.com Web Search (only when YDC_API_KEY is set) ──
 
           case "youcom_web_search":
             result = await youcomWebSearchHandler(args); break;

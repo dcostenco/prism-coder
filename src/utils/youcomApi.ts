@@ -1,50 +1,49 @@
 /**
  * You.com Web Search API Client
  *
- * Thin HTTP client for the You.com Search API. When YOUCOM_API_KEY is set,
+ * Thin HTTP client for the You.com Search API. When YDC_API_KEY is set,
  * the `youcom_web_search` tool becomes available as an optional alternative
  * to the built-in Brave search tools.
  *
- * You.com offers two access modes:
- *   1. Authenticated (YDC_API_KEY) — full web search + URL content extraction
- *   2. Keyless free tier — basic web search only (no API key needed)
- *
- * Authentication: Use the YDC_API_KEY environment variable.
+ * Authentication uses the X-API-Key header with the YDC_API_KEY env var.
  * Get a key at https://you.com/platform/api-keys
+ *
+ * API docs: https://you.com/docs/api-reference/search/v1-search
  */
 
-import { YOUCOM_API_KEY } from "../config.js";
+import { YDC_API_KEY } from "../config.js";
 import { debugLog } from "./logger.js";
 
-const YOUS_SEARCH_API = "https://api.you.com/api/v1/search";
-const YOUCOM_API_KEY_MISSING_ERROR = "YOUCOM_API_KEY is not configured";
+const YOUCOM_SEARCH_API = "https://ydc-index.io/v1/search";
+const YDC_API_KEY_MISSING_ERROR = "YDC_API_KEY is not configured";
 
-interface YouComSearchResult {
+interface YouComSearchWebResult {
   title: string;
   url: string;
   description?: string;
-  snippet?: string;
-  date?: string;
 }
 
 interface YouComSearchResponse {
-  results?: YouComSearchResult[];
+  web?: YouComSearchWebResult[];
+  news?: YouComSearchWebResult[];
   error?: string;
+}
+
+interface YouComApiError {
+  error?: string;
+  message?: string;
 }
 
 /**
  * Formats a single search result as a markdown-like text block,
  * matching the style used by the Brave search results in the codebase.
  */
-function formatResult(result: YouComSearchResult, index: number): string {
+function formatResult(result: YouComSearchWebResult, index: number): string {
   const lines: string[] = [];
   lines.push(`${index + 1}. ${result.title}`);
   lines.push(`   URL: ${result.url}`);
   if (result.description) {
     lines.push(`   Description: ${result.description}`);
-  }
-  if (result.date) {
-    lines.push(`   Date: ${result.date}`);
   }
   return lines.join("\n");
 }
@@ -53,34 +52,33 @@ function formatResult(result: YouComSearchResult, index: number): string {
  * Performs a web search using the You.com Search API and returns
  * formatted text results (title, URL, description).
  *
- * Gated on YOUCOM_API_KEY being set; callers should check the
+ * Gated on YDC_API_KEY being set; callers should check the
  * exported constant before registering the tool.
  */
 export async function performYouComSearch(
   query: string,
   count: number = 10,
 ): Promise<string> {
-  if (!YOUCOM_API_KEY) {
-    throw new Error(YOUCOM_API_KEY_MISSING_ERROR);
+  if (!YDC_API_KEY) {
+    throw new Error(YDC_API_KEY_MISSING_ERROR);
   }
 
-  const params = new URLSearchParams({
+  const body = {
     query,
-  });
-  if (count > 0) {
-    params.set("count", String(Math.min(count, 20)));
-  }
+    count: Math.min(count, 20),
+  };
 
-  const url = `${YOUS_SEARCH_API}?${params.toString()}`;
-  debugLog(`[youcomApi] searching: query_chars=${query.length}, count=${count}`);
+  debugLog(`[youcomApi] searching: query_chars=${query.length}, count=${body.count}`);
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetch(YOUCOM_SEARCH_API, {
+      method: "POST",
       headers: {
-        Authorization: `Bearer ${YOUCOM_API_KEY}`,
-        Accept: "application/json",
+        "X-API-Key": YDC_API_KEY,
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     });
   } catch (err: any) {
@@ -89,10 +87,16 @@ export async function performYouComSearch(
   }
 
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    debugLog(`[youcomApi] HTTP ${response.status}: ${body.slice(0, 200)}`);
+    let errorInfo: string;
+    try {
+      const errBody: YouComApiError = await response.json() as YouComApiError;
+      errorInfo = errBody?.message ?? errBody?.error ?? response.statusText;
+    } catch {
+      errorInfo = await response.text().catch(() => response.statusText);
+    }
+    debugLog(`[youcomApi] HTTP ${response.status}: ${errorInfo.slice(0, 200)}`);
     throw new Error(
-      `You.com search returned HTTP ${response.status}${body ? `: ${body.slice(0, 200)}` : ""}`
+      `You.com search returned HTTP ${response.status}${errorInfo ? `: ${errorInfo.slice(0, 200)}` : ""}`
     );
   }
 
@@ -109,9 +113,17 @@ export async function performYouComSearch(
     throw new Error(`You.com search API error: ${data.error}`);
   }
 
-  const results = data.results ?? [];
+  // The API returns { web: [...], news: [...] }. Surface web results primarily.
+  const results: YouComSearchWebResult[] = (data.web ?? []);
   if (results.length === 0) {
-    return `No results found for "${query}".\n`;
+    // Fall back to news if web is empty
+    const newsResults = data.news ?? [];
+    if (newsResults.length === 0) {
+      return `No results found for "${query}".\n`;
+    }
+    const formatted = newsResults.map((r, i) => formatResult(r, i));
+    const header = `You.com news results for "${query}":\n${"=".repeat(60)}\n\n`;
+    return header + formatted.join("\n\n") + "\n";
   }
 
   const formatted = results.map((r, i) => formatResult(r, i));
@@ -120,9 +132,9 @@ export async function performYouComSearch(
 }
 
 /**
- * Returns true when YOUCOM_API_KEY is set, so callers can conditionally
+ * Returns true when YDC_API_KEY is set, so callers can conditionally
  * register the youcom_web_search tool.
  */
 export function youcomSearchAvailable(): boolean {
-  return !!YOUCOM_API_KEY;
+  return !!YDC_API_KEY;
 }

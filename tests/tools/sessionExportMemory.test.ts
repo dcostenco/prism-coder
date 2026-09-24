@@ -101,6 +101,7 @@ vi.mock("../../src/config.js", () => ({
   PRISM_AUTO_CAPTURE:     false,
   PRISM_CAPTURE_PORTS:    [],
   GOOGLE_API_KEY:         "",
+  YDC_API_KEY:            "",
   SERVER_CONFIG:          { name: "prism-test", version: "4.5.1" },
   // Step 5 pruning config — required by backgroundScheduler.ts transitive import
   PRISM_GRAPH_PRUNING_ENABLED:            false,
