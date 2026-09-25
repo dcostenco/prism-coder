@@ -196,7 +196,18 @@ afterEach(async () => {
   else process.env.PRISM_FORCE_LOCAL = previousForceLocal;
   if (previousSyncDisabled === undefined) delete process.env.PRISM_SKILL_SYNC_DISABLED;
   else process.env.PRISM_SKILL_SYNC_DISABLED = previousSyncDisabled;
-  await rm(fixtureRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
+  try {
+    await rm(fixtureRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // libsql-js#228: close() cannot finalize prepared statements, so Windows can
+    // hold config.db and its -shm/-wal files until V8 GC. This failed main's
+    // Windows CLI Integration on three of four runs after the test landed. The
+    // runner removes its temp tree at exit; any other cleanup error still fails.
+    if (process.platform !== "win32" || !["EBUSY", "EPERM", "ENOTEMPTY"].includes(code ?? "")) {
+      throw error;
+    }
+  }
 });
 
 describe("scoped skill host lifecycle", () => {
