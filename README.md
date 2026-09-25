@@ -158,6 +158,21 @@ or by re-enabling after each run.
 <details>
 <summary>Release history (optional)</summary>
 
+## What's New in v20.21.15
+
+### Follow-ups: see what runs locally, and a stricter screen when the classifier is down
+
+- `local_savings` (and `prism savings`) shows a line for follow-ups, calls that
+  carried your conversation. It covers how many the local model answered (and
+  how many of those the 9b answered), how many the on-device screen refused and
+  at which stage, how many your plan's multi-turn limits refused, and how many
+  went to the cloud.
+- A short chat answer ("16", "Yes") counts as an answer. Before, the quality
+  gate treated it as empty, and a paid plan re-asked the cloud.
+- When the on-device classifier fails every read on a follow-up, the follow-up
+  is no longer answered on a keyword check alone. It goes to the cloud if your
+  plan allows it, and is refused otherwise.
+
 ## What's New in v20.21.14
 
 ### Skills load when they help, and you can see why they loaded

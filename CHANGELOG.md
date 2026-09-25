@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 20.21.15 — 2026-09-25
 
 ### A follow-up is no longer served on keyword checks alone while the classifier is down
 
@@ -31,6 +31,15 @@ Before this, multi-turn use was recorded but never shown, so there was no way
 to tell whether local serving was taking over follow-ups or sending them back
 to your host. The figures come from the ledger prism already keeps. Nothing
 new is recorded or sent.
+
+### A short chat answer is an answer
+
+The quality gate treated any chat answer of four characters or fewer as an
+empty response. A follow-up is often answered with one short value ("16",
+"Yes"). On a paid plan, a failed gate discards the local answer and asks the
+cloud instead. In chat mode an answer now counts as empty only when it has no
+letter or digit at all ("", "..."). Route mode is unchanged (empty only when
+blank), and code mode keeps its four-character floor.
 
 ## 20.21.14 — 2026-09-24
 

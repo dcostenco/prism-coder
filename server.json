@@ -6,13 +6,13 @@
     "url": "https://github.com/dcostenco/prism-coder",
     "source": "github"
   },
-  "version": "20.21.14",
+  "version": "20.21.15",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "prism-mcp-server",
-      "version": "20.21.14",
+      "version": "20.21.15",
       "transport": {
         "type": "stdio"
       },
