@@ -1445,11 +1445,11 @@ It is paid because it cannot run without Synalux behind it:
 ```typescript
 // Call 1
 prism_infer({ prompt: "My project codename is Nightjar. Reply OK.", mode: "chat" })
-// → "OK"                                  (local 9b, $0)
+// → "OK"                                  (local model, $0)
 
 // Call 2 — the model never saw call 1
 prism_infer({ prompt: "What is my codename? One word.", mode: "chat" })
-// → "I don't have that information."      (local 9b, correct and useless)
+// → "I don't have that information."      (local model, correct and useless)
 
 // Call 3 — a coding follow-up with no thread
 prism_infer({ prompt: "Now add a timeout parameter to it.", mode: "code" })
@@ -1474,7 +1474,7 @@ prism_infer({
     prompt: "What is my codename? One word.",
     mode: "chat",
 })
-// → "Nightjar"                            (local 9b, $0; history_turns: 2)
+// → "Nightjar"                            (local model, $0; history_turns: 2)
 
 prism_infer({
     messages: [
@@ -1484,7 +1484,7 @@ prism_infer({
     prompt: "Write the one-line call that stores its result in n.",
     mode: "code",
 })
-// → "n = countActiveUsers(data)"          (local 9b, $0)
+// → "n = countActiveUsers(data)"          (local model, $0)
 
 // A turn the on-device screen finds uncertain, alone or in context, is not
 // served locally: it goes to Synalux cloud on a paid plan, or is refused with
