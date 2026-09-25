@@ -151,6 +151,7 @@ const FOLLOWUP_STAGE_NAMES: Record<string, string> = {
     context: "turns together",
     rules: "rules",
     backstop: "keyword net",
+    budget: "screening limit",
 };
 
 /**
@@ -160,7 +161,7 @@ const FOLLOWUP_STAGE_NAMES: Record<string, string> = {
  */
 export function followupLines(f: LocalSavings["followups"]): string[] {
     if (!f) return [];
-    const total = f.served_local + f.refused + f.cloud;
+    const total = f.served_local + f.refused + f.refused_by_plan + f.cloud;
     if (total === 0) return [];
     const nineB = f.served_local > 0 ? ` (${fmt(f.served_local_9b)} by the 9b)` : "";
     const lines = [
@@ -168,6 +169,9 @@ export function followupLines(f: LocalSavings["followups"]): string[] {
         "  Follow-ups with your conversation:",
         `    ${fmt(f.served_local)} answered locally${nineB} · ${fmt(f.refused)} refused by the on-device screen · ${fmt(f.cloud)} sent to cloud`,
     ];
+    if (f.refused_by_plan > 0) {
+        lines.push(`    ${fmt(f.refused_by_plan)} refused by your plan's multi-turn limits`);
+    }
     // Most refusals first; ties in a fixed stage order, so the line never depends on SQL row order.
     const order = (k: string) => { const i = Object.keys(FOLLOWUP_STAGE_NAMES).indexOf(k); return i < 0 ? 99 : i; };
     const stages = Object.entries(f.refused_by_layer).filter(([, n]) => n > 0)

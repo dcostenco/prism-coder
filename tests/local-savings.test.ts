@@ -466,3 +466,39 @@ describe('follow-ups with the conversation (history_turns > 0)', () => {
     expect(text).not.toContain('Follow-ups');
   });
 });
+
+describe('follow-ups: review fixes', () => {
+  const refused = (over: Record<string, unknown>) => ({
+    backend: 'refused', model: null, used_cloud: false, gate_outcome: 'refused', history_turns: 2, ...over,
+  });
+
+  it('counts plan refusals apart from the on-device screen, and keeps them out of the stage breakdown', async () => {
+    await appendInferMetricBatch([
+      refused({ refusal_reason: 'multi_turn_not_in_plan' }),
+      refused({ refusal_reason: 'history_over_plan_cap' }),
+      refused({ refusal_reason: 'layer1_reserved', refusal_layer: 'context' }),
+    ]);
+    const s = (await queryLocalSavings())!;
+    expect(s.followups).toMatchObject({ refused: 1, refused_by_plan: 2 });
+    expect(s.followups!.refused_by_layer).toEqual({ context: 1 });
+    const text = renderSavings(s, 'all').text;
+    expect(text).toContain('1 refused by the on-device screen');
+    expect(text).toContain("2 refused by your plan's multi-turn limits");
+  });
+
+  it('counts a 9b by its tag, and never a 19b', async () => {
+    await appendInferMetricBatch([
+      local({ history_turns: 2, model: 'dcostenco/prism-coder:9b' }),
+      local({ history_turns: 2, model: 'prism-coder:19b' }),
+      local({ history_turns: 2, model: null, backend: 'ollama-9b' }),
+    ]);
+    const f = (await queryLocalSavings())!.followups!;
+    expect(f.served_local).toBe(3);
+    expect(f.served_local_9b).toBe(2);
+  });
+
+  it('names the screening-limit stage in plain words', async () => {
+    await appendInferMetricBatch([refused({ refusal_reason: 'layer1_uncertain', refusal_layer: 'budget' })]);
+    expect(renderSavings((await queryLocalSavings())!, 'all').text).toContain('Refusals by stage: screening limit 1');
+  });
+});

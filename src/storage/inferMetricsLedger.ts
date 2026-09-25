@@ -332,9 +332,13 @@ export interface FollowupSavings {
     served_local: number;
     /** Of served_local, answered by a 9b model. */
     served_local_9b: number;
+    /** Refused by the on-device screen (rules, classifier, keyword net). */
     refused: number;
+    /** Refused because the plan does not include history, or the history
+     *  exceeded the plan's cap. Not the screen. */
+    refused_by_plan: number;
     cloud: number;
-    /** Refusals by the screening stage that stopped them ('unrecorded' for older rows). */
+    /** Screen refusals by the stage that stopped them ('unrecorded' for older rows). */
     refused_by_layer: Record<string, number>;
 }
 
@@ -397,18 +401,23 @@ export async function queryLocalSavings(sinceTs?: number): Promise<LocalSavings 
         });
 
         const followWhere = `WHERE history_turns > 0${sinceTs != null ? " AND ts >= ?" : ""}`;
+        const PLAN_REFUSAL = `refusal_reason IN ('multi_turn_not_in_plan', 'history_over_plan_cap')`;
+        // A 9b model: '9b' right after a non-digit, so a future '19b' is not counted.
+        const NINE_B = `(LOWER(COALESCE(model, backend)) GLOB '*[^0-9]9b*' OR LOWER(COALESCE(model, backend)) GLOB '9b*')`;
         const follow = await client.execute({
             sql: `SELECT
                 SUM(CASE WHEN ${SERVED_LOCAL} THEN 1 ELSE 0 END) AS served,
-                SUM(CASE WHEN ${SERVED_LOCAL} AND LOWER(COALESCE(model, backend)) LIKE '%9b%' THEN 1 ELSE 0 END) AS served_9b,
+                SUM(CASE WHEN ${SERVED_LOCAL} AND ${NINE_B} THEN 1 ELSE 0 END) AS served_9b,
                 SUM(CASE WHEN used_cloud = 1 THEN 1 ELSE 0 END) AS cloud,
-                SUM(CASE WHEN used_cloud = 0 AND NOT (${SERVED_LOCAL}) THEN 1 ELSE 0 END) AS refused
+                SUM(CASE WHEN used_cloud = 0 AND NOT (${SERVED_LOCAL}) AND NOT (${PLAN_REFUSAL}) THEN 1 ELSE 0 END) AS refused,
+                SUM(CASE WHEN used_cloud = 0 AND NOT (${SERVED_LOCAL}) AND ${PLAN_REFUSAL} THEN 1 ELSE 0 END) AS refused_by_plan
                   FROM infer_metrics ${followWhere}`,
             args: whereArgs,
         });
         const followLayers = await client.execute({
             sql: `SELECT COALESCE(refusal_layer, 'unrecorded') AS layer, COUNT(*) AS n
                   FROM infer_metrics ${followWhere} AND used_cloud = 0 AND NOT (${SERVED_LOCAL})
+                        AND NOT (${PLAN_REFUSAL})
                   GROUP BY COALESCE(refusal_layer, 'unrecorded')`,
             args: whereArgs,
         });
@@ -448,6 +457,7 @@ export async function queryLocalSavings(sinceTs?: number): Promise<LocalSavings 
                 served_local: Number(f.served ?? 0),
                 served_local_9b: Number(f.served_9b ?? 0),
                 refused: Number(f.refused ?? 0),
+                refused_by_plan: Number(f.refused_by_plan ?? 0),
                 cloud: Number(f.cloud ?? 0),
                 refused_by_layer,
             },

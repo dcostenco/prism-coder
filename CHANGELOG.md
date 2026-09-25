@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 carried your conversation. It shows:
 - how many the local model answered, and how many of those the 9b answered;
 - how many the on-device screen refused, and at which stage;
+- how many your plan's multi-turn limits refused, counted separately;
 - how many went to the cloud.
 
 Before this, multi-turn use was recorded but never shown, so there was no way

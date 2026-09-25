@@ -1595,8 +1595,11 @@ own line:
 
 A refused follow-up went back to your host instead of being answered locally,
 so this line shows how much of your follow-up work local serving actually
-took. It appears for the `week`, `month`, `all` and `--days` views, which read
-the durable ledger.
+took. Refusals because your plan does not include multi-turn history, or the
+history is over its cap, are counted on their own line. They are recorded only
+when the host asks for a report (`escalation: "report"`); otherwise they fail
+before anything is recorded. The line appears for the `week`, `month`, `all`
+and `--days` views, which read the durable ledger.
 
 Refused calls are excluded, the VS Code panel-playground share is disclosed
 separately, and the known sources of undercount are listed inline rather than
