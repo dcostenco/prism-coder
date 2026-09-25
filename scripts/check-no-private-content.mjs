@@ -59,6 +59,9 @@ const FORBIDDEN_PATHS = [
     { re: /(^|\/)portal\//i, why: "private portal source" },
     { re: /(^|\/)prism-aac\//i, why: "private application source" },
     { re: /(^|\/)bfcl\//i, why: "benchmark corpus and evaluation methodology" },
+    // Benchmark and evaluation directories, with their fixtures and results.
+    // A benchmark directory passed every rule above on 2026-09-24.
+    { re: /(^|\/)(bench|benchmarks?|evals?|evaluations?|harness(es)?|scaffolds?)\//i, why: "benchmarks and evaluation harnesses belong in the private repo" },
     { re: /(^|\/)(sft|grounded_recall|corpus|train)[^/]*\.jsonl$/i, why: "training corpus" },
     { re: /(^|\/)(PHASE_[^/]*|PLAN_[^/]*|IMPLEMENTATION_PLAN[^/]*)\.md$/i, why: "roadmap / phase plan" },
     { re: /(^|\/)modal_[^/]*\.py$/i, why: "cloud GPU orchestration" },
@@ -187,9 +190,9 @@ if (tracked.length === 0) throw new Error("git ls-files returned nothing — ref
 const violations = [];
 
 for (const path of tracked) {
-    for (const { re, why } of FORBIDDEN_PATHS) {
-        if (re.test(path)) violations.push({ path, why, kind: "path" });
-    }
+    // One report per path: the first rule that names it.
+    const hit = FORBIDDEN_PATHS.find(({ re }) => re.test(path));
+    if (hit) violations.push({ path, why: hit.why, kind: "path" });
 }
 
 for (const rule of FORBIDDEN_CONTENT) {
