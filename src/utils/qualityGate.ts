@@ -27,7 +27,7 @@ export const TOOL_CALL_BLEED_RE = /<\|tool_call\|>|<\|tool_call_end\|>/;
  * @param stripped  Response AFTER think-stripping (use stripThink first)
  * @param thinkOnly  True if the response was only <think> blocks with no answer
  * @param finishReason  Ollama's finish_reason if available (e.g. "length" = truncated)
- * @param mode  Inference mode — "route" uses length===0 floor; "code"/"chat" keep <5
+ * @param mode  Inference mode — "route": empty only when blank; "chat": empty only with no letter or digit; "code"/unset: 4 chars or fewer
  */
 export function passesQualityGate(
     stripped: string,
@@ -42,9 +42,18 @@ export function passesQualityGate(
 
     // Signal 2: Mode-aware empty floor.
     // Route legitimately returns 1–4 char labels ("P1", "YES", "CO4", "FIXED").
-    // Use length===0 for route; keep <5 for code/chat where single-word answers are invalid.
-    const emptyFloor = mode === "route" ? 0 : 4;
-    if (stripped.trim().length <= emptyFloor) {
+    // Chat answers can be one short value: a follow-up asking "what is x times
+    // 6?" is correctly answered "42". Measured 2026-09-24: under the old <5
+    // floor, correct chat answers "16" and "36" failed here and, on a paid
+    // plan, were thrown away and re-asked of the cloud. So chat is empty only
+    // when it has no letter or digit at all.
+    // Code keeps <5: a 1–4 char code answer ("Hi", "DONE") is not an answer.
+    const trimmed = stripped.trim();
+    const empty =
+        mode === "route" ? trimmed.length === 0
+        : mode === "chat" ? !/[\p{L}\p{N}]/u.test(trimmed)
+        : trimmed.length <= 4;
+    if (empty) {
         return { pass: false, reason: "empty_response" };
     }
 

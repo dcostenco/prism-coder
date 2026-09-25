@@ -393,3 +393,30 @@ describe("passesQualityGate", () => {
         expect(passesQualityGate("Hi", false).pass).toBe(false);
     });
 });
+
+// ── Signal 2, chat: short values are answers ────────────────────────────────
+// A multi-turn follow-up is often answered with one short value. Under the old
+// <5 floor these failed the gate, and on a paid plan a correct local answer was
+// discarded and re-asked of the cloud (measured 2026-09-24: "16", "36").
+describe("passesQualityGate: chat short answers", () => {
+    it.each(["16", "42", "Yes", "No.", "P1", "東京", "é"])("chat: %j passes", (answer) => {
+        expect(passesQualityGate(answer, false, undefined, "chat").pass).toBe(true);
+    });
+
+    it.each(["", "   ", "...", "`", "—", "**"])("chat: %j (no letter or digit) is still empty_response", (answer) => {
+        const r = passesQualityGate(answer, false, undefined, "chat");
+        expect(r.pass).toBe(false);
+        expect(r.reason).toBe("empty_response");
+    });
+
+    it("code and the unset default keep the <5 floor", () => {
+        expect(passesQualityGate("16", false, undefined, "code").reason).toBe("empty_response");
+        expect(passesQualityGate("DONE", false, undefined, "code").reason).toBe("empty_response");
+        expect(passesQualityGate("Hi", false).reason).toBe("empty_response");
+    });
+
+    it("chat: a short answer can still fail for another reason", () => {
+        expect(passesQualityGate("16", false, "length", "chat").reason).toBe("hard_truncation");
+        expect(passesQualityGate("", true, undefined, "chat").reason).toBe("think_only");
+    });
+});
