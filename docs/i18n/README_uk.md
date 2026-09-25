@@ -1501,9 +1501,13 @@ prism_infer({
 // → "SYN-4471"                            (Gemini 3.6 Flash; used_cloud: true)
 ```
 
-Measured on the real 9b through the real handler with cloud off: 7 of 12
-benign follow-ups are served locally, the rest refuse and name the reason;
-every injection variant the reviewers built refuses.
+Measured on 20.21.14 through the real handler, with the 9b and cloud off:
+- Every benign follow-up that reached the local 9b was answered correctly.
+  Without the conversation, most answers were invented.
+- The on-device screen still refuses too many benign follow-ups: 11 of 26 in
+  our tests. Each refusal names its reason. Cutting these false refusals is
+  the current work.
+- Every reserved multi-turn probe was refused before any generation (11 of 11).
 </details>
 
 | Mode | Think | Model | Use case |
