@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### A follow-up is no longer served on keyword checks alone while the classifier is down
+
+When the on-device classifier failed every read it was asked for on a
+follow-up (for example while Ollama restarts) and the conversation's earlier
+turns had already been screened, `prism_infer` could still answer the
+follow-up locally after only a keyword check. It now treats that follow-up as
+uncertain, like any other request the screen could not clear:
+- with cloud fallback on your plan, it goes to the cloud;
+- otherwise it is refused, with the reason `layer1_screen_all_reads_failed`.
+
+A follow-up that carries an image is answered on your machine with the cloud
+off, as other image requests already are. Single requests, and follow-ups
+where the classifier answered, behave as before.
+
 ### See how much of your follow-up work runs locally
 
 `local_savings` (and `prism savings`) now has a line for follow-ups: calls that
