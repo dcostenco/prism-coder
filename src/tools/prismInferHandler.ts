@@ -2005,6 +2005,17 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     if (l1 === "UNCERTAIN" || l1 === "OBVIOUS_RESERVED") break;
                 }
             }
+            // A classifier that answered none of this request's window reads
+            // read none of them: the keyword net must not become their sole
+            // guard (review round 16). The consecutive-ERROR breaker catches
+            // this only from its third read, and a follow-up that re-sends the
+            // same turns leaves one or two uncached windows (measured
+            // 2026-09-25: a dead classifier, two failed reads, served locally
+            // on the keyword net).
+            if (budget.calls > 0 && budget.consecutiveErrors === budget.calls && !budget.tripped) {
+                budget.tripped = true;
+                attempts.push({ tier: "layer1", reason: "layer1_screen_all_reads_failed" });
+            }
             // A budget or breaker trip raises to UNCERTAIN whatever the cache
             // held (text: cloud or refused; with an image: local only).
             if (budget.tripped) l1 = raise(l1, "UNCERTAIN", "budget");

@@ -966,6 +966,36 @@ describe("R21 the context read joins the worker's answer with the next request",
     });
 });
 
+describe("R25 a classifier that answers none of a request's window reads trips to UNCERTAIN", () => {
+    // 2026-09-25: a host re-sent the same accepted turns with a new prompt
+    // while the classifier was down. Every earlier window was a cache hit, so
+    // the request made two reads (the prompt and its new context window),
+    // both failed, the three-read breaker never fired, and the keyword net
+    // alone served it locally.
+    it("the same turns with a new prompt and a dead classifier: refused, not served on the keyword net", async () => {
+        await runInfer(args({ prompt: "Which one did I pick?" }), deps());
+        const dead = vi.fn(async () => "ERROR" as const);
+        const d = deps({ callLayer1: dead });
+        const r = await runInfer(args({ prompt: "And the other one?" }), d);
+        expect(dead.mock.calls.filter(c => /^(User|Assistant): /.test(String(c[0]))).length).toBeLessThan(LAYER1_SCREEN_ERROR_BREAKER);
+        expect(r.backend).toBe("refused");
+        expect(r.attempts.map(a => a.reason)).toContain("layer1_screen_all_reads_failed");
+        expect((d.callLocal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+    });
+    it("one failed read after clean ones keeps the existing ERROR path", async () => {
+        const last = contextWindows(args()).at(-1);
+        const callLayer1 = vi.fn(async (t: string) => (t === last ? "ERROR" : "OBVIOUS_NOT_RESERVED") as "ERROR" | "OBVIOUS_NOT_RESERVED");
+        const r = await runInfer(args(), deps({ callLayer1 }));
+        expect(r.attempts.map(a => a.reason)).not.toContain("layer1_screen_all_reads_failed");
+        expect(r.backend).toBe("ollama-9b");
+    });
+    it("a single turn keeps the single-prompt ERROR path", async () => {
+        const r = await runInfer(args({ messages: undefined }), deps({ callLayer1: vi.fn(async () => "ERROR" as const) }));
+        expect(r.attempts.map(a => a.reason)).not.toContain("layer1_screen_all_reads_failed");
+        expect(r.backend).toBe("ollama-9b");
+    });
+});
+
 describe("R20 a refusal names the layer that caused it", () => {
     // 2026-09-16: a benign production call was refused and only a replay could
     // say which layer did it. The verdict's origin is now on the result and in
