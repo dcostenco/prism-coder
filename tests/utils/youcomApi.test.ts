@@ -91,7 +91,7 @@ async function getModule() {
   return import("../../src/utils/youcomApi.js");
 }
 
-/** Build a fake You.com API response shape */
+/** Build a fake You.com API response in the documented shape */
 function fakeSuccessResponse(webResults: number = 3, newsResults: number = 0) {
   const web = Array.from({ length: webResults }, (_, i) => ({
     title: `Web Result ${i + 1}`,
@@ -103,8 +103,55 @@ function fakeSuccessResponse(webResults: number = 3, newsResults: number = 0) {
     url: `https://news.example.com/news-${i + 1}`,
     description: `Description for news result ${i + 1}`,
   }));
-  return { web, news };
+  return { results: { web, news }, metadata: {} };
 }
+
+/** The docs example response verbatim (from the Search API reference). */
+const DOCS_EXAMPLE_RESPONSE = {
+  results: {
+    web: [
+      {
+        title: "India: Latest News, Breaking News Today | India.com",
+        url: "https://www.india.com/",
+        description:
+          "Get all the latest news and updates on India including politics, entertainment, sports, business and technology news only at India.com.",
+        snippets: [
+          "India.com brings Latest News & Breaking News from India & World. Get news updates on Politics, Sports, Business, Entertainment & more.",
+        ],
+      },
+      {
+        title: "India News | Today's Top Stories | Reuters.com",
+        url: "https://www.reuters.com/world/india/",
+        description:
+          "Reuters.com is your online source for the latest India news stories and current events, ensuring our readers up to date with any breaking news developments.",
+        snippets: [
+          "The latest news on India, including coverage of the Adani Group, politics, social media developments and analysis.",
+        ],
+      },
+    ],
+    news: [
+      {
+        title: "India News | Latest India News | The Indian Express",
+        url: "https://indianexpress.com/",
+        description:
+          "Indian Express gives you latest India News, today news in India, news from India.",
+        snippets: [
+          "Read the latest news India and get the latest news and updates from India. The Indian Express covers all the latest news headlines from India.",
+        ],
+      },
+      {
+        title: "Latest India News | Today's Headlines | NDTV.com",
+        url: "https://www.ndtv.com/india",
+        description:
+          "NDTV.com provides latest India news, breaking news from India.",
+        snippets: [
+          "NDTV.com provides the latest India news, top headlines from India and around the world.",
+        ],
+      },
+    ],
+  },
+  metadata: { search_id: "abc123" },
+};
 
 describe("performYouComSearch", () => {
   beforeEach(() => {
@@ -139,7 +186,7 @@ describe("performYouComSearch", () => {
     expect(parsedBody.count).toBe(5);
   });
 
-  it("parses { web, news } response correctly", async () => {
+  it("parses { results: { web, news } } response correctly", async () => {
     const resp = fakeSuccessResponse(3);
     mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(resp), { status: 200 }));
 
@@ -169,7 +216,7 @@ describe("performYouComSearch", () => {
 
   it("returns no-results message when both web and news are empty", async () => {
     mockFetch.mockResolvedValueOnce(
-      new Response(JSON.stringify({ web: [], news: [] }), { status: 200 })
+      new Response(JSON.stringify({ results: { web: [], news: [] }, metadata: {} }), { status: 200 })
     );
 
     const { performYouComSearch } = await getModule();
@@ -245,6 +292,59 @@ describe("performYouComSearch", () => {
     const [, opts] = mockFetch.mock.calls[0];
     const parsedBody = JSON.parse(opts.body);
     expect(parsedBody.count).toBe(20);
+  });
+
+  it("clamps count of 0 to 1", async () => {
+    const resp = fakeSuccessResponse(1);
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(resp), { status: 200 }));
+
+    const { performYouComSearch } = await getModule();
+    await performYouComSearch("clamp zero", 0);
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const parsedBody = JSON.parse(opts.body);
+    expect(parsedBody.count).toBe(1);
+  });
+
+  it("clamps count of -5 to 1", async () => {
+    const resp = fakeSuccessResponse(1);
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(resp), { status: 200 }));
+
+    const { performYouComSearch } = await getModule();
+    await performYouComSearch("clamp neg", -5);
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const parsedBody = JSON.parse(opts.body);
+    expect(parsedBody.count).toBe(1);
+  });
+
+  it("parses the docs example response verbatim", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify(DOCS_EXAMPLE_RESPONSE), { status: 200 })
+    );
+
+    const { performYouComSearch } = await getModule();
+    const result = await performYouComSearch("What are the latest geopolitical updates from India");
+
+    // Should return web results from the documented shape
+    expect(result).toContain("India: Latest News, Breaking News Today | India.com");
+    expect(result).toContain("https://www.india.com/");
+    expect(result).toContain("Reuters.com");
+    expect(result).toContain("https://www.reuters.com/world/india/");
+    // Should not fall through to "No results found"
+    expect(result).not.toContain("No results found");
+  });
+
+  it("returns no-results when response has no results field (optional schema)", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ metadata: { search_id: "empty" } }), { status: 200 })
+    );
+
+    const { performYouComSearch } = await getModule();
+    const result = await performYouComSearch("empty response");
+
+    expect(result).toContain("No results found");
+    expect(result).toContain("empty response");
   });
 });
 

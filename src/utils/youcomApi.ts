@@ -21,11 +21,16 @@ interface YouComSearchWebResult {
   title: string;
   url: string;
   description?: string;
+  snippets?: string[];
 }
 
+/** The documented API response shape. `results` wraps the web/news arrays. */
 interface YouComSearchResponse {
-  web?: YouComSearchWebResult[];
-  news?: YouComSearchWebResult[];
+  results?: {
+    web?: YouComSearchWebResult[];
+    news?: YouComSearchWebResult[];
+  };
+  metadata?: Record<string, unknown>;
   error?: string;
 }
 
@@ -43,7 +48,14 @@ function formatResult(result: YouComSearchWebResult, index: number): string {
   lines.push(`${index + 1}. ${result.title}`);
   lines.push(`   URL: ${result.url}`);
   if (result.description) {
-    lines.push(`   Description: ${result.description}`);
+    let desc = result.description;
+    // Append first snippet as extra detail when the description is short
+    if (result.snippets?.length && desc.length < 200) {
+      desc += ` — ${result.snippets[0]}`;
+    }
+    lines.push(`   Description: ${desc}`);
+  } else if (result.snippets?.length) {
+    lines.push(`   Description: ${result.snippets[0]}`);
   }
   return lines.join("\n");
 }
@@ -65,7 +77,7 @@ export async function performYouComSearch(
 
   const body = {
     query,
-    count: Math.min(count, 20),
+    count: Math.max(1, Math.min(count ?? 10, 20)),
   };
 
   debugLog(`[youcomApi] searching: query_chars=${query.length}, count=${body.count}`);
@@ -113,11 +125,11 @@ export async function performYouComSearch(
     throw new Error(`You.com search API error: ${data.error}`);
   }
 
-  // The API returns { web: [...], news: [...] }. Surface web results primarily.
-  const results: YouComSearchWebResult[] = (data.web ?? []);
+  // The documented response wraps arrays under `results`.
+  const results: YouComSearchWebResult[] = (data.results?.web ?? []);
   if (results.length === 0) {
     // Fall back to news if web is empty
-    const newsResults = data.news ?? [];
+    const newsResults = data.results?.news ?? [];
     if (newsResults.length === 0) {
       return `No results found for "${query}".\n`;
     }
