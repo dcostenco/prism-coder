@@ -502,3 +502,18 @@ describe('follow-ups: review fixes', () => {
     expect(renderSavings((await queryLocalSavings())!, 'all').text).toContain('Refusals by stage: screening limit 1');
   });
 });
+
+describe('follow-ups: every history row is counted exactly once', () => {
+  it('a refusal with no recorded reason still counts as a screen refusal (NULL must not vanish)', async () => {
+    await appendInferMetricBatch([
+      local({ history_turns: 2 }),
+      { backend: 'refused', model: null, used_cloud: false, gate_outcome: 'refused', history_turns: 2, refusal_layer: 'prompt' },
+      { backend: 'refused', model: null, used_cloud: false, gate_outcome: 'refused', history_turns: 2, refusal_reason: 'multi_turn_not_in_plan' },
+      { backend: 'cloud', model: 'synalux', used_cloud: true, history_turns: 2, prompt_tokens: 1, completion_tokens: 1 },
+    ]);
+    const f = (await queryLocalSavings())!.followups!;
+    expect(f.refused).toBe(1);
+    expect(f.refused_by_layer).toEqual({ prompt: 1 });
+    expect(f.served_local + f.refused + f.refused_by_plan + f.cloud).toBe(4);
+  });
+});

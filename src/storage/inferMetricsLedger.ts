@@ -401,7 +401,7 @@ export async function queryLocalSavings(sinceTs?: number): Promise<LocalSavings 
         });
 
         const followWhere = `WHERE history_turns > 0${sinceTs != null ? " AND ts >= ?" : ""}`;
-        const PLAN_REFUSAL = `refusal_reason IN ('multi_turn_not_in_plan', 'history_over_plan_cap')`;
+        const PLAN_REFUSAL = `COALESCE(refusal_reason, '') IN ('multi_turn_not_in_plan', 'history_over_plan_cap')`;
         // A 9b model: '9b' right after a non-digit, so a future '19b' is not counted.
         const NINE_B = `(LOWER(COALESCE(model, backend)) GLOB '*[^0-9]9b*' OR LOWER(COALESCE(model, backend)) GLOB '9b*')`;
         const follow = await client.execute({
