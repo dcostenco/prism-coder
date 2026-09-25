@@ -144,6 +144,40 @@ export interface SavingsRender {
     data: LocalSavings & { period: SavingsPeriod };
 }
 
+/** Plain names for the on-device screen's stages, as recorded in refusal_layer. */
+const FOLLOWUP_STAGE_NAMES: Record<string, string> = {
+    isolated: "earlier turn alone",
+    prompt: "follow-up alone",
+    context: "turns together",
+    rules: "rules",
+    backstop: "keyword net",
+};
+
+/**
+ * Follow-ups: calls that carried the conversation. Shown even when none was
+ * served, because refusals are the part a user needs to see: a follow-up the
+ * screen refused went back to the host instead of being answered locally.
+ */
+export function followupLines(f: LocalSavings["followups"]): string[] {
+    if (!f) return [];
+    const total = f.served_local + f.refused + f.cloud;
+    if (total === 0) return [];
+    const nineB = f.served_local > 0 ? ` (${fmt(f.served_local_9b)} by the 9b)` : "";
+    const lines = [
+        "",
+        "  Follow-ups with your conversation:",
+        `    ${fmt(f.served_local)} answered locally${nineB} · ${fmt(f.refused)} refused by the on-device screen · ${fmt(f.cloud)} sent to cloud`,
+    ];
+    // Most refusals first; ties in a fixed stage order, so the line never depends on SQL row order.
+    const order = (k: string) => { const i = Object.keys(FOLLOWUP_STAGE_NAMES).indexOf(k); return i < 0 ? 99 : i; };
+    const stages = Object.entries(f.refused_by_layer).filter(([, n]) => n > 0)
+        .sort((a, b) => b[1] - a[1] || order(a[0]) - order(b[0]) || a[0].localeCompare(b[0]));
+    if (stages.length > 0) {
+        lines.push(`    Refusals by stage: ${stages.map(([k, n]) => `${FOLLOWUP_STAGE_NAMES[k] ?? k} ${fmt(n)}`).join(" · ")}`);
+    }
+    return lines;
+}
+
 export function renderSavings(s: LocalSavings, period: SavingsPeriod, customDays?: number): SavingsRender {
     const label =
         customDays !== undefined && Number.isFinite(customDays) && customDays > 0
@@ -162,6 +196,7 @@ export function renderSavings(s: LocalSavings, period: SavingsPeriod, customDays
         lines.push(period === "session"
             ? "  Delegate work with prism_infer, or use session_task_route to pick targets automatically."
             : "  Once prism starts serving locally, displaced token volume shows up here.");
+        lines.push(...followupLines(s.followups));
         return { text: lines.join("\n"), data: { ...s, period } };
     }
 
@@ -183,6 +218,8 @@ export function renderSavings(s: LocalSavings, period: SavingsPeriod, customDays
             lines.push(`    ${name}: ${fmt(m.calls)} call(s), ~${abbreviate(t)} tokens`);
         }
     }
+
+    lines.push(...followupLines(s.followups));
 
     lines.push("");
     lines.push(`  ${basisLine(s)}`);

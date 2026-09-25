@@ -322,6 +322,20 @@ export interface LocalSavings {
     first_ts: number | null;
     last_ts: number | null;
     by_model: Record<string, LocalSavingsModelRow>;
+    /** Calls that carried conversation history (`history_turns > 0`): how many
+     *  follow-ups local answered, refused, or sent to cloud. Ledger views only;
+     *  the session accumulators do not track history. */
+    followups?: FollowupSavings;
+}
+
+export interface FollowupSavings {
+    served_local: number;
+    /** Of served_local, answered by a 9b model. */
+    served_local_9b: number;
+    refused: number;
+    cloud: number;
+    /** Refusals by the screening stage that stopped them ('unrecorded' for older rows). */
+    refused_by_layer: Record<string, number>;
 }
 
 /**
@@ -382,6 +396,28 @@ export async function queryLocalSavings(sinceTs?: number): Promise<LocalSavings 
             args: whereArgs,
         });
 
+        const followWhere = `WHERE history_turns > 0${sinceTs != null ? " AND ts >= ?" : ""}`;
+        const follow = await client.execute({
+            sql: `SELECT
+                SUM(CASE WHEN ${SERVED_LOCAL} THEN 1 ELSE 0 END) AS served,
+                SUM(CASE WHEN ${SERVED_LOCAL} AND LOWER(COALESCE(model, backend)) LIKE '%9b%' THEN 1 ELSE 0 END) AS served_9b,
+                SUM(CASE WHEN used_cloud = 1 THEN 1 ELSE 0 END) AS cloud,
+                SUM(CASE WHEN used_cloud = 0 AND NOT (${SERVED_LOCAL}) THEN 1 ELSE 0 END) AS refused
+                  FROM infer_metrics ${followWhere}`,
+            args: whereArgs,
+        });
+        const followLayers = await client.execute({
+            sql: `SELECT COALESCE(refusal_layer, 'unrecorded') AS layer, COUNT(*) AS n
+                  FROM infer_metrics ${followWhere} AND used_cloud = 0 AND NOT (${SERVED_LOCAL})
+                  GROUP BY COALESCE(refusal_layer, 'unrecorded')`,
+            args: whereArgs,
+        });
+        const f = follow.rows[0] as Record<string, unknown>;
+        const refused_by_layer: Record<string, number> = {};
+        for (const row of followLayers.rows as Array<Record<string, unknown>>) {
+            refused_by_layer[String(row.layer)] = Number(row.n ?? 0);
+        }
+
         const r = agg.rows[0] as Record<string, unknown>;
         const by_model: Record<string, LocalSavingsModelRow> = {};
         for (const row of byM.rows as Array<Record<string, unknown>>) {
@@ -408,6 +444,13 @@ export async function queryLocalSavings(sinceTs?: number): Promise<LocalSavings 
             first_ts: r.first_ts == null ? null : Number(r.first_ts),
             last_ts: r.last_ts == null ? null : Number(r.last_ts),
             by_model,
+            followups: {
+                served_local: Number(f.served ?? 0),
+                served_local_9b: Number(f.served_9b ?? 0),
+                refused: Number(f.refused ?? 0),
+                cloud: Number(f.cloud ?? 0),
+                refused_by_layer,
+            },
         };
     } catch (e) {
         debugLog(`[infer-ledger] savings query failed: ${e instanceof Error ? e.message : e}`);

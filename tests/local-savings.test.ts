@@ -408,3 +408,61 @@ describe('windowStart', () => {
     expect(renderSavings(custom!, 'all', 14).text).toMatch(/LAST 14 DAYS/);
   });
 });
+
+describe('follow-ups with the conversation (history_turns > 0)', () => {
+  // Older rows carry no refusal_layer: omit the key rather than pass undefined.
+  const refused = (layer: string | undefined, over: Record<string, unknown> = {}) => ({
+    backend: 'refused', model: null, used_cloud: false, gate_outcome: 'refused',
+    refusal_reason: 'layer1_reserved', history_turns: 2,
+    ...(layer ? { refusal_layer: layer } : {}), ...over,
+  });
+
+  it('counts follow-ups answered locally, refused, and sent to cloud, and nothing else', async () => {
+    await appendInferMetricBatch([
+      local({ history_turns: 2 }),
+      local({ history_turns: 4 }),
+      local({ history_turns: 2, backend: 'ollama-4b', model: 'prism-coder:4b' }),
+      local(), // single-turn: not a follow-up
+      refused('prompt'), refused('prompt'), refused('isolated'), refused(undefined),
+      refused('context', { history_turns: 0 }), // single-turn refusal: not a follow-up
+      { backend: 'cloud', model: 'synalux', used_cloud: true, history_turns: 2, prompt_tokens: 10, completion_tokens: 10 },
+    ]);
+    const f = (await queryLocalSavings())!.followups!;
+    expect(f.served_local).toBe(3);
+    expect(f.served_local_9b).toBe(2);
+    expect(f.refused).toBe(4);
+    expect(f.cloud).toBe(1);
+    expect(f.refused_by_layer).toEqual({ prompt: 2, isolated: 1, unrecorded: 1 });
+  });
+
+  it('respects the period window', async () => {
+    await appendInferMetricBatch([local({ history_turns: 2 }), refused('context')]);
+    const later = Date.now() + 60_000;
+    const f = (await queryLocalSavings(later))!.followups!;
+    expect([f.served_local, f.refused, f.cloud]).toEqual([0, 0, 0]);
+  });
+
+  it('renders the follow-up line with refusals by stage in plain words', async () => {
+    await appendInferMetricBatch([
+      local({ history_turns: 2 }), local({ history_turns: 2 }),
+      refused('isolated'), refused('prompt'), refused('prompt'), refused('context'),
+    ]);
+    const text = renderSavings((await queryLocalSavings())!, 'all').text;
+    expect(text).toContain('Follow-ups with your conversation:');
+    expect(text).toContain('2 answered locally (2 by the 9b) · 4 refused by the on-device screen · 0 sent to cloud');
+    expect(text).toContain('Refusals by stage: follow-up alone 2 · earlier turn alone 1 · turns together 1');
+  });
+
+  it('still shows refused follow-ups when nothing at all was served locally', async () => {
+    await appendInferMetricBatch([refused('context'), refused('context')]);
+    const text = renderSavings((await queryLocalSavings())!, 'all').text;
+    expect(text).toContain('No calls served locally yet.');
+    expect(text).toContain('0 answered locally · 2 refused by the on-device screen · 0 sent to cloud');
+  });
+
+  it('prints no follow-up block when no call carried history', async () => {
+    await appendInferMetricBatch([local(), local()]);
+    const text = renderSavings((await queryLocalSavings())!, 'all').text;
+    expect(text).not.toContain('Follow-ups');
+  });
+});

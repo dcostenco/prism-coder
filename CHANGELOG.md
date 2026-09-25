@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### See how much of your follow-up work runs locally
+
+`local_savings` (and `prism savings`) now has a line for follow-ups: calls that
+carried your conversation. It shows:
+- how many the local model answered, and how many of those the 9b answered;
+- how many the on-device screen refused, and at which stage;
+- how many went to the cloud.
+
+Before this, multi-turn use was recorded but never shown, so there was no way
+to tell whether local serving was taking over follow-ups or sending them back
+to your host. The figures come from the ledger prism already keeps. Nothing
+new is recorded or sent.
+
 ## 20.21.14 — 2026-09-24
 
 ### Tasks that say they need host tools stay with the host
