@@ -21,6 +21,7 @@
  */
 
 import { performWebSearch, performWebSearchRaw, performLocalSearch, performLocalSearchRaw, performBraveAnswers } from "../utils/braveApi.js";
+import { performYouComSearch } from "../utils/youcomApi.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
 import { 
   isBraveWebSearchArgs, 
@@ -31,6 +32,7 @@ import {
   isBraveLocalSearchCodeModeArgs, 
   isCodeModeTransformArgs,
   isScholarResearchArgs,
+  isYouComWebSearchArgs,
 } from "./definitions.js";
 import { runInSandbox } from "../utils/executor.js";
 import { CODE_MODE_TEMPLATES, getTemplateNames } from "../templates/codeMode.js";
@@ -313,6 +315,35 @@ export async function researchPaperAnalysisHandler(args: unknown) {
       content: [{
         type: "text",
         text: `Error analyzing research paper: ${error instanceof Error ? error.message : String(error)}`
+      }],
+      isError: true,
+    };
+  }
+}
+
+// ─── You.com Web Search Handler (Optional) ───────────────────
+// Registered only when YDC_API_KEY is set.
+
+/** Performs a web search via You.com and returns formatted results. */
+export async function youcomWebSearchHandler(args: unknown) {
+  if (!isYouComWebSearchArgs(args)) {
+    throw new Error("Invalid arguments for youcom_web_search");
+  }
+
+  const { query, count = 10 } = args;
+
+  try {
+    const results = await performYouComSearch(query, count);
+    return {
+      content: [{ type: "text", text: results }],
+      isError: false,
+    };
+  } catch (error) {
+    console.error("You.com search error:", error);
+    return {
+      content: [{
+        type: "text",
+        text: `You.com search failed: ${error instanceof Error ? error.message : String(error)}`
       }],
       isError: true,
     };

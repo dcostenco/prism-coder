@@ -13,7 +13,7 @@
  * The corresponding IMPLEMENTATIONS (what the tools actually do) are in handlers.ts.
  *
  * Tool Categories:
- *   1. Search Tools       — brave_web_search, brave_local_search
+ *   1. Search Tools       — brave_web_search, brave_local_search, youcom_web_search
  *   2. Code Mode Tools    — brave_web_search_code_mode, brave_local_search_code_mode, code_mode_transform
  *   3. AI Analysis Tools  — brave_answers, gemini_research_paper_analysis
  *   4. Session Memory     — defined separately in sessionMemoryDefinitions.ts (optional)
@@ -99,6 +99,35 @@ export const WEB_SEARCH_TOOL: Tool = {
         type: "number",
         description: "Pagination offset (max 9, default 0)",
         default: 0,
+      },
+    },
+    required: ["query"],
+  },
+};
+
+// ─── You.com Web Search Tool (Optional) ───────────────────────
+// Registered only when YDC_API_KEY is set. Provides an alternative
+// web search provider alongside the built-in Brave search tools.
+// You.com allows up to 20 results per request.
+
+export const YOUCOM_WEB_SEARCH_TOOL: Tool = {
+  name: "youcom_web_search",
+  description:
+    "Performs a web search using the You.com Search API, ideal for general queries, news, articles, and current events. " +
+    "Returns formatted results with titles, URLs, and descriptions. " +
+    "Configure with the YDC_API_KEY environment variable. " +
+    "Get a key at https://you.com/platform/api-keys",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "Search query",
+      },
+      count: {
+        type: "number",
+        description: "Number of results (1-20, default 10)",
+        default: 10,
       },
     },
     required: ["query"],
@@ -404,5 +433,17 @@ export function isCodeModeTransformArgs(
     args !== null &&
     "data" in args &&
     typeof (args as { data: string }).data === "string"
+  );
+}
+
+/** Validates arguments for youcom_web_search */
+export function isYouComWebSearchArgs(
+  args: unknown
+): args is { query: string; count?: number } {
+  return (
+    typeof args === "object" &&
+    args !== null &&
+    "query" in args &&
+    typeof (args as { query: string }).query === "string"
   );
 }
