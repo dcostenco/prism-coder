@@ -802,6 +802,11 @@ export const PRISM_INFER_TOOL: Tool = {
                     "Synalux deterministic route correction. 'local': skips that correction only.",
                 default: "auto",
             },
+            allow_parallel_calls: {
+                type: "boolean",
+                description: "Route: keep a reply of several calls only if every call is in allowed_tools.",
+                default: false,
+            },
             think: {
                 type: "boolean",
                 description:
@@ -811,10 +816,8 @@ export const PRISM_INFER_TOOL: Tool = {
             strict_entitlements: {
                 type: "boolean",
                 description:
-                    "Fail loud instead of running with ASSUMED free-tier limits: when entitlements " +
-                    "fell back to free because the portal was unreachable (source='fallback_free'), " +
-                    "throw instead of silently applying free clamps. Portal-confirmed free plans and " +
-                    "unconfigured machines are unaffected.",
+                    "Throw rather than apply assumed free limits when the portal was unreachable " +
+                    "(source='fallback_free'). Confirmed-free and unconfigured setups are unaffected.",
                 default: false,
             },
             escalation: {
@@ -876,6 +879,8 @@ export interface PrismInferArgs {
     /** auto = local contract + subscribed portal correction; local = skips that correction only
      *  (cloud inference fallback and the grounding verifier are separate switches). */
     route_guard?: "auto" | "local";
+    /** Route mode: accept a reply of several complete calls, each on allowed_tools. Default false. */
+    allow_parallel_calls?: boolean;
     /** Enable thinking (<think> blocks). Default: true for chat/code, false for route. */
     think?: boolean;
     /** Session key. Same id used by session_load_context / session_save_ledger.
@@ -954,6 +959,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
         !["route", "chat", "code"].includes(a.mode as string)) return false;
     if (a.route_guard !== undefined &&
         !["auto", "local"].includes(a.route_guard as string)) return false;
+    if (a.allow_parallel_calls !== undefined && typeof a.allow_parallel_calls !== "boolean") return false;
     if (a.allowed_tools !== undefined) {
         if (!Array.isArray(a.allowed_tools) || a.allowed_tools.length > MAX_ROUTE_TOOLS) return false;
         if (!a.allowed_tools.every(isRouteToolName)) return false;
@@ -2144,6 +2150,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     }
 
     const mode = args.mode ?? "route";
+    const gateOptions = { allowParallelCalls: mode === "route" && args.allow_parallel_calls === true };
     // Model choice belongs here—not in session_task_route—because this layer
     // owns every viability input and the explicit caller override contract.
     const requestedCeiling = resolveRequestedModelCeiling(args);
@@ -3124,7 +3131,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 let output = stripped;
 
                 // Quality gate — all modes. Route uses mode-aware empty floor (length===0).
-                let gate = passesQualityGate(output, thinkOnly, result.doneReason, mode);
+                let gate = passesQualityGate(output, thinkOnly, result.doneReason, mode, gateOptions);
                 if (gate.pass && mode === "code") {
                     gate = passesCodingQualityGate(args.prompt, output);
                 }
@@ -3167,7 +3174,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     if (retried.ok) {
                         const retriedStrip = stripThink(retried.text);
                         const retriedGate = passesQualityGate(
-                            retriedStrip.stripped, retriedStrip.thinkOnly, retried.doneReason, mode,
+                            retriedStrip.stripped, retriedStrip.thinkOnly, retried.doneReason, mode, gateOptions,
                         );
                         // Keep the retry only if it is actually better — a retry that
                         // truncates too must not overwrite the original with a
@@ -3207,7 +3214,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                     );
                     if (deterministicRepair.changes.length > 0) {
                         output = deterministicRepair.output;
-                        gate = passesQualityGate(output, false, result.doneReason, mode);
+                        gate = passesQualityGate(output, false, result.doneReason, mode, gateOptions);
                         if (gate.pass) {
                             gate = passesCodingQualityGate(args.prompt, output);
                         }
@@ -3496,6 +3503,7 @@ async function applyVerification(
     const mode = args.mode ?? "route";
     if (mode === "route") {
         const allowedTools = new Set(args.allowed_tools ?? DEFAULT_PRISM_ROUTE_TOOLS);
+        const contractOptions = { allowParallel: args.allow_parallel_calls === true };
         const parsed = parseRouteOutput(draft);
         const shouldUsePortal =
             args.route_guard !== "local" &&
@@ -3522,7 +3530,7 @@ async function applyVerification(
                     args.prompt,
                 );
                 if (!portalOutcome) {
-                    const localCheck = applyLocalRouteContract(draft, allowedTools);
+                    const localCheck = applyLocalRouteContract(draft, allowedTools, contractOptions);
                     routeGuard = {
                         ...localCheck,
                         source: "local_fallback",
@@ -3542,7 +3550,7 @@ async function applyVerification(
                     routeGuard = portalOutcome;
                 }
             } catch (error) {
-                const localFallback = applyLocalRouteContract(draft, allowedTools);
+                const localFallback = applyLocalRouteContract(draft, allowedTools, contractOptions);
                 routeGuard = {
                     ...localFallback,
                     source: "local_fallback",
@@ -3562,7 +3570,7 @@ async function applyVerification(
                 }
             }
         } else {
-            routeGuard = applyLocalRouteContract(draft, allowedTools);
+            routeGuard = applyLocalRouteContract(draft, allowedTools, contractOptions);
         }
         routedDraft = routeGuard.output;
     }

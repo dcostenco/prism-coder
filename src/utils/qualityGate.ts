@@ -1,4 +1,4 @@
-import { parseRouteOutput } from "./routeContract.js";
+import { parseRouteCalls, parseRouteOutput } from "./routeContract.js";
 
 /**
  * Quality Gate — deterministic check for obvious inference failures.
@@ -28,12 +28,14 @@ export const TOOL_CALL_BLEED_RE = /<\|tool_call\|>|<\|tool_call_end\|>/;
  * @param thinkOnly  True if the response was only <think> blocks with no answer
  * @param finishReason  Ollama's finish_reason if available (e.g. "length" = truncated)
  * @param mode  Inference mode — "route": empty only when blank; "chat": empty only with no letter or digit; "code"/unset: 4 chars or fewer
+ * @param options.allowParallelCalls  Route mode: a reply of several complete calls is valid
  */
 export function passesQualityGate(
     stripped: string,
     thinkOnly: boolean,
     finishReason?: string,
     mode?: "route" | "code" | "chat",
+    options: { allowParallelCalls?: boolean } = {},
 ): QualityGateResult {
     // Signal 1: Think-only — model reasoned but produced no answer (check before empty)
     if (thinkOnly) {
@@ -61,6 +63,22 @@ export function passesQualityGate(
     // meaning the model hit num_predict before finishing
     if (finishReason === "length") {
         return { pass: false, reason: "hard_truncation" };
+    }
+
+    // Several complete calls, when the caller asked for them (route mode). The
+    // envelopes repeat by design, so the prose loop checks below would fail any
+    // three calls; a loop here is the same call again and again.
+    if (mode === "route" && options.allowParallelCalls) {
+        const several = parseRouteCalls(stripped);
+        if (several.kind === "tool_calls") {
+            const seen = new Map<string, number>();
+            for (const c of several.calls) {
+                const key = JSON.stringify([c.name, c.args]);
+                seen.set(key, (seen.get(key) ?? 0) + 1);
+                if ((seen.get(key) ?? 0) >= 3) return { pass: false, reason: "loop_detected" };
+            }
+            return { pass: true };
+        }
     }
 
     // Signal 5: Tool-call bleed. The pipe envelope is invalid in chat/code,

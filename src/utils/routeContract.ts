@@ -27,7 +27,14 @@ export interface RouteGuardOutcome {
     source: "local" | "portal" | "local_fallback";
     original_tool?: string;
     final_tool?: string;
+    /** Every tool called, in order, when a reply of several calls was kept. */
+    calls?: string[];
     reason?: string;
+}
+
+export interface RouteContractOptions {
+    /** Accept a reply of several complete calls; each must be advertised. */
+    allowParallel?: boolean;
 }
 
 const PIPE_START = "<|tool_call|>";
@@ -301,13 +308,78 @@ export function routeServesProse(output: string): boolean {
     return t.slice(last.at + last.e.length).trim() !== "";   // text after the envelope
 }
 
+const OPENERS = [PIPE_START, ANGLE_START] as const;
+const MAX_PARALLEL_CALLS = 64;
+
+/**
+ * A reply of complete tool-call envelopes one after another, with only
+ * whitespace between them. Every envelope must be closed and hold a valid
+ * call; any text, an unclosed envelope or a bad body makes the whole reply
+ * malformed. A single envelope is left to parseRouteOutput.
+ */
+export function parseRouteCalls(
+    output: string,
+): { kind: "tool_calls"; calls: Array<{ name: string; args: Record<string, unknown> }> } | { kind: "malformed" } {
+    if (output.length > MAX_ROUTE_OUTPUT_CHARS) return { kind: "malformed" };
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let rest = output.trim();
+    while (rest.length > 0) {
+        const opener = OPENERS.find(o => rest.startsWith(o));
+        if (!opener || calls.length >= MAX_PARALLEL_CALLS) return { kind: "malformed" };
+        let end = -1;
+        let endToken = "";
+        for (const token of END_TOKENS) {
+            const at = rest.indexOf(token, opener.length);
+            if (at >= 0 && (end < 0 || at < end)) {
+                end = at;
+                endToken = token;
+            }
+        }
+        if (end < 0) return { kind: "malformed" };
+        const body = rest.slice(opener.length, end).trim();
+        if (OPENERS.some(o => body.includes(o))) return { kind: "malformed" };
+        const parsed = parseToolJson(body);
+        if (parsed.kind !== "tool_call") return { kind: "malformed" };
+        calls.push({ name: parsed.name, args: parsed.args });
+        rest = rest.slice(end + endToken.length).trim();
+    }
+    return calls.length > 1 ? { kind: "tool_calls", calls } : { kind: "malformed" };
+}
+
 export function applyLocalRouteContract(
     draft: string,
     allowedTools: ReadonlySet<string> = DEFAULT_PRISM_ROUTE_TOOLS,
+    options: RouteContractOptions = {},
 ): RouteGuardOutcome {
     const parsed = parseRouteOutput(draft);
     if (parsed.kind === "plain_text") {
         return { output: draft, action: "plain_text", source: "local" };
+    }
+    if (parsed.kind === "malformed" && options.allowParallel) {
+        const several = parseRouteCalls(draft);
+        if (several.kind === "tool_calls") {
+            if (several.calls.some(c => c.name === "NO_TOOL")) {
+                return { output: "NO_TOOL", action: "suppressed", source: "local", reason: "malformed_tool_call" };
+            }
+            const unadvertised = several.calls.find(c => !allowedTools.has(c.name));
+            if (unadvertised) {
+                return {
+                    output: "NO_TOOL",
+                    action: "suppressed",
+                    source: "local",
+                    original_tool: unadvertised.name,
+                    reason: "unadvertised_tool",
+                };
+            }
+            return {
+                output: draft,
+                action: "preserved",
+                source: "local",
+                original_tool: several.calls[0].name,
+                final_tool: several.calls[0].name,
+                calls: several.calls.map(c => c.name),
+            };
+        }
     }
     if (parsed.kind === "malformed") {
         return {
