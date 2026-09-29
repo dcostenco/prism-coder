@@ -1,7 +1,8 @@
 /**
  * The classifier-input policy: the classifier's copy of a request leaves out
- * sentences made only of listed words. A synthetic policy stands in for the
- * real one, which is not public.
+ * a sentence when every word is listed, each required group is present, and
+ * each qualified word follows one of its words. A synthetic policy stands in
+ * for the real one, which is not public.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "fs";
@@ -34,7 +35,7 @@ describe("classifierCopy", () => {
         expect(classifierCopy(`Write a function. ${LISTED}\n\n${req}`, P)).toBe(`Write a function.\n\n${req}`);
         expect(classifierCopy(`${LISTED} Write a function.\n${req}`, P)).toBe(`Write a function.\n${req}`);
         expect(classifierCopy(`Write a function.\n\n${req}\n\nSed do, amet!`, P)).toBe(`Write a function.\n\n${req}`);
-        expect(classifierCopy(`Write a function. ${LISTED} Consectetur elit.\n\n${req}`, P)).toBe(`Write a function.\n\n${req}`);
+        expect(classifierCopy(`Write a function. ${LISTED} Sed amet elit.\n\n${req}`, P)).toBe(`Write a function.\n\n${req}`);
     });
 
     it("returns text with nothing to leave out unchanged, byte for byte", () => {
@@ -55,9 +56,37 @@ describe("classifierCopy", () => {
         }
     });
 
-    it("counts pattern tokens as listed, but keeps a sentence of pattern tokens alone", () => {
-        expect(classifierCopy("Write a function. Lorem ###abc ipsum.\n\nThe spec.", P)).toBe("Write a function.\n\nThe spec.");
+    it("counts pattern tokens as listed, but never toward a group; a sentence of pattern tokens alone is kept", () => {
+        expect(classifierCopy("Write a function. Lorem ###abc dolor.\n\nThe spec.", P)).toBe("Write a function.\n\nThe spec.");
+        expect(classifierCopy("Write a function. Lorem ipsum ###dolor.\n\nThe spec.", P)).toBe("Write a function. Lorem ipsum ###dolor.\n\nThe spec.");
         expect(classifierCopy("Write a function.\n###abc\nThe spec.\n###", P)).toBe("Write a function.\n###abc\nThe spec.\n###");
+    });
+
+    it("keeps a sentence of listed words that lacks a word from any required group", () => {
+        for (const sentence of ["Ipsum sit.", "Lorem ipsum.", "Dolor sit amet.", "Consectetur adipiscing elit."]) {
+            const text = `Write a function. ${sentence}\n\nThe spec.`;
+            expect(classifierCopy(text, P), sentence).toBe(text);
+        }
+    });
+
+    it("counts a qualified word only right after one of its words or a pattern token", () => {
+        expect(classifierCopy("The spec. Sed amet elit.", P)).toBe("The spec.");
+        expect(classifierCopy("The spec. Sed ###x elit dolor.", P)).toBe("The spec.");
+        for (const sentence of ["Elit sed amet.", "Sed elit amet.", "Sed dolor, elit."]) {
+            const text = `The spec. ${sentence}`;
+            expect(classifierCopy(text, P), sentence).toBe(text);
+        }
+    });
+
+    it("never leaves out a question", () => {
+        for (const text of ["The spec. Lorem ipsum dolor?", "Lorem dolor? The spec.", "The spec.\nSed amet elit?  "]) {
+            expect(classifierCopy(text, P), text).toBe(text);
+        }
+    });
+
+    it("keeps every other character, leading and trailing whitespace included", () => {
+        expect(classifierCopy("  Write a function.\nLorem ipsum dolor.\n", P)).toBe("  Write a function.\n");
+        expect(classifierCopy("\nLorem ipsum dolor.\nThe spec.  ", P)).toBe("\nThe spec.  ");
     });
 
     it("never returns an empty request", () => {

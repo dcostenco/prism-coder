@@ -30,7 +30,7 @@ export const ANSWER_CHECK_POLICY_SHA256 = "ba12ab1f6858b68ed36b7c0551aa3381ffb45
 /** The mechanism this client implements (answerGrounding.ts, groundAnswer). */
 export const ANSWER_CHECK_POLICY_EVALUATOR = "answer-check/1";
 /** The classifier-input artifact this release runs. */
-export const CLASSIFIER_INPUT_POLICY_SHA256 = "4eca32bba3d6a06997a621329f0732042e93281b021136448f2a80942eee7f84";
+export const CLASSIFIER_INPUT_POLICY_SHA256 = "84919b8120e8dffa775cbaeb2e87b1a75e3cb968dee5b079e1da81e3785568fc";
 /** The mechanism this client implements (layer1.ts classifierCopy). */
 export const CLASSIFIER_INPUT_POLICY_EVALUATOR = "classifier-input/1";
 
@@ -40,6 +40,7 @@ const MIN_OPERATIONAL_TERMS = 8;
 const MIN_DEPLOY_DECISION = 2;
 const MIN_DROP_WORDS = 8;
 const MAX_WORD_CHARS = 40;
+const MAX_REQUIRED_GROUPS = 4;
 /** A list longer than this is not a policy this client was released with. */
 const MAX_LIST_ENTRIES = 1_000;
 /** A group whose body repeats may be repeated at most this many times. */
@@ -238,8 +239,9 @@ export function parseAnswerCheckPolicy(bytes: string, expectSha256: string = ANS
 /** The classifier-input policy from the artifact's exact bytes, or null for
  *  anything but the expected artifact: another hash, schema or evaluator, a
  *  word list below its floor or with an entry that is not one lowercase word,
- *  a token pattern that is oversized, refers back, repeats a varying group or
- *  does not compile. */
+ *  no required group or a group or qualifier naming an unlisted word, a token
+ *  pattern that is oversized, refers back, repeats a varying group or does not
+ *  compile. */
 export function parseClassifierInputPolicy(bytes: string, expectSha256: string = CLASSIFIER_INPUT_POLICY_SHA256): ClassifierInputPolicy | null {
     if (Buffer.byteLength(bytes, "utf8") > MAX_ARTIFACT_BYTES) return null;
     if (sha256(bytes) !== expectSha256) return null;
@@ -251,11 +253,24 @@ export function parseClassifierInputPolicy(bytes: string, expectSha256: string =
     const words = s.drop_sentence_words;
     const word = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= MAX_WORD_CHARS && v === v.toLowerCase() && !/\s/.test(v);
     if (!Array.isArray(words) || words.length < MIN_DROP_WORDS || words.length > MAX_LIST_ENTRIES || !words.every(word)) return null;
+    const listed = new Set(words);
+    const subset = (v: unknown): v is string[] => Array.isArray(v) && v.length > 0 && v.length <= MAX_LIST_ENTRIES && v.every(w => typeof w === "string" && listed.has(w));
+    const groups = s.require_each;
+    if (!Array.isArray(groups) || groups.length === 0 || groups.length > MAX_REQUIRED_GROUPS || !groups.every(subset)) return null;
+    const after = s.only_after ?? {};
+    if (typeof after !== "object" || after === null || Array.isArray(after)) return null;
+    const afterEntries = Object.entries(after as Record<string, unknown>);
+    if (!afterEntries.every(([w, prev]) => listed.has(w) && subset(prev))) return null;
     const also = s.also_match;
     if (also !== undefined && !(typeof also === "string" && also.length > 0 && also.length <= MAX_PATTERN_CHARS && !/\\[1-9]|\\k</.test(also) && !hasNestedRepetition(also))) return null;
     try {
         // The client sets the flags (none); the artifact supplies the source only.
-        return { dropWords: new Set(words), alsoMatch: typeof also === "string" ? new RegExp(also) : null };
+        return {
+            dropWords: listed,
+            requireEach: groups.map(g => new Set(g)),
+            onlyAfter: new Map(afterEntries.map(([w, prev]) => [w, new Set(prev as string[])])),
+            alsoMatch: typeof also === "string" ? new RegExp(also) : null,
+        };
     } catch {
         return null;
     }

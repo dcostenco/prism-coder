@@ -80,29 +80,43 @@ export function layer1ClassifierContent(input: string): string {
 /** The classifier-input policy, served by Synalux and pinned by hash
  *  (inferencePolicy.ts loads it). */
 export interface ClassifierInputPolicy {
-    /** A sentence made only of these words is left out of the classifier's copy. */
+    /** A sentence can be left out of the classifier's copy only if every word is listed here. */
     dropWords: ReadonlySet<string>;
-    /** Tokens that count as listed words; a sentence of these alone is kept. */
+    /** ...and it has at least one word from each of these groups. */
+    requireEach: ReadonlyArray<ReadonlySet<string>>;
+    /** A listed word here counts only right after one of its words, or after a pattern token. */
+    onlyAfter: ReadonlyMap<string, ReadonlySet<string>>;
+    /** Tokens that count as listed words, but never satisfy a group. */
     alsoMatch: RegExp | null;
 }
 
 const TOKEN_EDGE = /^[^\w`'#.+-]+|[^\w`'#+-]+$/g;
 
-function onlyListedWords(sentence: string, p: ClassifierInputPolicy): boolean {
-    let listed = false;
+function droppable(sentence: string, p: ClassifierInputPolicy): boolean {
+    // A question is never left out: it may be what the request asks.
+    if (/\?\s*$/.test(sentence)) return false;
+    const hit = p.requireEach.map(() => false);
+    let prev: string | null = null;
     for (const raw of sentence.toLowerCase().split(/[\s,;:()]+/)) {
         const token = raw.replace(TOKEN_EDGE, "");
         if (!token) continue;
-        if (p.dropWords.has(token)) listed = true;
-        else if (!p.alsoMatch?.test(token)) return false;
+        const pattern = !!p.alsoMatch?.test(token);
+        if (p.dropWords.has(token)) {
+            const after = p.onlyAfter.get(token);
+            if (after && !(prev !== null && (after.has(prev) || !!p.alsoMatch?.test(prev)))) return false;
+            p.requireEach.forEach((group, i) => { if (group.has(token)) hit[i] = true; });
+        } else if (!pattern) {
+            return false;
+        }
+        prev = token;
     }
-    return listed;
+    return hit.length > 0 && hit.every(Boolean);
 }
 
 /**
  * The classifier's copy of a request under a classifier-input policy. A
- * sentence made only of listed words is left out; every other sentence is kept
- * unchanged, and text with nothing to leave out is returned as it is.
+ * sentence the policy allows is left out with one adjacent separator; every
+ * other character is kept, and text with nothing to leave out is returned as it is.
  */
 export function classifierCopy(text: string, p: ClassifierInputPolicy): string {
     // Even indexes are sentences, odd indexes the separators between them.
@@ -110,15 +124,15 @@ export function classifierCopy(text: string, p: ClassifierInputPolicy): string {
     const keep = parts.map(() => true);
     let dropped = false;
     for (let i = 0; i < parts.length; i += 2) {
-        if (!onlyListedWords(parts[i], p)) continue;
+        if (!droppable(parts[i], p)) continue;
         keep[i] = false;
         dropped = true;
         if (i > 0 && keep[i - 1]) keep[i - 1] = false;
         else if (i + 1 < parts.length) keep[i + 1] = false;
     }
     if (!dropped) return text;
-    const out = parts.filter((_, i) => keep[i]).join("").trim();
-    return out || text;
+    const out = parts.filter((_, i) => keep[i]).join("");
+    return out.trim() ? out : text;
 }
 
 const VALID: ReadonlySet<string> = new Set([

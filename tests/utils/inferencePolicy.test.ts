@@ -293,10 +293,12 @@ describe("parseClassifierInputPolicy", () => {
     const CISHA = sha(CI);
     const civariant = (edit: (a: any) => void) => { const a = JSON.parse(CI); edit(a); const b = JSON.stringify(a); return { b, h: sha(b) }; };
 
-    it("builds exactly the pinned artifact: the word set, and the token pattern with no flags", () => {
+    it("builds exactly the pinned artifact: the word set, groups, qualifiers, and the token pattern with no flags", () => {
         const p = parseClassifierInputPolicy(CI, CISHA)!;
         expect(p).not.toBeNull();
         expect([...p.dropWords]).toContain("lorem");
+        expect(p.requireEach.map(g => [...g])).toEqual([["lorem", "sed"], ["dolor", "amet"]]);
+        expect([...p.onlyAfter.get("elit")!]).toEqual(["amet"]);
         expect(p.alsoMatch?.flags).toBe("");
         expect(p.alsoMatch?.test("###abc")).toBe(true);
     });
@@ -316,6 +318,15 @@ describe("parseClassifierInputPolicy", () => {
             ["empty word", (a: any) => { a.classifier_input.drop_sentence_words[0] = ""; }],
             ["long word", (a: any) => { a.classifier_input.drop_sentence_words[0] = "x".repeat(41); }],
             ["not a string", (a: any) => { a.classifier_input.drop_sentence_words[0] = 7; }],
+            ["no groups", (a: any) => { delete a.classifier_input.require_each; }],
+            ["empty group list", (a: any) => { a.classifier_input.require_each = []; }],
+            ["empty group", (a: any) => { a.classifier_input.require_each[0] = []; }],
+            ["group word not listed", (a: any) => { a.classifier_input.require_each[0].push("vault"); }],
+            ["five groups", (a: any) => { a.classifier_input.require_each = [["lorem"], ["lorem"], ["lorem"], ["lorem"], ["lorem"]]; }],
+            ["qualifier not an object", (a: any) => { a.classifier_input.only_after = ["elit"]; }],
+            ["qualified word not listed", (a: any) => { a.classifier_input.only_after = { vault: ["amet"] }; }],
+            ["qualifier names an unlisted word", (a: any) => { a.classifier_input.only_after = { elit: ["vault"] }; }],
+            ["empty qualifier", (a: any) => { a.classifier_input.only_after = { elit: [] }; }],
             ["empty pattern", (a: any) => { a.classifier_input.also_match = ""; }],
             ["pattern not a string", (a: any) => { a.classifier_input.also_match = 7; }],
             ["back-reference", (a: any) => { a.classifier_input.also_match = "^(#)\\1$"; }],
@@ -327,9 +338,11 @@ describe("parseClassifierInputPolicy", () => {
             expect(parseClassifierInputPolicy(b, h), name).toBeNull();
         }
     });
-    it("the token pattern is optional", () => {
-        const { b, h } = civariant((a: any) => { delete a.classifier_input.also_match; });
-        expect(parseClassifierInputPolicy(b, h)?.alsoMatch).toBeNull();
+    it("the token pattern and the qualifiers are optional", () => {
+        const { b, h } = civariant((a: any) => { delete a.classifier_input.also_match; delete a.classifier_input.only_after; });
+        const p = parseClassifierInputPolicy(b, h)!;
+        expect(p.alsoMatch).toBeNull();
+        expect(p.onlyAfter.size).toBe(0);
     });
 });
 
