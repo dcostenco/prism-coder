@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.17 — 2026-09-29
+
+### Fewer ordinary coding requests refused by the on-device screen
+
+The on-device screen refused some ordinary coding requests that it should have
+let through. With a Synalux account (free included), the screen's classifier
+now reads each request through a classifier-input policy that Synalux serves.
+The policy is fetched by its SHA-256, verified, and held in memory only, like
+the second-read and answer-check policies. The screen's rule-based checks still
+read the whole request.
+
+- Without an account, or when the policy cannot be fetched, the screen works
+  exactly as in 20.21.16.
+- The first screened request waits at most 3 seconds for the policy. If it has
+  not arrived by then, that request is screened as before.
+
 ## 20.21.16 — 2026-09-27
 
 ### A local answer to a conversation is checked before it is served
