@@ -19,7 +19,7 @@ vi.mock("../../src/config.js", async (importOriginal) => {
 });
 vi.mock("../../src/utils/synaluxJwt.js", () => ({ getSynaluxJwt: mockGetSynaluxJwt, invalidateSynaluxJwt: mockInvalidateSynaluxJwt }));
 
-import { parseSecondReadPolicy, getSecondReadPolicy, parseAnswerCheckPolicy, getAnswerCheckPolicy, _resetSecondReadPolicyForTest, clearInferencePolicies, hasNestedRepetition, SECOND_READ_POLICY_SHA256, ANSWER_CHECK_POLICY_SHA256 } from "../../src/utils/inferencePolicy.js";
+import { parseSecondReadPolicy, getSecondReadPolicy, parseAnswerCheckPolicy, getAnswerCheckPolicy, parseClassifierInputPolicy, getClassifierInputPolicy, _resetSecondReadPolicyForTest, clearInferencePolicies, hasNestedRepetition, SECOND_READ_POLICY_SHA256, ANSWER_CHECK_POLICY_SHA256, CLASSIFIER_INPUT_POLICY_SHA256 } from "../../src/utils/inferencePolicy.js";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const ARTIFACT = JSON.parse(readFileSync(new URL("../fixtures/second-read-policy.synthetic.json", import.meta.url), "utf8"));
@@ -285,5 +285,80 @@ describe("clearInferencePolicies: a sign-out or an account change drops what the
         await pending;
         await load();
         expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("parseClassifierInputPolicy", () => {
+    const CI = JSON.stringify(JSON.parse(readFileSync(new URL("../fixtures/classifier-input-policy.synthetic.json", import.meta.url), "utf8")));
+    const CISHA = sha(CI);
+    const civariant = (edit: (a: any) => void) => { const a = JSON.parse(CI); edit(a); const b = JSON.stringify(a); return { b, h: sha(b) }; };
+
+    it("builds exactly the pinned artifact: the word set, and the token pattern with no flags", () => {
+        const p = parseClassifierInputPolicy(CI, CISHA)!;
+        expect(p).not.toBeNull();
+        expect([...p.dropWords]).toContain("lorem");
+        expect(p.alsoMatch?.flags).toBe("");
+        expect(p.alsoMatch?.test("###abc")).toBe(true);
+    });
+    it("another hash is no policy", () => {
+        expect(parseClassifierInputPolicy(CI.replace("lorem", "lorex"), CISHA)).toBeNull();
+        expect(parseClassifierInputPolicy(CI, CLASSIFIER_INPUT_POLICY_SHA256)).toBeNull();
+    });
+    it("a wrong schema or evaluator, a short list, an entry that is not one lowercase word, a bad token pattern is no policy", () => {
+        for (const [name, edit] of [
+            ["schema", (a: any) => { a.schema = 2; }],
+            ["evaluator", (a: any) => { a.evaluator = "classifier-input/2"; }],
+            ["missing section", (a: any) => { delete a.classifier_input; }],
+            ["few words", (a: any) => { a.classifier_input.drop_sentence_words = a.classifier_input.drop_sentence_words.slice(0, 7); }],
+            ["not a list", (a: any) => { a.classifier_input.drop_sentence_words = "lorem"; }],
+            ["uppercase", (a: any) => { a.classifier_input.drop_sentence_words[0] = "Lorem"; }],
+            ["two words", (a: any) => { a.classifier_input.drop_sentence_words[0] = "lorem ipsum"; }],
+            ["empty word", (a: any) => { a.classifier_input.drop_sentence_words[0] = ""; }],
+            ["long word", (a: any) => { a.classifier_input.drop_sentence_words[0] = "x".repeat(41); }],
+            ["not a string", (a: any) => { a.classifier_input.drop_sentence_words[0] = 7; }],
+            ["empty pattern", (a: any) => { a.classifier_input.also_match = ""; }],
+            ["pattern not a string", (a: any) => { a.classifier_input.also_match = 7; }],
+            ["back-reference", (a: any) => { a.classifier_input.also_match = "^(#)\\1$"; }],
+            ["nested repetition", (a: any) => { a.classifier_input.also_match = "^(#+)+$"; }],
+            ["uncompilable", (a: any) => { a.classifier_input.also_match = "(unclosed"; }],
+            ["oversize pattern", (a: any) => { a.classifier_input.also_match = "x".repeat(1_025); }],
+        ] as const) {
+            const { b, h } = civariant(edit);
+            expect(parseClassifierInputPolicy(b, h), name).toBeNull();
+        }
+    });
+    it("the token pattern is optional", () => {
+        const { b, h } = civariant((a: any) => { delete a.classifier_input.also_match; });
+        expect(parseClassifierInputPolicy(b, h)?.alsoMatch).toBeNull();
+    });
+});
+
+describe("getClassifierInputPolicy", () => {
+    const CI = JSON.stringify(JSON.parse(readFileSync(new URL("../fixtures/classifier-input-policy.synthetic.json", import.meta.url), "utf8")));
+    let fetchMock: ReturnType<typeof vi.fn>;
+    beforeEach(() => {
+        vi.clearAllMocks();
+        clearInferencePolicies();
+        mockGetSynaluxJwt.mockResolvedValue("jwt-current");
+        fetchMock = vi.fn(async () => new Response(CI, { status: 200 }));
+    });
+    const load = () => getClassifierInputPolicy({ fetchImpl: fetchMock as unknown as typeof fetch, expectSha256: sha(CI) });
+
+    it("GETs the artifact by its hash, loads once, and drops it when the account changes", async () => {
+        expect((await load())?.dropWords.has("lorem")).toBe(true);
+        expect(String(fetchMock.mock.calls[0][0])).toBe(`${PORTAL}/api/v1/prism/inference-policy/${sha(CI)}`);
+        await load();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        clearInferencePolicies();
+        await load();
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+    it("the real pin is what an unconfigured call fetches", async () => {
+        await getClassifierInputPolicy({ fetchImpl: fetchMock as unknown as typeof fetch });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(`${PORTAL}/api/v1/prism/inference-policy/${CLASSIFIER_INPUT_POLICY_SHA256}`);
+    });
+    it("a denial is no policy", async () => {
+        fetchMock.mockResolvedValue(new Response("{}", { status: 403 }));
+        expect(await load()).toBeNull();
     });
 });

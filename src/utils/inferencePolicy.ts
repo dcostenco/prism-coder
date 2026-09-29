@@ -1,7 +1,8 @@
 /**
- * Policies the on-device multi-turn features run with, served by Synalux to
- * plans with multi-turn: the second read's exclusion policy (the conversations
- * the 9b may not re-read after a 4b hedge) and the answer check's rules. Each
+ * Policies on-device features run with, served by Synalux to plans with
+ * multi-turn: the second read's exclusion policy (the conversations the 9b may
+ * not re-read after a 4b hedge), the answer check's rules, and the screen's
+ * classifier-input policy (layer1.ts classifierCopy). Each
  * release accepts exactly one artifact of each, pinned by its SHA-256, so the
  * policy a client runs is the one it was released and validated with.
  *
@@ -11,12 +12,13 @@
  * kept. Anything but the pinned, well-formed artifact is no policy: with
  * no second-read policy the second read does not run (the hedge stands); with
  * no answer-check policy a local answer to a conversation is unchecked (cloud,
- * else withheld).
+ * else withheld); with no classifier-input policy the classifier reads the
+ * request as written.
  */
 import { createHash } from "node:crypto";
 import { PRISM_SYNALUX_BASE_URL } from "../config.js";
 import { getSynaluxJwt, invalidateSynaluxJwt } from "./synaluxJwt.js";
-import type { SecondReadExclusionPolicy } from "./layer1.js";
+import type { ClassifierInputPolicy, SecondReadExclusionPolicy } from "./layer1.js";
 import { arithmeticExpressions, type AnswerCheckPolicy } from "./answerGrounding.js";
 
 /** The artifact this release runs. Changing it is a release, with its gates. */
@@ -27,11 +29,17 @@ export const SECOND_READ_POLICY_EVALUATOR = "second-read-exclusion/1";
 export const ANSWER_CHECK_POLICY_SHA256 = "ba12ab1f6858b68ed36b7c0551aa3381ffb45b6123eb0aacd09c9316efd27993";
 /** The mechanism this client implements (answerGrounding.ts, groundAnswer). */
 export const ANSWER_CHECK_POLICY_EVALUATOR = "answer-check/1";
+/** The classifier-input artifact this release runs. */
+export const CLASSIFIER_INPUT_POLICY_SHA256 = "4eca32bba3d6a06997a621329f0732042e93281b021136448f2a80942eee7f84";
+/** The mechanism this client implements (layer1.ts classifierCopy). */
+export const CLASSIFIER_INPUT_POLICY_EVALUATOR = "classifier-input/1";
 
 const MAX_ARTIFACT_BYTES = 64 * 1024;
 const MAX_PATTERN_CHARS = 1_024;
 const MIN_OPERATIONAL_TERMS = 8;
 const MIN_DEPLOY_DECISION = 2;
+const MIN_DROP_WORDS = 8;
+const MAX_WORD_CHARS = 40;
 /** A list longer than this is not a policy this client was released with. */
 const MAX_LIST_ENTRIES = 1_000;
 /** A group whose body repeats may be repeated at most this many times. */
@@ -227,6 +235,32 @@ export function parseAnswerCheckPolicy(bytes: string, expectSha256: string = ANS
     }
 }
 
+/** The classifier-input policy from the artifact's exact bytes, or null for
+ *  anything but the expected artifact: another hash, schema or evaluator, a
+ *  word list below its floor or with an entry that is not one lowercase word,
+ *  a token pattern that is oversized, refers back, repeats a varying group or
+ *  does not compile. */
+export function parseClassifierInputPolicy(bytes: string, expectSha256: string = CLASSIFIER_INPUT_POLICY_SHA256): ClassifierInputPolicy | null {
+    if (Buffer.byteLength(bytes, "utf8") > MAX_ARTIFACT_BYTES) return null;
+    if (sha256(bytes) !== expectSha256) return null;
+    let a: unknown;
+    try { a = JSON.parse(bytes); } catch { return null; }
+    const art = a as { schema?: unknown; evaluator?: unknown; classifier_input?: Record<string, unknown> };
+    if (art?.schema !== 1 || art.evaluator !== CLASSIFIER_INPUT_POLICY_EVALUATOR || typeof art.classifier_input !== "object" || art.classifier_input === null) return null;
+    const s = art.classifier_input;
+    const words = s.drop_sentence_words;
+    const word = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= MAX_WORD_CHARS && v === v.toLowerCase() && !/\s/.test(v);
+    if (!Array.isArray(words) || words.length < MIN_DROP_WORDS || words.length > MAX_LIST_ENTRIES || !words.every(word)) return null;
+    const also = s.also_match;
+    if (also !== undefined && !(typeof also === "string" && also.length > 0 && also.length <= MAX_PATTERN_CHARS && !/\\[1-9]|\\k</.test(also) && !hasNestedRepetition(also))) return null;
+    try {
+        // The client sets the flags (none); the artifact supplies the source only.
+        return { dropWords: new Set(words), alsoMatch: typeof also === "string" ? new RegExp(also) : null };
+    } catch {
+        return null;
+    }
+}
+
 interface LoadOptions {
     fetchImpl?: typeof fetch;
     deadlineMs?: number;
@@ -301,16 +335,20 @@ async function load<T>(o: LoadOptions, sha: string, parse: (bytes: string, sha: 
 
 const secondRead = pinned(SECOND_READ_POLICY_SHA256, parseSecondReadPolicy);
 const answerCheck = pinned(ANSWER_CHECK_POLICY_SHA256, parseAnswerCheckPolicy);
+const classifierInput = pinned(CLASSIFIER_INPUT_POLICY_SHA256, parseClassifierInputPolicy);
 /** The pinned second-read policy, or null. */
 export const getSecondReadPolicy = (o: LoadOptions = {}) => secondRead.get(o);
 /** The pinned answer-check policy, or null. */
 export const getAnswerCheckPolicy = (o: LoadOptions = {}) => answerCheck.get(o);
+/** The pinned classifier-input policy, or null. */
+export const getClassifierInputPolicy = (o: LoadOptions = {}) => classifierInput.get(o);
 
-/** Drops both cached policies; the next conversation loads them again. Called
+/** Drops every cached policy; the next request loads them again. Called
  *  when the account changes (dashboard sign-in and sign-out). */
 export function clearInferencePolicies(): void {
     secondRead.reset();
     answerCheck.reset();
+    classifierInput.reset();
 }
 
 /** Tests only. */

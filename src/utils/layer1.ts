@@ -77,6 +77,50 @@ export function layer1ClassifierContent(input: string): string {
     return LAYER1_PROMPT.replace("{prompt}", () => input);
 }
 
+/** The classifier-input policy, served by Synalux and pinned by hash
+ *  (inferencePolicy.ts loads it). */
+export interface ClassifierInputPolicy {
+    /** A sentence made only of these words is left out of the classifier's copy. */
+    dropWords: ReadonlySet<string>;
+    /** Tokens that count as listed words; a sentence of these alone is kept. */
+    alsoMatch: RegExp | null;
+}
+
+const TOKEN_EDGE = /^[^\w`'#.+-]+|[^\w`'#+-]+$/g;
+
+function onlyListedWords(sentence: string, p: ClassifierInputPolicy): boolean {
+    let listed = false;
+    for (const raw of sentence.toLowerCase().split(/[\s,;:()]+/)) {
+        const token = raw.replace(TOKEN_EDGE, "");
+        if (!token) continue;
+        if (p.dropWords.has(token)) listed = true;
+        else if (!p.alsoMatch?.test(token)) return false;
+    }
+    return listed;
+}
+
+/**
+ * The classifier's copy of a request under a classifier-input policy. A
+ * sentence made only of listed words is left out; every other sentence is kept
+ * unchanged, and text with nothing to leave out is returned as it is.
+ */
+export function classifierCopy(text: string, p: ClassifierInputPolicy): string {
+    // Even indexes are sentences, odd indexes the separators between them.
+    const parts = text.split(/((?<=[.!?])[^\S\r\n]+|[\r\n]+)/);
+    const keep = parts.map(() => true);
+    let dropped = false;
+    for (let i = 0; i < parts.length; i += 2) {
+        if (!onlyListedWords(parts[i], p)) continue;
+        keep[i] = false;
+        dropped = true;
+        if (i > 0 && keep[i - 1]) keep[i - 1] = false;
+        else if (i + 1 < parts.length) keep[i + 1] = false;
+    }
+    if (!dropped) return text;
+    const out = parts.filter((_, i) => keep[i]).join("").trim();
+    return out || text;
+}
+
 const VALID: ReadonlySet<string> = new Set([
     "OBVIOUS_RESERVED",
     "OBVIOUS_NOT_RESERVED",
@@ -522,6 +566,10 @@ export async function callLayer1(
          *  (see prismInferHandler's history screen). The oversize keyword
          *  floor below is NOT gated by this and still runs. */
         deterministic?: boolean;
+        /** The account's classifier-input policy, when it has one. Only the
+         *  classifier's copy follows it; the deterministic floor and the
+         *  keyword backstop read the full request. */
+        classifierInput?: ClassifierInputPolicy | null;
     },
 ): Promise<Layer1Verdict> {
     if (!userPrompt || !userPrompt.trim()) return "ERROR";
@@ -543,7 +591,8 @@ export async function callLayer1(
         // short-circuits to reserved handling.
         return "OBVIOUS_RESERVED";
     }
-    const classifierInput = oversize ? buildOversizeExcerpt(userPrompt) : userPrompt;
+    const excerpt = oversize ? buildOversizeExcerpt(userPrompt) : userPrompt;
+    const classifierInput = opts?.classifierInput ? classifierCopy(excerpt, opts.classifierInput) : excerpt;
 
     // A SYSTEM baked into the classifier model's Modelfile must not sit in front
     // of LAYER1_PROMPT. prism-coder:4b bakes a tool-routing prompt; with it the

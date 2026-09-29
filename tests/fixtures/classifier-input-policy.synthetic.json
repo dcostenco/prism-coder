@@ -1,0 +1,8 @@
+{
+    "schema": 1,
+    "evaluator": "classifier-input/1",
+    "classifier_input": {
+        "drop_sentence_words": ["lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing", "elit", "sed", "do"],
+        "also_match": "^#{3}\\w*$"
+    }
+}

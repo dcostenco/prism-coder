@@ -53,8 +53,8 @@ import {
     passesCodingQualityGate,
 } from "../utils/codingQualityPolicy.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
-import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, keywordBackstop, reservedCategory, MAX_CLASSIFIER_PROMPT_LENGTH, layer1ClassifierContent, secondReadExclusion, type Layer1Verdict, type SecondReadExclusionPolicy } from "../utils/layer1.js";
-import { getSecondReadPolicy, getAnswerCheckPolicy } from "../utils/inferencePolicy.js";
+import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, keywordBackstop, reservedCategory, MAX_CLASSIFIER_PROMPT_LENGTH, layer1ClassifierContent, secondReadExclusion, type Layer1Verdict, type SecondReadExclusionPolicy, type ClassifierInputPolicy } from "../utils/layer1.js";
+import { getSecondReadPolicy, getAnswerCheckPolicy, getClassifierInputPolicy } from "../utils/inferencePolicy.js";
 import { pseudonymizeForCheck } from "../utils/pseudonymize.js";
 import { answerGroundingBytes, answerGroundingContent, parseGroundingVerdict, arithmeticSlips, arithmeticCorrection, ANSWER_GROUNDING_OUTPUT_TOKENS, ANSWER_GROUNDING_THINK, ANSWER_GROUNDING_THINK_TOKENS, ANSWER_GROUNDING_TIMEOUT_MS, ANSWER_GROUNDING_RETRY_TIMEOUT_MS, ANSWER_GROUNDING_FOLLOW_UP_TOKENS, type AnswerGroundingVerdict, type AnswerCheckPolicy } from "../utils/answerGrounding.js";
 import { recordInference, recordThinkOnlyRetry, formatInferenceMetrics, estimateTokens } from "../utils/inferenceMetrics.js";
@@ -316,6 +316,9 @@ function layer1HistoryCached(model: string, window: string): boolean {
     const hit = layer1HistoryCache.get(key);
     return hit !== undefined && hit.expiresAt > performance.now();
 }
+/** How long the screen waits for the classifier-input policy on its first load. */
+const CLASSIFIER_INPUT_LOAD_MS = 3_000;
+
 /** Tokens the classifier may generate (callLayer1's num_predict); they share
  *  the context with the request. */
 export const LAYER1_CLASSIFIER_OUTPUT_TOKENS = 16;
@@ -2000,7 +2003,7 @@ export interface InferDeps {
     /** Injectable classifier-limits lookup for the hedge second read; defaults to probeClassifierLimits. */
     probeClassifierLimits?: typeof probeClassifierLimits;
     /** Injectable Layer 1 classifier for testing. Defaults to callLayer1 from layer1.ts. */
-    callLayer1?: (userPrompt: string, ollamaUrl: string, model: string, fetchImpl?: typeof fetch, images?: string[], opts?: { deterministic?: boolean }) => Promise<Layer1Verdict>;
+    callLayer1?: (userPrompt: string, ollamaUrl: string, model: string, fetchImpl?: typeof fetch, images?: string[], opts?: { deterministic?: boolean; classifierInput?: ClassifierInputPolicy | null }) => Promise<Layer1Verdict>;
     /** Injectable local answer check for testing. Defaults to groundAnswer (the 9b on this device). */
     groundAnswer?: (o: Parameters<typeof groundAnswer>[0]) => Promise<{ verdict: AnswerGroundingVerdict; reply?: string; ms?: number }>;
     /** Injectable runtime-context lookup for the local check. Defaults to probeLoadedContext (/api/ps). */
@@ -2009,6 +2012,8 @@ export interface InferDeps {
     answerCheckPolicy?: () => Promise<AnswerCheckPolicy | null>;
     /** Injectable second-read exclusion policy for testing. Defaults to getSecondReadPolicy. */
     secondReadPolicy?: () => Promise<SecondReadExclusionPolicy | null>;
+    /** Injectable classifier-input policy for testing. Defaults to getClassifierInputPolicy. */
+    classifierInputPolicy?: () => Promise<ClassifierInputPolicy | null>;
     /** Injectable Synalux confirmation of a local pass (pseudonymized). Defaults to callSynaluxAnswerCheck. */
     checkAnswer?: (o: { messages: readonly InferHistoryTurn[]; prompt: string; answer: string }) => Promise<{ verdict: AnswerCheckVerdict; policy_version?: string; reason?: string }>;
 }
@@ -2445,10 +2450,15 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         // kept: reserved and uncertain fail closed for text, error follows
         // the single-prompt error path), then each turn and the prompt in
         // context (raise only) — see below.
+        // The account's classifier-input policy; without one the classifier
+        // reads the prompt as written.
+        const classifierInput = await (deps.classifierInputPolicy ?? (() => getClassifierInputPolicy({ deadlineMs: CLASSIFIER_INPUT_LOAD_MS })))().catch(() => null);
         let l1: Layer1Verdict;
         if (!args.messages?.length) {
-            // Single turn: the exact call it always was.
-            l1 = await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
+            // Single turn: one call; the classifier-input policy is passed when there is one.
+            l1 = classifierInput
+                ? await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { classifierInput })
+                : await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
             if (l1 !== "OBVIOUS_NOT_RESERVED") l1Layer = "prompt";
         } else {
             l1 = "OBVIOUS_NOT_RESERVED";
@@ -2530,7 +2540,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // (review round 19: skipping it there bypassed that floor).
             const promptFastPath = promptRoutine && args.prompt.length <= MAX_CLASSIFIER_PROMPT_LENGTH && (resolvedImages?.length ?? 0) === 0;
             if (l1 !== "OBVIOUS_RESERVED" && !promptFastPath) {
-                l1 = raise(l1, await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false }), "prompt");
+                l1 = raise(l1, await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false, ...(classifierInput ? { classifierInput } : {}) }), "prompt");
             }
             // 3. Context, raise only: one window per turn and one for the
             // prompt (see contextWindows), cached like any window. Skipped
