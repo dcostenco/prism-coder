@@ -20,6 +20,15 @@ read the whole request.
   it has not arrived by then, that request is screened as before, and the load
   is retried after 30 seconds.
 
+### Route mode can keep several tool calls
+
+`prism_infer` in route mode accepts `allow_parallel_calls: true`. With it, a
+reply that calls several tools is kept when every call names a tool in
+`allowed_tools`. If any call names a tool that was not offered, the reply
+becomes `NO_TOOL`. The same call with the same arguments three or more times
+fails the quality gate as a loop. Without the option, route mode works as in
+20.21.16.
+
 ## 20.21.16 — 2026-09-27
 
 ### A local answer to a conversation is checked before it is served

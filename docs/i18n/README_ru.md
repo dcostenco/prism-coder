@@ -164,6 +164,8 @@ or by re-enabling after each run.
   Synalux account (free included), it now reads each request through a policy
   that Synalux serves, pinned by its SHA-256. Without an account, or with
   images attached, the screen is unchanged.
+- `prism_infer` route mode: set `allow_parallel_calls` to keep a reply that
+  calls several of the tools you offered in `allowed_tools`.
 
 ## What's New in v20.21.16
 
