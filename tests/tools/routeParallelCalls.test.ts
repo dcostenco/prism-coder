@@ -144,6 +144,29 @@ describe("quality gate: several calls in route mode", () => {
         expect(passesQualityGate(same, false, "stop", "route", { allowParallelCalls: true }))
             .toEqual({ pass: false, reason: "loop_detected" });
     });
+
+    it("reads the same arguments in another key order as the same call", () => {
+        const reordered = [
+            call("get_weather", { city: "Lisbon", units: "c" }),
+            call("get_weather", { units: "c", city: "Lisbon" }),
+            call("get_weather", { city: "Lisbon", units: "c" }),
+        ].join("\n");
+        expect(passesQualityGate(reordered, false, "stop", "route", { allowParallelCalls: true }))
+            .toEqual({ pass: false, reason: "loop_detected" });
+        const nested = [
+            call("get_weather", { where: { city: "Lisbon", country: "PT" } }),
+            call("get_weather", { where: { country: "PT", city: "Lisbon" } }),
+            call("get_weather", { where: { city: "Lisbon", country: "PT" } }),
+        ].join("\n");
+        expect(passesQualityGate(nested, false, "stop", "route", { allowParallelCalls: true }))
+            .toEqual({ pass: false, reason: "loop_detected" });
+        const different = [
+            call("get_weather", { city: "Lisbon", units: "c" }),
+            call("get_weather", { units: "f", city: "Lisbon" }),
+            call("get_weather", { city: "Porto", units: "c" }),
+        ].join("\n");
+        expect(passesQualityGate(different, false, "stop", "route", { allowParallelCalls: true })).toEqual({ pass: true });
+    });
 });
 
 describe("prism_infer: allow_parallel_calls", () => {

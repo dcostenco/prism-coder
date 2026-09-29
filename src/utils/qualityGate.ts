@@ -1,5 +1,15 @@
 import { parseRouteCalls, parseRouteOutput } from "./routeContract.js";
 
+/** JSON with object keys sorted at every level: the same arguments in any order give one string. */
+function canonicalJson(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+    if (value !== null && typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        return `{${Object.keys(record).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(record[k])}`).join(",")}}`;
+    }
+    return JSON.stringify(value) ?? "null";
+}
+
 /**
  * Quality Gate — deterministic check for obvious inference failures.
  *
@@ -73,7 +83,7 @@ export function passesQualityGate(
         if (several.kind === "tool_calls") {
             const seen = new Map<string, number>();
             for (const c of several.calls) {
-                const key = JSON.stringify([c.name, c.args]);
+                const key = canonicalJson([c.name, c.args]);
                 seen.set(key, (seen.get(key) ?? 0) + 1);
                 if ((seen.get(key) ?? 0) >= 3) return { pass: false, reason: "loop_detected" };
             }
