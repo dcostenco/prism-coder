@@ -14,9 +14,11 @@ the second-read and answer-check policies. The screen's rule-based checks still
 read the whole request.
 
 - Without an account, or when the policy cannot be fetched, the screen works
-  exactly as in 20.21.16.
-- The first screened request waits at most 3 seconds for the policy. If it has
-  not arrived by then, that request is screened as before.
+  exactly as in 20.21.16. A request with images attached is always screened
+  as in 20.21.16.
+- A screened request waits at most 3 seconds for the policy while it loads. If
+  it has not arrived by then, that request is screened as before, and the load
+  is retried after 30 seconds.
 
 ## 20.21.16 — 2026-09-27
 

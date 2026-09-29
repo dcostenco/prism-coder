@@ -162,8 +162,8 @@ or by re-enabling after each run.
 
 - Fixed: the on-device screen refused some ordinary coding requests. With a
   Synalux account (free included), it now reads each request through a policy
-  that Synalux serves, pinned by its SHA-256. Without an account, the screen
-  is unchanged.
+  that Synalux serves, pinned by its SHA-256. Without an account, or with
+  images attached, the screen is unchanged.
 
 ## What's New in v20.21.16
 

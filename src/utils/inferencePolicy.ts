@@ -30,7 +30,7 @@ export const ANSWER_CHECK_POLICY_SHA256 = "ba12ab1f6858b68ed36b7c0551aa3381ffb45
 /** The mechanism this client implements (answerGrounding.ts, groundAnswer). */
 export const ANSWER_CHECK_POLICY_EVALUATOR = "answer-check/1";
 /** The classifier-input artifact this release runs. */
-export const CLASSIFIER_INPUT_POLICY_SHA256 = "19227b7b52f4fde82c4cb63962cf2d99e0b39850983ed54b21620cb648508492";
+export const CLASSIFIER_INPUT_POLICY_SHA256 = "6b215f9af8cb94c9467852d6bd20f93c3a5c33dd35c649bee77e5f69e0abe4b1";
 /** The mechanism this client implements (layer1.ts classifierCopy). */
 export const CLASSIFIER_INPUT_POLICY_EVALUATOR = "classifier-input/1";
 
