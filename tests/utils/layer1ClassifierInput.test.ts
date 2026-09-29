@@ -57,9 +57,9 @@ describe("classifierCopy", () => {
     });
 
     it("counts pattern tokens as listed, but never toward a group; a sentence of pattern tokens alone is kept", () => {
-        expect(classifierCopy("Write a function. Lorem ###abc dolor.\n\nThe spec.", P)).toBe("Write a function.\n\nThe spec.");
-        expect(classifierCopy("Write a function. Lorem ipsum ###dolor.\n\nThe spec.", P)).toBe("Write a function. Lorem ipsum ###dolor.\n\nThe spec.");
-        expect(classifierCopy("Write a function.\n###abc\nThe spec.\n###", P)).toBe("Write a function.\n###abc\nThe spec.\n###");
+        expect(classifierCopy("Write a function. Lorem ++abc dolor.\n\nThe spec.", P)).toBe("Write a function.\n\nThe spec.");
+        expect(classifierCopy("Write a function. Lorem ipsum ++dolor.\n\nThe spec.", P)).toBe("Write a function. Lorem ipsum ++dolor.\n\nThe spec.");
+        expect(classifierCopy("Write a function.\n++abc\nThe spec.\n++", P)).toBe("Write a function.\n++abc\nThe spec.\n++");
     });
 
     it("keeps a sentence of listed words that lacks a word from any required group", () => {
@@ -71,8 +71,8 @@ describe("classifierCopy", () => {
 
     it("counts a qualified word only right after one of its words or a token matching the qualifier pattern", () => {
         expect(classifierCopy("The spec. Sed amet elit.", P)).toBe("The spec.");
-        expect(classifierCopy("The spec. Sed ###x elit dolor.", P)).toBe("The spec.");
-        for (const sentence of ["Elit sed amet.", "Sed elit amet.", "Sed dolor, elit.", "Sed ### elit dolor."]) {
+        expect(classifierCopy("The spec. Sed ++x elit dolor.", P)).toBe("The spec.");
+        for (const sentence of ["Elit sed amet.", "Sed elit amet.", "Sed dolor, elit.", "Sed ++ elit dolor."]) {
             const text = `The spec. ${sentence}`;
             expect(classifierCopy(text, P), sentence).toBe(text);
         }
@@ -114,7 +114,7 @@ describe("classifierCopy", () => {
     it("never loses a word that is not listed, over many generated requests", () => {
         const OTHER = ["session", "token", "login", "password", "deploy", "ship", "dose", "mg", "restraint",
             "seclusion", "suicide", "diagnosis", "patient", "bypass", "crisis", "(session)", "‹token›", "dose.", "write"];
-        const LIST = ["lorem", "ipsum", "dolor", "sit,", "amet", "consectetur", "adipiscing", "elit", "sed", "do", "###x"];
+        const LIST = ["lorem", "ipsum", "dolor", "sit,", "amet", "consectetur", "adipiscing", "elit", "sed", "do", "++x"];
         const SEPS = [" ", ". ", ".\n", "\n\n", ". ", "\r", "\r\n", "! ", "? ", ", ", "; "];
         let seed = 7;
         // The high bits: this generator's low bits repeat with a short period.
@@ -175,6 +175,13 @@ describe("callLayer1 with a classifier-input policy", () => {
             expect(await callLayer1(t, "http://x", "prism-coder:4b", fetchImpl, undefined, { classifierInput: P }), t).toBe("OBVIOUS_RESERVED");
             expect(sent, t).toEqual([]);
         }
+    });
+
+    it("classifies a request with an image as written", async () => {
+        const { sent, fetchImpl } = spyFetch("OBVIOUS_NOT_RESERVED");
+        await callLayer1(text, "http://x", "prism-coder:4b", fetchImpl, ["aW1hZ2U="], { classifierInput: P });
+        expect(sent).toContain(layer1ClassifierContent(text));
+        expect(sent.some((c) => c === layer1ClassifierContent(classifierCopy(text, P)))).toBe(false);
     });
 
     it("keeps the model's reserved verdict on the copy", async () => {

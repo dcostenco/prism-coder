@@ -299,11 +299,11 @@ describe("parseClassifierInputPolicy", () => {
         expect([...p.dropWords]).toContain("lorem");
         expect(p.requireEach.map(g => [...g])).toEqual([["lorem", "sed"], ["dolor", "amet"]]);
         expect([...p.onlyAfter.get("elit")!]).toEqual(["amet"]);
-        expect(p.onlyAfterPattern?.test("###x")).toBe(true);
-        expect(p.onlyAfterPattern?.test("###")).toBe(false);
+        expect(p.onlyAfterPattern?.test("++x")).toBe(true);
+        expect(p.onlyAfterPattern?.test("++")).toBe(false);
         expect([...p.keptNeedsOneOf]).toEqual(["write", "spec", "function"]);
         expect(p.alsoMatch?.flags).toBe("");
-        expect(p.alsoMatch?.test("###abc")).toBe(true);
+        expect(p.alsoMatch?.test("++abc")).toBe(true);
     });
     it("another hash is no policy", () => {
         expect(parseClassifierInputPolicy(CI.replace("lorem", "lorex"), CISHA)).toBeNull();

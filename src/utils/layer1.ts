@@ -592,7 +592,8 @@ export async function callLayer1(
         deterministic?: boolean;
         /** The account's classifier-input policy, when it has one. Only the
          *  classifier's copy follows it; the deterministic floor and the
-         *  keyword backstop read the full request. */
+         *  keyword backstop read the full request, and a request with images
+         *  is classified as written. */
         classifierInput?: ClassifierInputPolicy | null;
     },
 ): Promise<Layer1Verdict> {
@@ -616,7 +617,7 @@ export async function callLayer1(
         return "OBVIOUS_RESERVED";
     }
     const excerpt = oversize ? buildOversizeExcerpt(userPrompt) : userPrompt;
-    const classifierInput = opts?.classifierInput ? classifierCopy(excerpt, opts.classifierInput) : excerpt;
+    const classifierInput = opts?.classifierInput && !hasImages ? classifierCopy(excerpt, opts.classifierInput) : excerpt;
 
     // A SYSTEM baked into the classifier model's Modelfile must not sit in front
     // of LAYER1_PROMPT. prism-coder:4b bakes a tool-routing prompt; with it the
