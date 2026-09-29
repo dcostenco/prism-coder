@@ -84,8 +84,9 @@ export interface ClassifierInputPolicy {
     dropWords: ReadonlySet<string>;
     /** ...and it has at least one word from each of these groups. */
     requireEach: ReadonlyArray<ReadonlySet<string>>;
-    /** A listed word here counts only right after one of its words, or after a pattern token. */
+    /** A listed word here counts only right after one of its words, or after a token matching onlyAfterPattern. */
     onlyAfter: ReadonlyMap<string, ReadonlySet<string>>;
+    onlyAfterPattern: RegExp | null;
     /** Tokens that count as listed words, but never satisfy a group. */
     alsoMatch: RegExp | null;
 }
@@ -93,8 +94,8 @@ export interface ClassifierInputPolicy {
 const TOKEN_EDGE = /^[^\w`'#.+-]+|[^\w`'#+-]+$/g;
 
 function droppable(sentence: string, p: ClassifierInputPolicy): boolean {
-    // A question is never left out: it may be what the request asks.
-    if (/\?\s*$/.test(sentence)) return false;
+    // A sentence with a question mark is never left out: it may be what the request asks.
+    if (sentence.includes("?")) return false;
     const hit = p.requireEach.map(() => false);
     let prev: string | null = null;
     for (const raw of sentence.toLowerCase().split(/[\s,;:()]+/)) {
@@ -103,7 +104,7 @@ function droppable(sentence: string, p: ClassifierInputPolicy): boolean {
         const pattern = !!p.alsoMatch?.test(token);
         if (p.dropWords.has(token)) {
             const after = p.onlyAfter.get(token);
-            if (after && !(prev !== null && (after.has(prev) || !!p.alsoMatch?.test(prev)))) return false;
+            if (after && !(prev !== null && (after.has(prev) || !!p.onlyAfterPattern?.test(prev)))) return false;
             p.requireEach.forEach((group, i) => { if (group.has(token)) hit[i] = true; });
         } else if (!pattern) {
             return false;

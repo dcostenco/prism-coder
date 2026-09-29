@@ -13,7 +13,7 @@ const ENT = {
     features: { cloud_fallback: false, grounding_verifier: false, knowledge_search_unlimited: false, session_memory_unlimited: false, analytics_dashboard: false },
     upgrade_url: "https://synalux.ai/pricing",
 } as PrismEntitlements;
-const POLICY: ClassifierInputPolicy = { dropWords: new Set(["lorem", "ipsum"]), requireEach: [new Set(["lorem"])], onlyAfter: new Map(), alsoMatch: null };
+const POLICY: ClassifierInputPolicy = { dropWords: new Set(["lorem", "ipsum"]), requireEach: [new Set(["lorem"])], onlyAfter: new Map(), onlyAfterPattern: null, alsoMatch: null };
 
 beforeEach(() => _setCacheForTest(ENT, 60_000));
 afterAll(() => _resetEntitlementsForTest());

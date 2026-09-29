@@ -299,6 +299,8 @@ describe("parseClassifierInputPolicy", () => {
         expect([...p.dropWords]).toContain("lorem");
         expect(p.requireEach.map(g => [...g])).toEqual([["lorem", "sed"], ["dolor", "amet"]]);
         expect([...p.onlyAfter.get("elit")!]).toEqual(["amet"]);
+        expect(p.onlyAfterPattern?.test("###x")).toBe(true);
+        expect(p.onlyAfterPattern?.test("###")).toBe(false);
         expect(p.alsoMatch?.flags).toBe("");
         expect(p.alsoMatch?.test("###abc")).toBe(true);
     });
@@ -327,6 +329,8 @@ describe("parseClassifierInputPolicy", () => {
             ["qualified word not listed", (a: any) => { a.classifier_input.only_after = { vault: ["amet"] }; }],
             ["qualifier names an unlisted word", (a: any) => { a.classifier_input.only_after = { elit: ["vault"] }; }],
             ["empty qualifier", (a: any) => { a.classifier_input.only_after = { elit: [] }; }],
+            ["bad qualifier pattern", (a: any) => { a.classifier_input.only_after_pattern = "^(#+)+$"; }],
+            ["qualifier pattern not a string", (a: any) => { a.classifier_input.only_after_pattern = 7; }],
             ["empty pattern", (a: any) => { a.classifier_input.also_match = ""; }],
             ["pattern not a string", (a: any) => { a.classifier_input.also_match = 7; }],
             ["back-reference", (a: any) => { a.classifier_input.also_match = "^(#)\\1$"; }],
@@ -339,9 +343,10 @@ describe("parseClassifierInputPolicy", () => {
         }
     });
     it("the token pattern and the qualifiers are optional", () => {
-        const { b, h } = civariant((a: any) => { delete a.classifier_input.also_match; delete a.classifier_input.only_after; });
+        const { b, h } = civariant((a: any) => { delete a.classifier_input.also_match; delete a.classifier_input.only_after; delete a.classifier_input.only_after_pattern; });
         const p = parseClassifierInputPolicy(b, h)!;
         expect(p.alsoMatch).toBeNull();
+        expect(p.onlyAfterPattern).toBeNull();
         expect(p.onlyAfter.size).toBe(0);
     });
 });

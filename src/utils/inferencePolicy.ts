@@ -30,7 +30,7 @@ export const ANSWER_CHECK_POLICY_SHA256 = "ba12ab1f6858b68ed36b7c0551aa3381ffb45
 /** The mechanism this client implements (answerGrounding.ts, groundAnswer). */
 export const ANSWER_CHECK_POLICY_EVALUATOR = "answer-check/1";
 /** The classifier-input artifact this release runs. */
-export const CLASSIFIER_INPUT_POLICY_SHA256 = "84919b8120e8dffa775cbaeb2e87b1a75e3cb968dee5b079e1da81e3785568fc";
+export const CLASSIFIER_INPUT_POLICY_SHA256 = "f633f8b278528137dc08fc5137921b826273c31afeff4a2db1358a75361971fa";
 /** The mechanism this client implements (layer1.ts classifierCopy). */
 export const CLASSIFIER_INPUT_POLICY_EVALUATOR = "classifier-input/1";
 
@@ -261,14 +261,16 @@ export function parseClassifierInputPolicy(bytes: string, expectSha256: string =
     if (typeof after !== "object" || after === null || Array.isArray(after)) return null;
     const afterEntries = Object.entries(after as Record<string, unknown>);
     if (!afterEntries.every(([w, prev]) => listed.has(w) && subset(prev))) return null;
-    const also = s.also_match;
-    if (also !== undefined && !(typeof also === "string" && also.length > 0 && also.length <= MAX_PATTERN_CHARS && !/\\[1-9]|\\k</.test(also) && !hasNestedRepetition(also))) return null;
+    const tokenPattern = (v: unknown) => v === undefined || (typeof v === "string" && v.length > 0 && v.length <= MAX_PATTERN_CHARS && !/\\[1-9]|\\k</.test(v) && !hasNestedRepetition(v));
+    const also = s.also_match, afterPattern = s.only_after_pattern;
+    if (!tokenPattern(also) || !tokenPattern(afterPattern)) return null;
     try {
         // The client sets the flags (none); the artifact supplies the source only.
         return {
             dropWords: listed,
             requireEach: groups.map(g => new Set(g)),
             onlyAfter: new Map(afterEntries.map(([w, prev]) => [w, new Set(prev as string[])])),
+            onlyAfterPattern: typeof afterPattern === "string" ? new RegExp(afterPattern) : null,
             alsoMatch: typeof also === "string" ? new RegExp(also) : null,
         };
     } catch {

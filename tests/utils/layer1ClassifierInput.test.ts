@@ -69,17 +69,18 @@ describe("classifierCopy", () => {
         }
     });
 
-    it("counts a qualified word only right after one of its words or a pattern token", () => {
+    it("counts a qualified word only right after one of its words or a token matching the qualifier pattern", () => {
         expect(classifierCopy("The spec. Sed amet elit.", P)).toBe("The spec.");
         expect(classifierCopy("The spec. Sed ###x elit dolor.", P)).toBe("The spec.");
-        for (const sentence of ["Elit sed amet.", "Sed elit amet.", "Sed dolor, elit."]) {
+        for (const sentence of ["Elit sed amet.", "Sed elit amet.", "Sed dolor, elit.", "Sed ### elit dolor."]) {
             const text = `The spec. ${sentence}`;
             expect(classifierCopy(text, P), sentence).toBe(text);
         }
     });
 
-    it("never leaves out a question", () => {
-        for (const text of ["The spec. Lorem ipsum dolor?", "Lorem dolor? The spec.", "The spec.\nSed amet elit?  "]) {
+    it("never leaves out a sentence with a question mark", () => {
+        for (const text of ["The spec. Lorem ipsum dolor?", "Lorem dolor? The spec.", "The spec.\nSed amet elit?  ",
+            "The spec. Lorem dolor?!", "The spec. Lorem dolor?\"", "The spec. Lorem (dolor?)", "The spec.\nLorem ? dolor"]) {
             expect(classifierCopy(text, P), text).toBe(text);
         }
     });
