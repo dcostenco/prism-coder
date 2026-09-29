@@ -301,6 +301,7 @@ describe("parseClassifierInputPolicy", () => {
         expect([...p.onlyAfter.get("elit")!]).toEqual(["amet"]);
         expect(p.onlyAfterPattern?.test("###x")).toBe(true);
         expect(p.onlyAfterPattern?.test("###")).toBe(false);
+        expect([...p.keptNeedsOneOf]).toEqual(["write", "spec", "function"]);
         expect(p.alsoMatch?.flags).toBe("");
         expect(p.alsoMatch?.test("###abc")).toBe(true);
     });
@@ -329,6 +330,9 @@ describe("parseClassifierInputPolicy", () => {
             ["qualified word not listed", (a: any) => { a.classifier_input.only_after = { vault: ["amet"] }; }],
             ["qualifier names an unlisted word", (a: any) => { a.classifier_input.only_after = { elit: ["vault"] }; }],
             ["empty qualifier", (a: any) => { a.classifier_input.only_after = { elit: [] }; }],
+            ["no kept words", (a: any) => { delete a.classifier_input.kept_needs_one_of; }],
+            ["empty kept words", (a: any) => { a.classifier_input.kept_needs_one_of = []; }],
+            ["kept word not one word", (a: any) => { a.classifier_input.kept_needs_one_of = ["write it"]; }],
             ["bad qualifier pattern", (a: any) => { a.classifier_input.only_after_pattern = "^(#+)+$"; }],
             ["qualifier pattern not a string", (a: any) => { a.classifier_input.only_after_pattern = 7; }],
             ["empty pattern", (a: any) => { a.classifier_input.also_match = ""; }],

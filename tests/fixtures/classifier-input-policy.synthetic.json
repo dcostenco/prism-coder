@@ -6,6 +6,7 @@
         "require_each": [["lorem", "sed"], ["dolor", "amet"]],
         "only_after": { "elit": ["amet"] },
         "only_after_pattern": "^#{3}\\w+$",
-        "also_match": "^#{3}\\w*$"
+        "also_match": "^#{3}\\w*$",
+        "kept_needs_one_of": ["write", "spec", "function"]
     }
 }

@@ -89,18 +89,25 @@ export interface ClassifierInputPolicy {
     onlyAfterPattern: RegExp | null;
     /** Tokens that count as listed words, but never satisfy a group. */
     alsoMatch: RegExp | null;
+    /** Nothing is left out unless a sentence that stays has one of these words. */
+    keptNeedsOneOf: ReadonlySet<string>;
+}
+
+/** Question marks in the scripts prism serves: a sentence with one is never left out. */
+const QUESTION_MARK = new RegExp("[?" + String.fromCharCode(0xff1f, 0xfe56, 0x061f, 0x037e, 0x00bf, 0x203d, 0x2047, 0x2048, 0x2049, 0x2e2e, 0x055e, 0x1367) + "]");
+
+function words(sentence: string): string[] {
+    return sentence.toLowerCase().split(/[\s,;:()]+/).map((w) => w.replace(TOKEN_EDGE, "")).filter(Boolean);
 }
 
 const TOKEN_EDGE = /^[^\w`'#.+-]+|[^\w`'#+-]+$/g;
 
 function droppable(sentence: string, p: ClassifierInputPolicy): boolean {
     // A sentence with a question mark is never left out: it may be what the request asks.
-    if (sentence.includes("?")) return false;
+    if (QUESTION_MARK.test(sentence)) return false;
     const hit = p.requireEach.map(() => false);
     let prev: string | null = null;
-    for (const raw of sentence.toLowerCase().split(/[\s,;:()]+/)) {
-        const token = raw.replace(TOKEN_EDGE, "");
-        if (!token) continue;
+    for (const token of words(sentence)) {
         const pattern = !!p.alsoMatch?.test(token);
         if (p.dropWords.has(token)) {
             const after = p.onlyAfter.get(token);
@@ -132,6 +139,8 @@ export function classifierCopy(text: string, p: ClassifierInputPolicy): string {
         else if (i + 1 < parts.length) keep[i + 1] = false;
     }
     if (!dropped) return text;
+    // The sentences that stay must still say what is asked; otherwise the classifier reads it all.
+    if (!parts.some((part, i) => i % 2 === 0 && keep[i] && words(part).some((w) => p.keptNeedsOneOf.has(w)))) return text;
     const out = parts.filter((_, i) => keep[i]).join("");
     return out.trim() ? out : text;
 }

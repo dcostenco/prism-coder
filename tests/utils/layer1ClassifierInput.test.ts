@@ -78,9 +78,11 @@ describe("classifierCopy", () => {
         }
     });
 
-    it("never leaves out a sentence with a question mark", () => {
+    it("never leaves out a sentence with a question mark, in any script prism serves", () => {
+        const marks = [0xff1f, 0xfe56, 0x061f, 0x037e, 0x00bf, 0x203d, 0x2047, 0x2048, 0x2049, 0x2e2e, 0x055e, 0x1367].map(c => String.fromCharCode(c));
         for (const text of ["The spec. Lorem ipsum dolor?", "Lorem dolor? The spec.", "The spec.\nSed amet elit?  ",
-            "The spec. Lorem dolor?!", "The spec. Lorem dolor?\"", "The spec. Lorem (dolor?)", "The spec.\nLorem ? dolor"]) {
+            "The spec. Lorem dolor?!", "The spec. Lorem dolor?\"", "The spec. Lorem (dolor?)", "The spec.\nLorem ? dolor",
+            ...marks.map(m => `The spec. Lorem dolor${m}`)]) {
             expect(classifierCopy(text, P), text).toBe(text);
         }
     });
@@ -88,6 +90,14 @@ describe("classifierCopy", () => {
     it("keeps every other character, leading and trailing whitespace included", () => {
         expect(classifierCopy("  Write a function.\nLorem ipsum dolor.\n", P)).toBe("  Write a function.\n");
         expect(classifierCopy("\nLorem ipsum dolor.\nThe spec.  ", P)).toBe("\nThe spec.  ");
+    });
+
+    it("leaves nothing out unless a sentence that stays has one of the words the policy needs", () => {
+        for (const text of [`Here are the notes. ${LISTED}`, `The vault. ${LISTED}\nSed amet.`, `${LISTED} Lorem dolor.`]) {
+            expect(classifierCopy(text, P), text).toBe(text);
+        }
+        expect(classifierCopy(`Here is the spec. ${LISTED}`, P)).toBe("Here is the spec.");
+        expect(classifierCopy(`${LISTED} Write it.`, P)).toBe("Write it.");
     });
 
     it("never returns an empty request", () => {
@@ -103,14 +113,16 @@ describe("classifierCopy", () => {
 
     it("never loses a word that is not listed, over many generated requests", () => {
         const OTHER = ["session", "token", "login", "password", "deploy", "ship", "dose", "mg", "restraint",
-            "seclusion", "suicide", "diagnosis", "patient", "bypass", "crisis", "(session)", "‹token›", "dose."];
+            "seclusion", "suicide", "diagnosis", "patient", "bypass", "crisis", "(session)", "‹token›", "dose.", "write"];
         const LIST = ["lorem", "ipsum", "dolor", "sit,", "amet", "consectetur", "adipiscing", "elit", "sed", "do", "###x"];
         const SEPS = [" ", ". ", ".\n", "\n\n", ". ", "\r", "\r\n", "! ", "? ", ", ", "; "];
         let seed = 7;
-        const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+        // The high bits: this generator's low bits repeat with a short period.
+        const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return Math.floor(seed / 65536) % n; };
         const count = (s: string, w: string) => s.split(w).length - 1;
+        let changed = 0;
         for (let i = 0; i < 2000; i++) {
-            let text = "";
+            let text = rnd(2) ? "Write it. " : "";
             const words = 3 + rnd(25);
             for (let k = 0; k < words; k++) {
                 const w = rnd(4) === 0 ? OTHER[rnd(OTHER.length)] : LIST[rnd(LIST.length)];
@@ -118,8 +130,9 @@ describe("classifierCopy", () => {
             }
             const out = classifierCopy(text, P);
             for (const w of OTHER) expect(count(out, w), `${JSON.stringify(text)} lost ${w}`).toBe(count(text, w));
-            if (out !== text) expect(out.length).toBeLessThan(text.length);
+            if (out !== text) { changed++; expect(out.length).toBeLessThan(text.length); }
         }
+        expect(changed).toBeGreaterThan(100);
     });
 });
 

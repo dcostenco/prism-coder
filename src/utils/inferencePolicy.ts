@@ -30,7 +30,7 @@ export const ANSWER_CHECK_POLICY_SHA256 = "ba12ab1f6858b68ed36b7c0551aa3381ffb45
 /** The mechanism this client implements (answerGrounding.ts, groundAnswer). */
 export const ANSWER_CHECK_POLICY_EVALUATOR = "answer-check/1";
 /** The classifier-input artifact this release runs. */
-export const CLASSIFIER_INPUT_POLICY_SHA256 = "f633f8b278528137dc08fc5137921b826273c31afeff4a2db1358a75361971fa";
+export const CLASSIFIER_INPUT_POLICY_SHA256 = "67f779a6fb159b88f07b0e2775be141365f085e48573f81329ae9ec41b257ccd";
 /** The mechanism this client implements (layer1.ts classifierCopy). */
 export const CLASSIFIER_INPUT_POLICY_EVALUATOR = "classifier-input/1";
 
@@ -239,7 +239,8 @@ export function parseAnswerCheckPolicy(bytes: string, expectSha256: string = ANS
 /** The classifier-input policy from the artifact's exact bytes, or null for
  *  anything but the expected artifact: another hash, schema or evaluator, a
  *  word list below its floor or with an entry that is not one lowercase word,
- *  no required group or a group or qualifier naming an unlisted word, a token
+ *  no required group or a group or qualifier naming an unlisted word, no
+ *  words a kept sentence must offer, a token
  *  pattern that is oversized, refers back, repeats a varying group or does not
  *  compile. */
 export function parseClassifierInputPolicy(bytes: string, expectSha256: string = CLASSIFIER_INPUT_POLICY_SHA256): ClassifierInputPolicy | null {
@@ -261,6 +262,8 @@ export function parseClassifierInputPolicy(bytes: string, expectSha256: string =
     if (typeof after !== "object" || after === null || Array.isArray(after)) return null;
     const afterEntries = Object.entries(after as Record<string, unknown>);
     if (!afterEntries.every(([w, prev]) => listed.has(w) && subset(prev))) return null;
+    const needed = s.kept_needs_one_of;
+    if (!Array.isArray(needed) || needed.length === 0 || needed.length > MAX_LIST_ENTRIES || !needed.every(word)) return null;
     const tokenPattern = (v: unknown) => v === undefined || (typeof v === "string" && v.length > 0 && v.length <= MAX_PATTERN_CHARS && !/\\[1-9]|\\k</.test(v) && !hasNestedRepetition(v));
     const also = s.also_match, afterPattern = s.only_after_pattern;
     if (!tokenPattern(also) || !tokenPattern(afterPattern)) return null;
@@ -272,6 +275,7 @@ export function parseClassifierInputPolicy(bytes: string, expectSha256: string =
             onlyAfter: new Map(afterEntries.map(([w, prev]) => [w, new Set(prev as string[])])),
             onlyAfterPattern: typeof afterPattern === "string" ? new RegExp(afterPattern) : null,
             alsoMatch: typeof also === "string" ? new RegExp(also) : null,
+            keptNeedsOneOf: new Set(needed),
         };
     } catch {
         return null;
