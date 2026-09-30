@@ -67,7 +67,7 @@ describe("Windows sqlite handle release (diagnostic)", { timeout: 60_000 }, () =
     console.log(`\n=== platform=${process.platform} arch=${process.arch} node=${process.version} ===`);
     if (!IS_WINDOWS) {
       console.log("POSIX: unlink succeeds on open files, so this cannot reproduce here.");
-      console.log("Run on windows-x64 via: gh workflow run windows-diagnostic.yml");
+      console.log("It reproduces only on windows-x64, which is not supported and has no CI job.");
     }
 
     // E1 — baseline: close(), then unlink each file. Which one is locked?
