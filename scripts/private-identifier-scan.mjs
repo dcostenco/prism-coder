@@ -17,12 +17,14 @@
  * Each file is "squashed": the glue that assembly idioms use is deleted
  * (quotes, backticks, +, $, braces, parentheses, brackets, commas,
  * backslashes, whitespace, and the words printf, echo and .concat), and each
- * term is looked for in what remains, case-insensitively. That catches
- * concatenated literals, template interpolation of a literal, a joined array
- * of literals, .concat, adjacent literals, shell quote splicing and a shell
- * printf substitution. It does not evaluate code: a name computed some other
- * way still passes, so this is a tripwire for the idioms that actually
- * happened, not a proof that no name can be built.
+ * term is looked for in what remains, case-insensitively. Before that, a join
+ * made only of string literals is resolved: an array of literals joined with a
+ * literal separator (JS and Python forms) and path.join of literals. That
+ * catches concatenated literals, template interpolation of a literal, joined
+ * arrays, path.join, .concat, adjacent literals, shell quote splicing and a
+ * shell printf substitution. It does not evaluate code: a name built with a
+ * separator or piece held in a variable still passes, so this is a tripwire
+ * for the idioms that actually happened, not a proof that no name can be built.
  *
  * Only the term list may assemble terms: it has to, to exist without matching
  * itself.
@@ -43,9 +45,29 @@ export const ASSEMBLY_EXEMPT = new Set(["scripts/private-identifier-terms.mjs"])
 const GLUE_WORDS = /\bprintf\b|\becho\b|\.concat\b/gi;
 const GLUE_CHARS = /['"`+${}()[\],\\\s]/g;
 
-/** Text with the assembly glue removed, lower-cased. */
+// One string literal with no escapes and no line break, in any quote style.
+const LIT = "'[^'\\\\\\n]*'|\"[^\"\\\\\\n]*\"|`[^`$\\\\\\n]*`";
+const LITS = `(?:${LIT})(?:\\s*,\\s*(?:${LIT}))*`;
+const ARRAY_JOIN = new RegExp(`\\[\\s*(${LITS})\\s*,?\\s*\\]\\s*\\.join\\(\\s*(${LIT})?\\s*\\)`, "g");
+const SEPARATOR_JOIN = new RegExp(`(${LIT})\\s*\\.join\\(\\s*[[(]\\s*(${LITS})\\s*,?\\s*[\\])]\\s*\\)`, "g");
+const PATH_JOIN = new RegExp(`\\bjoin\\(\\s*((?:${LIT})(?:\\s*,\\s*(?:${LIT}))+)\\s*\\)`, "g");
+
+const literalValues = (list) => [...list.matchAll(new RegExp(LIT, "g"))].map((m) => m[0].slice(1, -1));
+
+/**
+ * Replace each join built only from string literals with the string it makes:
+ * ["a", "b"].join("-"), "-".join(["a", "b"]) and path.join("a", "b").
+ */
+export function resolveLiteralJoins(text) {
+    return String(text)
+        .replace(ARRAY_JOIN, (_m, list, sep) => literalValues(list).join(sep === undefined ? "," : sep.slice(1, -1)))
+        .replace(SEPARATOR_JOIN, (_m, sep, list) => literalValues(list).join(sep.slice(1, -1)))
+        .replace(PATH_JOIN, (_m, list) => literalValues(list).join("/"));
+}
+
+/** Text with literal joins resolved and the assembly glue removed, lower-cased. */
 export function squash(text) {
-    return String(text).replace(GLUE_WORDS, "").replace(GLUE_CHARS, "").toLowerCase();
+    return resolveLiteralJoins(text).replace(GLUE_WORDS, "").replace(GLUE_CHARS, "").toLowerCase();
 }
 
 /**

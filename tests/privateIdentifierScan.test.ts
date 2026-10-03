@@ -45,6 +45,26 @@ const IDIOMS: Array<[string, (a: string, b: string) => string]> = [
     ["backslash-escaped characters", (a, b) => `const re = /${(a + b).replace(/[-/]/g, (c) => "\\" + c)}/;`],
 ];
 
+/**
+ * Split a term around its last separator (a hyphen or a slash after the first
+ * character), so a join with that separator rebuilds it.
+ */
+function aroundSeparator(term: string): [string, string, string] | null {
+    for (const sep of ["-", "/"]) {
+        const i = term.lastIndexOf(sep);
+        if (i > 0) return [term.slice(0, i), sep, term.slice(i + 1)];
+    }
+    return null;
+}
+
+/** Joins whose separator is itself a literal, so the scan can resolve them. */
+const SEPARATOR_IDIOMS: Array<[string, (a: string, sep: string, b: string) => string | null]> = [
+    ["array joined with a literal separator", (a, sep, b) => `const dir = ["${a}", "${b}"].join("${sep}");`],
+    ["literal separator joining a list (Python)", (a, sep, b) => `dir = "${sep}".join(["${a}", "${b}"])`],
+    ["path.join of literals", (a, sep, b) => (sep === "/" ? `const p = path.join("${a}", "${b}");` : null)],
+];
+const SEPARATED = NUMBERED.filter(([, term]) => aroundSeparator(term) !== null);
+
 const temps: string[] = [];
 afterEach(() => {
     for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -82,6 +102,20 @@ describe("the scan sees through assembly idioms", () => {
         });
     }
 
+    for (const [idiom, build] of SEPARATOR_IDIOMS) {
+        it.each(SEPARATED)(`${idiom}: term #%i`, (index, term) => {
+            const [a, sep, b] = aroundSeparator(term)!;
+            const sample = build(a, sep, b);
+            if (sample === null) return; // this idiom cannot build a term with that separator
+            expect(sample.toLowerCase().includes(term.toLowerCase())).toBe(false);
+            expect(privateIdentifierHits(sample)).toContain(index);
+        });
+    }
+
+    it("has a term that path.join can build, so that idiom is exercised", () => {
+        expect(SEPARATED.some(([, term]) => aroundSeparator(term)![1] === "/")).toBe(true);
+    });
+
     it.each(NUMBERED)("a written-out term #%i is found too", (index, term) => {
         expect(privateIdentifierHits(`see ${term} here`)).toContain(index);
     });
@@ -91,6 +125,12 @@ describe("the scan does not invent findings", () => {
     it.each(NUMBERED)("term #%i split by a word that is not glue", (index, term) => {
         const [a, b] = pieces(term);
         expect(privateIdentifierHits(`${a} and ${b}`)).not.toContain(index);
+    });
+
+    it("a join that uses a variable is left alone", () => {
+        for (const text of ['const p = parts.join("-");', 'const p = join(home, "skills");', "const d = `a${SEP}b`;"]) {
+            expect(privateIdentifierHits(text), text).toEqual([]);
+        }
     });
 
     it("ordinary prose and code are clean", () => {
