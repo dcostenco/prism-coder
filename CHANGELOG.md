@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.18 — 2026-10-03
+
+### A refused save says how to recover, and the host instructions allow it
+
+`session_save_ledger` and `session_save_handoff` refuse with `context_not_loaded`
+when Prism has no live record that the conversation loaded that project, for
+example after a long idle gap or for a project that startup did not load. The
+refusal pointed to `session_load_context`, but the instruction blocks that
+`prism connect` writes for Claude Code, Codex and Gemini CLI said never to call
+it, so an agent that followed its instructions could not save again in that
+conversation.
+
+- The refusal now says to call `session_load_context` with the same `project`
+  and `conversation_id` as the refused save, then retry the save once. It
+  prints that call with the values the save used. A value longer than 200
+  characters gets the instruction without the printed call.
+- An empty `conversation_id` gets its own refusal, which says to pass the id
+  from the `<prism_session />` line that `session_bootstrap` prints.
+- The three instruction blocks still say to call `session_bootstrap` exactly
+  once and not to use `session_load_context` in its place, now only for
+  first-turn startup. Each block carries the same recovery rule, and the server
+  instructions, the tool descriptions, the `.agents` rule and the plugin skill
+  say the same.
+- A host file that already holds a Prism-managed block gets the new text the
+  next time the Prism server starts, unless `PRISM_NO_STARTUP_REFRESH=1` is
+  set. The host reads it in its next session.
+- Access is unchanged. A conversation that never loaded a project is still
+  refused, and a recovery load unlocks only that conversation and project.
+
 ## 20.21.17 — 2026-09-29
 
 ### Fewer ordinary coding requests refused by the on-device screen
