@@ -8,7 +8,9 @@ description: "Activate on the first user turn of every conversation, including g
 Use this skill once, on the first user turn of a conversation. A greeting such
 as "hi", "hello", or "ready?" is still a first user turn and must activate it.
 Do not run it again after startup context has already been shown in the same
-conversation.
+conversation. This re-entry rule covers startup only; a save refused with
+`context_not_loaded` is recovered as described under "Recovering from
+`context_not_loaded`" below.
 
 Portable native-skill activation starts when the host processes the first user
 turn. It cannot display anything before the developer sends that first input.
@@ -93,3 +95,14 @@ compact safety and evidence contract in the MCP server instructions.
 For bug reports or screenshots, run a real diagnostic before explaining the
 cause. Never report "done", "fixed", or "working" without observable
 verification.
+
+## Recovering from `context_not_loaded`
+
+Startup runs once, but a later `session_save_ledger` or `session_save_handoff`
+can still be refused with `context_not_loaded`: after a long idle gap, after a
+restart, or for a project that startup did not load. That is not a second
+startup and the re-entry rule above does not apply. Call `session_load_context`
+with the same `project` and the same `conversation_id` as the refused save, then
+retry the save once. Do not repeat `session_bootstrap` or print a startup display
+for it. If the reload or the retry fails, tell the user; a local note is a
+fallback after that, never a substitute for the reload.

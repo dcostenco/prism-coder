@@ -18,8 +18,15 @@ Do not generate any text before the call. Print the complete tool result
 verbatim, preserving all headings and ordering. If the user input was only a
 greeting, stop after that block; do not add a second greeting.
 
-Use `session_load_context(project)` only for an explicit project reload or when
-`session_bootstrap` is unavailable on an older Prism server.
+Startup is that one call. If a later `session_save_ledger` or
+`session_save_handoff` is refused with `context_not_loaded`, call
+`session_load_context(project, conversation_id)` with the same project and
+conversation_id as the refused save, then retry the save once; that recovery is
+not a second startup, so do not repeat `session_bootstrap` or print a startup
+display for it. If the reload or the retry fails, tell the user; a local note is
+a fallback after that, never a substitute. Also use `session_load_context` for an
+explicit project reload or when `session_bootstrap` is unavailable on an older
+Prism server.
 
 ## Local-First Orchestration
 

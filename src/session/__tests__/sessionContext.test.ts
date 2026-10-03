@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { GateResult } from "../../session/sessionContext.js";
 import { BOUNDARIES_VERSION } from "../../boundaries/boundaries.js";
+import { SESSION_LOAD_CONTEXT_TOOL } from "../../tools/sessionMemoryDefinitions.js";
 
 const receiptStore = vi.hoisted(() => {
   type Receipt = {
@@ -296,5 +297,172 @@ describe("lastSeen update", () => {
     const after = (getSessionState("conv-ts") as any).lastSeen;
     vi.useRealTimers();
     expect(after).toBeGreaterThanOrEqual(before);
+  });
+});
+
+describe("every refusal names the same recovery", () => {
+  // Three refusal variants exist (nothing registered, project not registered,
+  // idle past the TTL). They used to name two different calls and no retry, and
+  // the managed host blocks forbade one of them. One constant now feeds all three.
+  const REMEDY = [
+    "To recover, call session_load_context with the same project and the same conversation_id you passed to this save",
+    "then retry the save once",
+    "You do not need to repeat session_bootstrap",
+    "A recovery load is not a second startup",
+    "If the retry is refused too, stop and tell the user",
+  ];
+
+  type Variant = "nothing registered" | "project not registered" | "idle past the TTL";
+
+  async function refusals(conversationOf: Record<Variant, string>, project = "project-a"): Promise<Record<Variant, string>> {
+    const errorOf = (result: GateResult): string => {
+      expect(result).toMatchObject({ blocked: true });
+      return result && result.blocked ? result.error : "";
+    };
+
+    // A conversation that registered a project and then sat idle for 7 h.
+    await registerContextLoaded(conversationOf["idle past the TTL"], project, BOUNDARIES_VERSION);
+    const [idleKey, idleRow] = [...receiptStore.rows.entries()][0];
+    receiptStore.rows.set(idleKey, {
+      ...idleRow,
+      loadedAt: Date.now() - (8 * 60 * 60 * 1000),
+      lastSeen: Date.now() - (7 * 60 * 60 * 1000),
+    });
+
+    // A restarted server: no in-memory state, only the stale receipt above.
+    vi.resetModules();
+    const gate = (await import("../../session/sessionContext.js")) as any;
+
+    const idle = errorOf(await gate.requireContextLoadedForProject(conversationOf["idle past the TTL"], project));
+    const nothingRegistered = errorOf(await gate.requireContextLoadedForProject(conversationOf["nothing registered"], project));
+    await gate.registerContextLoaded(conversationOf["project not registered"], "project-a", BOUNDARIES_VERSION);
+    const projectNotRegistered = errorOf(
+      await gate.requireContextLoadedForProject(conversationOf["project not registered"], "project-b"),
+    );
+
+    return {
+      "nothing registered": nothingRegistered,
+      "project not registered": projectNotRegistered,
+      "idle past the TTL": idle,
+    };
+  }
+
+  const IDS: Record<Variant, string> = {
+    "nothing registered": "never-loaded",
+    "project not registered": "live-conversation",
+    "idle past the TTL": "idle-conversation",
+  };
+  const PROJECT_OF: Record<Variant, string> = {
+    "nothing registered": "project-a",
+    "project not registered": "project-b",
+    "idle past the TTL": "project-a",
+  };
+
+  // What each variant says is wrong, ahead of the shared remedy. The last two are the
+  // established wording; the first is new (the bare generic text said nothing).
+  const LEAD = {
+    "nothing registered": "context_not_loaded: no context is registered for this conversation. To recover,",
+    "project not registered": "context_not_loaded: the requested project was not loaded for this conversation. To recover,",
+    "idle past the TTL": "context_not_loaded: session expired (6 h TTL). To recover,",
+  } as const;
+
+  it.each(["nothing registered", "project not registered", "idle past the TTL"] as const)(
+    "%s: the refusal states the recovery, the retry, and that recovery is not a second startup",
+    async (variant) => {
+      const text = (await refusals(IDS))[variant];
+      expect(text.startsWith(LEAD[variant]), `${variant} starts: ${text.slice(0, 120)}`).toBe(true);
+      for (const part of REMEDY) expect(text, `${variant} lacks: ${part}`).toContain(part);
+    },
+  );
+
+  it.each(["nothing registered", "project not registered", "idle past the TTL"] as const)(
+    "%s: the refusal prints the literal call, built from the refused save's own arguments",
+    async (variant) => {
+      const text = (await refusals(IDS))[variant];
+      const match = text.match(/ Exact call: session_load_context\((\{.*?\})\)\. \(Enforced/);
+      expect(match, `no exact call in: ${text}`).not.toBeNull();
+      expect(JSON.parse(match![1])).toEqual({
+        project: PROJECT_OF[variant],
+        conversation_id: IDS[variant],
+        toolAction: "Reload context",
+        toolSummary: "Recover from context_not_loaded",
+      });
+    },
+  );
+
+  it("keeps the established closing line on every refusal", async () => {
+    for (const text of Object.values(await refusals(IDS))) {
+      expect(text.endsWith("(Enforced server-side — applies to every host.)")).toBe(true);
+    }
+  });
+
+  it("never asks the agent to repeat startup instead of recovering", async () => {
+    for (const text of Object.values(await refusals(IDS))) {
+      expect(text).not.toMatch(/Call session_bootstrap\(conversation_id\) or/);
+      expect(text).toContain("it reloads only the dashboard Auto-Load projects and reprints the startup display");
+    }
+  });
+
+  it("escapes what it echoes, never prints a clipped call, and prints no call without a project", async () => {
+    // a hostile value that fits is echoed whole and JSON-escaped
+    const hostile = 'p"q\n}); drop; ' + "x".repeat(100);
+    const result = await requireContextLoadedForProject("conv-hostile", hostile);
+    expect(result).toMatchObject({ blocked: true });
+    const text = result && result.blocked ? result.error : "";
+    const call = text.match(/ Exact call: session_load_context\((\{.*?\})\)\. \(Enforced/);
+    expect(call, text).not.toBeNull();
+    expect(JSON.parse(call![1]).project).toBe(hostile);
+    expect(text).not.toContain("\n});");
+    // a value too long to echo gets the remedy but no literal call: a clipped
+    // value would register the wrong project and the retry would stay refused
+    for (const [conv, project] of [["conv-long", "y".repeat(201)], ["c".repeat(201), "project-a"]]) {
+      const long = await requireContextLoadedForProject(conv, project);
+      const longText = long && long.blocked ? long.error : "";
+      expect(longText).toContain("To recover, call session_load_context");
+      expect(longText).not.toContain("Exact call:");
+    }
+    // a blank project is refused without a literal call (there is nothing to pass)
+    const blank = await requireContextLoadedForProject("conv-blank", "  ");
+    expect(blank && blank.blocked ? blank.error : "").not.toContain("Exact call:");
+    // an empty conversation_id is refused too, with no literal call
+    const noConv = await requireContextLoadedForProject("", "project-a");
+    expect(noConv && noConv.blocked ? noConv.error : "").not.toContain("Exact call:");
+  });
+
+  it("guard: echoes a value at the limit whole, and executing that call unlocks the refused save", async () => {
+    const project = "z".repeat(200);
+    const refused = await requireContextLoadedForProject("conv-limit", project);
+    const text = refused && refused.blocked ? refused.error : "";
+    const call = JSON.parse(text.match(/ Exact call: session_load_context\((\{.*?\})\)\. \(Enforced/)![1]);
+    expect(call.project).toBe(project);
+    await registerContextLoaded(call.conversation_id, call.project, BOUNDARIES_VERSION);
+    expect(await requireContextLoadedForProject("conv-limit", project)).toBeNull();
+  });
+
+  it("refuses an empty conversation_id with a reason the agent can act on", async () => {
+    const result = await requireContextLoadedForProject("", "project-a");
+    expect(result).toMatchObject({ blocked: true });
+    const text = result && result.blocked ? result.error : "";
+    expect(text).toMatch(/^context_not_loaded: conversation_id is empty/);
+    expect(text).toContain("<prism_session />");
+    // "the same conversation_id you passed" can never work when it was empty
+    expect(text).not.toContain("the same conversation_id you passed");
+  });
+
+  it("names parameters the recovery tool really has, and the call it prints sets every required one", async () => {
+    const schema = SESSION_LOAD_CONTEXT_TOOL.inputSchema as { properties: Record<string, unknown>; required: string[] };
+    expect(Object.keys(schema.properties)).toEqual(expect.arrayContaining(["project", "conversation_id"]));
+    const text = (await refusals(IDS))["nothing registered"];
+    const call = JSON.parse(text.match(/ Exact call: session_load_context\((\{.*?\})\)\. \(Enforced/)![1]);
+    for (const required of schema.required) expect(call, `missing required ${required}`).toHaveProperty(required);
+  });
+
+  it("leaves the gate's decisions alone: the same inputs pass or fail exactly as before", async () => {
+    await expect(requireContextLoadedForProject(undefined, "project-a")).resolves.toBeNull();
+    await registerContextLoaded("decided", "project-a", BOUNDARIES_VERSION);
+    await expect(requireContextLoadedForProject("decided", "project-a")).resolves.toBeNull();
+    await expect(requireContextLoadedForProject("decided", "project-b")).resolves.toMatchObject({ blocked: true });
+    await expect(requireContextLoadedForProject("decided", "Project-A")).resolves.toMatchObject({ blocked: true });
+    await expect(requireContextLoadedForProject("", "project-a")).resolves.toMatchObject({ blocked: true });
   });
 });

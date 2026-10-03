@@ -115,27 +115,83 @@ export function markContextLoaded(
   lastSeenConversationId = conversationId;
 }
 
+const ENFORCED = " (Enforced server-side — applies to every host.)";
+
+/**
+ * The one remedy every refusal names, so the three variants cannot drift apart
+ * and the host instruction blocks (src/contextRecoveryPolicy.ts), the server
+ * instructions and the tool descriptions can say the same thing. A block that
+ * forbids the call a refusal asks for leaves an agent with no way forward
+ * (tests/startup-recovery-contract.test.ts pins every surface).
+ */
+const CONTEXT_RECOVERY =
+  " To recover, call session_load_context with the same project and the same conversation_id you " +
+  "passed to this save, then retry the save once. You do not need to repeat session_bootstrap (it " +
+  "reloads only the dashboard Auto-Load projects and reprints the startup display). A recovery load " +
+  "is not a second startup. If the retry is refused too, stop and tell the user.";
+
 function contextNotLoadedError(project?: string): GateResult {
   const projectNote = project
     ? " the requested project was not loaded for this conversation."
-    : "";
+    : " no context is registered for this conversation.";
   return {
     blocked: true,
     error:
-      "context_not_loaded:" + projectNote + " Call session_bootstrap(conversation_id) or " +
-      "session_load_context(project, conversation_id) " +
-      "before this action. This project-scoped tool needs confirmed working context " +
-      "to act correctly. (Enforced server-side — applies to every host.)",
+      "context_not_loaded:" + projectNote + CONTEXT_RECOVERY +
+      " This project-scoped tool needs confirmed working context to act correctly." + ENFORCED,
+  };
+}
+
+/**
+ * A save whose conversation_id is the empty string can never be recovered by
+ * "the same conversation_id you passed": the load handler registers nothing for
+ * an empty id. Say what is actually wrong and where the real id comes from.
+ */
+function emptyConversationIdError(): GateResult {
+  return {
+    blocked: true,
+    error:
+      "context_not_loaded: conversation_id is empty, so no context can be registered for it." +
+      " Pass this conversation's conversation_id (the value on session_bootstrap's <prism_session /> line)," +
+      " call session_load_context with that conversation_id and this project, then retry the save once." +
+      " If the retry is refused too, stop and tell the user." + ENFORCED,
   };
 }
 
 function contextExpiredError(): GateResult {
   return {
     blocked: true,
-    error:
-      "context_not_loaded: session expired (6 h TTL). Call " +
-      "session_bootstrap(conversation_id) or session_load_context(project, conversation_id) again. " +
-      "(Enforced server-side — applies to every host.)",
+    error: "context_not_loaded: session expired (6 h TTL)." + CONTEXT_RECOVERY + ENFORCED,
+  };
+}
+
+/**
+ * Longest project or conversation_id a refusal echoes back. A longer value gets
+ * the remedy without a literal call: a clipped value would register the wrong
+ * project, and the retry would be refused again.
+ */
+const MAX_ECHOED_VALUE = 200;
+
+/**
+ * Print the literal recovery call, built from the arguments the refused save
+ * used, so "the same project and conversation_id" cannot be mistyped or
+ * replaced by a host session id. Values are JSON-escaped and echoed whole, only
+ * to the caller that just sent them; a value too long to echo gets no call.
+ */
+function withExactCall(gate: GateResult, conversationId: string, project: string): GateResult {
+  if (!gate || !gate.blocked || !conversationId || !project.trim() || !gate.error.endsWith(ENFORCED)) {
+    return gate;
+  }
+  if (project.length > MAX_ECHOED_VALUE || conversationId.length > MAX_ECHOED_VALUE) return gate;
+  const call = JSON.stringify({
+    project,
+    conversation_id: conversationId,
+    toolAction: "Reload context",
+    toolSummary: "Recover from context_not_loaded",
+  });
+  return {
+    blocked: true,
+    error: gate.error.slice(0, -ENFORCED.length) + ` Exact call: session_load_context(${call}).` + ENFORCED,
   };
 }
 
@@ -265,8 +321,17 @@ export async function requireContextLoadedForProject(
   conversationId: string | undefined,
   project: string,
 ): Promise<GateResult> {
+  const gate = await evaluateContextGateForProject(conversationId, project);
+  return conversationId === undefined ? gate : withExactCall(gate, conversationId, project);
+}
+
+async function evaluateContextGateForProject(
+  conversationId: string | undefined,
+  project: string,
+): Promise<GateResult> {
   if (conversationId === undefined) return null;
-  if (!conversationId || !project.trim()) return contextNotLoadedError(project || undefined);
+  if (!conversationId) return emptyConversationIdError();
+  if (!project.trim()) return contextNotLoadedError(project || undefined);
 
   const memoryGate = requireContextLoaded(conversationId);
   const memoryState = sessions.get(conversationId);

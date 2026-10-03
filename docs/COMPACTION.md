@@ -71,7 +71,9 @@ payload carries the same `Skill files are STALE` warning the bootstrap shows.
 - Active **knowledge** relevant to the current project context
 - The current synchronized subscription tier and provisioned skill status
 
-Use `session_load_context(project)` only for an explicit project reload or as a
+Use `session_load_context(project, conversation_id)` to recover when a save is
+refused with `context_not_loaded` (same project and conversation_id as the
+refused save, then retry the save once), for an explicit project reload, or as a
 fallback with an older Prism server that does not expose `session_bootstrap`.
 
 The agent is fully oriented before writing a single byte of response.
