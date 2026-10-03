@@ -10,7 +10,9 @@
  * bytes leave the machine.
  *
  * What it does, per outgoing ref (pre-push stdin protocol):
- *   1. Runs scripts/check-no-private-content.mjs (the tracked-tree guard).
+ *   1. Runs scripts/check-no-private-content.mjs (the tracked-tree guard) and
+ *      scripts/private-identifier-scan.mjs (private names, written out or
+ *      assembled from pieces).
  *   2. Scans the outgoing RANGE — every commit's diff AND message — for:
  *      a. generic secret shapes (private key blocks, JWTs, hex/base64 key
  *         assignments, cloud tokens), and context that should never appear in
@@ -94,6 +96,19 @@ try {
     });
 } catch {
     console.error("[public-guard] BLOCKED: check-no-private-content failed on the tracked tree.");
+    process.exit(1);
+}
+
+// ── 1b. Private identifiers, written out or assembled from pieces ────────────
+// check-no-private-content covers paths and content rules, not identifiers.
+// The literal identifier guard runs in CI, after a push is already public, and
+// cannot see a name built at runtime. This scan runs before bytes leave.
+try {
+    execFileSync(process.execPath, [join(repoRoot, "scripts", "private-identifier-scan.mjs")], {
+        cwd: repoRoot, stdio: ["ignore", "inherit", "inherit"],
+    });
+} catch {
+    console.error("[public-guard] BLOCKED: private-identifier-scan failed on the tracked tree.");
     process.exit(1);
 }
 

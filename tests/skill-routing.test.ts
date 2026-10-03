@@ -9,9 +9,8 @@
  *   - resolveSkillsForPrompt is a no-op (portal-side now)
  *   - exports backward-compat types and OFFLINE_FALLBACK
  *
- * NOTE: Routing logic (budget tranching, pattern matching, project resolution)
- * is tested in the portal at src/__tests__/skills-routing.test.ts.
- * This file only tests the thin client behavior.
+ * NOTE: Server-side routing logic (budget tranching, pattern matching, project
+ * resolution) is tested with the server. This file only tests the thin client.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
@@ -200,7 +199,7 @@ describe('skill routing — backward compat', () => {
 // PUBLIC routing table and matched locally. These tests pin the two things that
 // can silently break: (1) the match still happens, (2) it produces exactly what
 // the portal would have produced.
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _applyPromptRouting, _setStorage, type ResolvedSkill } from '../src/tools/skillRouting.js';
@@ -282,8 +281,8 @@ describe('skill routing — on-device prompt matching', () => {
   });
 
   it('withholds prompt-matched skills from free tier, matching portal gating', async () => {
-    // resolve/route.ts: `const gated = tier === 'paid' ? resolved : []`. Local
-    // matching must not hand back an entitlement the portal just withheld.
+    // The server returns no prompt-matched skills to the free tier. Local
+    // matching must not hand back an entitlement the server just withheld.
     mockEndpoints({
       resolve: { loaded: [], skipped: [], routing_version: 26, tier: 'free' },
       table: TEST_TABLE,
@@ -539,15 +538,17 @@ describe('skill routing — native path (bootstrap)', () => {
   });
 });
 
-// ── Parity with the portal's resolver ────────────────────────────────────────
+// ── Parity with the server's resolver ────────────────────────────────────────
 
 /**
- * Verbatim reference port of portal resolve/route.ts lines 143-184. If the
- * portal changes its resolution order, priority arithmetic, or dedup rules,
- * this reference drifts from production and the test below stops proving
- * anything — so portal/src/__tests__ pins the portal side against this file.
+ * Reference implementation of the server-side resolver: universal skills,
+ * then project skills, then prompt keywords, then a stable sort by priority.
+ * The client matches prompt keywords on-device against the server's
+ * universal+project result and must end up with exactly what the server would
+ * have returned. If the server changes its resolution order, priority
+ * arithmetic or dedup rules, change this reference with it.
  */
-function portalReference(
+function serverReference(
   table: { universal?: unknown[]; projects?: Record<string, unknown[]>; prompt_keywords?: Record<string, string[]> },
   project: string,
   prompt?: string,
@@ -586,20 +587,24 @@ function portalReference(
             }
           }
         }
-      } catch { /* portal swallows invalid patterns */ }
+      } catch { /* the server swallows invalid patterns */ }
     }
   }
   resolved.sort((a, b) => a.priority - b.priority);
   return resolved;
 }
 
-const REAL_TABLE_PATH = process.env.PRISM_ROUTING_TABLE_PATH || path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  // Sibling checkout name assembled at runtime so the private repo name is
-  // never a literal in this PUBLIC repo (same trick as scripts/sync-skills.sh).
-  `../../${'synalux'}-private/portal/src/config/prism/skills-routing.json`,
-);
+// The synthetic table is the default, so this parity proof runs everywhere,
+// CI included. To check a real routing table as well, point
+// PRISM_ROUTING_TABLE_PATH at it; a path that cannot be read fails the run.
+const SYNTHETIC_TABLE_PATH = fileURLToPath(new URL('./fixtures/skills-routing.synthetic.json', import.meta.url));
+const PARITY_TABLES: Array<[string, string]> = [['synthetic table', SYNTHETIC_TABLE_PATH]];
+if (process.env.PRISM_ROUTING_TABLE_PATH) {
+  PARITY_TABLES.push(['PRISM_ROUTING_TABLE_PATH', process.env.PRISM_ROUTING_TABLE_PATH]);
+}
+const readTable = (tablePath: string) => JSON.parse(readFileSync(tablePath, 'utf8'));
 
+const PARITY_PROJECTS = ['synalux', 'prism-coder', 'prism-aac', 'unrelated-repo'];
 const PARITY_PROMPTS = [
   "A serious regression: Sam Doe can't access their prism ledger. Their account is sam.doe@example.invalid.",
   'A customer says their invoice list is empty but they insist they have invoices.',
@@ -610,50 +615,84 @@ const PARITY_PROMPTS = [
   'Refactor the billing reconciliation job and add unit tests.',
   'Update the README to document the new PRISM_STORAGE options.',
   'fix the TypeScript compile error',
+  'add a prefix to the ids',
   'deploy to production',
   'train a LoRA on the v2 corpus',
   'take a screenshot and verify the layout',
+  "deploy the screenshot fix, then document it; I can't see the layout",
   '', // empty prompt must be a no-op
 ];
 
-describe('skill routing — parity with portal resolver', () => {
-  const available = existsSync(REAL_TABLE_PATH);
-  if (!available) {
-    it.skip(`REAL routing table not found at ${REAL_TABLE_PATH} — parity unproven`, () => {});
-    console.warn(`[skill-routing] parity test SKIPPED: no table at ${REAL_TABLE_PATH}`);
-  }
-
-  it.runIf(available)('produces byte-identical output to the portal for every prompt', () => {
-    const table = JSON.parse(readFileSync(REAL_TABLE_PATH, 'utf8'));
+describe.each(PARITY_TABLES)('skill routing — parity with the server resolver (%s)', (_label, tablePath) => {
+  it('produces byte-identical output to the server for every prompt', () => {
+    const table = readTable(tablePath);
     expect(Object.keys(table.prompt_keywords || {}).length).toBeGreaterThan(0);
 
-    for (const project of ['synalux', 'prism-coder', 'prism-aac', 'unrelated-repo']) {
+    for (const project of PARITY_PROJECTS) {
       for (const prompt of PARITY_PROMPTS) {
-        // Production composition: the portal resolves universal+project with
-        // NO prompt, then we apply the keyword rules on-device.
-        const base = portalReference(table, project, undefined);
+        // Production composition: the server resolves universal+project with
+        // NO prompt, then the client applies the keyword rules on-device.
+        const base = serverReference(table, project, undefined);
         const local = _applyPromptRouting(base, prompt, table.prompt_keywords);
-        const portal = portalReference(table, project, prompt);
-        expect(local, `project=${project} prompt=${JSON.stringify(prompt)}`).toEqual(portal);
+        const server = serverReference(table, project, prompt);
+        expect(local, `project=${project} prompt=${JSON.stringify(prompt)}`).toEqual(server);
       }
     }
   });
 
-  it.runIf(available)('parity holds for a prompt that matches nothing', () => {
-    const table = JSON.parse(readFileSync(REAL_TABLE_PATH, 'utf8'));
-    const base = portalReference(table, 'synalux', undefined);
+  it('parity holds for a prompt that matches nothing', () => {
+    const table = readTable(tablePath);
+    const base = serverReference(table, 'synalux', undefined);
     const local = _applyPromptRouting(base, 'zzz qqq', table.prompt_keywords);
-    expect(local).toEqual(portalReference(table, 'synalux', 'zzz qqq'));
+    expect(local).toEqual(serverReference(table, 'synalux', 'zzz qqq'));
+  });
+});
+
+describe('skill routing — the parity proof is not vacuous', () => {
+  it('the synthetic table drives every branch of the resolver', () => {
+    // Parity over a table that never reaches a branch proves nothing about
+    // that branch. Each flag below is one branch the comparison must cover.
+    const table = readTable(SYNTHETIC_TABLE_PATH);
+    const reached = {
+      categoryFlip: false, promptAdded: false, priorityTie: false,
+      sharedSkillAcrossPatterns: false, projectDefaultPriority: false,
+    };
+    for (const project of PARITY_PROJECTS) {
+      const base = serverReference(table, project, undefined);
+      const baseNames = new Set(base.map((s) => s.name));
+      if (base.some((s) => s.category === 'project' && s.priority >= 100 && s.priority < 200)) reached.projectDefaultPriority = true;
+      for (const prompt of PARITY_PROMPTS) {
+        const out = serverReference(table, project, prompt);
+        if (out.some((s) => s.category === 'prompt' && baseNames.has(s.name))) reached.categoryFlip = true;
+        const added = out.filter((s) => s.category === 'prompt' && !baseNames.has(s.name));
+        if (added.length > 0) reached.promptAdded = true;
+        if (out.some((s, i) => i > 0 && out[i - 1].priority === s.priority)) reached.priorityTie = true;
+        const matched = Object.entries(table.prompt_keywords as Record<string, string[]>).filter(([pattern]) => {
+          try { return new RegExp(pattern, 'i').test(prompt); } catch { return false; }
+        });
+        const counts = new Map<string, number>();
+        for (const [, skills] of matched) for (const name of skills) counts.set(name, (counts.get(name) ?? 0) + 1);
+        if ([...counts.values()].some((n) => n > 1)) reached.sharedSkillAcrossPatterns = true;
+      }
+    }
+    expect(reached).toEqual({
+      categoryFlip: true, promptAdded: true, priorityTie: true,
+      sharedSkillAcrossPatterns: true, projectDefaultPriority: true,
+    });
+    const invalid = Object.keys(table.prompt_keywords).filter((pattern) => {
+      try { new RegExp(pattern, 'i'); return false; } catch { return true; }
+    });
+    expect(invalid.length, 'an invalid pattern must be present, and swallowed').toBeGreaterThan(0);
   });
 
   it('detects a divergent matcher (the parity test can actually fail)', () => {
     // Negative control: a matcher that gets the priority arithmetic wrong must
     // be caught. Without this, the parity assertions above could be vacuous.
     const table = { universal: [{ name: 'a', priority: 0, protected: true }], prompt_keywords: { widget: ['b'] } };
-    const base = portalReference(table, 'p', undefined);
+    const base = serverReference(table, 'p', undefined);
     const wrong = _applyPromptRouting(base, 'widget', { widget: ['b'] })
       .map((s) => ({ ...s, priority: s.priority + 1 }));
-    expect(wrong).not.toEqual(portalReference(table, 'p', 'widget'));
+    expect(wrong).not.toEqual(serverReference(table, 'p', 'widget'));
   });
 });
 

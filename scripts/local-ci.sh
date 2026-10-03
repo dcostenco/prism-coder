@@ -22,7 +22,7 @@ step() {
 }
 
 # The term list is NOT duplicated here. It had four entries while the workflow
-# had five, so this script passed while CI failed on prism-aac""-internal.
+# had five, so this script passed while CI failed on the missing term.
 # Both now read scripts/private-identifier-terms.mjs.
 leak_guard() {
   local TERMS=()

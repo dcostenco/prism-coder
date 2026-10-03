@@ -3,7 +3,7 @@
  *
  * Portal search is available to every `prism connect` login, so a
  * free account is routed to the portal, and the portal answers its search
- * with 403 "requires Standard plan or higher". Owner's decision: that
+ * with 403 "requires Standard plan or higher". By design, that
  * account may use the key it configured itself — the same footing as a user
  * who never signed in. Everything else the portal can say (outage, quota,
  * expired login, a 403 that is not about the plan) stays inside the privacy

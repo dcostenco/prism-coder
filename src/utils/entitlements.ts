@@ -16,9 +16,9 @@ import { resolvePortalBaseUrl, usablePortalKey } from "./synaluxSearch.js";
 
 // ── Types ─────────────────────────────────────────────────────────
 
-/** prism_infer multi-turn policy. Ruled by the PORTAL's plan table
- *  (portal/src/app/api/v1/prism/entitlements/route.ts): Prism is a thin
- *  client and never decides this itself. Absent from an older portal →
+/** prism_infer multi-turn policy. Ruled by the plan table that the Synalux
+ *  entitlements endpoint serves: Prism is a thin client and never decides
+ *  this itself. Absent from an older portal →
  *  DEFAULT_MULTI_TURN; wild values are clamped to the absolute ceiling. */
 export interface MultiTurnEntitlement {
     enabled: boolean;
@@ -28,9 +28,9 @@ export interface MultiTurnEntitlement {
 
 /** What a host with NO portal (unconfigured), a portal that says nothing
  *  (older deployment), or an assumed-free fallback gets: OFF. Multi-turn
- *  needs a Synalux account, and a free one is enough (owner decision
- *  2026-09-26): the answer check it depends on is served per account. The
- *  caps here are what an account gets when the portal omits them. */
+ *  needs a Synalux account, and a free one is enough: the answer check it
+ *  depends on is served per account. The caps here are what an account gets
+ *  when the portal omits them. */
 export const DEFAULT_MULTI_TURN: MultiTurnEntitlement = { enabled: false, max_turns: 12, max_chars: 32_000 };
 /** Structural ceiling no plan can exceed: the portal's own inference route
  *  takes at most 50 messages INCLUDING the current turn appended on
@@ -85,9 +85,8 @@ export interface PrismEntitlements {
 // ── Free-tier defaults (no auth) ──────────────────────────────────
 
 /** No account: everything local, with no cap on the model the user's own
- *  machine can run (owner decision 2026-09-26). Anything that needs Synalux
- *  (multi-turn with the answer check, cloud answers) needs an account; a free
- *  one is enough. */
+ *  machine can run. Anything that needs Synalux (multi-turn with the answer
+ *  check, cloud answers) needs an account; a free one is enough. */
 export const FREE_ENTITLEMENTS: PrismEntitlements = {
     plan: "free",
     model_ceiling: "27b",

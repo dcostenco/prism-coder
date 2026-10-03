@@ -708,7 +708,7 @@ describe("v6: read order and concurrency", () => {
         expect(most).toBe(2);
         expect(l1.mock.calls.length).toBe(1 + 8 + 2 * contextWindows(a).filter(w => w.trim()).length);
     });
-    it("by default the reads run one at a time (owner decision 2026-09-26: two at once cut the margin to the 1.5 s classifier timeout)", async () => {
+    it("by default the reads run one at a time (two at once cut the margin to the 1.5 s classifier timeout)", async () => {
         expect(LAYER1_SECOND_READ_CONCURRENCY).toBe(1);
         let inFlight = 0, most = 0;
         const l1 = vi.fn(async (t: string, _u: string, m: string) => { inFlight++; most = Math.max(most, inFlight); await new Promise(r => setTimeout(r, 3)); inFlight--; return hedgePrompt(m, t); });

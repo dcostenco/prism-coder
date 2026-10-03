@@ -56,17 +56,15 @@ if [ -f "$DB" ]; then
   fi
 fi
 
+# The skills directory is SYNALUX_SKILLS_DIR, else ~/.synalux/skills. Nothing
+# else is guessed: a public script must not know the name of any private
+# checkout, built at runtime or not.
 if [ -n "$SYNALUX_SKILLS_DIR" ]; then
   SYNALUX_SKILLS="$SYNALUX_SKILLS_DIR"
-# Legacy auto-detect for repo-holders. The private-repo dir name is assembled at
-# runtime so it is never a literal string in this public file (the leak-guard CI
-# check greps tracked files for it). Prefer SYNALUX_SKILLS_DIR or ~/.synalux/skills.
-elif _priv="$HOME/synalux-$(printf 'priv')ate/skills"; [ -d "$_priv" ]; then
-  SYNALUX_SKILLS="$_priv"
 elif [ -d "$HOME/.synalux/skills" ]; then
   SYNALUX_SKILLS="$HOME/.synalux/skills"
 else
-  echo "✗ No skills directory found"
+  echo "✗ No skills directory found. Set SYNALUX_SKILLS_DIR to your skills checkout, or use ~/.synalux/skills."
   exit 1
 fi
 

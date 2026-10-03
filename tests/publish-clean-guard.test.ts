@@ -8,6 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { privateIdentifierTerms } from "../scripts/private-identifier-terms.mjs";
 
 const SCRIPT = resolve(process.cwd(), "scripts/check-publish-clean.mjs");
 const tempRepos: string[] = [];
@@ -310,18 +311,16 @@ describe("npm publish cleanliness guard", () => {
 // The CI guard checked ONE term (the private repo name) and stayed green while
 // a private Vercel team slug and a private client project name shipped in the
 // published npm package. Running it here too means it fails at `npm test`,
-// before a publish, not after. Terms are split so this file cannot self-match.
+// before a publish, not after. The terms come from the one canonical list, so
+// this file neither repeats nor assembles them (tests/privateIdentifierScan.test.ts
+// covers names assembled from pieces).
 describe("private identifiers must not appear in tracked files", () => {
-  const TERMS = [
-    "synalux" + "-private",
-    "dcostencos" + "-projects",
-    "bcba" + "-private",
-    "prism-aac" + "-internal",
-    "/Users/" + "admin",
-  ];
+  const TERMS = privateIdentifierTerms();
   const IGNORE = /package-lock\.json|\.github\/workflows\/ci\.yml|tests\/publish-clean-guard\.test\.ts/;
 
-  it.each(TERMS)("no tracked file contains %s", (term) => {
+  // Titled by position, never by value: test titles land in CI logs, and the
+  // logs of a public repository are public.
+  it.each(TERMS.map((term, i) => [i + 1, term] as const))("no tracked file contains private identifier #%i", (_index, term) => {
     const tracked = execFileSync("git", ["ls-files"], { encoding: "utf8" })
       .split("\n").filter(Boolean).filter((f) => !IGNORE.test(f));
     const hits = spawnSync("grep", ["-ln", term, ...tracked], { encoding: "utf8" })
