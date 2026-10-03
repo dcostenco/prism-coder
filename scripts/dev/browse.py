@@ -2505,10 +2505,12 @@ def resolve_device_options(device, viewport, touch, scale, safe_area):
     any flag given explicitly wins, so --device iphone-17 --viewport 874x402
     is the same phone turned sideways (pass its landscape --safe-area too).
     """
-    preset = DEVICE_PRESETS.get(device) if device else None
-    if device and preset is None:
+    # "Given" means not None: an empty value (an unset shell variable) must fail
+    # loudly, not quietly fall back to a desktop default.
+    preset = DEVICE_PRESETS.get(device) if device is not None else None
+    if device is not None and preset is None:
         raise ValueError(f"Unknown --device {device!r}. Known: {', '.join(sorted(DEVICE_PRESETS))}.")
-    if viewport:
+    if viewport is not None:
         size = parse_viewport(viewport)
     elif preset:
         size = tuple(preset['viewport'])
@@ -2517,8 +2519,10 @@ def resolve_device_options(device, viewport, touch, scale, safe_area):
     return {
         'viewport': size,
         'touch': bool(touch or preset),
-        'device_scale_factor': parse_device_scale_factor(scale) if scale else (preset['scale'] if preset else None),
-        'safe_area': parse_safe_area(safe_area) if safe_area else (tuple(preset['safe_area']) if preset else None),
+        'device_scale_factor': (parse_device_scale_factor(scale) if scale is not None
+                                else (preset['scale'] if preset else None)),
+        'safe_area': (parse_safe_area(safe_area) if safe_area is not None
+                      else (tuple(preset['safe_area']) if preset else None)),
     }
 
 

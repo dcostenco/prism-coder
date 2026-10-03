@@ -500,6 +500,22 @@ describe.skipIf(!python)('Prism Browser policy helpers (regression)', () => {
     });
   });
 
+  it('refuses an empty device option instead of falling back to a desktop default', async () => {
+    // `--safe-area "$INSETS"` with the variable unset passes "". Treating that
+    // as "not given" ran a phone test with no insets, silently.
+    const result = runPython([
+      'out = {}',
+      'for name, args in {"viewport": (None, "", False, None, None), "scale": (None, None, False, "", None),',
+      '                   "safe_area": (None, None, False, None, ""), "preset_viewport": ("iphone-17", "", False, None, None)}.items():',
+      ' try: browse.resolve_device_options(*args); out[name] = "accepted"',
+      ' except ValueError: out[name] = "error"',
+      'print(json.dumps(out))',
+    ].join('\n'));
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ viewport: 'error', scale: 'error', safe_area: 'error', preset_viewport: 'error' });
+  });
+
   it('parses quoted selectors so a selector may contain spaces', async () => {
     const result = runPython([
       'print(json.dumps([',
