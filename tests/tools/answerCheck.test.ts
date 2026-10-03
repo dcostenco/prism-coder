@@ -398,8 +398,8 @@ describe("what is checked", () => {
 });
 
 /**
- * The tier × cloud matrix (owner, 2026-09-26: "test with cloud enabled/disabled
- * to follow free/paid tier functionality"). Every combination of plan, the
+ * The tier × cloud matrix: cloud enabled and disabled, on the free and the
+ * paid tiers. Every combination of plan, the
  * caller's cloud flag, request shape, image, local verdict, confirmation and
  * cloud health, with what must happen and what may leave the device.
  */

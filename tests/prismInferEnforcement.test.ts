@@ -3,7 +3,7 @@
  *
  * Verifies that runInfer() correctly enforces entitlement gates:
  *   1. Model ceiling — no account: no cap (the model runs on the user's own
- *      machine, owner 2026-09-26); a plan may still set one, and it binds
+ *      machine); a plan may still set one, and it binds
  *   2. Max tokens — clamped to plan limit
  *   3. Cloud fallback — blocked for free users
  *   4. Grounding verifier — blocked for free users
