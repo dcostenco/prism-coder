@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.18 — 2026-10-03
+
+### Prism Browser can test phone and tablet layouts
+
+`prism browser` only ever ran as a desktop browser, so CSS written for
+touchscreens (`(pointer: coarse)`) never applied and every
+`env(safe-area-inset-*)` read 0. A layout that fit at a phone's size could still
+overflow on the phone itself. New options emulate the device:
+
+- `--device NAME` applies a measured iPhone or iPad in portrait: viewport, pixel
+  ratio, touch, and safe area. `iphone-se`, `iphone-17`, `iphone-air`,
+  `iphone-17-pro-max`, `ipad-a16`, `ipad-pro-13`; the values were read from a
+  full-screen web view on iOS 26.5 simulators.
+- `--touch`, `--device-scale-factor N`, and `--safe-area T,R,B,L` set each part
+  on its own, and override a preset.
+
+The safe area is applied after the fingerprint layer's user-agent override,
+which otherwise reset it to 0 under `--stealth full`. Chromium applies the
+insets even to a page without `viewport-fit=cover`, where iOS reports 0.
+
 ## 20.21.17 — 2026-09-29
 
 ### Fewer ordinary coding requests refused by the on-device screen

@@ -68,6 +68,19 @@ AUDIT_LOG_PATH = BROWSER_DATA_DIR / "audit.log"
 DEFAULT_PROFILE = "default"
 DEFAULT_TIMEOUT = 30000
 DEFAULT_VIEWPORT = (1440, 900)
+# iOS devices in portrait as a full-screen WKWebView page sees them: CSS
+# viewport, devicePixelRatio, and env(safe-area-inset-*) as (top, right,
+# bottom, left). Measured 2026-10-03 on iOS 26.5 simulators, each running a
+# full-screen WKWebView app whose page reported these values. Landscape was not
+# measured: pass --viewport and --safe-area for it.
+DEVICE_PRESETS: dict[str, dict] = {
+    'iphone-se': {'viewport': (375, 667), 'scale': 2.0, 'safe_area': (20, 0, 0, 0)},
+    'iphone-17': {'viewport': (402, 874), 'scale': 3.0, 'safe_area': (62, 0, 34, 0)},
+    'iphone-air': {'viewport': (420, 912), 'scale': 3.0, 'safe_area': (68, 0, 34, 0)},
+    'iphone-17-pro-max': {'viewport': (440, 956), 'scale': 3.0, 'safe_area': (62, 0, 34, 0)},
+    'ipad-a16': {'viewport': (820, 1180), 'scale': 2.0, 'safe_area': (32, 0, 20, 0)},
+    'ipad-pro-13': {'viewport': (1032, 1376), 'scale': 2.0, 'safe_area': (32, 0, 20, 0)},
+}
 REPL_IDLE_TIMEOUT = 600  # 10 minutes — auto-close to prevent zombie Chromium
 PIPE_IDLE_TIMEOUT = 600  # stdin held open with no commands — same protection
 MAX_INIT_SCRIPT_BYTES = 256 * 1024
@@ -796,7 +809,8 @@ class StealthBrowserSession:
                  allow_degraded_stealth=False, ephemeral_profile=False,
                  storage_state_path=None, trace_path=None, video_dir=None,
                  har_path=None, grant_permissions=None, geolocation=None,
-                 allow_http_error=False):
+                 allow_http_error=False, touch=False, device_scale_factor=None,
+                 safe_area=None):
         self.profile = validate_profile_name(profile)
         self.headless = headless
         self.timeout = timeout
@@ -814,6 +828,9 @@ class StealthBrowserSession:
         self.grant_permissions = list(grant_permissions or [])
         self.geolocation = geolocation
         self.allow_http_error = allow_http_error
+        self.touch = touch
+        self.device_scale_factor = device_scale_factor
+        self.safe_area = safe_area  # (top, right, bottom, left) CSS px, or None
         self.stealth_degraded: list[str] = []
         self.fingerprint: dict = {}
         self._fingerprint_reverified = False
@@ -895,6 +912,13 @@ class StealthBrowserSession:
                 'latitude': self.geolocation[0],
                 'longitude': self.geolocation[1],
             }
+        if self.touch:
+            # A phone or tablet: (pointer: coarse) and (hover: none) match, touch
+            # events exist, and the page's meta viewport is honoured.
+            launch_kwargs['has_touch'] = True
+            launch_kwargs['is_mobile'] = True
+        if self.device_scale_factor:
+            launch_kwargs['device_scale_factor'] = self.device_scale_factor
         if self.video_dir:
             launch_kwargs['record_video_dir'] = str(self.video_dir)
         if self.har_path:
@@ -950,7 +974,8 @@ class StealthBrowserSession:
         audit_log(
             "session_start", f"profile={self.profile}",
             f"stealth={self.stealth_level},headless={self.headless},"
-            f"local_only={self.local_only},degraded={len(self.stealth_degraded)}",
+            f"local_only={self.local_only},degraded={len(self.stealth_degraded)},"
+            f"touch={self.touch},scale={self.device_scale_factor},safe_area={self.safe_area}",
         )
 
     def _on_new_page(self, page):
@@ -990,6 +1015,29 @@ class StealthBrowserSession:
         self.diagnostics.attach(page)
         if self.stealth_level != "none":
             self._apply_cdp_user_agent(page)
+        # After the user-agent override, never before: Emulation.setUserAgentOverride
+        # resets an earlier safe-area override on the same page, and env() then
+        # reads 0 under --stealth full.
+        if self.safe_area:
+            self._apply_safe_area(page)
+
+    def _apply_safe_area(self, page):
+        """
+        Set env(safe-area-inset-*), which Playwright cannot emulate. Chromium
+        applies it whether or not the page sets viewport-fit=cover; iOS reports
+        0 without it. A runtime without the override fails the run: a silent 0
+        would test the wrong layout.
+        """
+        top, right, bottom, left = self.safe_area
+        try:
+            self._context.new_cdp_session(page).send('Emulation.setSafeAreaInsetsOverride', {
+                'insets': {'top': top, 'right': right, 'bottom': bottom, 'left': left},
+            })
+        except Exception as exc:
+            raise RuntimeError(
+                f"--safe-area could not be applied ({type(exc).__name__}: {exc}). "
+                "It needs a Chromium with Emulation.setSafeAreaInsetsOverride."
+            ) from exc
 
     def _apply_cdp_user_agent(self, page):
         """
@@ -2309,7 +2357,15 @@ def build_parser():
                    help='Delete screenshots captured in this run on exit (see --help notes)')
     p.add_argument('--sanitize', action='store_true', help='Mask PHI patterns in text output')
     p.add_argument('--timeout', type=int, default=DEFAULT_TIMEOUT, help='Timeout (ms)')
-    p.add_argument('--viewport', default='1440x900', help='Viewport WxH')
+    p.add_argument('--viewport', default=None, help='Viewport WxH (default 1440x900, or the --device size)')
+    p.add_argument('--device', choices=sorted(DEVICE_PRESETS),
+                   help='Emulate a measured iPhone or iPad in portrait: size, pixel ratio, touch and safe area')
+    p.add_argument('--touch', action='store_true',
+                   help='Emulate a touchscreen: (pointer: coarse), (hover: none), touch events, meta viewport')
+    p.add_argument('--device-scale-factor', metavar='N', help='Device pixel ratio, for example 3')
+    p.add_argument('--safe-area', metavar='T,R,B,L',
+                   help='env(safe-area-inset-*) in CSS pixels, for example 62,0,34,0; unlike iOS, '
+                        'applied even when the page omits viewport-fit=cover')
     p.add_argument('--stealth', choices=['full', 'light', 'none'], default='full',
                    help='Fingerprint level: full (stealth lib + CDP + JS), light (CDP + JS), none')
     p.add_argument('--allow-degraded-stealth', action='store_true',
@@ -2422,6 +2478,50 @@ def parse_viewport(value: str) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def parse_safe_area(value: str) -> tuple[int, int, int, int]:
+    """Parse T,R,B,L insets in CSS pixels, failing loudly like --viewport."""
+    match = re.fullmatch(r'\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*', value or '')
+    if not match:
+        raise ValueError(
+            f"Invalid --safe-area {value!r}. Expected T,R,B,L in CSS pixels, for example 62,0,34,0."
+        )
+    return tuple(int(group) for group in match.groups())
+
+
+def parse_device_scale_factor(value: str) -> float:
+    """Parse a device pixel ratio, failing loudly on anything outside 0.5 to 5."""
+    try:
+        scale = float(value)
+    except (TypeError, ValueError):
+        scale = 0.0
+    if not 0.5 <= scale <= 5:
+        raise ValueError(f"Invalid --device-scale-factor {value!r}. Expected a number from 0.5 to 5, for example 3.")
+    return scale
+
+
+def resolve_device_options(device, viewport, touch, scale, safe_area):
+    """
+    Combine --device with the individual flags. The preset supplies defaults;
+    any flag given explicitly wins, so --device iphone-17 --viewport 874x402
+    is the same phone turned sideways (pass its landscape --safe-area too).
+    """
+    preset = DEVICE_PRESETS.get(device) if device else None
+    if device and preset is None:
+        raise ValueError(f"Unknown --device {device!r}. Known: {', '.join(sorted(DEVICE_PRESETS))}.")
+    if viewport:
+        size = parse_viewport(viewport)
+    elif preset:
+        size = tuple(preset['viewport'])
+    else:
+        size = DEFAULT_VIEWPORT
+    return {
+        'viewport': size,
+        'touch': bool(touch or preset),
+        'device_scale_factor': parse_device_scale_factor(scale) if scale else (preset['scale'] if preset else None),
+        'safe_area': parse_safe_area(safe_area) if safe_area else (tuple(preset['safe_area']) if preset else None),
+    }
+
+
 def parse_geolocation(value: str) -> tuple[float, float]:
     parts = (value or '').split(',')
     if len(parts) != 2:
@@ -2447,9 +2547,12 @@ def main():
         return 1
 
     try:
-        viewport = parse_viewport(args.viewport)
+        device = resolve_device_options(
+            args.device, args.viewport, args.touch, args.device_scale_factor, args.safe_area,
+        )
     except ValueError as exc:
         parser.error(str(exc))
+    viewport = device['viewport']
 
     geolocation = None
     if args.geolocation:
@@ -2488,6 +2591,9 @@ def main():
             grant_permissions=args.grant,
             geolocation=geolocation,
             allow_http_error=args.allow_http_error,
+            touch=device['touch'],
+            device_scale_factor=device['device_scale_factor'],
+            safe_area=device['safe_area'],
         )
     except (ValueError, StealthConfigurationError) as exc:
         print(json.dumps({"status": "error", "message": str(exc)}), file=sys.stderr)

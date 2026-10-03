@@ -80,6 +80,39 @@ state carries between runs and makes them order dependent. For test runs use
 `--trace PATH`, `--video DIR`, and `--har PATH` record Playwright artifacts for
 a failing run.
 
+## Phones and tablets
+
+A desktop run never matches `(pointer: coarse)` and reads every
+`env(safe-area-inset-*)` as 0, so CSS written for touchscreens, and layouts
+that pad the iPhone status area and home indicator, cannot show up at a phone
+size alone. Emulate the device instead:
+
+- `--device NAME` — a measured iPhone or iPad in portrait: viewport, pixel
+  ratio, touch, and safe area. `iphone-se`, `iphone-17`, `iphone-air`,
+  `iphone-17-pro-max`, `ipad-a16`, `ipad-pro-13`. The values were read from a
+  full-screen web view on iOS 26.5 simulators.
+- `--touch` — a touchscreen: `(pointer: coarse)` and `(hover: none)` match,
+  touch events exist, and the page's meta viewport is honoured.
+- `--device-scale-factor N` — the device pixel ratio, for example `3`.
+- `--safe-area T,R,B,L` — `env(safe-area-inset-*)` in CSS pixels, for example
+  `62,0,34,0`. On iOS a page reads the insets only if its meta viewport sets
+  `viewport-fit=cover`; without it an iPhone 17 reports 0. Chromium applies
+  them either way, so check that your page sets it.
+
+Flags given explicitly override the preset, so a phone turned sideways is
+`--device iphone-17 --viewport 874x402 --safe-area 0,62,21,62`. Landscape
+insets are not part of the presets. The engine stays Chromium, and the user
+agent stays the desktop one, so pages that branch on the user-agent string
+still take their desktop path.
+
+```bash
+printf '%s\n' \
+  'open http://127.0.0.1:3000/app' \
+  'assert-eval matchMedia("(pointer: coarse)").matches' \
+  'screenshot phone.png' \
+  | prism browser --headless --fast --ephemeral-profile --local-only --device iphone-17 pipe
+```
+
 ## Multiple pages
 
 A popup (OAuth, payment, print preview) opens a new page. `pages` lists them,
