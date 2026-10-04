@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 20.21.18 — 2026-10-03
+## 20.21.19 — 2026-10-03
 
 ### Prism Browser can test phone and tablet layouts
 

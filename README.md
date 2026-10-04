@@ -158,7 +158,7 @@ or by re-enabling after each run.
 <details>
 <summary>Release history (optional)</summary>
 
-## What's New in v20.21.18
+## What's New in v20.21.19
 
 - Prism Browser emulates phones and tablets. `--device iphone-17`, or one of
   five other measured iPhones and iPads, turns on touch CSS, the pixel ratio,
