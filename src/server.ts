@@ -482,8 +482,10 @@ export const PRISM_SERVER_INSTRUCTIONS =
   `Emit no preamble. Print the complete tool result verbatim as the entire first-turn startup display, before any optional ` +
   `answer. Do not summarize, paraphrase, rename headings, reformat, or omit any returned section. Preserve its order and ` +
   `line content. For a greeting-only prompt, stop after the verbatim startup display. ` +
-  `Do not substitute session_load_context while session_bootstrap is available; use session_load_context ` +
-  `only for an explicit project reload or as an older-server fallback. ` +
+  `Do not substitute session_load_context for the startup call while session_bootstrap is available. Use ` +
+  `session_load_context to recover when a save is refused with context_not_loaded (pass that save's project ` +
+  `and conversation_id, then retry the save once; recovery is not a second startup), for an explicit project ` +
+  `reload, or as an older-server fallback. ` +
   `Use session_save_ledger to log completed work and session_save_handoff to preserve state for the next session. ` +
   `Reuse the conversation_id from session_bootstrap's <prism_session /> line for those saves and for ` +
   `session_detect_drift, the 60-minute goal-alignment drift check. Do not add the id to the visible greeting.\n\n` +

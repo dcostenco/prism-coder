@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "universal": [
+    { "name": "floor-rules", "priority": 0, "protected": true },
+    "plain-universal",
+    { "name": "late-universal", "priority": 7 },
+    { "name": "default-priority" },
+    "floor-rules",
+    { "name": "tied-universal", "priority": 1 }
+  ],
+  "projects": {
+    "prism": ["prism-shared", { "name": "prism-pinned", "priority": 3 }, "plain-universal"],
+    "coder": [{ "name": "coder-tools" }, "prism-shared"],
+    "synalux": ["platform-ops", { "name": "platform-late", "priority": 207 }],
+    "zz-unmatched": ["never-loaded-by-project"]
+  },
+  "prompt_keywords": {
+    "can'?t (access|see)|no rows|is (empty|blank)": ["data-first", "plain-universal"],
+    "\\breadme\\b|document": ["docs-writer"],
+    "deploy|production": ["release-check", "data-first"],
+    "screenshot|layout": ["visual-check", "prism-pinned"],
+    "typescript|compile": ["types-check"],
+    "[unterminated": ["never-reachable"],
+    "(?<!pre)fix\\b": ["fix-flow"],
+    "LORA|Corpus": ["training-check"]
+  }
+}

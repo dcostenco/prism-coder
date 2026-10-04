@@ -1,5 +1,5 @@
 /**
- * The answer check (owner decisions 2026-09-25/26): a local answer to a
+ * The answer check: a local answer to a
  * conversation is served only when it passes the local check, run on this
  * device with the pinned rules. When cloud is allowed and no image is
  * attached, a local pass is also confirmed by Synalux on a copy pseudonymized
@@ -29,7 +29,7 @@ import { _setCacheForTest, _resetEntitlementsForTest, FREE_ENTITLEMENTS, type Pr
 const GB = 1024 ** 3;
 const BYTES = JSON.stringify(JSON.parse(readFileSync(new URL("../fixtures/answer-check-policy.synthetic.json", import.meta.url), "utf8")));
 const POLICY = parseAnswerCheckPolicy(BYTES, createHash("sha256").update(BYTES).digest("hex"))!;
-// The plans (portal/src/lib/prism-plan-entitlements.ts, owner decisions 2026-09-26):
+// The plans, as the server defines them:
 // no account: everything local, no multi-turn; a free account: multi-turn with the
 // local check and 20 metered cloud answers a day, no confirmation; Pro (plan key
 // "standard"): the confirmation too.
@@ -398,8 +398,8 @@ describe("what is checked", () => {
 });
 
 /**
- * The tier × cloud matrix (owner, 2026-09-26: "test with cloud enabled/disabled
- * to follow free/paid tier functionality"). Every combination of plan, the
+ * The tier × cloud matrix: cloud enabled and disabled, on the free and the
+ * paid tiers. Every combination of plan, the
  * caller's cloud flag, request shape, image, local verdict, confirmation and
  * cloud health, with what must happen and what may leave the device.
  */

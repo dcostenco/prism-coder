@@ -155,7 +155,7 @@ describe("getEntitlements cache", () => {
         _resetEntitlementsForTest();
         const result = await getEntitlements();
         expect(result.plan).toBe("free");
-        // no account: everything local, no model-size cap (owner 2026-09-26)
+        // no account: everything local, no model-size cap
         expect(result.model_ceiling).toBe("27b");
         expect(result.max_tokens).toBe(512);
     });

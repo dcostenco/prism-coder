@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { privateIdentifierTerms } from "../scripts/private-identifier-terms.mjs";
 
 const scriptPath = resolve("scripts/sync-skills.sh");
 const tempHomes: string[] = [];
@@ -117,6 +118,26 @@ describe.skipIf(process.platform === "win32" || !sqliteAvailable)(
         .toBe("developer checkout content");
       expect(sqlite(dbPath, "SELECT COUNT(*) FROM system_settings WHERE key='skill:orphan';"))
         .toBe("0");
+    });
+
+    it("never takes skills from a directory named after a private checkout", () => {
+      // Without SYNALUX_SKILLS_DIR only ~/.synalux/skills may be used. An old
+      // auto-detect looked for a sibling private checkout by name; a public
+      // script must not know that name, so such a directory is never read.
+      const { dbPath, home } = makeFixture();
+      createLegacySchema(dbPath);
+      for (const term of privateIdentifierTerms().filter((t) => !t.includes("/"))) {
+        mkdirSync(join(home, term, "skills", "demo"), { recursive: true });
+        writeFileSync(join(home, term, "skills", "demo", "SKILL.md"), "private checkout content\n");
+      }
+
+      const result = runSync(home, "", ["--legacy-local"]);
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain("No skills directory found");
+      expect(result.stdout).toContain("Set SYNALUX_SKILLS_DIR");
+      expect(sqlite(dbPath, "SELECT value FROM system_settings WHERE key='skill:demo';"))
+        .toBe("old content");
     });
 
   },

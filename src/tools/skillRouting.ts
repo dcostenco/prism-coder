@@ -13,8 +13,8 @@
  * regexes match, and the regexes are already public. Sending the raw first
  * message bought nothing a local match could not compute — and free-tier
  * callers paid that privacy cost for literally zero routing benefit, since
- * the portal gates them to an empty set (resolve/route.ts: `tier === 'paid' ?
- * resolved : []`). Paid skill CONTENT stays gated server-side at
+ * the server returns no prompt-matched skills to the free tier. Paid skill
+ * CONTENT stays gated server-side at
  * /api/v1/prism/skill-manifest, which this change does not touch.
  *
  * Cache: portal keyed on (project,role) — no longer per-prompt, which never
@@ -503,8 +503,8 @@ export function stripQuotedEvidenceForRouting(
 }
 
 /**
- * Verbatim port of portal resolve/route.ts prompt-matching block + the sort
- * that follows it. Parity is the whole point: any divergence silently changes
+ * Port of the server resolver's prompt-matching step and the sort that
+ * follows it. Parity is the whole point: any divergence silently changes
  * which skills load. Do not "improve" this — the reference implementation and
  * a scenario-level parity test both pin it.
  *

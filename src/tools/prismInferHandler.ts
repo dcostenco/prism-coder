@@ -134,7 +134,7 @@ export const VISION_SYSTEM_PROMPT =
 
 export const MAX_INFER_IMAGES = 8;
 
-/** Multi-turn history (owner decisions 2026-09-15): the HOST curates turns;
+/** Multi-turn history: the HOST curates turns;
  *  Prism bounds, screens, counts and forwards them, and never stores them;
  *  and the BOUNDS are the portal's to set (Prism is a thin client). The
  *  validator enforces only the structural ceiling (ABSOLUTE_MULTI_TURN); the
@@ -303,7 +303,7 @@ export function _resetLayer1HistoryCacheForTest(): void { layer1HistoryCache.cle
  *    probe and read races the time left, and no clearance is accepted after it. */
 export const LAYER1_SECOND_READ_MAX_CALLS = 48;
 export const LAYER1_SECOND_READ_DEADLINE_MS = 30_000;
-/** Reads in flight at once: ONE (owner decision 2026-09-26, after review).
+/** Reads in flight at once: ONE.
  *  Two at once made each classifier read about twice as slow and some reads
  *  abort at the classifier's first-attempt timeout (an aborted read keeps the
  *  hedge: refusal or cloud), for little clearance time gained. The per-read
@@ -1633,8 +1633,8 @@ interface CloudResult {
     reason?: string;
 }
 
-/** Portal cap on the flattened conversation (`ROLE: content` lines) — see
- *  portal/src/app/api/v1/prism/inference/route.ts MAX_PROMPT_BYTES. */
+/** Server cap on the flattened conversation (`ROLE: content` lines): the
+ *  Synalux inference endpoint enforces the same limit. */
 export const CLOUD_HISTORY_CAP_BYTES = 32 * 1024;
 
 /** Exported for tests: the cap check must be provable without a portal. */

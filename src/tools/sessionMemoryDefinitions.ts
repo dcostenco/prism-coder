@@ -8,7 +8,10 @@ export const SESSION_SAVE_LEDGER_TOOL: Tool = {
     "Save an immutable session log entry to the session ledger. " +
     "Use this at the END of each work session to record what was accomplished. " +
     "The ledger is append-only — entries cannot be updated or deleted. " +
-    "This creates a permanent audit trail of all agent work sessions.",
+    "This creates a permanent audit trail of all agent work sessions. " +
+    "The save is refused with context_not_loaded until session_bootstrap or session_load_context has loaded " +
+    "this exact project for this conversation_id; on that refusal call session_load_context with the same " +
+    "project and conversation_id, then retry the save once.",
   inputSchema: {
     type: "object",
     properties: {
@@ -67,7 +70,11 @@ export const SESSION_SAVE_HANDOFF_TOOL: Tool = {
     "Pass expected_version to enable concurrency control.\n\n" +
     "**v0.4.0 OCC**: If you received a version number from session_load_context, " +
     "/resume_session prompt, or memory resource attachment, you MUST pass it as " +
-    "expected_version to prevent overwriting another session's changes.",
+    "expected_version to prevent overwriting another session's changes.\n\n" +
+    "Pass the same conversation_id as session_save_ledger: the save is refused with context_not_loaded until " +
+    "session_bootstrap or session_load_context has loaded this exact project for it; on that refusal call " +
+    "session_load_context with the same project and conversation_id, then retry the save once, passing the " +
+    "version it shows as expected_version.",
   inputSchema: {
     type: "object",
     properties: {
@@ -109,7 +116,7 @@ export const SESSION_SAVE_HANDOFF_TOOL: Tool = {
       },
       conversation_id: {
         type: "string",
-        description: "Optional. Session key for this conversation (same id used in session_load_context). When provided, the server verifies that session_load_context was called for this conversation before accepting the write.",
+        description: "Optional. Session key for this conversation (same id used in session_load_context). When provided, the server verifies that session_bootstrap or session_load_context loaded this exact project for this conversation before accepting the write.",
       },
     },
     required: ["project"],
@@ -122,7 +129,9 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
   name: "session_load_context",
   description:
     "Load session context for a project using progressive context loading. " +
-    "Use this for an explicit project reload, or as a startup fallback only when session_bootstrap is unavailable. " +
+    "Use this to recover when session_save_ledger or session_save_handoff is refused with context_not_loaded " +
+    "(pass that save's project and the same conversation_id, then retry the save once; a recovery load is not a " +
+    "second startup), for an explicit project reload, or as a startup fallback only when session_bootstrap is unavailable. " +
     "When session_bootstrap is available, do not substitute this tool for the first-turn bootstrap. " +
     "Three levels available:\n" +
     "- **quick**: Just the latest project state — keywords and open TODOs (~50 tokens)\n" +
@@ -159,7 +168,7 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
       },
       conversation_id: {
         type: "string",
-        description: "Optional. Session key for this conversation (same id used in session_save_ledger). When provided, marks the session as context-loaded server-side so project-scoped tools can verify working context without relying on hook-based enforcement. Required on non-Claude hosts.",
+        description: "Optional for a plain read. Pass it whenever this load is meant to unlock saves (startup fallback, or recovery from context_not_loaded), using the same conversation_id as the refused or upcoming save. When provided, marks this project as context-loaded server-side so project-scoped saves are accepted; without it nothing is registered.",
       },
       prompt: {
         type: "string",
@@ -226,7 +235,7 @@ export const SESSION_BOOTSTRAP_TOOL: Tool = {
     "before any user-facing response, passing the user's verbatim first message as {prompt: \"<first user message>\"}. " +
     "The prompt is matched against prompt_keywords ON-DEVICE to load symptom-triggered skills on turn one; it is used " +
     "for routing only and never leaves the machine. Pass {} only when there is no user message. " +
-    "Do not substitute session_load_context when this tool is available. " +
+    "Do not substitute session_load_context for this startup call. " +
     "This starts a Prism-backed conversation without host hooks. " +
     "Prism reads the dashboard's Auto-Load Projects, Context Depth (quick/standard/deep), developer name, and default role, " +
     "then returns the greeting and correctly scoped prior-session context. Emit no preamble. Print the complete tool result " +
@@ -234,7 +243,10 @@ export const SESSION_BOOTSTRAP_TOOL: Tool = {
     "headings, reformat, or omit any returned section. Preserve its order and line content. For a greeting-only prompt, " +
     "stop after the verbatim startup display. Do not guess or pass a project or depth. Prism returns a stable " +
     "conversation_id on the trailing <prism_session /> line; reuse it for session_save_ledger, session_save_handoff, and " +
-    "session_detect_drift throughout this conversation without adding it to the visible greeting.",
+    "session_detect_drift throughout this conversation without adding it to the visible greeting. " +
+    "This is the first-turn startup call only: if a later save is refused with context_not_loaded, recover with " +
+    "session_load_context for that save's project and conversation_id, then retry the save once, rather than " +
+    "repeating this startup display.",
   annotations: {
     readOnlyHint: true,
     destructiveHint: false,
