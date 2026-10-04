@@ -29,6 +29,7 @@ const COVERAGE: Record<string, string | null> = {
     "Setup Node": null,                             // the local node IS the runtime
     "Setup Python for Prism Browser contract": null, // ditto for python
     "Install Prism Browser Python runtime": null,    // installs into the runner
+    "Install Prism Browser's Chromium": null,        // downloads into the runner; locally `python3 -m playwright install chromium` once
     "Check for private content": "Check for private content",
     "Check lock file drift": "Check lock file drift",
     "Install Dependencies": "npm ci parity (linux)", // via Docker, see the script
