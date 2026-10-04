@@ -91,12 +91,28 @@ describe('formatSymptomSkillInline — the REAL renderer, executed', () => {
 
 describe('routeOffload writer', () => {
   it('writes the full text and returns a readable path', async () => {
-    const { writeRouteOffload } = await import('../src/utils/routeOffload.js');
-    const body = 'RULE-BODY-'.repeat(500);
-    const p = writeRouteOffload(`# test-skill\n\n${body}`, 'test');
-    expect(p).toBeTruthy();
-    expect(existsSync(p!)).toBe(true);
-    expect(readFileSync(p!, 'utf8')).toContain(body);
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    // A scratch home, as in the tests below: without it every run left a
+    // test-*.md file in the real ~/.prism-mcp/route-context.
+    const home = mkdtempSync(join(tmpdir(), 'offload-write-'));
+    const prev = process.env.HOME;
+    const prevProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      const { writeRouteOffload } = await import('../src/utils/routeOffload.js');
+      const body = 'RULE-BODY-'.repeat(500);
+      const p = writeRouteOffload(`# test-skill\n\n${body}`, 'test');
+      expect(p).toBeTruthy();
+      expect(p!.startsWith(join(home, '.prism-mcp', 'route-context'))).toBe(true);
+      expect(existsSync(p!)).toBe(true);
+      expect(readFileSync(p!, 'utf8')).toContain(body);
+    } finally {
+      if (prev === undefined) delete process.env.HOME; else process.env.HOME = prev;
+      if (prevProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = prevProfile;
+    }
   });
 
   it('never throws when the directory cannot be created', async () => {

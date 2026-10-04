@@ -28,7 +28,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { parse as parseToml } from "smol-toml";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   configureClaudeAgentPolicy,
   configureClaudeNativeStartup,
@@ -253,6 +253,7 @@ function runBuiltCli(
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const home of tempHomes.splice(0)) {
     rmSync(home, { recursive: true, force: true });
   }
@@ -1249,6 +1250,11 @@ describe("prism connect", () => {
     const root = makeHome();
     const codexHome = join(root, "custom-codex-home");
     mkdirSync(codexHome, { recursive: true });
+    // Production resolution uses the process home, and connect writes its
+    // installation receipt there. Without a scratch home this test rewrote the
+    // receipt in the real home of whoever ran the suite (every push runs it).
+    vi.stubEnv("HOME", root);
+    vi.stubEnv("USERPROFILE", root);
     const production = connectHosts({
       hosts: ["codex"],
       platform: "linux",
@@ -1257,6 +1263,7 @@ describe("prism connect", () => {
       env: { CODEX_HOME: codexHome },
     });
     expect(production.results[0].path).toBe(join(codexHome, "config.toml"));
+    expect(existsSync(join(root, ".prism-mcp", "installation.json"))).toBe(true);
 
     const isolatedHome = makeHome();
     const isolated = connectHosts({
@@ -1763,11 +1770,16 @@ describe("prism connect", () => {
   });
 
   it("exposes Codex through the built CLI with fail-loud exit codes", () => {
-    const codexHome = join(makeHome(), "codex-home");
+    const home = makeHome();
+    const codexHome = join(home, "codex-home");
     mkdirSync(codexHome, { recursive: true });
     const cliPath = resolve("dist/cli.js");
     const env = {
       ...process.env,
+      // The CLI writes its installation receipt under HOME; without its own
+      // home this test rewrote the receipt of whoever ran the suite.
+      HOME: home,
+      USERPROFILE: home,
       CODEX_HOME: codexHome,
       PRISM_CONFIG_PATH: join(codexHome, "prism-config.db"),
       PRISM_SKILL_SYNC_DISABLED: "true",
@@ -1780,6 +1792,7 @@ describe("prism connect", () => {
     });
     expect(connected.status, connected.stderr).toBe(0);
     expect(connected.stdout).toContain("Codex: registered");
+    expect(existsSync(join(home, ".prism-mcp", "installation.json"))).toBe(true);
     expect(readTomlConfig(join(codexHome, "config.toml")).mcp_servers)
       .toHaveProperty("prism-mcp");
     expect(existsSync(join(codexHome, "AGENTS.md"))).toBe(false);
