@@ -778,7 +778,8 @@ describe.skipIf(!python || !browserRoot || !playwrightRuntimeAvailable)('Prism B
     const phone = await uaOf(['--device', 'iphone-17']);
     expect(phone).toBe(desktop);
     expect(phone).not.toMatch(/Mobile|iPhone|iPad|Android/);
-  }, 120_000);
+    // Two sequential launches: the 70 s per-launch budget the other tests use, twice, plus margin.
+  }, 150_000);
 
   it('applies the stealth library instead of swallowing a constructor error', async () => {
     const run = await runPipe([], [`open ${origin}/`, 'fingerprint']);

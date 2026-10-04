@@ -99,12 +99,13 @@ size alone. Emulate the device instead:
   `viewport-fit=cover`; without it an iPhone 17 reports 0. Chromium applies
   them either way, so check that your page sets it.
 
-Flags given explicitly override the preset, so `--device iphone-17
---viewport 874x402` is the same phone turned sideways. Landscape insets were
-not measured and are not part of the presets, so pass the values your device
-reports with `--safe-area`. The engine stays Chromium, and the user
-agent stays the desktop one, so pages that branch on the user-agent string
-still take their desktop path.
+Flags given explicitly override the preset, so
+`--device iphone-17 --viewport 874x402 --safe-area T,R,B,L` is the same phone
+turned sideways. Landscape insets were not measured and are not part of the
+presets: put the values your device reports in place of `T,R,B,L`, because
+without `--safe-area` the portrait insets still apply. The engine stays
+Chromium, and the user agent stays the desktop one, so pages that branch on the
+user-agent string still take their desktop path.
 
 ```bash
 printf '%s\n' \
