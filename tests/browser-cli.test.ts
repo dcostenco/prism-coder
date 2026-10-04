@@ -657,6 +657,16 @@ describe.skipIf(!python || !browserRoot || !playwrightRuntimeAvailable)('Prism B
           + '});</script></body></html>');
         return;
       }
+      if (path === '/phone-no-cover') {
+        // The same probe target WITHOUT viewport-fit=cover. iOS reports 0 insets
+        // for such a page; the docs say Chromium applies them anyway.
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<!doctype html><html><head><title>Phone, no cover</title>'
+          + '<meta name="viewport" content="width=device-width, initial-scale=1"></head><body>'
+          + '<div id="inset" style="position:fixed;top:env(safe-area-inset-top);bottom:env(safe-area-inset-bottom)"></div>'
+          + '</body></html>');
+        return;
+      }
       if (path === '/headers') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(fixturePage('<div id="app">headers</div><script>fetch("/sub.txt");</script>'));
@@ -738,6 +748,37 @@ describe.skipIf(!python || !browserRoot || !playwrightRuntimeAvailable)('Prism B
     expect(run.status, run.stderr).toBe(0);
     expect(phoneResult(run)).toMatchObject({ coarse: true, top: '62px', bottom: '34px' });
   }, 70_000);
+
+  // docs/prism-browser.md warns that, unlike iOS, Chromium applies the insets
+  // to a page that never set viewport-fit=cover. A test that passes here while
+  // the same page reads 0 on an iPhone is the trap that warning describes.
+  it('applies the safe area even to a page without viewport-fit=cover, unlike iOS', async () => {
+    const run = await runPipe(['--device', 'iphone-17'], [`open ${origin}/phone-no-cover`, `eval ${phoneProbe}`]);
+    expect(run.status, run.stderr).toBe(0);
+    expect(phoneResult(run)).toMatchObject({ coarse: true, top: '62px', bottom: '34px' });
+  }, 70_000);
+
+  // docs/prism-browser.md: "the user agent stays the desktop one, so pages that
+  // branch on the user-agent string still take their desktop path".
+  // The user agent is chosen per profile name, so both runs share one profile;
+  // the later --profile wins over runBrowser's per-run default.
+  it.each(['full', 'none'])('keeps the desktop user agent under a device preset (--stealth %s)', async (stealth) => {
+    const profile = `ua-device-${stealth}`;
+    const uaOf = async (extra: string[]) => {
+      const run = await runPipe(
+        ['--stealth', stealth, '--profile', profile, ...extra],
+        [`open ${origin}/`, 'eval navigator.userAgent'],
+      );
+      expect(run.status, run.stderr).toBe(0);
+      const row = run.rows.find((r) => typeof r.result === 'string' && r.result.startsWith('Mozilla/'));
+      expect(row, run.stdout + run.stderr).toBeDefined();
+      return row!.result as string;
+    };
+    const desktop = await uaOf([]);
+    const phone = await uaOf(['--device', 'iphone-17']);
+    expect(phone).toBe(desktop);
+    expect(phone).not.toMatch(/Mobile|iPhone|iPad|Android/);
+  }, 120_000);
 
   it('applies the stealth library instead of swallowing a constructor error', async () => {
     const run = await runPipe([], [`open ${origin}/`, 'fingerprint']);
