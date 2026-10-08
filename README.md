@@ -158,6 +158,14 @@ or by re-enabling after each run.
 <details>
 <summary>Release history (optional)</summary>
 
+## What's New in v20.21.20
+
+- Fixed: a `session_save_ledger` call refused with `context_not_loaded`, or the
+  greeting-only reply that writes nothing, restarted the hourly drift reminder.
+  A ledger save restarts it now only when it writes an entry.
+- A written ledger entry's reply also asks for the handoff when the checkpoint
+  ends a unit of work.
+
 ## What's New in v20.21.19
 
 - Prism Browser emulates phones and tablets. `--device iphone-17`, or one of

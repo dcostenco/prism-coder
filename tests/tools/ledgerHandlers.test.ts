@@ -127,6 +127,7 @@ vi.mock("../../src/session/sessionContext.js", () => ({
   markContextLoaded: vi.fn(),
   registerContextLoaded: vi.fn(() => Promise.resolve()),
   noteDriftSessionStart: vi.fn(),
+  noteDriftCheck: vi.fn(),
   noteInferenceForSession: vi.fn(),
   getSessionState: vi.fn(() => null),
 }));

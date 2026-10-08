@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.20 — 2026-10-08
+
+### A refused ledger save no longer silences the drift reminder
+
+The hourly reminder to save the ledger and check for drift restarted its timer
+after every `session_save_ledger` reply, including a save refused with
+`context_not_loaded` and the greeting-only reply that writes nothing. Nothing
+was saved, yet the reminder went quiet for another hour. A ledger save now
+restarts the timer only when it writes an entry; `session_detect_drift`
+restarts it as before.
+
+### A saved ledger entry asks for the handoff too
+
+The reply to a written ledger entry now ends with: "If this checkpoint ends a
+unit of work, also save the handoff with session_save_handoff." The ledger
+records what happened, and the next session starts from the handoff. A refused
+save and the greeting-only reply do not ask.
+
 ## 20.21.19 — 2026-10-03
 
 ### Prism Browser can test phone and tablet layouts

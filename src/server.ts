@@ -926,9 +926,8 @@ export function createServer() {
           case "session_save_ledger":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
             result = await sessionSaveLedgerHandler(args);
-            // GATE 5: Reset drift timer — save_ledger counts as a drift checkpoint
-            { const cid = (args as Record<string, unknown>)?.conversation_id as string | undefined;
-              if (cid) { const { noteDriftCheck } = await import("./session/sessionContext.js"); noteDriftCheck(cid); } }
+            // GATE 5: the handler resets the drift timer itself, and only when
+            // it wrote an entry (not on a refusal or the greeting-only skip).
             // Savings sync (paid, opt-in, fail-soft): session end is the natural
             // push point. pushSavings gates itself — disabled/free/no-jwt all
             // return without a request, and nothing here awaits it.

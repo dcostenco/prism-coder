@@ -181,7 +181,9 @@ import { getEmbeddingProvider } from "../../../src/utils/llm/factory.js";
 import {
   registerContextLoaded,
   requireContextLoadedForProject,
+  noteDriftCheck,
 } from "../../../src/session/sessionContext.js";
+import { isGreetingOnlyMemoryEntry } from "../../../src/utils/memoryQuality.js";
 import {
   sessionSaveLedgerHandler,
   sessionSaveHandoffHandler,
@@ -488,6 +490,51 @@ describe("ledgerHandlers", () => {
       // Warning is prepended to the success text
       expect(result.content[0].text).toContain("[advisory] Operating boundaries updated");
       expect(result.content[0].text).toContain("✅ Session ledger saved");
+    });
+
+    // --- Drift checkpoint and handoff nudge: only for an entry that was WRITTEN ---
+    // The server used to reset the GATE 5 drift timer after every returned
+    // result, so a refused save or the greeting-only skip silenced the hourly
+    // reminder without saving anything.
+
+    const HANDOFF_NUDGE = "also save the handoff with session_save_handoff";
+
+    it("a written entry resets the drift timer for its conversation and asks for the handoff", async () => {
+      vi.mocked(noteDriftCheck).mockClear();
+      const result = await sessionSaveLedgerHandler(validArgs);
+      expect(result.isError).toBe(false);
+      expect(noteDriftCheck).toHaveBeenCalledWith("conv-001");
+      expect(result.content[0].text).toContain(HANDOFF_NUDGE);
+    });
+
+    it("a refused save neither resets the drift timer nor asks for the handoff", async () => {
+      vi.mocked(noteDriftCheck).mockClear();
+      vi.mocked(requireContextLoadedForProject).mockResolvedValueOnce({
+        blocked: true,
+        error: "context_not_loaded: call session_load_context first.",
+      });
+      const result = await sessionSaveLedgerHandler(validArgs);
+      expect(result.isError).toBe(true);
+      expect(noteDriftCheck).not.toHaveBeenCalled();
+      expect(result.content[0].text).not.toContain(HANDOFF_NUDGE);
+    });
+
+    it("the greeting-only skip neither resets the drift timer nor asks for the handoff", async () => {
+      const greeting = { ...validArgs, summary: "Hi! How can I help you today?" };
+      expect(isGreetingOnlyMemoryEntry({ summary: greeting.summary })).toBe(true);
+      vi.mocked(noteDriftCheck).mockClear();
+      const result = await sessionSaveLedgerHandler(greeting);
+      expect(result.isError).toBe(false);
+      expect(result.content[0].text).toContain("no ledger entry was written");
+      expect(noteDriftCheck).not.toHaveBeenCalled();
+      expect(result.content[0].text).not.toContain(HANDOFF_NUDGE);
+    });
+
+    it("a failed storage write does not reset the drift timer", async () => {
+      vi.mocked(noteDriftCheck).mockClear();
+      storage.saveLedger.mockRejectedValueOnce(new Error("DB write failed"));
+      await expect(sessionSaveLedgerHandler(validArgs)).rejects.toThrow("DB write failed");
+      expect(noteDriftCheck).not.toHaveBeenCalled();
     });
   });
 
