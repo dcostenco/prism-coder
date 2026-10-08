@@ -165,6 +165,8 @@ or by re-enabling after each run.
   A ledger save restarts it now only when it writes an entry.
 - A written ledger entry's reply also asks for the handoff when the checkpoint
   ends a unit of work.
+- A ledger save skipped as a duplicate of one saved in the last 5 minutes now
+  says nothing new was written, instead of "saved".
 
 ## What's New in v20.21.19
 

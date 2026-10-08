@@ -536,6 +536,19 @@ describe("ledgerHandlers", () => {
       await expect(sessionSaveLedgerHandler(validArgs)).rejects.toThrow("DB write failed");
       expect(noteDriftCheck).not.toHaveBeenCalled();
     });
+
+    it("a deduplicated save is not reported as saved and is not a checkpoint", async () => {
+      // SQLite returns { id, deduplicated: true } for an identical entry saved
+      // in the last 5 minutes, without inserting a row.
+      vi.mocked(noteDriftCheck).mockClear();
+      storage.saveLedger.mockResolvedValueOnce({ id: "existing-entry", deduplicated: true });
+      const result = await sessionSaveLedgerHandler(validArgs);
+      expect(result.isError).toBe(false);
+      expect(result.content[0].text).toContain("nothing new was written");
+      expect(result.content[0].text).not.toContain("Session ledger saved");
+      expect(result.content[0].text).not.toContain(HANDOFF_NUDGE);
+      expect(noteDriftCheck).not.toHaveBeenCalled();
+    });
   });
 
   describe("sessionSaveExperienceHandler", () => {

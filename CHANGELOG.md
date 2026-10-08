@@ -20,6 +20,13 @@ unit of work, also save the handoff with session_save_handoff." The ledger
 records what happened, and the next session starts from the handoff. A refused
 save and the greeting-only reply do not ask.
 
+### A duplicate ledger save no longer reads as saved
+
+The local store skips an entry identical to one saved for the same project and
+conversation in the last 5 minutes. The reply still said "✅ Session ledger
+saved" and restarted the drift timer. It now says that nothing new was written,
+and leaves the timer alone.
+
 ## 20.21.19 — 2026-10-03
 
 ### Prism Browser can test phone and tablet layouts

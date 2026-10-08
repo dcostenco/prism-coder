@@ -928,6 +928,22 @@ export async function sessionSaveLedgerHandler(args: unknown) {
     role: effectiveRole,  // v3.0: Hivemind role scoping (dashboard fallback)
   });
 
+  // SQLite skips an identical (project, conversation_id, summary) saved in the
+  // last 5 minutes and returns { id, deduplicated: true } without writing.
+  // Nothing new was saved, so this is not a drift checkpoint and must not read
+  // as one: no timer reset, no "saved" line, no handoff nudge, and no second
+  // embedding or auto-link pass over the existing row.
+  if ((result as { deduplicated?: boolean } | null | undefined)?.deduplicated === true) {
+    return {
+      content: [{
+        type: "text",
+        text: (_saveLedgerGateWarning ? `⚠️ ${_saveLedgerGateWarning}\n\n` : "") +
+          `ℹ️ An identical ledger entry for project "${project}" was already saved in the last 5 minutes; nothing new was written.` +
+          resolverNote,
+      }],
+      isError: false,
+    };
+  }
 
   // ─── Fire-and-forget embedding generation ───
   let embeddingQueued = false;
