@@ -856,6 +856,13 @@ describe("ledgerHandlers", () => {
       expect(result.content[0].text).toContain("expected_version: 1");
     });
 
+    it("a storage write that fails is an error, never a handoff reply", async () => {
+      // SupabaseStorage.saveHandoff now rejects when its RPC fails (it used to
+      // return { status: "updated" }); the server turns a rejection into isError.
+      storage.saveHandoff.mockRejectedValueOnce(new Error('Handoff for project "test-project" was not saved: reset'));
+      await expect(sessionSaveHandoffHandler(validArgs)).rejects.toThrow("was not saved");
+    });
+
     it("still returns persisted success when optional embedding provider initialization throws", async () => {
       storage.saveHandoff.mockResolvedValue({ status: "updated", version: 16 });
       mockGetEmbeddingProvider.mockImplementationOnce(() => {

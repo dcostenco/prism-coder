@@ -27,6 +27,13 @@ conversation in the last 5 minutes. The reply still said "✅ Session ledger
 saved" and restarted the drift timer. It now says that nothing new was written,
 and leaves the timer alone.
 
+### A handoff the cloud store failed to save is reported as an error
+
+With Supabase storage, a failed `save_handoff_with_version` call was caught
+and returned as "updated", so the agent was told "✅ Handoff updated" and the
+next session found the old handoff. The failure is now returned as an error
+naming the project, and the agent can retry.
+
 ## 20.21.19 — 2026-10-03
 
 ### Prism Browser can test phone and tablet layouts

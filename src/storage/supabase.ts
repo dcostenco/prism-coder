@@ -208,11 +208,11 @@ export class SupabaseStorage implements StorageBackend {
         version: data?.version,
       };
     } catch (e) {
-      debugLog("[SupabaseStorage] saveHandoff RPC failed: " + (e instanceof Error ? e.message : String(e)));
-      return {
-        status: "updated",
-        version: handoff.version ?? 1,
-      };
+      // The write failed. Reporting "updated" here told the agent its handoff
+      // was saved when nothing was; the caller turns this into an error reply.
+      const message = e instanceof Error ? e.message : String(e);
+      debugLog("[SupabaseStorage] saveHandoff RPC failed: " + message);
+      throw new Error(`Handoff for project "${handoff.project}" was not saved: ${message}`);
     }
   }
 
