@@ -71,7 +71,14 @@ function isPrivateIpv4(hostname: string): boolean {
 }
 
 function isDisallowedIpv6(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
+  const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  // URL normalizes dotted IPv4-mapped addresses into two hexadecimal groups.
+  const mapped = normalized.match(/^::ffff:([a-f0-9]{1,4}):([a-f0-9]{1,4})$/);
+  if (mapped) {
+    const high = parseInt(mapped[1], 16);
+    const low = parseInt(mapped[2], 16);
+    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  }
   return (
     normalized === "::1" ||
     normalized.startsWith("fc") || // fc00::/7
@@ -308,7 +315,9 @@ export class VerificationRunner {
       const suite = TestSuiteSchema.parse(parsed);
 
       if (harness) {
-        VerificationRunner.verifyRubricHash(suite.tests, harness);
+        // The frozen hash covers the submitted JSON, including its key order.
+        // Schema parsing may reorder keys or supply defaults for execution.
+        VerificationRunner.verifyRubricHash(parsed.tests, harness);
       }
 
       const { preparedById, orderedIds, precomputed } = prepareAssertions(

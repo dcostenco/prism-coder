@@ -544,6 +544,8 @@ describe("Dark Factory Pipelines & Verification Harness", () => {
    */
   it("should enforce safe pipeline state transitions", async () => {
     // Transition to COMPLETED
+    const currentState = await storage.getPipeline(PI_ID, TEST_USER_ID);
+    expect(currentState?.status).toBe("RUNNING");
     const completedState = {
       id: PI_ID,
       project: TEST_PROJECT,
@@ -552,7 +554,8 @@ describe("Dark Factory Pipelines & Verification Harness", () => {
       current_step: "FINAL_EVAL",
       iteration: 2,
       started_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      // Compare-and-swap requires the persisted version, not a newly invented timestamp.
+      updated_at: currentState!.updated_at,
       spec: "{}",
     };
     await expect(storage.savePipeline(completedState)).resolves.not.toThrow();

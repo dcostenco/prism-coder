@@ -15,6 +15,7 @@
  */
 
 import { ANALYTICS_DATE_PATTERN, ANALYTICS_METRIC_IDS, DASHBOARD_READ_MESSAGES } from './readMessages.js';
+import { DARK_FACTORY_SETTINGS_UNAVAILABLE } from '../darkfactory/enablement.js';
 
 export function renderDashboardLocalOpenHTML(): string {
     return `<!DOCTYPE html>
@@ -508,8 +509,10 @@ export function renderDashboardHTML(version: string): string {
     .modal-close:hover { color: var(--text-primary); }
     .setting-row {
       display: flex; justify-content: space-between; align-items: center;
+      gap: 1rem;
       padding: 0.75rem 0; border-bottom: 1px solid rgba(255,255,255,0.05);
     }
+    .setting-row > div { min-width: 0; }
     .setting-row:last-child { border-bottom: none; }
     .setting-label { font-size: 0.85rem; color: var(--text-secondary); }
     .setting-desc { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.2rem; }
@@ -1315,6 +1318,14 @@ export function renderDashboardHTML(version: string): string {
             <div class="setting-desc">Route tasks to local Claw agent (PRISM_TASK_ROUTER_ENABLED)</div>
           </div>
           <div class="toggle" id="toggle-task-router" onclick="toggleBootSetting('task_router_enabled', this)"></div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Dark Factory</div>
+            <div class="setting-desc">Enable pipeline execution tools and the background runner. Restart required; an environment override wins.</div>
+            <div id="dark-factory-state" style="color:var(--text-muted);font-size:0.78rem;margin-top:0.25rem">Loading startup state…</div>
+          </div>
+          <button class="toggle" id="toggle-dark-factory" type="button" role="switch" aria-label="Dark Factory enablement" aria-checked="false" disabled onclick="toggleBootSetting('PRISM_DARK_FACTORY_ENABLED', this)"></button>
         </div>
         <div class="setting-row">
           <div>
@@ -3996,9 +4007,11 @@ function loadSettings() {
                     return [4 /*yield*/, fetch('/api/settings?t=' + Date.now())];
                 case 1:
                     res = _a.sent();
+                    if (!res.ok) throw new Error(DARK_FACTORY_SETTINGS_UNAVAILABLE_MESSAGE);
                     return [4 /*yield*/, res.json()];
                 case 2:
                     data = _a.sent();
+                    if (!data.darkFactory) throw new Error(DARK_FACTORY_SETTINGS_UNAVAILABLE_MESSAGE);
                     s = data.settings || {};
                     // Runtime toggles
                     if (s.auto_capture === 'true')
@@ -4022,6 +4035,21 @@ function loadSettings() {
                         document.getElementById('toggle-task-router').classList.add('active');
                     else
                         document.getElementById('toggle-task-router').classList.remove('active');
+                    if ((s.PRISM_DARK_FACTORY_ENABLED || (data.darkFactory && data.darkFactory.saved ? 'true' : 'false')) === 'true')
+                        document.getElementById('toggle-dark-factory').classList.add('active');
+                    else
+                        document.getElementById('toggle-dark-factory').classList.remove('active');
+                    document.getElementById('toggle-dark-factory').setAttribute('aria-checked', document.getElementById('toggle-dark-factory').classList.contains('active') ? 'true' : 'false');
+                    if (data.darkFactory) {
+                        var df = data.darkFactory;
+                        var effective = df.envOverride === null ? df.saved : df.envOverride;
+                        var state = df.envOverride === null ? 'Saved: ' + (df.saved ? 'on' : 'off') + ' · Active: ' + (df.active ? 'on' : 'off') + (df.pendingRestart ? ' · restart required' : '') : 'Saved: ' + (df.saved ? 'on' : 'off') + ' · Active override: ' + (df.envOverride ? 'on' : 'off');
+                        document.getElementById('dark-factory-state').textContent = state;
+                        document.getElementById('toggle-dark-factory').disabled = df.envOverride !== null;
+                        document.getElementById('toggle-dark-factory').setAttribute('aria-disabled', df.envOverride !== null ? 'true' : 'false');
+                        document.getElementById('toggle-dark-factory').classList.toggle('active', effective);
+                        document.getElementById('toggle-dark-factory').setAttribute('aria-checked', effective ? 'true' : 'false');
+                    }
                     // Storage Backend
                     if (s.PRISM_STORAGE) {
                         document.getElementById('storageBackendSelect').value = s.PRISM_STORAGE;
@@ -4044,6 +4072,9 @@ function loadSettings() {
                 case 3:
                     e_19 = _a.sent();
                     console.warn('Settings load failed:', e_19);
+                    document.getElementById('dark-factory-state').textContent = DARK_FACTORY_SETTINGS_UNAVAILABLE_MESSAGE;
+                    document.getElementById('toggle-dark-factory').disabled = true;
+                    document.getElementById('toggle-dark-factory').setAttribute('aria-disabled', 'true');
                     return [3 /*break*/, 4];
                 case 4: return [2 /*return*/];
             }
@@ -4096,15 +4127,20 @@ function toggleSetting(key, el) {
 }
 function toggleBootSetting(key, el) {
     var isActive = el.classList.toggle('active');
+    el.setAttribute('aria-checked', isActive ? 'true' : 'false');
     saveSetting(key, isActive ? 'true' : 'false').then(function (ok) {
         if (!ok) {
             el.classList.toggle('active'); // rollback on failure
+            el.setAttribute('aria-checked', isActive ? 'false' : 'true');
         }
         else {
-            showToast('Saved. Restart your AI client for this to take effect.');
+            showToast(DARK_FACTORY_RESTART_MESSAGE);
+            loadSettings();
         }
     });
 }
+var DARK_FACTORY_SETTINGS_UNAVAILABLE_MESSAGE = ${JSON.stringify(DARK_FACTORY_SETTINGS_UNAVAILABLE)};
+var DARK_FACTORY_RESTART_MESSAGE = 'Saved. Restart your AI client for this to take effect.';
 function saveBootSetting(key, value) {
     saveSetting(key, value).then(function (ok) {
         if (ok)

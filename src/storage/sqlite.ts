@@ -3579,11 +3579,11 @@ export class SqliteStorage implements StorageBackend {
   // ─── Dark Factory (v7.3) ───────────────────────────────────
 
   async savePipeline(state: PipelineState): Promise<void> {
-    const now = new Date().toISOString();
-    const updatedState = { ...state, updated_at: now };
-
     // Status Guard: prevent overwriting a terminated pipeline
     const existing = await this.getPipeline(state.id, state.user_id);
+    const clock = Date.now();
+    const prior = existing ? Date.parse(existing.updated_at) : 0;
+    const updatedState = { ...state, updated_at: new Date(Math.max(clock, prior + 1)).toISOString() };
     if (existing) {
       if (existing.status === 'ABORTED' || existing.status === 'COMPLETED') {
         throw new Error(`Cannot update pipeline ${state.id} because it is already ${existing.status}.`);
@@ -3598,7 +3598,7 @@ export class SqliteStorage implements StorageBackend {
       }
     }
 
-    await this.db.execute({
+    const result = await this.db.execute({
       sql: `
         INSERT INTO dark_factory_pipelines (id, project, user_id, status, current_step, iteration, eval_revisions, started_at, updated_at, spec, error, last_heartbeat, contract_payload, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -3613,6 +3613,9 @@ export class SqliteStorage implements StorageBackend {
           last_heartbeat = excluded.last_heartbeat,
           contract_payload = excluded.contract_payload,
           notes = excluded.notes
+        WHERE dark_factory_pipelines.user_id = excluded.user_id
+          AND dark_factory_pipelines.updated_at = ?
+          AND dark_factory_pipelines.status NOT IN ('ABORTED', 'COMPLETED')
       `,
       args: [
         updatedState.id,
@@ -3628,9 +3631,14 @@ export class SqliteStorage implements StorageBackend {
         updatedState.error || null,
         updatedState.last_heartbeat || null,
         updatedState.contract_payload ? JSON.stringify(updatedState.contract_payload) : null,
-        updatedState.notes || null
+        updatedState.notes || null,
+        existing ? state.updated_at : null
       ]
     });
+    if (result.rowsAffected !== 1) {
+      throw new Error(`Pipeline ${state.id} changed concurrently or is no longer writable.`);
+    }
+    state.updated_at = updatedState.updated_at;
   }
 
   async getPipeline(id: string, userId: string): Promise<PipelineState | null> {

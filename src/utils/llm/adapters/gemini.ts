@@ -39,7 +39,7 @@ import {
 } from "@google/generative-ai";
 import { GOOGLE_API_KEY } from "../../../config.js";
 import { debugLog } from "../../logger.js";
-import type { LLMProvider } from "../provider.js";
+import type { LLMProvider, TextGenerationOptions } from "../provider.js";
 
 // ─── Model Constants ──────────────────────────────────────────────────────────
 // Defined as constants (not hardcoded strings) so external reviewers can see
@@ -77,14 +77,15 @@ export class GeminiAdapter implements LLMProvider {
 
   // ─── Text Generation ─────────────────────────────────────────────────────
 
-  async generateText(prompt: string, systemInstruction?: string): Promise<string> {
+  async generateText(prompt: string, systemInstruction?: string, options?: TextGenerationOptions): Promise<string> {
     // getGenerativeModel() is lightweight — it just binds model name + options.
     // The HTTP call happens inside generateContent() below.
     const model = this.ai.getGenerativeModel({
-      model: TEXT_MODEL,
+      model: options?.model || TEXT_MODEL,
       // Only spread systemInstruction if provided — avoids sending an empty field
       // which could confuse some model versions.
       ...(systemInstruction ? { systemInstruction } : {}),
+      ...(options?.json || options?.maxOutputTokens ? { generationConfig: { ...(options?.json ? { responseMimeType: "application/json" } : {}), ...(options?.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}) } } : {}),
     });
 
     const result = await model.generateContent(prompt);

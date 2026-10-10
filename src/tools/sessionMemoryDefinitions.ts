@@ -198,7 +198,9 @@ export const SESSION_ROUTE_PROMPT_TOOL: Tool = {
     "table and the same account-scoped frontmatter triggers; it never leaves the machine. Calling it is cheap: when " +
     "nothing new matches it returns a single line, and anything named in `loaded` is never returned again. When it " +
     "does return skills, read and follow them before doing the work \u2014 they are the rules for the task at hand, " +
-    "not background. Skip it only for follow-ups within work you have already routed.",
+    "not background. It also checks bounded implementation requests for Factory. Supply the current project, working_directory, files_involved and test_command when known. " +
+    "When prism_factory_route recommends session_start_pipeline, call it automatically with recommended_args, then report the pipeline id and monitor it. " +
+    "Routing itself does not execute code. Skip it only for follow-ups within work you have already routed.",
   annotations: {
     readOnlyHint: true,
     destructiveHint: false,
@@ -223,6 +225,10 @@ export const SESSION_ROUTE_PROMPT_TOOL: Tool = {
         type: "string",
         description: "Optional project override. Omit to use the session's project.",
       },
+      working_directory: { type: "string", description: "Current repository's absolute path for a bounded Factory task." },
+      files_involved: { type: "array", items: { type: "string" }, description: "Relative code files the current implementation task concerns." },
+      test_command: { type: "string", description: "Repository verification command, supplied by the host from the request or repository instructions." },
+      allowed_write_paths: { type: "array", items: { type: "string" }, description: "Relative files the user authorized Factory to change." },
     },
     required: ["prompt"],
   },

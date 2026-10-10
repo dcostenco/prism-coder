@@ -1561,11 +1561,11 @@ export class SupabaseStorage implements StorageBackend {
   // ─── Dark Factory (v7.3) ───────────────────────────────────
 
   async savePipeline(state: PipelineState): Promise<void> {
-    const now = new Date().toISOString();
-    const updatedState = { ...state, updated_at: now };
-
     // Status Guard: prevent overwriting a terminated pipeline
     const existing = await this.getPipeline(state.id, state.user_id);
+    const clock = Date.now();
+    const prior = existing ? Date.parse(existing.updated_at) : 0;
+    const updatedState = { ...state, updated_at: new Date(Math.max(clock, prior + 1)).toISOString() };
     if (existing) {
       if (existing.status === 'ABORTED' || existing.status === 'COMPLETED') {
         throw new Error(`Cannot update pipeline ${state.id} because it is already ${existing.status}.`);
@@ -1581,7 +1581,30 @@ export class SupabaseStorage implements StorageBackend {
     }
 
     try {
-      await supabasePost(
+      if (existing) {
+        const result = await supabasePatch(
+          "dark_factory_pipelines",
+          {
+            user_id: updatedState.user_id,
+            status: updatedState.status,
+            current_step: updatedState.current_step,
+            iteration: updatedState.iteration,
+            updated_at: updatedState.updated_at,
+            spec: updatedState.spec,
+            error: updatedState.error || null,
+            last_heartbeat: updatedState.last_heartbeat || null,
+            eval_revisions: updatedState.eval_revisions ?? 0,
+            contract_payload: updatedState.contract_payload ? JSON.stringify(updatedState.contract_payload) : null,
+            notes: updatedState.notes || null,
+          },
+          { id: `eq.${state.id}`, user_id: `eq.${state.user_id}`, updated_at: `eq.${state.updated_at}`, status: `eq.${existing.status}` },
+          { Prefer: "return=representation" }
+        );
+        if (!Array.isArray(result) || result.length !== 1) throw new Error(`Pipeline ${state.id} changed concurrently or is no longer writable.`);
+        state.updated_at = updatedState.updated_at;
+        return;
+      }
+      const inserted = await supabasePost(
         "dark_factory_pipelines",
         {
           id: updatedState.id,
@@ -1603,13 +1626,14 @@ export class SupabaseStorage implements StorageBackend {
           notes: updatedState.notes || null,
         },
         { on_conflict: "id" },
-        { Prefer: "return=minimal,resolution=merge-duplicates" }
+        { Prefer: "return=representation" }
       );
+      if (!Array.isArray(inserted) || inserted.length !== 1) throw new Error(`Pipeline ${state.id} was not created.`);
     } catch (e: any) {
       // PGRST202 fallback if the table doesn't exist yet
       if (e.message?.includes("PGRST202") || e.message?.includes("Could not find the relation")) {
         debugLog("[SupabaseStorage] dark_factory_pipelines missing — please run migration 038");
-        return;
+        throw new Error(`Pipeline ${state.id} was not saved because dark_factory_pipelines is unavailable.`);
       }
       throw e;
     }

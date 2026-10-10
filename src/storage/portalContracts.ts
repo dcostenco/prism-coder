@@ -18,6 +18,7 @@
  */
 
 import { z } from "zod";
+import { TestAssertionSchema, type TestAssertion } from '../verification/schema.js';
 import { ANALYTICS_DATE_PATTERN } from "../dashboard/readMessages.js";
 
 const AnalyticsCountSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -75,6 +76,25 @@ export const FactoryPipelinesResponseSchema = z.object({
   pipelines: z.array(FactoryPipelineSchema).max(100)
     .refine(rows => new Set(rows.map(row => row.id)).size === rows.length),
 });
+export const FactoryPipelineResponseSchema = z.object({
+  status: z.literal('success'),
+  pipeline: FactoryPipelineSchema.nullable(),
+});
+const VerificationHarnessSchema = z.object({
+  project: z.string().min(1), conversation_id: z.string().min(1), created_at: PipelineTimestampSchema,
+  rubric_hash: z.string().regex(/^[a-f0-9]{64}$/), min_pass_rate: z.number().min(0).max(1),
+  tests: z.array(z.custom<TestAssertion>(value => TestAssertionSchema.safeParse(value).success)), metadata: z.record(z.string(), z.unknown()).optional(),
+});
+const VerificationRunSchema = z.object({
+  id: z.string().min(1), rubric_hash: z.string().regex(/^[a-f0-9]{64}$/), project: z.string().min(1),
+  conversation_id: z.string().min(1), run_at: PipelineTimestampSchema, passed: z.boolean(),
+  pass_rate: z.number().min(0).max(1), critical_failures: AnalyticsCountSchema,
+  coverage_score: z.number().min(0).max(1), result_json: PipelineSpecSchema,
+  gate_action: z.enum(['continue', 'block', 'abort']), gate_override: z.boolean().optional(), override_reason: z.string().optional(),
+});
+export const FactoryHarnessResponseSchema = z.object({ status: z.literal('success'), harness: VerificationHarnessSchema.nullable(), reused: z.boolean().optional() });
+export const FactoryRunResponseSchema = z.object({ status: z.literal('success'), run: VerificationRunSchema.nullable() });
+export const FactoryRunsResponseSchema = z.object({ status: z.literal('success'), runs: z.array(VerificationRunSchema).max(100).refine(runs => new Set(runs.map(run => run.id)).size === runs.length) });
 
 // ─── knowledge_search ────────────────────────────────────────────
 

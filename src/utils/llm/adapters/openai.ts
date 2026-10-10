@@ -50,7 +50,7 @@
 import OpenAI from "openai";
 import { getSettingSync } from "../../../storage/configStorage.js";
 import { debugLog } from "../../logger.js";
-import type { LLMProvider } from "../provider.js";
+import type { LLMProvider, TextGenerationOptions } from "../provider.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -99,10 +99,10 @@ export class OpenAIAdapter implements LLMProvider {
 
   // ─── Text Generation ─────────────────────────────────────────────────────
 
-  async generateText(prompt: string, systemInstruction?: string): Promise<string> {
+  async generateText(prompt: string, systemInstruction?: string, options?: TextGenerationOptions): Promise<string> {
     // Read model at call time (not constructor) so the user can hot-swap
     // the model setting without restarting the server.
-    const model = getSettingSync("openai_model", "gpt-4o-mini");
+    const model = options?.model || getSettingSync("openai_model", "gpt-4o-mini");
 
     // Build message array: optional system message first, then user prompt.
     // This maps cleanly to Gemini's systemInstruction + user prompt pattern.
@@ -114,7 +114,7 @@ export class OpenAIAdapter implements LLMProvider {
 
     debugLog(`[OpenAIAdapter] generateText — model=${model}, messages=${messages.length}`);
 
-    const response = await this.client.chat.completions.create({ model, messages });
+    const response = await this.client.chat.completions.create({ model, messages, ...(options?.json ? { response_format: { type: "json_object" as const } } : {}), ...(options?.maxOutputTokens ? { max_tokens: options.maxOutputTokens } : {}) });
 
     // choices[0] is always the primary completion. ?? "" returns empty string
     // on null content (e.g. if the model returned a function call instead).

@@ -29,7 +29,8 @@ export class SafetyController {
    */
   private static readonly LEGAL_TRANSITIONS: Record<PipelineStatus, PipelineStatus[]> = {
     'PENDING': ['RUNNING', 'ABORTED'],  // Queued → Runner promotes or user aborts
-    'RUNNING': ['PAUSED', 'ABORTED', 'COMPLETED', 'FAILED'],
+    // Step progress and heartbeats retain RUNNING throughout the pipeline.
+    'RUNNING': ['RUNNING', 'PAUSED', 'ABORTED', 'COMPLETED', 'FAILED'],
     'PAUSED':  ['RUNNING', 'ABORTED'],
     'ABORTED': [],  // Terminal — no exits
     'COMPLETED': [], // Terminal — no exits
@@ -190,6 +191,14 @@ export class SafetyController {
     if (spec.contextFiles && spec.contextFiles.length > 0) {
       lines.push(`Context Files: ${spec.contextFiles.join(', ')}`);
     }
+    if (spec.allowedWritePaths) {
+      lines.push(`Allowed WRITE_FILE/PATCH_FILE targetPath values (relative, exactly as listed): ${JSON.stringify(spec.allowedWritePaths)}`);
+    }
+    if (spec.testCommand) {
+      lines.push(`Caller-authorized test command (exact string): ${spec.testCommand}`);
+      lines.push(`The VERIFY phase runs this command independently. In EXECUTE, return file changes only; do not add a RUN_TEST action.`);
+    }
+    lines.push(`All targetPath values must be relative. The executor supplies the working directory; never prefix targetPath with the working directory.`);
 
     lines.push(
       ``,

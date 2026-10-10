@@ -7,7 +7,7 @@ export const SESSION_START_PIPELINE_TOOL: Tool = {
   description:
     "Start an autonomous Dark Factory pipeline. The pipeline runs in the background " +
     "and executes a PLAN → EXECUTE → VERIFY cycle up to `max_iterations` times.\n\n" +
-    "**Requires:** `PRISM_DARK_FACTORY_ENABLED=true` in the environment.\n\n" +
+    "**Requires:** Dark Factory is enabled at startup (enabled by default; the dashboard setting applies when no explicit `PRISM_DARK_FACTORY_ENABLED=true|false` override is present).\n\n" +
     "**How it works:**\n" +
     "1. Call this tool with an objective (what to accomplish)\n" +
     "2. The pipeline is queued and executes autonomously in the background\n" +
@@ -54,6 +54,8 @@ export const SESSION_START_PIPELINE_TOOL: Tool = {
           "Optional model name to use instead of the default LLM. " +
           "Useful for routing to a local model (e.g., 'qwen3') via Claw.",
       },
+      test_command: { type: "string", description: "Caller-authorized verification command. Factory runs this without a shell and requires it to pass." },
+      allowed_write_paths: { type: "array", items: { type: "string" }, description: "Relative files Factory may change. Other context files remain read-only." },
     },
     required: ["project", "objective"],
   },
@@ -118,6 +120,8 @@ export interface StartPipelineArgs {
   max_iterations?: number;
   context_files?: string[];
   model_override?: string;
+  test_command?: string;
+  allowed_write_paths?: string[];
 }
 
 export function isStartPipelineArgs(args: unknown): args is StartPipelineArgs {
@@ -129,6 +133,8 @@ export function isStartPipelineArgs(args: unknown): args is StartPipelineArgs {
   if (a.max_iterations !== undefined && (typeof a.max_iterations !== "number" || a.max_iterations < 1 || a.max_iterations > 10)) return false;
   if (a.context_files !== undefined && (!Array.isArray(a.context_files) || !a.context_files.every((f: unknown) => typeof f === "string"))) return false;
   if (a.model_override !== undefined && typeof a.model_override !== "string") return false;
+  if (a.test_command !== undefined && (typeof a.test_command !== "string" || !a.test_command.trim())) return false;
+  if (a.allowed_write_paths !== undefined && (!Array.isArray(a.allowed_write_paths) || !a.allowed_write_paths.every((f: unknown) => typeof f === "string" && f.trim()))) return false;
   return true;
 }
 

@@ -214,7 +214,7 @@ function getAdvancedTourContent(): WizardStepContent {
         description:
             "Prism has much more to offer. Here's a quick tour of advanced capabilities:",
         instructions: [
-            "**Dark Factory** — Autonomous AI pipelines that run in the background (set PRISM_DARK_FACTORY_ENABLED=true)",
+            "**Dark Factory** — Autonomous AI pipelines that run in the background (enabled by default; use the dashboard or PRISM_DARK_FACTORY_ENABLED=false to disable)",
             "**Hivemind** — Multi-agent coordination with role-based access (set PRISM_ENABLE_HIVEMIND=true)",
             "**Auto-Scholar** — Autonomous research agent that discovers and synthesizes papers",
             "**Mind Palace Dashboard** — Web UI at localhost:3080 for managing projects, viewing analytics, and configuring settings",

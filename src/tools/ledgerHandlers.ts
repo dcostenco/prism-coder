@@ -39,6 +39,9 @@ import { resolveProject } from "../utils/projectResolver.js";
 import { getUpdateNotice } from "../updateNotice.js";
 import type { StorageBackend } from "../storage/interface.js";
 import { findRunningDashboardAccessState } from "../dashboard/dashboardAccess.js";
+import { isDarkFactoryEnabled } from "../darkfactory/enablement.js";
+import { routeFactoryPrompt, formatFactoryPromptRoute } from "../darkfactory/promptRouting.js";
+import { factoryBackendReadiness } from "../darkfactory/backendReadiness.js";
 
 // The running server's own version, for the update-available notice. A read
 // failure must never affect startup: an empty string fails the notice's
@@ -2600,6 +2603,7 @@ export async function sessionRoutePromptHandler(
 ): Promise<{ content: Array<{ type: "text"; text: string }> }> {
   const input = (typeof args === "object" && args !== null && !Array.isArray(args) ? args : {}) as {
     prompt?: unknown; loaded?: unknown; project?: unknown;
+    working_directory?: unknown; files_involved?: unknown; test_command?: unknown; allowed_write_paths?: unknown;
   };
   const prompt = typeof input.prompt === "string" ? input.prompt : "";
   const loaded = Array.isArray(input.loaded)
@@ -2607,11 +2611,21 @@ export async function sessionRoutePromptHandler(
     : [];
 
   const result = await runPromptRouteFromCache(prompt, loaded);
+  const project = typeof input.project === "string" ? input.project : undefined;
+  const workingDirectory = typeof input.working_directory === "string" ? input.working_directory :
+    (project ? await getSetting(`repo_path:${project}`, "") : "") || undefined;
+  const route = routeFactoryPrompt(prompt, {
+    enabled: isDarkFactoryEnabled(), project, working_directory: workingDirectory,
+    files_involved: Array.isArray(input.files_involved) ? input.files_involved.filter((file): file is string => typeof file === "string") : undefined,
+    test_command: typeof input.test_command === "string" ? input.test_command : undefined,
+    ...(await factoryBackendReadiness()),
+    allowed_write_paths: Array.isArray(input.allowed_write_paths) ? input.allowed_write_paths.filter((file): file is string => typeof file === "string") : undefined,
+  });
 
   // Text only, never structuredContent. A result carrying both lets a host
   // surface just the structured half — which is exactly how Claude Code
   // silently dropped the bootstrap payload for three weeks.
-  return { content: [{ type: "text", text: result.text }] };
+  return { content: [{ type: "text", text: `${result.text}\n\n${formatFactoryPromptRoute(route)}` }] };
 }
 
 export async function sessionBootstrapHandler(
@@ -2653,7 +2667,16 @@ export async function sessionBootstrapHandler(
     : "developer";
   const role = sanitizeNativeIdentity(defaultRole) || "global";
   const manifestSnapshot = await resolveNativeSkillManifestSnapshot(skillSyncResult);
-  const { text: systemReadyBlock, floorDigestChars } = await buildNativeSystemReadyBlock(manifestSnapshot, depth);
+  const { text: baseSystemReadyBlock, floorDigestChars } = await buildNativeSystemReadyBlock(manifestSnapshot, depth);
+  const startupProject = projects.length === 1 ? projects[0] : undefined;
+  const startupFactoryRoute = routeFactoryPrompt(typeof input.prompt === "string" ? input.prompt : "", {
+    enabled: isDarkFactoryEnabled(), project: startupProject,
+    working_directory: startupProject ? await getSetting(`repo_path:${startupProject}`, "") : undefined,
+    ...(await factoryBackendReadiness()),
+  });
+  const factoryStatusLine = `- 🏭 **Factory:** ${isDarkFactoryEnabled() ? "enabled" : "disabled"} for this MCP startup; enablement does not prove execution readiness.`;
+  const systemReadyBlock = `${baseSystemReadyBlock}\n${factoryStatusLine}` +
+    (startupFactoryRoute.candidate ? `\n${formatFactoryPromptRoute(startupFactoryRoute)}\nFor a suitable request, supply the current workspace and verification command through session_route_prompt, then automatically call its recommended pipeline tool.` : "");
   // First run = the dashboard has never been touched: no agent identity AND no
   // projects. Measured 2026-08-05: a brand-new free-tier install was greeted
   // with "Welcome back", three "Not loaded" rows, a warning, and three

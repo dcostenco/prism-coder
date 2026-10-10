@@ -20,6 +20,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 as w
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
+import { FACTORY_HOST_POLICY_LINES } from "./darkfactory/hostPolicy.js";
 import { CONTEXT_RECOVERY_POLICY_LINES } from "./contextRecoveryPolicy.js";
 import { EVIDENCE_WORKFLOW_POLICY_LINES } from "./evidenceWorkflowPolicy.js";
 import { LOCAL_FIRST_POLICY_ID, LOCAL_FIRST_POLICY_LINES } from "./localFirstPolicy.js";
@@ -163,6 +164,8 @@ const CODEX_STARTUP_BODY = [
   "block is managed by `prism connect`; do not edit it manually.",
   "",
   ...CONTEXT_RECOVERY_POLICY_LINES,
+  "",
+  ...FACTORY_HOST_POLICY_LINES,
   "",
   ...LOCAL_FIRST_POLICY_LINES,
   "",
@@ -764,6 +767,8 @@ function serializeClaudeStartupBlock(newline: string): string {
     "",
     ...CONTEXT_RECOVERY_POLICY_LINES,
     "",
+    ...FACTORY_HOST_POLICY_LINES,
+    "",
     ...LOCAL_FIRST_POLICY_LINES,
     "",
     ...EVIDENCE_WORKFLOW_POLICY_LINES,
@@ -865,6 +870,8 @@ function serializeGeminiStartupBlock(newline: string): string {
     "and session_detect_drift calls. This block is managed by `prism connect`; do not edit it manually.",
     "",
     ...CONTEXT_RECOVERY_POLICY_LINES,
+    "",
+    ...FACTORY_HOST_POLICY_LINES,
     "",
     ...LOCAL_FIRST_POLICY_LINES,
     "",

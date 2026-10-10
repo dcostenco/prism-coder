@@ -43,7 +43,7 @@
  */
 
 import { SpanStatusCode, context, trace } from "@opentelemetry/api";
-import type { LLMProvider } from "../provider.js";
+import type { LLMProvider, TextGenerationOptions } from "../provider.js";
 import { getTracer } from "../../telemetry.js";
 
 export class TracingLLMProvider implements LLMProvider {
@@ -124,7 +124,7 @@ export class TracingLLMProvider implements LLMProvider {
 
   // ── generateText ──────────────────────────────────────────────────────────
 
-  async generateText(prompt: string, systemInstruction?: string): Promise<string> {
+  async generateText(prompt: string, systemInstruction?: string, options?: TextGenerationOptions): Promise<string> {
     /**
      * Span: llm.generate_text
      *
@@ -140,7 +140,7 @@ export class TracingLLMProvider implements LLMProvider {
 
     return context.with(trace.setSpan(context.active(), span), async () => {
       try {
-        const result = await this.inner.generateText(prompt, systemInstruction);
+        const result = options ? await this.inner.generateText(prompt, systemInstruction, options) : await this.inner.generateText(prompt, systemInstruction);
         span.setStatus({ code: SpanStatusCode.OK });
         return result;
       } catch (err) {

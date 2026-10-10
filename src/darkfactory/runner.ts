@@ -26,6 +26,7 @@ import { SafetyController } from './safetyController.js';
 import { invokeClawAgent } from './clawInvocation.js';
 import { PRISM_DARK_FACTORY_POLL_MS, PRISM_DARK_FACTORY_MAX_RUNTIME_MS, PRISM_USER_ID, PRISM_VERIFICATION_LAYERS, PRISM_VERIFICATION_DEFAULT_SEVERITY } from '../config.js';
 import { debugLog } from '../utils/logger.js';
+import { executeActions } from './actionExecutor.js';
 import path from 'path';
 import fs from 'fs';
 import * as crypto from 'crypto';
@@ -502,14 +503,22 @@ async function executeStep(
       };
     }
 
-    // All actions validated — return success with structured notes
+    let observations: string[];
+    try {
+      observations = await executeActions(parsed.actions, spec, async () => {
+        const live = await (await getStorage()).getPipeline(pipeline.id, pipeline.user_id);
+        return live?.status === 'RUNNING' && live.current_step === pipeline.current_step;
+      });
+    } catch (error) {
+      return { iteration: pipeline.iteration, step, started_at: stepStart, completed_at: new Date().toISOString(), success: false, notes: String(error instanceof Error ? error.message : error) };
+    }
     return {
       iteration: pipeline.iteration,
       step,
       started_at: stepStart,
       completed_at: new Date().toISOString(),
       success: true,
-      notes: parsed.notes || `Executed ${parsed.actions.length} action(s) successfully`,
+      notes: `${parsed.notes || `Executed ${parsed.actions.length} action(s) successfully`}\n${observations.join('\n')}`,
     };
   } finally {
     stopHeartbeat();
@@ -658,6 +667,23 @@ async function runnerTick(): Promise<void> {
     // Execute the current step
     const result = await executeStep(pipeline, spec);
 
+    // Heartbeat pulses persist their own optimistic version while the model runs.
+    // Re-read after stopping the pulse and rebase only onto the same live step;
+    // never carry a step result across an abort or another runner's advance.
+    const afterStep = await storage.getPipeline(pipeline.id, pipeline.user_id);
+    if (!afterStep || afterStep.status !== 'RUNNING') {
+      debugLog(`[DarkFactory] Step result discarded for ${pipeline.id}: pipeline is no longer RUNNING.`);
+      return;
+    }
+    if (afterStep.current_step !== pipeline.current_step ||
+        afterStep.iteration !== pipeline.iteration ||
+        (afterStep.eval_revisions ?? 0) !== (pipeline.eval_revisions ?? 0)) {
+      debugLog(`[DarkFactory] Step result discarded for ${pipeline.id}: pipeline advanced concurrently.`);
+      return;
+    }
+    pipeline.updated_at = afterStep.updated_at;
+    pipeline.last_heartbeat = afterStep.last_heartbeat;
+
     // v7.3.1: Scope violation in EXECUTE step → immediate pipeline termination
     if ('scopeViolation' in result && result.scopeViolation) {
       debugLog(`[DarkFactory] Pipeline ${pipeline.id} terminated: scope violation in EXECUTE step.`);
@@ -675,6 +701,22 @@ async function runnerTick(): Promise<void> {
     }
 
     const currentStep = pipeline.current_step as DarkFactoryStep;
+    if (currentStep === 'VERIFY') {
+      if (!spec.testCommand) {
+        result.success = false;
+        result.notes = 'Deterministic verification requires spec.testCommand.';
+      } else try {
+        const verificationNotes = await executeActions([{ type: 'RUN_TEST', targetPath: '.', command: spec.testCommand }], spec, async () => {
+          const live = await (await getStorage()).getPipeline(pipeline.id, pipeline.user_id);
+          return live?.status === 'RUNNING' && live.current_step === pipeline.current_step;
+        });
+        result.notes = `${result.notes || ''}\n${verificationNotes.join('\n')}`;
+        result.success = true;
+      } catch (error) {
+        result.success = false;
+        result.notes = `Deterministic verification failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
 
     // ── Phase 4: Verification Pipeline Orchestrator ──
     if (currentStep === 'VERIFY' && spec.workingDirectory) {
@@ -685,13 +727,15 @@ async function runnerTick(): Promise<void> {
           const harnessData = JSON.parse(rawHarness);
 
           // GAP-5 fix: Persist the harness so CLI drift detection works for DarkFactory runs
-          const rubricHash = computeRubricHash(harnessData.tests);
+          const minPassRate = harnessData.min_pass_rate ?? 1;
+          const rubricHash = computeRubricHash(harnessData.tests, minPassRate);
           const harness: VerificationHarness = {
             ...harnessData,
             project: pipeline.project,
             conversation_id: `dark-factory-${pipeline.id}`,
-            created_at: new Date().toISOString(),
+            created_at: pipeline.started_at,
             rubric_hash: rubricHash,
+            min_pass_rate: minPassRate,
           };
           await storage.saveVerificationHarness(harness, pipeline.user_id);
 
@@ -719,7 +763,7 @@ async function runnerTick(): Promise<void> {
             project: pipeline.project,
             conversation_id: `dark-factory-${pipeline.id}`,
             run_at: new Date().toISOString(),
-            passed: passRate >= harnessData.min_pass_rate && verificationResult.severity_gate.action !== "abort",
+            passed: passRate >= minPassRate && verificationResult.severity_gate.action !== "abort",
             pass_rate: passRate,
             critical_failures: verificationResult.severity_gate.failed_assertions.length,
             coverage_score: coverageScore,
@@ -728,8 +772,8 @@ async function runnerTick(): Promise<void> {
             gate_override: false,
           };
           
-          const { canContinue, validatedResult } = Gatekeeper.executeGate(valResult); 
-          await storage.saveVerificationRun(validatedResult, pipeline.user_id);
+          await storage.saveVerificationRun(valResult, pipeline.user_id);
+          const { canContinue, validatedResult } = Gatekeeper.executeGate(valResult);
 
           // GAP-3 fix: Emit verification experience event for ML routing feedback
           try {
@@ -870,9 +914,7 @@ async function runnerTick(): Promise<void> {
         // EXECUTE notes = what the generator did
         // EVALUATE notes = what the evaluator found
         // Other steps: preserve existing notes
-        const updatedNotes = (currentStep === 'EXECUTE' || currentStep === 'EVALUATE') && result.notes
-          ? result.notes
-          : pipeline.notes;
+        const updatedNotes = result.notes || pipeline.notes;
 
         await storage.savePipeline({
           ...pipeline,

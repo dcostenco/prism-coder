@@ -441,11 +441,11 @@ export const PRISM_VERIFICATION_DEFAULT_SEVERITY =
 
 // ─── v7.3: Dark Factory Orchestration ─────────────────────────
 // Autonomous pipeline runner: PLAN → EXECUTE → VERIFY → iterate.
-// Opt-in because it executes LLM calls in the background.
+// Enabled by default; the persisted preference or an explicit env override can disable it.
 
-/** Master switch for the Dark Factory background runner. */
+/** Compatibility default; startup resolver applies env or persisted dashboard state. */
 export const PRISM_DARK_FACTORY_ENABLED =
-  process.env.PRISM_DARK_FACTORY_ENABLED === "true"; // Opt-in
+  true; // Startup resolver applies env override or persisted dashboard setting.
 
 /** Poll interval for the runner loop (ms). Default: 30s. */
 export const PRISM_DARK_FACTORY_POLL_MS = parseInt(

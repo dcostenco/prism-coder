@@ -36,7 +36,7 @@ export async function sessionStartPipelineHandler(args: unknown) {
     };
   }
 
-  const { project, objective, working_directory, max_iterations, context_files, model_override } = args;
+  const { project, objective, working_directory, max_iterations, context_files, model_override, test_command, allowed_write_paths } = args;
 
   // Resolve working directory: explicit arg > dashboard repo_path > reject
   let resolvedWorkDir = working_directory;
@@ -61,6 +61,8 @@ export async function sessionStartPipelineHandler(args: unknown) {
     workingDirectory: resolvedWorkDir,
     contextFiles: context_files,
     modelOverride: model_override,
+    testCommand: test_command,
+    allowedWritePaths: allowed_write_paths,
   };
 
   const pipelineState: PipelineState = {

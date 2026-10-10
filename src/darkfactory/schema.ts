@@ -21,6 +21,8 @@ export interface PipelineSpec {
   
   /** Optional model override to use for reasoning inside the factory (e.g. qwen3) */
   modelOverride?: string;
+  allowedWritePaths?: string[];
+  testCommand?: string;
 }
 
 /**

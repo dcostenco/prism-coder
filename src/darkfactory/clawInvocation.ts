@@ -4,6 +4,7 @@ import { PipelineSpec } from './schema.js';
 import { PipelineState } from '../storage/interface.js';
 import { SafetyController } from './safetyController.js';
 import { debugLog } from '../utils/logger.js';
+import { readContextFiles } from './actionExecutor.js';
 
 /**
  * JSON output schema instruction injected into EXECUTE step prompts.
@@ -16,23 +17,25 @@ You MUST respond with ONLY a valid JSON object matching this schema:
 {
   "actions": [
     {
-      "type": "READ_FILE" | "WRITE_FILE" | "PATCH_FILE" | "RUN_TEST",
+      "type": "READ_FILE" | "WRITE_FILE" | "PATCH_FILE",
       "targetPath": "<relative path within the workspace>",
       "content": "<file content for WRITE_FILE>",
-      "patch": "<patch content for PATCH_FILE>",
-      "command": "<test command for RUN_TEST>"
+      "patch": "<patch content for PATCH_FILE>"
     }
   ],
   "notes": "<optional summary of what you did>"
 }
 
 RULES:
-- type MUST be one of: READ_FILE, WRITE_FILE, PATCH_FILE, RUN_TEST
+- type MUST be one of: READ_FILE, WRITE_FILE, PATCH_FILE
+- Submit only file actions here. The host runs the verification command independently in VERIFY.
 - targetPath MUST be a relative path within the workspace
 - Do NOT include any text outside the JSON object
 - Do NOT use markdown code fences
 - If you cannot complete the task, return: {"actions": [], "notes": "reason"}
 `.trim();
+// Thinking models consume this budget before emitting the structured response.
+const FACTORY_OUTPUT_TOKEN_BUDGET = 4096;
 
 const PLAN_CONTRACT_SCHEMA = `
 You MUST respond with ONLY a valid JSON object matching this schema:
@@ -91,6 +94,8 @@ export async function invokeClawAgent(
 
   // Scope injection via SafetyController — single source of truth
   const systemPrompt = SafetyController.generateBoundaryPrompt(spec, state);
+  let contextObservation = '';
+  try { contextObservation = await readContextFiles(spec); } catch (error) { return { success: false, resultText: `Context read failed: ${error instanceof Error ? error.message : String(error)}` }; }
 
   // Inject the appropriate JSON schema according to the step
   let stepPrompt = `Based on the system instructions, execute the necessary task for the current step (${state.current_step}). Respond with your actions and observations.`;
@@ -106,7 +111,7 @@ export async function invokeClawAgent(
     stepPrompt = `Based on the system instructions, execute the necessary actions for the current step (${state.current_step}).${revisionContext}\n\n${EXECUTE_JSON_SCHEMA}`;
     isJsonMode = true;
   } else if (state.current_step === 'PLAN_CONTRACT') {
-    stepPrompt = `Based on the system instructions from the PLAN phase, formulate a strict, boolean-testable contract rubric.\n\n${PLAN_CONTRACT_SCHEMA}`;
+    stepPrompt = `Based on the system instructions from the PLAN phase, formulate a strict, boolean-testable contract rubric.\n\nActual PLAN output:\n${state.notes || '(no plan output)'}\n\n${PLAN_CONTRACT_SCHEMA}`;
     isJsonMode = true;
   } else if (state.current_step === 'EVALUATE') {
     stepPrompt = `Based on the system instructions, evaluate the GENERATOR's execution against the PLAN_CONTRACT rubric. BE STRICT.
@@ -120,13 +125,14 @@ ${state.contract_payload ? JSON.stringify(state.contract_payload.criteria, null,
 ${EVALUATE_SCHEMA}`;
     isJsonMode = true;
   }
+  if (contextObservation) stepPrompt += `\n\n=== ACTUAL CONTEXT FILES ===\n${contextObservation}`;
 
   debugLog(`[ClawInvocation] Launching agent on pipeline ${state.id} step=${state.current_step} iter=${state.iteration} with ${timeoutMs}ms limit.${isJsonMode ? ' (JSON mode)' : ''}`);
 
   try {
     // Timeout Promise to ensure the runner thread does not block indefinitely
     const timeboundExecution = Promise.race([
-      llm.generateText(stepPrompt, systemPrompt),
+      llm.generateText(stepPrompt, systemPrompt, { json: isJsonMode, model: spec.modelOverride, maxOutputTokens: FACTORY_OUTPUT_TOKEN_BUDGET }),
       new Promise<string>((_, reject) => 
         setTimeout(() => reject(new Error('LLM_EXECUTION_TIMEOUT')), timeoutMs)
       )

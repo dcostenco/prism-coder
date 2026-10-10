@@ -54,7 +54,8 @@ import { SupabaseStorage } from "./supabase.js";
 import { debugLog } from "../utils/logger.js";
 import { PRISM_SYNALUX_BASE_URL, PRISM_SYNALUX_API_KEY } from "../config.js";
 import { isSynaluxSignedOut } from "../utils/synaluxCredentialState.js";
-import { KnowledgeSearchRequestSchema, KnowledgeSearchResponseSchema, ProjectAnalyticsResponseSchema, FactoryPipelinesResponseSchema } from "./portalContracts.js";
+import { KnowledgeSearchRequestSchema, KnowledgeSearchResponseSchema, ProjectAnalyticsResponseSchema, FactoryPipelinesResponseSchema, FactoryPipelineResponseSchema, FactoryHarnessResponseSchema, FactoryRunResponseSchema, FactoryRunsResponseSchema } from "./portalContracts.js";
+import type { VerificationHarness, ValidationResult } from '../verification/schema.js';
 import type {
   LedgerEntry,
   HandoffEntry,
@@ -118,6 +119,7 @@ export class SynaluxStorage extends SupabaseStorage {
   private readonly inflightContextLoads = new Map<string, Promise<ContextResult>>();
   private readonly closeController = new AbortController();
   private closed = false;
+  private factoryReady = false;
 
   constructor() {
     super();
@@ -141,10 +143,17 @@ export class SynaluxStorage extends SupabaseStorage {
 
   async initialize(_isLocal: boolean = false): Promise<void> {
     debugLog(`[SynaluxStorage] Initializing (portal=${this.baseUrl})`);
+    try {
+      const capabilities = await this.portalPost('/api/v1/prism/factory/verification', { action: 'capabilities' });
+      this.factoryReady = capabilities.status === 'success' && capabilities.execution_ready === true;
+    } catch { this.factoryReady = false; }
   }
+
+  isFactoryReady(): boolean { return !this.closed && !isSynaluxSignedOut() && this.factoryReady; }
 
   async close(): Promise<void> {
     this.closed = true;
+    this.factoryReady = false;
     this.cachedJwt = null;
     this.cachedJwtExpiresAt = 0;
     this.closeController.abort();
@@ -882,6 +891,58 @@ export class SynaluxStorage extends SupabaseStorage {
   }
 
   // ─── Factory read path ────────────────────────────────────────
+  async getPipeline(id: string, _userId: string): Promise<PipelineState | null> {
+    const result = FactoryPipelineResponseSchema.safeParse(await this.portalGet(`/api/v1/prism/factory/pipeline?id=${encodeURIComponent(id)}`));
+    if (!result.success || (result.data.pipeline && result.data.pipeline.id !== id)) throw new Error('[SynaluxStorage] Invalid Factory pipeline response');
+    return result.data.pipeline as PipelineState | null;
+  }
+
+  async saveVerificationHarness(harness: VerificationHarness, _userId: string): Promise<void> {
+    const result = FactoryHarnessResponseSchema.safeParse(await this.portalPost('/api/v1/prism/factory/verification', { action: 'save_harness', harness }));
+    if (!result.success || !result.data.harness || result.data.harness.rubric_hash !== harness.rubric_hash
+        || result.data.harness.min_pass_rate !== harness.min_pass_rate
+        || (!result.data.reused && (result.data.harness.project !== harness.project || result.data.harness.conversation_id !== harness.conversation_id))) throw new Error('[SynaluxStorage] Invalid verification harness save response');
+  }
+
+  async getVerificationHarness(rubric_hash: string, _userId: string): Promise<VerificationHarness | null> {
+    const result = FactoryHarnessResponseSchema.safeParse(await this.portalPost('/api/v1/prism/factory/verification', { action: 'get_harness', rubric_hash }));
+    if (!result.success || (result.data.harness && result.data.harness.rubric_hash !== rubric_hash)) throw new Error('[SynaluxStorage] Invalid verification harness response');
+    return result.data.harness as VerificationHarness | null;
+  }
+
+  async saveVerificationRun(run: ValidationResult, _userId: string): Promise<void> {
+    const result = FactoryRunResponseSchema.safeParse(await this.portalPost('/api/v1/prism/factory/verification', { action: 'save_run', run }));
+    if (!result.success || !result.data.run || result.data.run.id !== run.id || result.data.run.rubric_hash !== run.rubric_hash
+        || result.data.run.project !== run.project || result.data.run.conversation_id !== run.conversation_id || result.data.run.result_json !== run.result_json) throw new Error('[SynaluxStorage] Invalid verification run save response');
+  }
+
+  async getVerificationRun(id: string, _userId: string): Promise<ValidationResult | null> {
+    const result = FactoryRunResponseSchema.safeParse(await this.portalPost('/api/v1/prism/factory/verification', { action: 'get_run', id }));
+    if (!result.success || (result.data.run && result.data.run.id !== id)) throw new Error('[SynaluxStorage] Invalid verification run response');
+    return result.data.run as ValidationResult | null;
+  }
+
+  async listVerificationRuns(project: string, _userId: string): Promise<ValidationResult[]> {
+    const result = FactoryRunsResponseSchema.safeParse(await this.portalPost('/api/v1/prism/factory/verification', { action: 'list_runs', project }));
+    if (!result.success || result.data.runs.some(run => run.project !== project)) throw new Error('[SynaluxStorage] Invalid verification runs response');
+    return result.data.runs as ValidationResult[];
+  }
+
+  async savePipeline(state: PipelineState): Promise<void> {
+    const { user_id: _userId, ...pipeline } = state;
+    const create = state.status === 'PENDING' && state.current_step === 'INIT' && state.iteration === 0 && state.started_at === state.updated_at;
+    const result = FactoryPipelineResponseSchema.safeParse(await this.portalPost('/api/v1/prism/factory/pipeline', {
+      operation: create ? 'create' : 'update', pipeline,
+      ...(create ? {} : { expected_updated_at: state.updated_at }),
+    }));
+    if (!result.success || !result.data.pipeline || result.data.pipeline.id !== state.id || result.data.pipeline.project !== state.project
+        || result.data.pipeline.status !== state.status || result.data.pipeline.current_step !== state.current_step
+        || result.data.pipeline.iteration !== state.iteration || result.data.pipeline.spec !== state.spec
+        || Date.parse(result.data.pipeline.updated_at) <= Date.parse(state.updated_at)) throw new Error('[SynaluxStorage] Invalid Factory save response');
+    state.updated_at = result.data.pipeline.updated_at;
+    state.user_id = result.data.pipeline.user_id;
+  }
+
   async listPipelines(project?: string, status?: PipelineStatus, _userId?: string): Promise<PipelineState[]> {
     const query = new URLSearchParams();
     if (project !== undefined) query.set('project', project);

@@ -47,6 +47,7 @@ import { createDashboardStorageAccessor } from "./storageAccessor.js";
 import { DASHBOARD_READ_MESSAGES } from "./readMessages.js";
 import { isDashboardSettingKeyAllowed, isDashboardSettingValueAllowed } from "./settingsPolicy.js";
 import { isTrustedRequest, isRebindGuardedPath } from "./hostGuard.js";
+import { darkFactoryEnablementState, DARK_FACTORY_SETTINGS_UNAVAILABLE } from "../darkfactory/enablement.js";
 import {
   resolveDashboardToken,
   requestHasToken,
@@ -459,7 +460,7 @@ return false;}
                 type: "boolean",
                 title: "Enable Dark Factory",
                 description: "Set to true to enable autonomous evaluation pipelines.",
-                default: false
+                default: true
               },
               prismTaskRouterEnabled: {
                 type: "boolean",
@@ -795,10 +796,10 @@ return false;}
           const { getAllSettings } = await import("../storage/configStorage.js");
           const settings = await getAllSettings();
           res.writeHead(200, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify({ settings }));
+          return res.end(JSON.stringify({ settings, darkFactory: darkFactoryEnablementState() }));
         } catch {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify({ settings: {} }));
+          res.writeHead(503, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: DARK_FACTORY_SETTINGS_UNAVAILABLE }));
         }
       }
 

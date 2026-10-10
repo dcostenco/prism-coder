@@ -111,7 +111,7 @@ It registers capabilities for tools, prompts, resources, and resource subscripti
 | Search & analysis | 7 | Always |
 | Session memory | 30+ | Always (works with all storage backends) |
 | Hivemind agent registry | 3 | `PRISM_ENABLE_HIVEMIND=true` |
-| Dark Factory pipeline | 3 | `PRISM_DARK_FACTORY_ENABLED=true` |
+| Dark Factory pipeline | 3 | Enabled by default; dashboard setting or `PRISM_DARK_FACTORY_ENABLED=false` disables it |
 | Task router | 1 | `PRISM_TASK_ROUTER_ENABLED=true` |
 
 **Key files:** `src/server.ts`, `src/tools/index.ts`, `src/tools/definitions.ts`
@@ -480,7 +480,7 @@ the portal's lexical index.
 | `agent_heartbeat` | Heartbeat with current task and status |
 | `agent_list_team` | View all active teammates |
 
-### 7.4 Dark Factory (`PRISM_DARK_FACTORY_ENABLED=true`)
+### 7.4 Dark Factory (enabled by default; dashboard setting or `PRISM_DARK_FACTORY_ENABLED=false` disables it)
 
 | Tool | Purpose |
 |------|---------|
@@ -549,7 +549,40 @@ discovery (PubMed + ERIC + Semantic Scholar, then Yahoo) → local scrape
 **File:** `src/darkfactory/runner.ts`
 
 Autonomous pipeline execution triggered by `SESSION_START_PIPELINE` tool call.
-Gated behind `PRISM_DARK_FACTORY_ENABLED=true`.
+Startup resolves one decision for tool visibility, dispatch, and the background runner. An explicit environment value (`true` or `false`) overrides the saved dashboard preference; invalid or missing values use the saved boolean, defaulting to enabled. Changing the saved preference requires an MCP host restart. Enablement only exposes execution capabilities; model access, credentials, and paid execution readiness remain separate.
+
+For prompt-driven use, `session_route_prompt` returns a read-only
+`prism_factory_route` decision. A compatible host consumes a `factory` decision,
+calls `session_start_pipeline` with the recommended arguments, and polls status.
+Routing itself never creates a pipeline or runs a command. The dashboard is optional.
+
+Suitable requests ask to fix, implement, add, update, create, write, or repair
+one or two concrete code files, with a verification command and current project
+and absolute workspace context. For example: "Fix slug.cjs so whitespace becomes
+hyphens, then run node --test slug.test.cjs." The host supplies a write allowlist
+within those files; the independent test file should remain read-only.
+BCBA document drafting, assessments, operational definitions, crisis and
+consequence requests remain on the clinical host/skill route. Requests for
+deployment, credentials, payments, migrations, or destructive work also stay
+with the host. Paid Synalux storage probes the authenticated Portal API during
+initialization. Automatic execution stays with the host until pipeline and
+verification storage report ready; it does not fall back to local storage.
+Pipeline writes use owner-scoped optimistic concurrency. Frozen verification
+rubrics are immutable and content-addressed; each run retains its own project
+and conversation even when it reuses a rubric from another context.
+
+The runner reads context, plans, contracts, applies validated file actions,
+evaluates, runs the repository verification command, and finalizes or reports
+failure. Test commands execute without a shell. The Docker test harness uses a
+non-root container, restricted networking, and immutable independent tests.
+Its SDK host demonstrates the routing-to-execution contract. Generated native
+instructions for Codex, Claude, and Gemini consume that recommendation before
+ordinary delegation. Native-client permissions and model availability still
+apply. The separate Codex CLI harness exercises these instructions against the
+real MCP server; it does not establish activation in every installed client.
+CLI `route-prompt` hooks currently provide skill routing separately.
+
+See [the runnable filename repair example](../examples/factory-filename-fix/README.md).
 
 ---
 
@@ -791,7 +824,7 @@ The `--storage` flag prevents split-brain when CLI env differs from MCP server c
 | `PRISM_SCHOLAR_TOPICS` | `ai,agents` | Comma-separated research topics |
 | `PRISM_SCHOLAR_MAX_ARTICLES_PER_RUN` | `3` | Cost control |
 | `PRISM_ENABLE_HIVEMIND` | `false` | Enable multi-agent tools |
-| `PRISM_DARK_FACTORY_ENABLED` | `false` | Enable autonomous pipelines |
+| `PRISM_DARK_FACTORY_ENABLED` | `true` | Explicit startup override for autonomous pipelines; dashboard preference is used when unset |
 
 ### 13.6 Hivemind Watchdog
 

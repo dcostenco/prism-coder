@@ -23,6 +23,12 @@
  *     const llm = getLLMProvider();
  */
 
+export interface TextGenerationOptions {
+  json?: boolean;
+  model?: string;
+  maxOutputTokens?: number;
+}
+
 export interface LLMProvider {
   /**
    * Generate text using the active LLM.
@@ -41,7 +47,7 @@ export interface LLMProvider {
    *                          Adapters that don't support system prompts
    *                          should prepend it to the user prompt instead.
    */
-  generateText(prompt: string, systemInstruction?: string): Promise<string>;
+  generateText(prompt: string, systemInstruction?: string, options?: TextGenerationOptions): Promise<string>;
 
   /**
    * Generate an embedding vector for semantic memory search.

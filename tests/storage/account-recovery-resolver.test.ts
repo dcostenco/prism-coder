@@ -105,6 +105,12 @@ describe("Synalux account recovery through the storage resolver", () => {
         }
       }
 
+      if (url === `${portalOrigin}/api/v1/prism/factory/verification`) {
+        expect(authorization).toBe("Bearer storage-jwt");
+        expect(JSON.parse(String(init?.body))).toEqual({ action: "capabilities" });
+        return jsonResponse(200, { status: "success", execution_ready: true });
+      }
+
       if (url === `${portalOrigin}/api/v1/prism/memory`) {
         expect(authorization).toBe("Bearer storage-jwt");
         expect(JSON.parse(String(init?.body))).toEqual({ action: "list_projects" });
@@ -127,6 +133,7 @@ describe("Synalux account recovery through the storage resolver", () => {
     networkAvailable = true;
     const storage = await storageModule.getStorage();
     await expect(storage.listProjects()).resolves.toEqual(["team-project"]);
+    expect((storage as { isFactoryReady?: () => boolean }).isFactoryReady?.()).toBe(true);
 
     expect(process.env.PRISM_SYNALUX_API_KEY).toBe(persistedKey);
     expect(authorizations).toEqual([
@@ -134,6 +141,7 @@ describe("Synalux account recovery through the storage resolver", () => {
       `Bearer ${launcherKey}`,
       `Bearer ${persistedKey}`,
       `Bearer ${persistedKey}`,
+      "Bearer storage-jwt",
       "Bearer storage-jwt",
     ]);
   });

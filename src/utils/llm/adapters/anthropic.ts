@@ -37,7 +37,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getSettingSync } from "../../../storage/configStorage.js";
 import { debugLog } from "../../logger.js";
-import type { LLMProvider } from "../provider.js";
+import type { LLMProvider, TextGenerationOptions } from "../provider.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -73,8 +73,8 @@ export class AnthropicAdapter implements LLMProvider {
 
   // ─── Text Generation ─────────────────────────────────────────────────────
 
-  async generateText(prompt: string, systemInstruction?: string): Promise<string> {
-    const model = getSettingSync("anthropic_model", getDefaultModel());
+  async generateText(prompt: string, systemInstruction?: string, options?: TextGenerationOptions): Promise<string> {
+    const model = options?.model || getSettingSync("anthropic_model", getDefaultModel());
 
     debugLog(`[AnthropicAdapter] generateText — model=${model}`);
 
@@ -82,14 +82,20 @@ export class AnthropicAdapter implements LLMProvider {
     // This maps cleanly to LLMProvider's systemInstruction parameter.
     const response = await this.client.messages.create({
       model,
-      max_tokens: getMaxTokens(),
+      max_tokens: options?.maxOutputTokens || getMaxTokens(),
       ...(systemInstruction ? { system: systemInstruction } : {}),
       messages: [{ role: "user", content: prompt }],
+      ...(options?.json ? {
+        tools: [{ name: "emit_json", description: "Return the requested JSON object.", input_schema: { type: "object", additionalProperties: true } }],
+        tool_choice: { type: "tool", name: "emit_json" },
+      } : {}),
     });
 
     // Extract text from the first ContentBlock.
     // Anthropic returns an array of content blocks; we only use text blocks.
     const block = response.content[0];
+    if (options?.json && block?.type === "tool_use") return JSON.stringify(block.input);
+    if (options?.json) throw new Error("[AnthropicAdapter] Structured response missing emit_json tool use");
     if (!block || block.type !== "text") {
       throw new Error(
         `[AnthropicAdapter] Unexpected response content type: ${block?.type ?? "empty"}`

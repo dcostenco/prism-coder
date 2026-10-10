@@ -56,15 +56,14 @@ function buildSuite(tests: TestAssertion[]): string {
 }
 
 function buildHarness(tests: TestAssertion[]): VerificationHarness {
-  // Hash must be computed from Zod-parsed tests (same as runSuite does internally)
-  const parsed = TestSuiteSchema.parse({ tests });
+  // Freeze the original input, including omitted defaults and JSON key order.
   return {
     project: 'test',
     conversation_id: 'test-conv',
     created_at: new Date().toISOString(),
     min_pass_rate: 0.5,
-    rubric_hash: computeRubricHash(parsed.tests, 0.5),
-    tests: parsed.tests,
+    rubric_hash: computeRubricHash(tests, 0.5),
+    tests,
   };
 }
 
