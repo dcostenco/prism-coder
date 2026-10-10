@@ -158,6 +158,13 @@ or by re-enabling after each run.
 <details>
 <summary>Release history (optional)</summary>
 
+## What's New in v20.21.21
+
+- Prism Dashboard now reports unavailable analytics and factory reads clearly,
+  prevents stale project results, and keeps graph filters and counts in sync.
+- Project analytics can be read through the authenticated Portal API with
+  validated 14-day activity data.
+
 ## What's New in v20.21.20
 
 - Fixed: a `session_save_ledger` call refused with `context_not_loaded`, or the
