@@ -158,6 +158,15 @@ or by re-enabling after each run.
 <details>
 <summary>Release history (optional)</summary>
 
+## What's New in v20.21.22
+
+- Factory pipeline lists for cloud accounts use the authenticated Portal API,
+  including exact project and status filters, without direct database credentials.
+- Invalid, incomplete, or oversized reads show an unavailable state. A valid empty
+  list remains distinct from a failed read.
+- This release covers pipeline lists. Cloud pipeline creation, controls, and
+  execution still need separate validation.
+
 ## What's New in v20.21.21
 
 - Prism Dashboard now reports unavailable analytics and factory reads clearly,

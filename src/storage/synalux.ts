@@ -31,6 +31,7 @@
  *     - getEntriesMissingEmbeddings → POST /api/v1/prism/memory  action=list_missing_embeddings
  *     - listProjects      → POST /api/v1/prism/memory  action=list_projects
  *     - getAnalytics      → GET /api/v1/prism/analytics  view=project
+ *     - listPipelines     → GET /api/v1/prism/factory/pipelines
  *     - exportLedger      → POST /api/v1/prism/memory  action=export_memory (paginated)
  *
  *   Methods still falling through to SupabaseStorage (Phase 3 Tier B+):
@@ -53,7 +54,7 @@ import { SupabaseStorage } from "./supabase.js";
 import { debugLog } from "../utils/logger.js";
 import { PRISM_SYNALUX_BASE_URL, PRISM_SYNALUX_API_KEY } from "../config.js";
 import { isSynaluxSignedOut } from "../utils/synaluxCredentialState.js";
-import { KnowledgeSearchRequestSchema, KnowledgeSearchResponseSchema, ProjectAnalyticsResponseSchema } from "./portalContracts.js";
+import { KnowledgeSearchRequestSchema, KnowledgeSearchResponseSchema, ProjectAnalyticsResponseSchema, FactoryPipelinesResponseSchema } from "./portalContracts.js";
 import type {
   LedgerEntry,
   HandoffEntry,
@@ -66,6 +67,8 @@ import type {
   HealthStats,
   MemoryLink,
   AnalyticsData,
+  PipelineState,
+  PipelineStatus,
 } from "./interface.js";
 
 /**
@@ -876,6 +879,21 @@ export class SynaluxStorage extends SupabaseStorage {
       branch: v.branch ?? "main",
       created_at: v.created_at ?? new Date().toISOString(),
     })) as HistorySnapshot[];
+  }
+
+  // ─── Factory read path ────────────────────────────────────────
+  async listPipelines(project?: string, status?: PipelineStatus, _userId?: string): Promise<PipelineState[]> {
+    const query = new URLSearchParams();
+    if (project !== undefined) query.set('project', project);
+    if (status !== undefined) query.set('status', status);
+    const result = FactoryPipelinesResponseSchema.safeParse(
+      await this.portalGet('/api/v1/prism/factory/pipelines' + (query.size ? '?' + query : '')),
+    );
+    if (!result.success || result.data.pipelines.some(row =>
+      (project !== undefined && row.project !== project) || (status !== undefined && row.status !== status))) {
+      throw new Error('Factory pipelines unavailable');
+    }
+    return result.data.pipelines;
   }
 
   // ─── Health Check ─────────────────────────────────────────────

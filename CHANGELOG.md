@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.22 — 2026-10-10
+
+- Factory pipeline lists use the authenticated Portal API for cloud accounts,
+  preserving exact project/status filters and signed-in ownership without
+  requiring direct database credentials.
+- Reject malformed pipeline data, duplicate rows, incomplete reads, and lists
+  over 100 rows instead of presenting misleading Factory results.
+- This read-only slice does not validate cloud pipeline creation, controls, or
+  execution.
+
 ## 20.21.21 — 2026-10-09
 
 - Prism Dashboard now surfaces unavailable analytics and factory reads with a

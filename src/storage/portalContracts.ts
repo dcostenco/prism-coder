@@ -43,6 +43,39 @@ export const ProjectAnalyticsResponseSchema = z.object({
   analytics: ProjectAnalyticsSchema,
 });
 
+// Factory reads fail closed: corrupt rows must not become an empty or partial list.
+const PipelineTextSchema = z.string().refine(value => value.trim().length > 0);
+const PipelineTimestampSchema = z.string().refine(value => Number.isFinite(Date.parse(value)));
+const PipelineSpecSchema = z.string().refine(value => {
+  try {
+    const spec = JSON.parse(value);
+    return spec !== null && typeof spec === 'object' && !Array.isArray(spec);
+  } catch { return false; }
+});
+export const FactoryPipelineSchema = z.object({
+  id: PipelineTextSchema,
+  project: PipelineTextSchema,
+  user_id: PipelineTextSchema,
+  status: z.enum(['PENDING', 'RUNNING', 'PAUSED', 'ABORTED', 'COMPLETED', 'FAILED']),
+  current_step: PipelineTextSchema,
+  iteration: AnalyticsCountSchema,
+  eval_revisions: AnalyticsCountSchema.optional(),
+  started_at: PipelineTimestampSchema,
+  updated_at: PipelineTimestampSchema,
+  spec: PipelineSpecSchema,
+  error: z.string().nullable().optional(),
+  last_heartbeat: PipelineTimestampSchema.nullable().optional(),
+  contract_payload: z.object({
+    criteria: z.array(z.object({ id: z.string(), description: z.string() }).passthrough()),
+  }).passthrough().nullable().optional(),
+  notes: z.string().nullable().optional(),
+}).passthrough();
+export const FactoryPipelinesResponseSchema = z.object({
+  status: z.literal('success'),
+  pipelines: z.array(FactoryPipelineSchema).max(100)
+    .refine(rows => new Set(rows.map(row => row.id)).size === rows.length),
+});
+
 // ─── knowledge_search ────────────────────────────────────────────
 
 export const KnowledgeSearchRequestSchema = z.object({
