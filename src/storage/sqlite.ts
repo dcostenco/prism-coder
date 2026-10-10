@@ -2075,6 +2075,7 @@ export class SqliteStorage implements StorageBackend {
         FROM session_ledger
         WHERE user_id = ?
           AND archived_at IS NULL
+          AND deleted_at IS NULL
           AND embedding IS NULL
       `,
       args: [userId],  // bind user_id to the ? placeholder
@@ -2138,11 +2139,13 @@ export class SqliteStorage implements StorageBackend {
         FROM session_ledger r
         LEFT JOIN session_ledger a
           ON a.archived_at IS NOT NULL
+          AND a.deleted_at IS NULL
           AND a.project = r.project
           AND a.user_id = r.user_id
         WHERE r.user_id = ?
           AND r.is_rollup = 1
           AND r.archived_at IS NULL
+          AND r.deleted_at IS NULL
         GROUP BY r.id
         HAVING COUNT(a.id) = 0
       `,
@@ -2157,12 +2160,12 @@ export class SqliteStorage implements StorageBackend {
       sql: `
         SELECT
           (SELECT COUNT(*) FROM session_ledger
-            WHERE user_id = ? AND archived_at IS NULL) as active,
+            WHERE user_id = ? AND archived_at IS NULL AND deleted_at IS NULL) as active,
           (SELECT COUNT(*) FROM session_handoffs
             WHERE user_id = ?) as handoffs,
           (SELECT COUNT(*) FROM session_ledger
             WHERE user_id = ? AND is_rollup = 1
-            AND archived_at IS NULL) as rollups
+            AND archived_at IS NULL AND deleted_at IS NULL) as rollups
       `,
       args: [userId, userId, userId],  // bind user_id 3x (one per subquery)
     });
@@ -2488,7 +2491,7 @@ export class SqliteStorage implements StorageBackend {
               COUNT(*) AS total_entries,
               SUM(CASE WHEN is_rollup = 1 THEN 1 ELSE 0 END) AS total_rollups,
               -- rollup_count tracks how many raw entries each rollup replaced,
-              -- so we can show "X entries saved by compaction" in the dashboard.
+              -- so the dashboard reports how many originals were consolidated.
               SUM(CASE WHEN is_rollup = 1 THEN COALESCE(rollup_count, 0) ELSE 0 END) AS rollup_savings,
               COALESCE(AVG(LENGTH(summary)), 0) AS avg_summary_length
             FROM session_ledger
@@ -2528,7 +2531,7 @@ export class SqliteStorage implements StorageBackend {
     const sessionsByDay: Array<{ date: string; count: number }> = [];
     for (let i = 13; i >= 0; i--) {
       const date = new Date();
-      date.setDate(date.getDate() - i);
+      date.setUTCDate(date.getUTCDate() - i);
       const dateStr = date.toISOString().slice(0, 10);
       sessionsByDay.push({ date: dateStr, count: sparkMap.get(dateStr) || 0 });
     }

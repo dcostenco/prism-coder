@@ -44,6 +44,12 @@ async function openProject(projectBody: Record<string, unknown>) {
 }
 
 describe("dashboard project history", () => {
+  it.each([true, 1, 'true'])('labels stored rollups as rollups instead of ordinary sessions (%j)', async isRollup => {
+    const doc = await openProject({ context: { project: 'prism-coder', last_summary: 'Fixture context' },
+      ledger: [{ id: 'rolled', summary: 'Consolidated memory', is_rollup: isRollup, created_at: '2026-10-09T12:00:00Z' },
+        { id: 'normal', summary: 'Ordinary activity', is_rollup: false, created_at: '2026-10-08T12:00:00Z' }], history: [] });
+    expect([...doc.querySelectorAll('#ledgerTimeline .badge')].map(badge => badge.textContent)).toEqual(['rollup', 'session']);
+  });
   it("presents a newer durable session as latest activity while preserving older handoff restore points", async () => {
     const doc = await openProject({
       context: {

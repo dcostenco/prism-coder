@@ -1,4 +1,5 @@
 import type { StorageBackend } from "../storage/interface.js";
+import { PRISM_USER_ID } from '../config.js';
 
 /** Paid clients have Portal credentials, not direct Supabase credentials. */
 export async function readDashboardLedger(
@@ -7,9 +8,11 @@ export async function readDashboardLedger(
   project: string,
   order: "created_at.asc" | "created_at.desc",
   limit: number,
+  userId: string = PRISM_USER_ID,
 ): Promise<unknown[]> {
   if (backend !== "synalux") {
-    return storage.getLedgerEntries({ project: `eq.${project}`, order, limit: String(limit) });
+    return storage.getLedgerEntries({ project: `eq.${project}`, user_id: `eq.${userId}`,
+      deleted_at: 'is.null', order, limit: String(limit) });
   }
   if (!storage.getDashboardLedger) throw new Error("Cloud dashboard ledger reader unavailable");
   return storage.getDashboardLedger(project, order, limit);

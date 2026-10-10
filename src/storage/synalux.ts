@@ -30,6 +30,7 @@
  *     - patchLedger       → POST /api/v1/prism/memory  action=save_embedding
  *     - getEntriesMissingEmbeddings → POST /api/v1/prism/memory  action=list_missing_embeddings
  *     - listProjects      → POST /api/v1/prism/memory  action=list_projects
+ *     - getAnalytics      → GET /api/v1/prism/analytics  view=project
  *     - exportLedger      → POST /api/v1/prism/memory  action=export_memory (paginated)
  *
  *   Methods still falling through to SupabaseStorage (Phase 3 Tier B+):
@@ -52,7 +53,7 @@ import { SupabaseStorage } from "./supabase.js";
 import { debugLog } from "../utils/logger.js";
 import { PRISM_SYNALUX_BASE_URL, PRISM_SYNALUX_API_KEY } from "../config.js";
 import { isSynaluxSignedOut } from "../utils/synaluxCredentialState.js";
-import { KnowledgeSearchRequestSchema, KnowledgeSearchResponseSchema } from "./portalContracts.js";
+import { KnowledgeSearchRequestSchema, KnowledgeSearchResponseSchema, ProjectAnalyticsResponseSchema } from "./portalContracts.js";
 import type {
   LedgerEntry,
   HandoffEntry,
@@ -64,6 +65,7 @@ import type {
   HistorySnapshot,
   HealthStats,
   MemoryLink,
+  AnalyticsData,
 } from "./interface.js";
 
 /**
@@ -877,6 +879,14 @@ export class SynaluxStorage extends SupabaseStorage {
   }
 
   // ─── Health Check ─────────────────────────────────────────────
+  async getAnalytics(project: string, _userId: string): Promise<AnalyticsData> {
+    const query = new URLSearchParams({ view: 'project', project });
+    const result = ProjectAnalyticsResponseSchema.safeParse(await this.portalGet('/api/v1/prism/analytics?' + query));
+    if (!result.success || result.data.project !== project) {
+      throw new Error('Project analytics unavailable');
+    }
+    return result.data.analytics;
+  }
   // Phase 3 Tier B: route health_check through portal. The portal
   // returns summary counts only (no per-entry duplicate scan), so
   // activeLedgerSummaries is returned empty — the hygiene handler
@@ -889,6 +899,11 @@ export class SynaluxStorage extends SupabaseStorage {
         project: "prism-mcp",
       });
       const inventory = result.inventory as Record<string, number> | undefined;
+      if (!inventory || !['ledger_entries', 'active_projects', 'ledger_missing_embeddings'].every(field =>
+        Number.isSafeInteger(inventory[field]) && inventory[field] >= 0)
+        || inventory.ledger_missing_embeddings > inventory.ledger_entries) {
+        throw new Error('Health inventory unavailable');
+      }
       const totalActiveEntries = typeof inventory?.ledger_entries === "number" ? inventory.ledger_entries : 0;
       const totalHandoffs = typeof inventory?.active_projects === "number" ? inventory.active_projects : 0;
       // Hardcoding 0 here certified a 100%-missing-embeddings outage as

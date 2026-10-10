@@ -17,6 +17,10 @@
  */
 
 import { debugLog } from "../utils/logger.js";
+const BACKFILL_SCOPE_MESSAGES = {
+  empty: '✅ No eligible entries with missing embeddings found in the requested scope.',
+  complete: 'All scanned entries now have embeddings for semantic search.',
+} as const;
 import { activeStorageBackend, getStorage } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getEmbeddingProvider } from "../utils/llm/factory.js";
@@ -131,6 +135,7 @@ export async function backfillEmbeddingsHandler(args: unknown) {
     const params: Record<string, string> = {
       "embedding": "is.null",
       "archived_at": "is.null",
+      "deleted_at": "is.null",
       user_id: `eq.${PRISM_USER_ID}`,
       order: "id.asc",
       limit: String(safeLimit),
@@ -149,7 +154,7 @@ export async function backfillEmbeddingsHandler(args: unknown) {
     return {
       content: [{
         type: "text",
-        text: "✅ No entries with missing embeddings found. All ledger entries have embeddings.",
+        text: BACKFILL_SCOPE_MESSAGES.empty,
       }],
       isError: false,
     };
@@ -228,7 +233,7 @@ export async function backfillEmbeddingsHandler(args: unknown) {
         `• Total scanned: ${entries.length}\n\n` +
         (failed > 0
           ? `⚠️ ${failed} entries could not be repaired. Check server logs for details.`
-          : `All entries now have embeddings for semantic search.`),
+          : BACKFILL_SCOPE_MESSAGES.complete),
     }],
     isError: false,
     _stats: { repaired, failed, last_id: (entries[entries.length - 1] as any)?.id },

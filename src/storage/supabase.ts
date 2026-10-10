@@ -44,6 +44,8 @@ import {
 } from "./interface.js";
 
 import { debugLog } from "../utils/logger.js";
+import { ProjectAnalyticsSchema } from './portalContracts.js';
+import { DASHBOARD_READ_MESSAGES } from "../dashboard/readMessages.js";
 import { PRISM_USER_ID, PRISM_STORAGE } from "../config.js";
 import { getSetting as cfgGet, setSetting as cfgSet, getAllSettings as cfgGetAll } from "./configStorage.js";
 import { runAutoMigrations } from "./supabaseMigrations.js";
@@ -553,6 +555,7 @@ export class SupabaseStorage implements StorageBackend {
       user_id: `eq.${userId}`,
       archived_at: "is.null",
       embedding: "is.null",
+      deleted_at: "is.null",
     });
     const missingEmbeddings = Array.isArray(missingData) ? missingData.length : 0;
 
@@ -560,6 +563,7 @@ export class SupabaseStorage implements StorageBackend {
       select: "id,project,summary",
       user_id: `eq.${userId}`,
       archived_at: "is.null",
+      deleted_at: "is.null",
     });
     const activeLedgerSummaries = (Array.isArray(summData) ? summData : []).map(
       (r: any) => ({
@@ -581,6 +585,7 @@ export class SupabaseStorage implements StorageBackend {
       select: "project",
       user_id: `eq.${userId}`,
       archived_at: "is.null",
+      deleted_at: "is.null",
     });
     const ledgerProjects = new Set(
       (Array.isArray(ledgerData) ? ledgerData : [])
@@ -595,11 +600,13 @@ export class SupabaseStorage implements StorageBackend {
       user_id: `eq.${userId}`,
       is_rollup: "eq.true",
       archived_at: "is.null",
+      deleted_at: "is.null",
     });
     const archivedData = await supabaseGet("session_ledger", {
       select: "project",
       user_id: `eq.${userId}`,
       "archived_at": "not.is.null",
+      deleted_at: "is.null",
     });
     const archivedProjects = new Set(
       (Array.isArray(archivedData) ? archivedData : [])
@@ -793,31 +800,32 @@ export class SupabaseStorage implements StorageBackend {
   // ─── v3.1: Memory Analytics ──────────────────────────────────
 
   async getAnalytics(project: string, userId: string): Promise<AnalyticsData> {
-    // Attempt to call a Supabase RPC. Falls back to zeroed struct if the RPC
-    // doesn't exist yet (avoids breaking users who haven't run the migration).
-    try {
-      const result = await supabaseRpc("get_project_analytics", {
-        p_project: project,
-        p_user_id: userId,
-      });
-      const data = Array.isArray(result) ? result[0] : result;
-      if (data) {
-        return {
-          totalEntries: data.total_entries || 0,
-          totalRollups: data.total_rollups || 0,
-          rollupSavings: data.rollup_savings || 0,
-          avgSummaryLength: data.avg_summary_length || 0,
-          sessionsByDay: data.sessions_by_day || [],
-        };
-      }
-    } catch {
-      debugLog("[SupabaseStorage] getAnalytics RPC unavailable — returning zeroed struct");
+    // An unavailable read must not look like a genuinely empty project.
+    const result = await supabaseRpc("get_project_analytics", {
+      p_project: project,
+      p_user_id: userId,
+    });
+    const data = Array.isArray(result) ? result[0] : result;
+    if (!data) {
+      throw new Error(DASHBOARD_READ_MESSAGES.analyticsUnavailable);
     }
-    // Graceful degradation: return zeroed struct so dashboard doesn't crash
-    return {
-      totalEntries: 0, totalRollups: 0, rollupSavings: 0,
-      avgSummaryLength: 0, sessionsByDay: [],
+    const analytics = {
+      totalEntries: data.total_entries, totalRollups: data.total_rollups,
+      rollupSavings: data.rollup_savings, avgSummaryLength: data.avg_summary_length,
+      sessionsByDay: data.sessions_by_day,
     };
+    if (analytics.totalEntries === 0 && analytics.totalRollups === 0 && analytics.rollupSavings === 0
+      && analytics.avgSummaryLength === 0 && Array.isArray(analytics.sessionsByDay) && analytics.sessionsByDay.length === 0) {
+      const now = new Date();
+      analytics.sessionsByDay = Array.from({ length: 14 }, (_, index) => {
+        const date = new Date(now);
+        date.setUTCDate(now.getUTCDate() - (13 - index));
+        return { date: date.toISOString().slice(0, 10), count: 0 };
+      });
+    }
+    const parsed = ProjectAnalyticsSchema.safeParse(analytics);
+    if (!parsed.success) throw new Error(DASHBOARD_READ_MESSAGES.analyticsUnavailable);
+    return parsed.data;
   }
 
   // ─── v3.1: TTL / Automated Data Retention ────────────────────
@@ -1811,4 +1819,3 @@ export class SupabaseStorage implements StorageBackend {
     });
   }
 }
-

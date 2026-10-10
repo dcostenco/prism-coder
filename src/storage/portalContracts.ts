@@ -18,6 +18,30 @@
  */
 
 import { z } from "zod";
+import { ANALYTICS_DATE_PATTERN } from "../dashboard/readMessages.js";
+
+const AnalyticsCountSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const UTC_DAY_MS = 24 * 60 * 60 * 1000;
+export const ProjectAnalyticsSchema = z.object({
+    totalEntries: AnalyticsCountSchema,
+    totalRollups: AnalyticsCountSchema,
+    rollupSavings: AnalyticsCountSchema,
+    avgSummaryLength: z.number().nonnegative().finite(),
+    sessionsByDay: z.array(z.object({
+      date: z.string().regex(ANALYTICS_DATE_PATTERN), count: AnalyticsCountSchema,
+    })).length(14),
+  }).refine(value => value.totalRollups <= value.totalEntries
+    && value.sessionsByDay.reduce((sum, day) => sum + day.count, 0) <= value.totalEntries - value.totalRollups
+    && value.sessionsByDay.every((day, index, days) => {
+      const time = Date.parse(day.date);
+      return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === day.date
+        && (index === 0 || time - Date.parse(days[index - 1].date) === UTC_DAY_MS);
+    }));
+export const ProjectAnalyticsResponseSchema = z.object({
+  status: z.literal('success'),
+  project: z.string().min(1).max(100),
+  analytics: ProjectAnalyticsSchema,
+});
 
 // ─── knowledge_search ────────────────────────────────────────────
 

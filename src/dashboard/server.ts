@@ -44,6 +44,7 @@ import { redactSettings } from "../tools/commonHelpers.js";
 import { handleGraphRoutes } from "./graphRouter.js";
 import { handleAccountRoutes } from "./accountRouter.js";
 import { createDashboardStorageAccessor } from "./storageAccessor.js";
+import { DASHBOARD_READ_MESSAGES } from "./readMessages.js";
 import { isDashboardSettingKeyAllowed, isDashboardSettingValueAllowed } from "./settingsPolicy.js";
 import { isTrustedRequest, isRebindGuardedPath } from "./hostGuard.js";
 import {
@@ -419,7 +420,7 @@ return false;}
               googleApiKey: {
                 type: "string",
                 title: "Google AI API Key",
-                description: "API key for Google AI Studio / Gemini (powers synthesis, embeddings, paper analysis). Get one at https://aistudio.google.com/apikey"
+                description: DASHBOARD_READ_MESSAGES.directGeminiKey,
               },
               storage: {
                 type: "string",
@@ -622,17 +623,18 @@ return false;}
           if (!s) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: "Storage initializing..." })); }
           const stats = await s.getHealthStats(PRISM_USER_ID);
           const report = runHealthCheck(stats);
-          res.writeHead(200, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify(report));
+          res.writeHead(stats.missingEmbeddings < 0 ? 503 : 200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          return res.end(JSON.stringify({ ...report, scope: 'account', backend: activeStorageBackend,
+            coverage: stats.missingEmbeddings < 0 ? 'unavailable' : activeStorageBackend === 'synalux' ? 'embedding_inventory' : 'backend_scan' }));
         } catch (err) {
           console.error("[Dashboard] Health check error:", err);
-          res.writeHead(200, { "Content-Type": "application/json" });
+          res.writeHead(503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
           return res.end(JSON.stringify({
             status: "unknown",
+            scope: 'account', backend: activeStorageBackend, coverage: 'unavailable',
             summary: "Health check unavailable",
             issues: [],
             counts: { errors: 0, warnings: 0, infos: 0 },
-            totals: { activeEntries: 0, handoffs: 0, rollups: 0 },
             timestamp: new Date().toISOString(),
           }));
         }
@@ -648,6 +650,10 @@ return false;}
           const stats = await s.getHealthStats(PRISM_USER_ID);
           const report = runHealthCheck(stats);
 
+          if (stats.missingEmbeddings < 0) {
+            res.writeHead(503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+            return res.end(JSON.stringify({ ok: false, error: DASHBOARD_READ_MESSAGES.scanUnavailable }));
+          }
           let repairedCount = 0;
           let failedCount = 0;
           let cleanupMessages: string[] = [];
@@ -842,11 +848,8 @@ return false;}
           return res.end(JSON.stringify(analytics));
         } catch (err) {
           console.error("[Dashboard] Analytics error:", err);
-          res.writeHead(200, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify({
-            totalEntries: 0, totalRollups: 0, rollupSavings: 0,
-            avgSummaryLength: 0, sessionsByDay: [],
-          }));
+          res.writeHead(503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          return res.end(JSON.stringify({ error: DASHBOARD_READ_MESSAGES.analyticsUnavailable }));
         }
       }
 

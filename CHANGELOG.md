@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.21 — 2026-10-09
+
+- Prism Dashboard now surfaces unavailable analytics and factory reads with a
+  retryable state instead of stale or misleading values.
+- Graph filtering resets rendered state and metrics together, and project
+  analytics are available through the authenticated Portal API with validated
+  14-day activity data.
+
 ## 20.21.20 — 2026-10-08
 
 ### A refused ledger save no longer silences the drift reminder

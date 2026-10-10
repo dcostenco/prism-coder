@@ -281,8 +281,8 @@ describe("Dashboard ledger backend contract", () => {
   it.each(["local", "supabase"])("preserves %s dashboard query semantics", async backend => {
     const rows = [{ id: "existing-row" }];
     const storage = { getDashboardLedger: vi.fn(), getLedgerEntries: vi.fn().mockResolvedValue(rows) };
-    expect(await readDashboardLedger(storage, backend, "checkpoint-project", "created_at.desc", 20)).toBe(rows);
-    expect(storage.getLedgerEntries).toHaveBeenCalledWith({ project: "eq.checkpoint-project", order: "created_at.desc", limit: "20" });
+    expect(await readDashboardLedger(storage, backend, "checkpoint-project", "created_at.desc", 20, "test-owner")).toBe(rows);
+    expect(storage.getLedgerEntries).toHaveBeenCalledWith({ project: "eq.checkpoint-project", user_id: "eq.test-owner", deleted_at: "is.null", order: "created_at.desc", limit: "20" });
     expect(storage.getDashboardLedger).not.toHaveBeenCalled();
   });
 });
