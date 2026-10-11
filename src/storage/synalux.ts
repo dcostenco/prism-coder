@@ -19,6 +19,9 @@
  *
  *   Methods migrated to portal:
  *     - saveLedger        → POST /api/v1/prism/memory  action=save_ledger
+ *     - adjustImportance  → POST /api/v1/prism/memory  action=adjust_importance
+ *     - getGraduatedInsights → POST /api/v1/prism/memory  action=graduated_insights
+ *     - decayImportance   → POST /api/v1/prism/memory  action=decay_importance
  *     - saveHandoff       → POST /api/v1/prism/memory  action=save_handoff
  *     - saveHistorySnapshot → POST /api/v1/prism/memory  action=save_history_snapshot
  *     - loadContext       → POST /api/v1/prism/memory  action=load_context
@@ -348,8 +351,69 @@ export class SynaluxStorage extends SupabaseStorage {
       role: entry.role,
       event_type: entry.event_type,
       confidence_score: entry.confidence_score,
+      importance: entry.importance,
     });
     return result.entry ?? result;
+  }
+
+  // Portal derives the owner and workspace from the authenticated account.
+  async adjustImportance(id: string, delta: number, _userId: string): Promise<void> {
+    if (delta !== 1 && delta !== -1) {
+      throw new Error("Importance vote delta must be 1 or -1");
+    }
+    const entryId = id.toLowerCase();
+    const result = await this.portalPost("/api/v1/prism/memory", {
+      action: "adjust_importance", id: entryId, delta,
+    });
+    const entry = result.entry as { id?: unknown; importance?: unknown } | undefined;
+    if (!entry || entry.id !== entryId || typeof entry.importance !== "number"
+      || !Number.isInteger(entry.importance) || entry.importance < 0) {
+      throw new Error("Importance vote contract drift: updated entry is required");
+    }
+  }
+
+  async getGraduatedInsights(project: string, _userId: string, minImportance = 7): Promise<LedgerEntry[]> {
+    const entries: LedgerEntry[] = [];
+    const seen = new Set<string>();
+    let offset = 0;
+    let total: number | undefined;
+    while (true) {
+      const result = await this.portalPost("/api/v1/prism/memory", {
+        action: "graduated_insights", project, min_importance: minImportance, offset,
+      });
+      const page = result.page as { total?: number; has_more?: boolean; next_offset?: number | null } | undefined;
+      if (!Array.isArray(result.insights) || !page || !Number.isSafeInteger(page.total)
+        || (page.total as number) < 0 || typeof page.has_more !== "boolean"
+        || (total !== undefined && total !== page.total)) {
+        throw new Error("Graduated insight contract drift or list changed; retry");
+      }
+      total = page.total;
+      for (const row of result.insights as LedgerEntry[]) {
+        if (!row || typeof row.id !== "string" || seen.has(row.id) || row.project !== project.trim()
+          || typeof row.summary !== "string" || !Number.isInteger(row.importance)
+          || (row.importance as number) < minImportance) {
+          throw new Error("Invalid graduated insight response");
+        }
+        seen.add(row.id); entries.push(row);
+      }
+      if (!page.has_more) {
+        if (entries.length !== total) throw new Error("Graduated insight read is incomplete");
+        return entries;
+      }
+      if (!Number.isSafeInteger(page.next_offset) || page.next_offset !== entries.length || entries.length <= offset) {
+        throw new Error("Graduated insight pagination did not advance");
+      }
+      offset = page.next_offset as number;
+    }
+  }
+
+  async decayImportance(project: string, _userId: string, decayDays: number): Promise<void> {
+    const result = await this.portalPost("/api/v1/prism/memory", {
+      action: "decay_importance", project, days: decayDays,
+    });
+    if (!Number.isSafeInteger(result.decayed) || (result.decayed as number) < 0) {
+      throw new Error("Importance decay contract drift: updated count is required");
+    }
   }
 
   // ─── Handoff ─────────────────────────────────────────────────

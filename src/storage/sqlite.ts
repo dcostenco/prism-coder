@@ -2604,7 +2604,8 @@ export class SqliteStorage implements StorageBackend {
               AND importance > 0
               AND event_type != 'session'
               AND created_at < datetime('now', '-30 days')
-              AND deleted_at IS NULL`,
+              AND deleted_at IS NULL
+              AND archived_at IS NULL`,
       args: [project, userId],
     });
     const decayed = decayResult.rowsAffected || 0;
@@ -2628,12 +2629,15 @@ export class SqliteStorage implements StorageBackend {
     delta: number,
     userId: string
   ): Promise<void> {
-    await this.db.execute({
+    const result = await this.db.execute({
       sql: `UPDATE session_ledger
             SET importance = MAX(0, importance + ?)
-            WHERE id = ? AND user_id = ?`,
+            WHERE id = ? AND user_id = ?
+              AND deleted_at IS NULL
+              AND archived_at IS NULL`,
       args: [delta, id, userId],
     });
+    if (result.rowsAffected !== 1) throw new Error('Memory entry not found');
     debugLog(`[SqliteStorage] Adjusted importance for ${id} by ${delta > 0 ? "+" : ""}${delta}`);
   }
 
@@ -2695,7 +2699,8 @@ export class SqliteStorage implements StorageBackend {
               AND event_type != 'session'
               AND created_at < datetime('now', '-' || ? || ' days')
               AND (last_accessed_at IS NULL OR last_accessed_at < datetime('now', '-' || ? || ' days'))
-              AND deleted_at IS NULL`,
+              AND deleted_at IS NULL
+              AND archived_at IS NULL`,
       args: [project, userId, decayDays, decayDays],
     });
     const decayed = result.rowsAffected || 0;

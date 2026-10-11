@@ -164,6 +164,15 @@ or by re-enabling after each run.
 <details>
 <summary>Release history (optional)</summary>
 
+## What's New in v20.21.24
+
+- Synalux cloud preserves initial importance and handles votes, graduated
+  insights, and stale-score decay through the authenticated Portal API.
+- Voting rejects inactive or inaccessible records; decay preserves archived
+  history. Existing scores remain unchanged.
+- Graph importance thresholds use stored scores. Automatic retrieval ranking
+  and access tracking do not automatically turn ordinary memories into high-score rules.
+
 ## What's New in v20.21.23
 
 - Factory routes suitable bounded implementation prompts and executes only the

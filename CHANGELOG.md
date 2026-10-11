@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.24 — 2026-10-11
+
+- Preserve supplied initial importance when saving through Synalux cloud, while
+  retaining the server's initial-score cap.
+- Route importance votes, graduated insights, and stale-score decay through the
+  authenticated Portal API with owner and workspace checks. Votes update scores
+  atomically; incomplete insight reads fail instead of producing partial rules.
+- Preserve archived memory during SQLite decay and reject votes on inactive,
+  missing, or other-owner records.
+- Keep historical scores unchanged. Graph thresholds select stored scores;
+  opening the dashboard does not promote every memory to importance five or seven.
+
 ## 20.21.23 — 2026-10-10
 
 - Enable Factory by default and route suitable bounded implementation requests
