@@ -5,6 +5,15 @@ on:
     branches: [main]
     paths:
       - 'README.md'
+      - 'docs/i18n/**'
+      - 'scripts/generate_i18n.py'
+      - '.github/workflows/update-i18n.yml'
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'docs/i18n/**'
+      - 'scripts/generate_i18n.py'
+      - '.github/workflows/update-i18n.yml'
   workflow_dispatch:
 
 permissions:
@@ -26,7 +35,19 @@ jobs:
 
       - name: Verify generated translations are current
         run: |
-          if ! git diff --exit-code -- docs/i18n/; then
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          import scripts.generate_i18n as generator
+          expected = {f"docs/i18n/README_{code}.md" for code in generator.LANGS}
+          tracked = set(subprocess.check_output(
+              ["git", "ls-files", "--", "docs/i18n/README_*.md"], text=True
+          ).splitlines())
+          if expected != tracked:
+              raise SystemExit("Generated README filenames do not match the tracked language set.")
+          PY
+          generated_changes=$(git status --porcelain --untracked-files=all -- docs/i18n/)
+          if [ -n "$generated_changes" ]; then
             echo "::error::Generated translations are stale. Run 'python3 scripts/generate_i18n.py' and commit docs/i18n/."
             exit 1
           fi
