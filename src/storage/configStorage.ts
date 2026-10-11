@@ -3,6 +3,7 @@ import { resolve, dirname } from "path";
 import { homedir } from "os";
 import { existsSync } from "fs";
 import { mkdirUsableSync } from "../utils/usableDirectory.js";
+import { createHash, randomUUID } from "node:crypto";
 
 const PROTO_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
@@ -103,6 +104,14 @@ export async function initConfigStorage() {
         PRIMARY KEY (conversation_hash, project_hash)
       )
     `);
+    await client.execute(`CREATE TABLE IF NOT EXISTS dark_factory_authority (
+      pipeline_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, project TEXT NOT NULL,
+      user_id TEXT NOT NULL, started_at TEXT NOT NULL, spec_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`);
+    await client.execute(`CREATE TABLE IF NOT EXISTS dark_factory_execution_leases (
+      pipeline_id TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at INTEGER NOT NULL, reclaimed INTEGER NOT NULL DEFAULT 0
+    )`);
 
     // Preload all rows into the cache so subsequent reads are zero-cost.
     const rs = await client.execute("SELECT key, value FROM system_settings");
@@ -436,6 +445,36 @@ export async function getAllSettings(): Promise<Record<string, string>> {
   return settings;
 }
 
+export interface FactoryAuthorityPipeline {
+  id: string; project: string; user_id: string; started_at: string; spec: unknown;
+}
+export const DEFAULT_FACTORY_LEASE_MS = 30_000;
+export const FACTORY_LEASE_RENEW_MS = 10_000;
+function authorityFingerprint(p: FactoryAuthorityPipeline): string {
+  const parsed = Date.parse(p.started_at);
+  if (!Number.isFinite(parsed)) throw new Error("Invalid Factory pipeline start time");
+  const normalized = { id: p.id, project: p.project, user_id: p.user_id, started_at: new Date(parsed).toISOString(), spec: p.spec };
+  return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+}
+export async function registerFactoryAuthority(p: FactoryAuthorityPipeline): Promise<string> {
+  await initConfigStorage(); const fingerprint = authorityFingerprint(p);
+  await getClient().execute({ sql: `INSERT INTO dark_factory_authority (pipeline_id,fingerprint,project,user_id,started_at,spec_json,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(pipeline_id) DO NOTHING`, args: [p.id, fingerprint, p.project, p.user_id, p.started_at, JSON.stringify(p.spec), Date.now()] });
+  const existing = await getClient().execute({ sql: `SELECT fingerprint FROM dark_factory_authority WHERE pipeline_id=?`, args: [p.id] });
+  if (existing.rows[0]?.fingerprint !== fingerprint) throw new Error("Factory authority fingerprint mismatch");
+  return fingerprint;
+}
+export async function isFactoryAuthorized(p: FactoryAuthorityPipeline): Promise<boolean> {
+  await initConfigStorage(); const rs = await getClient().execute({ sql: `SELECT fingerprint FROM dark_factory_authority WHERE pipeline_id=?`, args: [p.id] });
+  return rs.rows.length === 1 && rs.rows[0].fingerprint === authorityFingerprint(p);
+}
+export async function claimFactoryLease(p: FactoryAuthorityPipeline, leaseMs = DEFAULT_FACTORY_LEASE_MS): Promise<{ token: string; reclaimed: boolean; isHeld: () => Promise<boolean>; renew: () => Promise<boolean>; acknowledgeRecovery: () => Promise<void>; release: () => Promise<void> } | null> {
+  await initConfigStorage(); const token = randomUUID(); const now = Date.now(); const expires = now + leaseMs; const client = getClient();
+  const result = await client.execute({ sql: `INSERT INTO dark_factory_execution_leases (pipeline_id,token,expires_at,reclaimed) SELECT ?,?,?,0 FROM dark_factory_authority WHERE pipeline_id=? AND fingerprint=? ON CONFLICT(pipeline_id) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at,reclaimed=CASE WHEN dark_factory_execution_leases.reclaimed=1 OR (dark_factory_execution_leases.token <> '' AND dark_factory_execution_leases.expires_at <= ?) THEN 1 ELSE 0 END WHERE dark_factory_execution_leases.expires_at <= ? RETURNING reclaimed`, args: [p.id, token, expires, p.id, authorityFingerprint(p), now, now] });
+  if (!result.rows.length) return null;
+  const reclaimed = Number(result.rows[0].reclaimed) === 1;
+  return { token, reclaimed, isHeld: async () => { const heldNow = Date.now(); const held = await client.execute({ sql: `SELECT 1 FROM dark_factory_execution_leases WHERE pipeline_id=? AND token=? AND expires_at>? AND EXISTS (SELECT 1 FROM dark_factory_authority WHERE pipeline_id=? AND fingerprint=?)`, args: [p.id, token, heldNow, p.id, authorityFingerprint(p)] }); return held.rows.length === 1; }, renew: async () => { const renewNow = Date.now(); const renewed = await client.execute({ sql: `UPDATE dark_factory_execution_leases SET expires_at=? WHERE pipeline_id=? AND token=? AND expires_at>? AND EXISTS (SELECT 1 FROM dark_factory_authority WHERE pipeline_id=? AND fingerprint=?)`, args: [renewNow + leaseMs, p.id, token, renewNow, p.id, authorityFingerprint(p)] }); return renewed.rowsAffected === 1; }, acknowledgeRecovery: async () => { await client.execute({sql:`UPDATE dark_factory_execution_leases SET reclaimed=0 WHERE pipeline_id=? AND token=?`,args:[p.id,token]}); }, release: async () => { await client.execute({ sql: `UPDATE dark_factory_execution_leases SET expires_at=0,token='' WHERE pipeline_id=? AND token=?`, args: [p.id, token] }); } };
+}
+
 /**
  * Closes the config SQLite client to release the file handle on prism-config.db.
  * Called by the lifecycle module during graceful shutdown.
@@ -446,6 +485,10 @@ export function closeConfigStorage() {
       configClient.close();
     } catch (e) {
       console.error(`[ConfigStorage] Error closing db:`, e);
+    } finally {
+      configClient = null;
+      initialized = false;
+      settingsCache = null;
     }
   }
 }

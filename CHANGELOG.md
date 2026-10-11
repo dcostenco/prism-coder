@@ -13,6 +13,8 @@ All notable changes to this project will be documented in this file.
   through authenticated Portal APIs with ownership and concurrency checks.
 - Serialize storage initialization so the first paid prompt awaits readiness;
   retain initialization through reconciliation and clean up failed candidates.
+- Require local execution authority for remote queue jobs and renewable leases
+  across MCP instances; preserve foreign jobs and prevent lost-owner replay.
 - Preserve verification rubric identity, minimum pass rates, and run provenance.
 - Bound structured model output to 4096 tokens and reject unsafe HTTP targets.
 - Add Docker and native-host E2E samples, clinical routing exclusions, and a

@@ -19,7 +19,8 @@
  */
 
 import { getStorage } from '../storage/index.js';
-import type { PipelineState, PipelineStatus } from '../storage/interface.js';
+import { SqliteStorage } from '../storage/sqlite.js';
+import type { PipelineState, PipelineStatus, StorageBackend } from '../storage/interface.js';
 import type { PipelineSpec, DarkFactoryStep, IterationResult, ExecutionStepResult, ActionPayload, ContractPayload, EvaluationPayload } from './schema.js';
 import { VALID_ACTION_TYPES } from './schema.js';
 import { SafetyController } from './safetyController.js';
@@ -34,6 +35,21 @@ import { Gatekeeper } from '../verification/gatekeeper.js';
 import { VerificationRunner } from '../verification/runner.js';
 import { computeRubricHash, type ValidationResult, type VerificationConfig, type VerificationHarness } from '../verification/schema.js';
 import { VerificationGateError } from '../errors.js';
+import { registerPipelineAuthority, isPipelineAuthorized, claimPipelineLease, FACTORY_LEASE_RENEW_MS } from './executionAuthority.js';
+
+type ExecutionLease = NonNullable<Awaited<ReturnType<typeof claimPipelineLease>>>;
+const LEASED_STORAGE_WRITES = new Set(['savePipeline', 'saveVerificationHarness', 'saveVerificationRun']);
+
+async function locallyAuthorized(pipeline: PipelineState, backend: StorageBackend): Promise<boolean> {
+  if (await isPipelineAuthorized(pipeline)) return true;
+  // Existing local SQLite queues already belong to this machine. Remote
+  // rows require a receipt created by the local start handler.
+  if (backend instanceof SqliteStorage && pipeline.status === 'PENDING') {
+    await registerPipelineAuthority(pipeline);
+    return true;
+  }
+  return false;
+}
 
 /** Interval handle for graceful shutdown */
 let runnerInterval: ReturnType<typeof setInterval> | null = null;
@@ -58,21 +74,31 @@ async function recoverStalePipelines(): Promise<void> {
       return;
     }
 
-    debugLog(`[DarkFactory] Found ${runningPipelines.length} stale RUNNING pipeline(s) — marking as FAILED.`);
+    debugLog(`[DarkFactory] Checking ${runningPipelines.length} RUNNING pipeline(s) for locally authorized recovery.`);
 
     for (const pipeline of runningPipelines) {
+      if (!(await locallyAuthorized(pipeline, storage))) continue;
+      const lease = await claimPipelineLease(pipeline);
+      if (!lease) continue;
       try {
+        const live = await storage.getPipeline(pipeline.id, pipeline.user_id);
+        if (!live || live.status !== 'RUNNING' || !(await isPipelineAuthorized(live))) continue;
+        if (!lease.reclaimed && !SafetyController.isHeartbeatLapsed(live)) continue;
+        if (!(await lease.isHeld())) continue;
         await storage.savePipeline({
-          ...pipeline,
+          ...live,
           status: 'FAILED',
           error: 'Unexpected Server Termination: pipeline was RUNNING when server restarted.',
           current_step: pipeline.current_step,
         });
+        await lease.acknowledgeRecovery();
         debugLog(`[DarkFactory] Pipeline ${pipeline.id} marked FAILED (was RUNNING on restart).`);
       } catch (err) {
         // Status guard may fire if pipeline was already ABORTED/COMPLETED
         // by a concurrent process — safe to ignore.
         console.error(`[DarkFactory] Failed to recover pipeline ${pipeline.id}: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        await lease.release();
       }
     }
   } catch (err) {
@@ -87,8 +113,9 @@ async function recoverStalePipelines(): Promise<void> {
  * Called periodically during LLM execution to prove liveness.
  * This is intentionally cheap — just a timestamp update.
  */
-async function pulseHeartbeat(pipelineId: string, userId: string): Promise<void> {
+async function pulseHeartbeat(pipelineId: string, userId: string, lease: ExecutionLease): Promise<void> {
   try {
+    if (!(await lease.isHeld())) return;
     const storage = await getStorage();
     const pipeline = await storage.getPipeline(pipelineId, userId);
     if (!pipeline || pipeline.status !== 'RUNNING') return;
@@ -106,9 +133,9 @@ async function pulseHeartbeat(pipelineId: string, userId: string): Promise<void>
  * Creates a heartbeat interval that pulses every 15 seconds during execution.
  * Returns a cleanup function to stop the interval.
  */
-function startHeartbeatInterval(pipelineId: string, userId: string): () => void {
+function startHeartbeatInterval(pipelineId: string, userId: string, lease: ExecutionLease): () => void {
   const interval = setInterval(() => {
-    pulseHeartbeat(pipelineId, userId).catch(() => {});
+    pulseHeartbeat(pipelineId, userId, lease).catch(() => {});
   }, 15_000);
 
   return () => clearInterval(interval);
@@ -128,16 +155,24 @@ async function sweepZombies(): Promise<void> {
 
     for (const pipeline of running) {
       if (SafetyController.isHeartbeatLapsed(pipeline)) {
+        if (!(await locallyAuthorized(pipeline, storage))) continue;
+        const lease = await claimPipelineLease(pipeline);
+        if (!lease) continue;
         debugLog(`[DarkFactory] Zombie detected: pipeline ${pipeline.id} heartbeat lapsed.`);
 
         try {
+          const live = await storage.getPipeline(pipeline.id, pipeline.user_id);
+          if (!live || live.status !== 'RUNNING' || !SafetyController.isHeartbeatLapsed(live) || !(await lease.isHeld())) continue;
           await storage.savePipeline({
-            ...pipeline,
+            ...live,
             status: 'FAILED',
             error: `Zombie pipeline: no heartbeat for ${SafetyController.HEARTBEAT_TIMEOUT_MS / 1000}s.`,
           });
+          await lease.acknowledgeRecovery();
         } catch {
           // Status guard may fire — pipeline was already terminated
+        } finally {
+          await lease.release();
         }
 
         // Emit failure experience event
@@ -359,7 +394,8 @@ export function parseEvaluationOutput(raw: string): { parsed: EvaluationPayload 
  */
 async function executeStep(
   pipeline: PipelineState,
-  spec: PipelineSpec
+  spec: PipelineSpec,
+  lease: ExecutionLease
 ): Promise<IterationResult & { scopeViolation?: string }> {
   const stepStart = new Date().toISOString();
   const step = pipeline.current_step as DarkFactoryStep;
@@ -367,7 +403,7 @@ async function executeStep(
   debugLog(`[DarkFactory] Executing step=${step} iter=${pipeline.iteration} pipeline=${pipeline.id}`);
 
   // Start heartbeat pulse during LLM execution
-  const stopHeartbeat = startHeartbeatInterval(pipeline.id, pipeline.user_id);
+  const stopHeartbeat = startHeartbeatInterval(pipeline.id, pipeline.user_id, lease);
 
   try {
     // All steps use the Claw invocation wrapper which applies:
@@ -506,6 +542,7 @@ async function executeStep(
     let observations: string[];
     try {
       observations = await executeActions(parsed.actions, spec, async () => {
+        if (!(await lease.isHeld())) return false;
         const live = await (await getStorage()).getPipeline(pipeline.id, pipeline.user_id);
         return live?.status === 'RUNNING' && live.current_step === pipeline.current_step;
       });
@@ -542,35 +579,60 @@ async function runnerTick(): Promise<void> {
   }
 
   tickInProgress = true;
+  let lease: ExecutionLease | null = null;
+  let renewalInterval: ReturnType<typeof setInterval> | undefined;
 
   try {
     // Phase 1: Zombie sweep (cheap — just DB reads)
     await sweepZombies();
 
     // Phase 2: Promote PENDING → RUNNING, then find a RUNNING pipeline to advance
-    const storage = await getStorage();
-
-    // Pick up PENDING pipelines and promote to RUNNING (queue → active)
-    const pending = await storage.listPipelines(undefined, 'PENDING', PRISM_USER_ID);
-    if (pending.length > 0) {
-      // Promote oldest PENDING pipeline (FIFO)
-      const toPromote = pending.sort(
-        (a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()
-      )[0];
-      debugLog(`[DarkFactory] Promoting PENDING pipeline ${toPromote.id} → RUNNING`);
-      await storage.savePipeline({ ...toPromote, status: 'RUNNING' });
+    const backend = await getStorage();
+    const candidates = [
+      ...await backend.listPipelines(undefined, 'PENDING', PRISM_USER_ID),
+      ...await backend.listPipelines(undefined, 'RUNNING', PRISM_USER_ID),
+    ].sort((a,b) => Date.parse(a.updated_at) - Date.parse(b.updated_at));
+    let selected: PipelineState | undefined;
+    for (const candidate of candidates) {
+      if (!(await locallyAuthorized(candidate, backend))) continue;
+      lease = await claimPipelineLease(candidate);
+      if (lease) { selected = candidate; break; }
     }
-
-    const running = await storage.listPipelines(undefined, 'RUNNING', PRISM_USER_ID);
-
-    if (running.length === 0) {
-      return; // Nothing to do
+    if (!selected || !lease) return;
+    const heldLease = lease;
+    renewalInterval = setInterval(() => { void heldLease.renew().catch(error => {
+      console.error(`[DarkFactory] Execution lease renewal failed: ${error instanceof Error ? error.message : String(error)}`);
+    }); }, FACTORY_LEASE_RENEW_MS);
+    renewalInterval.unref();
+    const pipeline = await backend.getPipeline(selected.id, selected.user_id);
+    if (!pipeline || !(await isPipelineAuthorized(pipeline))) return;
+    if (!['PENDING','RUNNING'].includes(pipeline.status)) {
+      if (['FAILED','ABORTED','COMPLETED'].includes(pipeline.status)) await heldLease.acknowledgeRecovery();
+      return;
     }
-
-    // Pick the oldest updated pipeline (FIFO fairness)
-    const pipeline = running.sort(
-      (a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()
-    )[0];
+    // Every persisted lifecycle/verification write must retain this process's
+    // authority. File actions and the test command check the same lease below.
+    const storage = new Proxy(backend, { get(target, key) {
+      const value = Reflect.get(target, key);
+      if (typeof value !== 'function') return value;
+      if (!LEASED_STORAGE_WRITES.has(String(key))) return value.bind(target);
+      return async (...args: unknown[]) => {
+        if (!(await heldLease.isHeld()) || !(await isPipelineAuthorized(pipeline))) throw new Error('Factory execution lease lost');
+        return Reflect.apply(value, target, args);
+      };
+    } });
+    if (heldLease.reclaimed && pipeline.status === 'RUNNING') {
+      await storage.savePipeline({ ...pipeline, status:'FAILED', error:'Execution owner was lost; refusing to replay an unfinished step.' });
+      await heldLease.acknowledgeRecovery();
+      return;
+    }
+    if (pipeline.status === 'PENDING') {
+      await storage.savePipeline({ ...pipeline, status:'RUNNING' });
+      const promoted = await backend.getPipeline(pipeline.id, pipeline.user_id);
+      if (!promoted || promoted.status !== 'RUNNING') return;
+      Object.assign(pipeline, promoted);
+      if (heldLease.reclaimed) await heldLease.acknowledgeRecovery();
+    }
 
     // Poison Pill Guard: Parse spec with localized error handling.
     // If a pipeline has corrupt/invalid JSON in its spec column,
@@ -665,7 +727,8 @@ async function runnerTick(): Promise<void> {
     }
 
     // Execute the current step
-    const result = await executeStep(pipeline, spec);
+    const result = await executeStep(pipeline, spec, heldLease);
+    if (!(await heldLease.isHeld())) return;
 
     // Heartbeat pulses persist their own optimistic version while the model runs.
     // Re-read after stopping the pulse and rebase only onto the same live step;
@@ -707,6 +770,7 @@ async function runnerTick(): Promise<void> {
         result.notes = 'Deterministic verification requires spec.testCommand.';
       } else try {
         const verificationNotes = await executeActions([{ type: 'RUN_TEST', targetPath: '.', command: spec.testCommand }], spec, async () => {
+          if (!(await heldLease.isHeld())) return false;
           const live = await (await getStorage()).getPipeline(pipeline.id, pipeline.user_id);
           return live?.status === 'RUNNING' && live.current_step === pipeline.current_step;
         });
@@ -940,6 +1004,10 @@ async function runnerTick(): Promise<void> {
     // Top-level catch: NEVER let runner errors crash the MCP server
     console.error(`[DarkFactory] Runner tick error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   } finally {
+    if (renewalInterval) clearInterval(renewalInterval);
+    if (lease) await lease.release().catch(error => {
+      console.error(`[DarkFactory] Execution lease release failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
     tickInProgress = false;
   }
 }

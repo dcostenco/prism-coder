@@ -11,6 +11,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import { resolve } from 'node:path';
 import { getStorage } from '../storage/index.js';
 import { PRISM_USER_ID } from '../config.js';
 import { getSettingSync } from '../storage/configStorage.js';
@@ -25,6 +26,7 @@ import {
   isAbortPipelineArgs,
 } from './pipelineDefinitions.js';
 import { debugLog } from '../utils/logger.js';
+import { registerPipelineAuthority } from '../darkfactory/executionAuthority.js';
 
 // ─── Start Pipeline Handler ─────────────────────────────────
 
@@ -52,6 +54,7 @@ export async function sessionStartPipelineHandler(args: unknown) {
     }
   }
 
+  resolvedWorkDir = resolve(resolvedWorkDir);
   const pipelineId = randomUUID();
   const now = new Date().toISOString();
 
@@ -82,6 +85,16 @@ export async function sessionStartPipelineHandler(args: unknown) {
   try {
     const storage = await getStorage();
     await storage.savePipeline(pipelineState);
+    try {
+      await registerPipelineAuthority(pipelineState);
+    } catch (error) {
+      try {
+        await storage.savePipeline({ ...pipelineState, status: 'ABORTED', error: 'Local execution authorization could not be persisted.' });
+      } catch (abortError) {
+        throw new Error(`Local execution authorization failed; cancelling the queued pipeline also failed: ${abortError instanceof Error ? abortError.message : String(abortError)}`, { cause: error });
+      }
+      throw error;
+    }
 
     debugLog(`[PipelineHandler] Pipeline ${pipelineId} created for project=${project} objective="${objective.slice(0, 80)}"`);
 

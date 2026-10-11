@@ -571,6 +571,16 @@ Pipeline writes use owner-scoped optimistic concurrency. Frozen verification
 rubrics are immutable and content-addressed; each run retains its own project
 and conversation even when it reuses a rubric from another context.
 
+Starting a pipeline also records immutable execution authority in the local
+private config database. Remote queue rows without that matching receipt remain
+untouched, including during startup recovery and zombie checks. Runners sharing
+that config database compete for a renewable execution lease; only its current
+holder can apply actions, verify, or persist progress. Expired owners cannot
+silently replay an unfinished running step. Receipts survive MCP restarts;
+configuring a different profile does not transfer execution authority. Existing
+pending local SQLite jobs can acquire authority from their trusted local queue.
+This needs no additional user setting or Portal migration.
+
 The runner reads context, plans, contracts, applies validated file actions,
 evaluates, runs the repository verification command, and finalizes or reports
 failure. Test commands execute without a shell. The Docker test harness uses a
