@@ -15,6 +15,9 @@ All notable changes to this project will be documented in this file.
   retain initialization through reconciliation and clean up failed candidates.
 - Require local execution authority for remote queue jobs and renewable leases
   across MCP instances; preserve foreign jobs and prevent lost-owner replay.
+- Stage new files before publishing without overwrite; cancel test/patch
+  commands when liveness is lost or the runner stops, including inherited
+  process cleanup.
 - Preserve verification rubric identity, minimum pass rates, and run provenance.
 - Bound structured model output to 4096 tokens and reject unsafe HTTP targets.
 - Add Docker and native-host E2E samples, clinical routing exclusions, and a

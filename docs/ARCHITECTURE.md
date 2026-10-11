@@ -574,16 +574,33 @@ and conversation even when it reuses a rubric from another context.
 Starting a pipeline also records immutable execution authority in the local
 private config database. Remote queue rows without that matching receipt remain
 untouched, including during startup recovery and zombie checks. Runners sharing
-that config database compete for a renewable execution lease; only its current
-holder can apply actions, verify, or persist progress. Expired owners cannot
+that config database compete for a renewable execution lease. Actions check
+authority at mutation boundaries, and persistence checks the current lease.
+Expired owners cannot
 silently replay an unfinished running step. Receipts survive MCP restarts;
 configuring a different profile does not transfer execution authority. Existing
 pending local SQLite jobs can acquire authority from their trusted local queue.
 This needs no additional user setting or Portal migration.
+New files are written in a private staging directory on the target filesystem
+and published as complete inodes without overwriting an existing target.
+Cancellation removes staging files instead of deleting a workspace target.
+Existing files retain descriptor-based writes and the post-open authority check.
+An authorized file operation already in flight may complete after a lease or
+status change. These checks do not provide an atomic transaction across the
+lease database and filesystem; the next action must pass a new check.
 
 The runner reads context, plans, contracts, applies validated file actions,
 evaluates, runs the repository verification command, and finalizes or reports
-failure. Test commands execute without a shell. The Docker test harness uses a
+failure. Test and patch commands execute without a shell and monitor liveness
+during execution. A failed check or runner shutdown cancels the command; the
+monitor checks local leases every 100 ms and remote status every second, with a
+5-second deadline for an unavailable check.
+On macOS/Linux, cancellation and parent exit reap the inherited process group,
+including children that ignore SIGTERM. Windows uses process-tree termination;
+its descendant cleanup has not been runtime-verified. Cancellation is bounded
+by those checks and applies to trusted repository commands; arbitrary test code
+does not run in an OS sandbox.
+The Docker test harness uses a
 non-root container, restricted networking, and immutable independent tests.
 Its SDK host demonstrates the routing-to-execution contract. Generated native
 instructions for Codex, Claude, and Gemini consume that recommendation before

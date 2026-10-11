@@ -542,10 +542,10 @@ async function executeStep(
     let observations: string[];
     try {
       observations = await executeActions(parsed.actions, spec, async () => {
-        if (!(await lease.isHeld())) return false;
+        if (!runnerInterval || !(await lease.isHeld())) return false;
         const live = await (await getStorage()).getPipeline(pipeline.id, pipeline.user_id);
-        return live?.status === 'RUNNING' && live.current_step === pipeline.current_step;
-      });
+        return !!runnerInterval && await lease.isHeld() && live?.status === 'RUNNING' && live.current_step === pipeline.current_step;
+      }, async () => !!runnerInterval && await lease.isHeld());
     } catch (error) {
       return { iteration: pipeline.iteration, step, started_at: stepStart, completed_at: new Date().toISOString(), success: false, notes: String(error instanceof Error ? error.message : error) };
     }
@@ -770,10 +770,10 @@ async function runnerTick(): Promise<void> {
         result.notes = 'Deterministic verification requires spec.testCommand.';
       } else try {
         const verificationNotes = await executeActions([{ type: 'RUN_TEST', targetPath: '.', command: spec.testCommand }], spec, async () => {
-          if (!(await heldLease.isHeld())) return false;
+          if (!runnerInterval || !(await heldLease.isHeld())) return false;
           const live = await (await getStorage()).getPipeline(pipeline.id, pipeline.user_id);
-          return live?.status === 'RUNNING' && live.current_step === pipeline.current_step;
-        });
+          return !!runnerInterval && await heldLease.isHeld() && live?.status === 'RUNNING' && live.current_step === pipeline.current_step;
+        }, async () => !!runnerInterval && await heldLease.isHeld());
         result.notes = `${result.notes || ''}\n${verificationNotes.join('\n')}`;
         result.success = true;
       } catch (error) {
