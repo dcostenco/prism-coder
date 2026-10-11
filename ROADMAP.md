@@ -2,6 +2,16 @@
 
 ## Current Phase: Agent Infrastructure Resilience
 
+- [ ] **v20.21.23** - Factory release
+    - [x] Default-enabled, prompt-triggered bounded implementation routing
+    - [x] Restart-aware dashboard toggle and environment override
+    - [x] Contained file actions with independent verification
+    - [x] Enterprise Portal pipeline and verification persistence
+    - [x] Shared storage startup waits for initialization and reconciliation
+    - [x] Docker, native-host, and paid Enterprise E2E evidence
+    - [x] Fourteen clinical routing cases stay with the host and create no pipelines
+    - [ ] Publish the reviewed client after its release checks pass
+
 - [x] **v11.0.1** - GRPO Alignment (Phase 1)
     - [x] Zero-Search $O(1)$ Retrieval Integration
     - [x] Group Relative Policy Optimization (500 iters)

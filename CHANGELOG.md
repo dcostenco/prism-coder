@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.23 — 2026-10-10
+
+- Enable Factory by default and route suitable bounded implementation requests
+  through native host instructions; BCBA prompts remain with the host.
+- Add a restart-aware dashboard toggle and an environment override.
+- Execute contained file actions from an explicit write list and run the caller's
+  verification command independently, preserving immutable test fixtures.
+- Route paid pipeline creation, lifecycle updates, and verification persistence
+  through authenticated Portal APIs with ownership and concurrency checks.
+- Serialize storage initialization so the first paid prompt awaits readiness;
+  retain initialization through reconciliation and clean up failed candidates.
+- Preserve verification rubric identity, minimum pass rates, and run provenance.
+- Bound structured model output to 4096 tokens and reject unsafe HTTP targets.
+- Add Docker and native-host E2E samples, clinical routing exclusions, and a
+  fixed-destination local model proxy for test execution.
+
 ## 20.21.22 — 2026-10-10
 
 - Factory pipeline lists use the authenticated Portal API for cloud accounts,

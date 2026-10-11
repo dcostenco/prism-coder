@@ -56,13 +56,18 @@ const sqliteInstances: object[] = [];
 const supabaseInstances: object[] = [];
 const synaluxInstances: object[] = [];
 const synaluxCapturedKeys: Array<string | undefined> = [];
+let initializationGate: Promise<void> = Promise.resolve();
+let releaseInitialization = () => {};
+let initializationCalls = 0;
+let closeCalls = 0;
+const mockReconcileHandoffs = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock("../src/storage/sqlite.js", () => ({
   SqliteStorage: class {
     tag = "sqlite";
     constructor() { sqliteInstances.push(this); }
-    async initialize() {}
-    async close() {}
+    async initialize() { initializationCalls++; await initializationGate; }
+    async close() { closeCalls++; }
     getHandoffTimestamps() { return []; }
   },
 }));
@@ -71,8 +76,8 @@ vi.mock("../src/storage/supabase.js", () => ({
   SupabaseStorage: class {
     tag = "supabase";
     constructor() { supabaseInstances.push(this); }
-    async initialize() {}
-    async close() {}
+    async initialize() { initializationCalls++; await initializationGate; }
+    async close() { closeCalls++; }
   },
 }));
 
@@ -83,14 +88,14 @@ vi.mock("../src/storage/synalux.js", () => ({
       synaluxInstances.push(this);
       synaluxCapturedKeys.push(process.env.PRISM_SYNALUX_API_KEY);
     }
-    async initialize() {}
-    async close() {}
+    async initialize() { initializationCalls++; await initializationGate; }
+    async close() { closeCalls++; }
   },
 }));
 
 // Reconciliation does a dynamic import — stub so the test doesn't hit it.
 vi.mock("../src/storage/reconcile.js", () => ({
-  reconcileHandoffs: vi.fn(async () => {}),
+  reconcileHandoffs: mockReconcileHandoffs,
 }));
 
 // ─── Test helpers ───────────────────────────────────────────────
@@ -121,6 +126,12 @@ beforeEach(() => {
   supabaseInstances.length = 0;
   synaluxInstances.length = 0;
   synaluxCapturedKeys.length = 0;
+  initializationCalls = 0;
+  closeCalls = 0;
+  mockReconcileHandoffs.mockReset();
+  mockReconcileHandoffs.mockResolvedValue(undefined);
+  initializationGate = Promise.resolve();
+  releaseInitialization = () => {};
   mockGetEntitlements.mockReset();
   mockGetEntitlements.mockResolvedValue(entitlement("standard", true));
   mockGetSynaluxJwt.mockReset();
@@ -136,6 +147,85 @@ afterEach(() => {
 });
 
 describe("getStorage — synalux dashboard-config fallback", () => {
+  it.each(["local", "supabase", "synalux"])("single-flights %s initialization and publishes only the ready instance", async backend => {
+    process.env.PRISM_STORAGE = backend;
+    if (backend === "supabase") {
+      process.env.SUPABASE_URL = "https://storage.example";
+      process.env.SUPABASE_KEY = "test-credential";
+    }
+    if (backend === "synalux") {
+      process.env.PRISM_SYNALUX_BASE_URL = "https://portal.example";
+      process.env.PRISM_SYNALUX_API_KEY = testSynaluxKey("initialization");
+    }
+    initializationGate = new Promise<void>(resolve => { releaseInitialization = resolve; });
+    const mod = await import("../src/storage/index.js");
+    const first = mod.getStorage();
+    const second = mod.getStorage();
+    let firstSettled = false;
+    let secondSettled = false;
+    void first.then(() => { firstSettled = true; });
+    void second.then(() => { secondSettled = true; });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(firstSettled).toBe(false);
+    expect(secondSettled).toBe(false);
+    expect(initializationCalls).toBe(1);
+    const lateCaller = mod.getStorage();
+    let lateSettled = false;
+    void lateCaller.then(() => { lateSettled = true; });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(lateSettled).toBe(false);
+    releaseInitialization();
+    const [a, b, c] = await Promise.all([first, second, lateCaller]);
+    expect(a).toBe(b);
+    expect(a).toBe(c);
+    expect((a as { tag?: string }).tag).toBe(backend === "local" ? "sqlite" : backend);
+  });
+
+  it("keeps concurrent callers pending until newer cloud handoffs reconcile", async () => {
+    process.env.PRISM_STORAGE = "local";
+    process.env.SUPABASE_URL = "https://storage.example";
+    process.env.SUPABASE_KEY = "test-credential";
+    let finishReconciliation = () => {};
+    mockReconcileHandoffs.mockImplementationOnce(() => new Promise<void>(resolve => { finishReconciliation = resolve; }));
+    const mod = await import("../src/storage/index.js");
+    const first = mod.getStorage();
+    await vi.waitFor(() => expect(mockReconcileHandoffs).toHaveBeenCalledOnce());
+    const second = mod.getStorage();
+    let firstSettled = false;
+    let secondSettled = false;
+    void first.then(() => { firstSettled = true; });
+    void second.then(() => { secondSettled = true; });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(firstSettled).toBe(false);
+    expect(secondSettled).toBe(false);
+    finishReconciliation();
+    const [a,b] = await Promise.all([first,second]);
+    expect(a).toBe(b);
+    expect(initializationCalls).toBe(1);
+  });
+
+  it("does not cache an initialization failure and permits a fresh retry", async () => {
+    process.env.PRISM_STORAGE = "local";
+    const mod = await import("../src/storage/index.js");
+    // Replace the test backend's initialization gate with a rejecting one for
+    // the first call, then allow the next call to construct a fresh instance.
+    initializationGate = new Promise<void>((_, reject) => { releaseInitialization = () => reject(new Error("init failed")); });
+    const failed = Promise.allSettled([mod.getStorage(),mod.getStorage()]);
+    await new Promise(resolve => setTimeout(resolve,0));
+    releaseInitialization();
+    const failures = await failed;
+    expect(failures).toHaveLength(2);
+    for(const failure of failures) {
+      expect(failure.status).toBe("rejected");
+      if(failure.status === "rejected") expect(failure.reason.message).toBe("init failed");
+    }
+    expect(closeCalls).toBe(1);
+    initializationGate = Promise.resolve();
+    const recovered = await mod.getStorage();
+    expect((recovered as { tag?: string }).tag).toBe("sqlite");
+    expect(initializationCalls).toBe(2);
+  });
+
   it("auto-resolves to synalux when env vars are missing but dashboard config has them", async () => {
     process.env.PRISM_STORAGE = "auto";
     mockSettings.PRISM_SYNALUX_BASE_URL = "https://portal.synalux.example";

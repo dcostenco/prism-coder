@@ -48,6 +48,12 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
   Where a host offers hooks (Claude Code, Codex), `prism connect` adds two
   small ones on top: mid-session prompt routing, and a post-compaction
   re-injection of the protected-floor digest.
+- **Prompt-triggered Factory** — enabled by default for suitable bounded
+  implementation requests with explicit files, an allowed write list, and a
+  verification command. The host starts and monitors the recommended pipeline;
+  BCBA requests stay with the host. A dashboard toggle or
+  `PRISM_DARK_FACTORY_ENABLED=false` disables Factory after an MCP restart.
+  Try the [three-test filename fix](examples/factory-filename-fix/README.md).
 - **Safe escalation and observability** — inference outcomes are explicit,
   reserved text remains fail-closed (clinical images are processed locally,
   never sent to the cloud), and local/cloud usage is recorded for
@@ -157,6 +163,16 @@ or by re-enabling after each run.
 
 <details>
 <summary>Release history (optional)</summary>
+
+## What's New in v20.21.23
+
+- Factory routes suitable bounded implementation prompts and executes only the
+  allowed file actions, with independent verification and explicit lifecycle results.
+- Paid pipeline creation, updates, aborts, and verification records use the
+  authenticated Portal API. Startup waits for paid storage initialization before
+  reporting Factory readiness.
+- The default-enabled toggle distinguishes the saved setting from the active
+  MCP setting and shows when a restart is required.
 
 ## What's New in v20.21.22
 

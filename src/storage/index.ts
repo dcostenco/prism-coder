@@ -132,9 +132,21 @@ async function ensureSupabaseCredentials(): Promise<boolean> {
 }
 
 let storageInstance: StorageBackend | null = null;
+let storageInitialization: Promise<StorageBackend> | null = null;
 export let activeStorageBackend: string = "local";
 
 export async function getStorage(): Promise<StorageBackend> {
+  if (storageInitialization) return storageInitialization;
+  if (storageInstance) return storageInstance;
+  storageInitialization = initializeStorage();
+  try {
+    return await storageInitialization;
+  } finally {
+    storageInitialization = null;
+  }
+}
+
+async function initializeStorage(): Promise<StorageBackend> {
   if (storageInstance) return storageInstance;
 
   const envStorage = process.env.PRISM_STORAGE as "supabase" | "synalux" | "local" | "auto" | undefined;
@@ -217,19 +229,30 @@ export async function getStorage(): Promise<StorageBackend> {
   activeStorageBackend = requested;
   debugLog(`[Prism Storage] Initializing backend: ${activeStorageBackend}`);
 
+  let instance: StorageBackend;
   if (activeStorageBackend === "synalux") {
     const { SynaluxStorage } = await import("./synalux.js");
-    storageInstance = new SynaluxStorage();
+    instance = new SynaluxStorage();
   } else if (activeStorageBackend === "supabase") {
-    storageInstance = new SupabaseStorage();
+    instance = new SupabaseStorage();
   } else if (activeStorageBackend === "local") {
     const { SqliteStorage } = await import("./sqlite.js");
-    storageInstance = new SqliteStorage();
+    instance = new SqliteStorage();
   } else {
     throw new Error(`Unknown PRISM_STORAGE value: "${activeStorageBackend}".`);
   }
 
-  await storageInstance.initialize(activeStorageBackend === "local");
+  try {
+    await instance.initialize(activeStorageBackend === "local");
+  } catch (error) {
+    try { await instance.close(); } catch (cleanupError) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; storage cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 
   // ─── Cross-backend reconciliation (local + Supabase available) ─
   // v9.2.4: when running on local SQLite but Supabase credentials exist, pull
@@ -240,17 +263,19 @@ export async function getStorage(): Promise<StorageBackend> {
     try {
       const { reconcileHandoffs } = await import("./reconcile.js");
       const { SqliteStorage } = await import("./sqlite.js");
-      const sqliteInstance = storageInstance as InstanceType<typeof SqliteStorage>;
-      await reconcileHandoffs(storageInstance!, () => sqliteInstance.getHandoffTimestamps());
+      const sqliteInstance = instance as InstanceType<typeof SqliteStorage>;
+      await reconcileHandoffs(instance, () => sqliteInstance.getHandoffTimestamps());
     } catch (err) {
       debugLog(`[Prism Storage] Reconciliation skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  return storageInstance;
+  storageInstance = instance;
+  return instance;
 }
 
 export async function closeStorage(): Promise<void> {
+  if (storageInitialization) await storageInitialization.catch(() => {});
   if (!storageInstance) return;
   const closing = storageInstance;
   // Clear the slot in `finally`: if close() throws, the previous code left a
@@ -263,6 +288,7 @@ export async function closeStorage(): Promise<void> {
     await closing.close();
   } finally {
     storageInstance = null;
+    storageInitialization = null;
   }
 }
 
@@ -282,6 +308,7 @@ export async function closeStorage(): Promise<void> {
  */
 export function _setStorageForTesting(instance: StorageBackend | null): void {
   storageInstance = instance;
+  storageInitialization = null;
 }
 
 export type { StorageBackend } from "./interface.js";
