@@ -168,14 +168,13 @@ describe("SupabaseStorage ACT-R access log methods", () => {
     expect(map.get("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")?.[0]).toBeInstanceOf(Date);
   });
 
-  it("getAccessLog returns empty map on RPC failure", async () => {
+  it("getAccessLog surfaces RPC failure so automatic ranking reports relevance fallback", async () => {
     mockSupabaseRpc.mockRejectedValueOnce(new Error("rpc missing"));
 
     const { SupabaseStorage } = await import("../../src/storage/supabase.js");
     const storage = new SupabaseStorage();
 
-    const map = await storage.getAccessLog(["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"], 5);
-    expect(map.size).toBe(0);
+    await expect(storage.getAccessLog(["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"], 5)).rejects.toThrow("rpc missing");
   });
 
   it("pruneAccessLog returns numeric count from scalar RPC response", async () => {

@@ -16,6 +16,7 @@
 
 import { ANALYTICS_DATE_PATTERN, ANALYTICS_METRIC_IDS, DASHBOARD_READ_MESSAGES } from './readMessages.js';
 import { DARK_FACTORY_SETTINGS_UNAVAILABLE } from '../darkfactory/enablement.js';
+import { ACTR_SETTINGS_UNAVAILABLE, ACTR_UI } from '../utils/actrEnablement.js';
 
 export function renderDashboardLocalOpenHTML(): string {
     return `<!DOCTYPE html>
@@ -1304,6 +1305,15 @@ export function renderDashboardHTML(version: string): string {
         </div>
 
         <div class="setting-section">Boot Settings <span class="boot-badge">Restart Required</span></div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">${ACTR_UI.label}</div>
+            <div class="setting-desc">${ACTR_UI.description}</div>
+            <div id="actr-state" style="color:var(--text-muted);font-size:0.78rem;margin-top:0.25rem">${ACTR_UI.loading}</div>
+          </div>
+          <button class="toggle" id="toggle-actr" type="button" role="switch" aria-label="${ACTR_UI.label}" aria-checked="false" disabled onclick="toggleBootSetting('PRISM_ACTR_ENABLED', this)"></button>
+        </div>
 
         <div class="setting-row">
           <div>
@@ -4012,6 +4022,7 @@ function loadSettings() {
                 case 2:
                     data = _a.sent();
                     if (!data.darkFactory) throw new Error(DARK_FACTORY_SETTINGS_UNAVAILABLE_MESSAGE);
+                    loadActrSettingState(data.actr);
                     s = data.settings || {};
                     // Runtime toggles
                     if (s.auto_capture === 'true')
@@ -4072,6 +4083,8 @@ function loadSettings() {
                 case 3:
                     e_19 = _a.sent();
                     console.warn('Settings load failed:', e_19);
+                    document.getElementById('actr-state').textContent = ACTR_SETTINGS_UNAVAILABLE_MESSAGE;
+                    document.getElementById('toggle-actr').disabled = true;
                     document.getElementById('dark-factory-state').textContent = DARK_FACTORY_SETTINGS_UNAVAILABLE_MESSAGE;
                     document.getElementById('toggle-dark-factory').disabled = true;
                     document.getElementById('toggle-dark-factory').setAttribute('aria-disabled', 'true');
@@ -4125,11 +4138,30 @@ function toggleSetting(key, el) {
             el.classList.toggle('active'); // rollback on failure
     });
 }
+function loadActrSettingState(ar) {
+    var toggle = document.getElementById('toggle-actr');
+    if (!ar) {
+        toggle.disabled = true;
+        document.getElementById('actr-state').textContent = ACTR_SETTINGS_UNAVAILABLE_MESSAGE;
+        return;
+    }
+    var effective = ar.envOverride === null ? ar.saved : ar.envOverride;
+    toggle.disabled = ar.envOverride !== null;
+    toggle.setAttribute('aria-disabled', toggle.disabled ? 'true' : 'false');
+    toggle.classList.toggle('active', effective);
+    toggle.setAttribute('aria-checked', effective ? 'true' : 'false');
+    document.getElementById('actr-state').textContent = ar.envOverride === null
+        ? 'Saved: ' + (ar.saved ? 'on' : 'off') + ' · Active in this process: ' + (ar.active ? 'on' : 'off') + (ar.pendingRestart ? ' · restart required' : '')
+        : 'Environment override: ' + (ar.envOverride ? 'on' : 'off') + ' · saved preference: ' + (ar.saved ? 'on' : 'off');
+}
 function toggleBootSetting(key, el) {
+    if (el.disabled) return;
+    if (key === 'PRISM_ACTR_ENABLED') el.disabled = true;
     var isActive = el.classList.toggle('active');
     el.setAttribute('aria-checked', isActive ? 'true' : 'false');
     saveSetting(key, isActive ? 'true' : 'false').then(function (ok) {
         if (!ok) {
+            if (key === 'PRISM_ACTR_ENABLED') el.disabled = false;
             el.classList.toggle('active'); // rollback on failure
             el.setAttribute('aria-checked', isActive ? 'false' : 'true');
         }
@@ -4140,6 +4172,7 @@ function toggleBootSetting(key, el) {
     });
 }
 var DARK_FACTORY_SETTINGS_UNAVAILABLE_MESSAGE = ${JSON.stringify(DARK_FACTORY_SETTINGS_UNAVAILABLE)};
+var ACTR_SETTINGS_UNAVAILABLE_MESSAGE = ${JSON.stringify(ACTR_SETTINGS_UNAVAILABLE)};
 var DARK_FACTORY_RESTART_MESSAGE = 'Saved. Restart your AI client for this to take effect.';
 function saveBootSetting(key, value) {
     saveSetting(key, value).then(function (ok) {

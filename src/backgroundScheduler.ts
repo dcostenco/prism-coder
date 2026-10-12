@@ -27,7 +27,6 @@ import {
   PRISM_GRAPH_PRUNE_PROJECT_COOLDOWN_MS,
   PRISM_GRAPH_PRUNE_SWEEP_BUDGET_MS,
   PRISM_GRAPH_PRUNE_MAX_PROJECTS_PER_SWEEP,
-  PRISM_ACTR_ENABLED,
   PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS,
 } from "./config.js";
 import { randomBytes } from "node:crypto";
@@ -175,7 +174,9 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
   graphPruneProjectCooldownMs: PRISM_GRAPH_PRUNE_PROJECT_COOLDOWN_MS,
   graphPruneSweepBudgetMs: PRISM_GRAPH_PRUNE_SWEEP_BUDGET_MS,
   graphPruneMaxProjectsPerSweep: PRISM_GRAPH_PRUNE_MAX_PROJECTS_PER_SWEEP,
-  enableAccessLogPrune: PRISM_ACTR_ENABLED,
+  // Default-on retrieval must not silently opt users into destructive maintenance.
+  // Preserve the existing explicit environment opt-in for access-log pruning.
+  enableAccessLogPrune: process.env.PRISM_ACTR_ENABLED === "true",
   accessLogRetentionDays: PRISM_ACTR_ACCESS_LOG_RETENTION_DAYS,
 };
 

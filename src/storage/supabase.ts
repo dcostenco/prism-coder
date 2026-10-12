@@ -1526,7 +1526,7 @@ export class SupabaseStorage implements StorageBackend {
       return result;
     } catch (e: any) {
       debugLog(`[SupabaseStorage] getAccessLog fallback/no-op: ${e.message}`);
-      return result;
+      throw e;
     }
   }
 

@@ -22,6 +22,8 @@
  *     - adjustImportance  → POST /api/v1/prism/memory  action=adjust_importance
  *     - getGraduatedInsights → POST /api/v1/prism/memory  action=graduated_insights
  *     - decayImportance   → POST /api/v1/prism/memory  action=decay_importance
+ *     - logAccess / recordAccesses / updateLastAccessed → action=record_access
+ *     - getAccessLog      → POST /api/v1/prism/memory  action=get_access_log
  *     - saveHandoff       → POST /api/v1/prism/memory  action=save_handoff
  *     - saveHistorySnapshot → POST /api/v1/prism/memory  action=save_history_snapshot
  *     - loadContext       → POST /api/v1/prism/memory  action=load_context
@@ -108,12 +110,84 @@ interface JwtExchangeResponse {
 
 /** Refresh JWT this many ms before expiry to avoid edge-case 401s. */
 const JWT_REFRESH_LEEWAY_MS = 60_000;
+const ACCESS_BATCH_LIMIT = 50;
+const ACCESS_ID_RE = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
+const ACCESS_MESSAGES = {
+  invalid: "Invalid memory access batch",
+  write: "Invalid memory access response",
+  read: "Invalid memory access history response",
+  failed: "[SynaluxStorage] Memory access recording failed",
+};
+
+function accessIds(ids: string[]): string[] {
+  if (!Array.isArray(ids) || ids.some(id => typeof id !== "string" || !ACCESS_ID_RE.test(id))) {
+    throw new Error(ACCESS_MESSAGES.invalid);
+  }
+  return [...new Set(ids.map(id => id.toLowerCase()))];
+}
 
 function buildContextLoadKey(project: string, level: string, userId: string, role?: string): string {
   return JSON.stringify({ project, level, userId, role: role ?? "" });
 }
 
 export class SynaluxStorage extends SupabaseStorage {
+  logAccess(entryId: string, contextHash?: string): void {
+    void this.recordAccesses([entryId], contextHash).catch(() => console.error(ACCESS_MESSAGES.failed));
+  }
+
+  async getCandidateLinks(entryIds: string[]): Promise<Array<{ source_id: string; target_id: string; strength: number }>> {
+    const ids = accessIds(entryIds);
+    if (ids.length === 0) return [];
+    if (ids.length > ACCESS_BATCH_LIMIT) throw new Error(ACCESS_MESSAGES.invalid);
+    const response = await this.portalPost("/api/v1/prism/memory", { action: "get_candidate_links", entry_ids: ids });
+    if (!Array.isArray(response.links) || response.links.length > ids.length * 20
+      || response.links.some(row => !row || !ids.includes(row.source_id) || !ids.includes(row.target_id)
+        || !Number.isFinite(row.strength) || row.strength < 0 || row.strength > 1)) throw new Error(ACCESS_MESSAGES.read);
+    return response.links;
+  }
+
+  async recordAccesses(entryIds: string[], contextHash?: string): Promise<void> {
+    await this.writeAccesses(entryIds, contextHash, true);
+  }
+
+  async updateLastAccessed(entryIds: string[]): Promise<void> {
+    await this.writeAccesses(entryIds, undefined, false);
+  }
+
+  private async writeAccesses(entryIds: string[], contextHash: string | undefined, recordHistory: boolean): Promise<void> {
+    const ids = accessIds(entryIds);
+    if (contextHash !== undefined && !/^[a-f0-9]{1,64}$/.test(contextHash)) throw new Error(ACCESS_MESSAGES.invalid);
+    for (let offset = 0; offset < ids.length; offset += ACCESS_BATCH_LIMIT) {
+      const batch = ids.slice(offset, offset + ACCESS_BATCH_LIMIT);
+      const response = await this.portalPost("/api/v1/prism/memory", {
+        action: "record_access", entry_ids: batch, context_hash: contextHash ?? null, record_history: recordHistory,
+      });
+      if (!Number.isInteger(response.recorded) || Number(response.recorded) < 0 || Number(response.recorded) > batch.length) {
+        throw new Error(ACCESS_MESSAGES.write);
+      }
+    }
+  }
+
+  async getAccessLog(entryIds: string[], maxPerEntry = ACCESS_BATCH_LIMIT): Promise<Map<string, Date[]>> {
+    const ids = accessIds(entryIds);
+    if (!Number.isInteger(maxPerEntry) || maxPerEntry < 1 || maxPerEntry > ACCESS_BATCH_LIMIT) throw new Error(ACCESS_MESSAGES.invalid);
+    const result = new Map<string, Date[]>();
+    for (let offset = 0; offset < ids.length; offset += ACCESS_BATCH_LIMIT) {
+      const batch = ids.slice(offset, offset + ACCESS_BATCH_LIMIT);
+      const response = await this.portalPost("/api/v1/prism/memory", { action: "get_access_log", entry_ids: batch, max_per_entry: maxPerEntry });
+      if (!Array.isArray(response.accesses) || response.accesses.length > batch.length * maxPerEntry) throw new Error(ACCESS_MESSAGES.read);
+      for (const row of response.accesses) {
+        if (!row || !batch.includes(row.entry_id) || typeof row.accessed_at !== "string") throw new Error(ACCESS_MESSAGES.read);
+        const timestamp = new Date(row.accessed_at);
+        if (!Number.isFinite(timestamp.getTime())) throw new Error(ACCESS_MESSAGES.read);
+        const history = result.get(row.entry_id) ?? [];
+        if (history.length >= maxPerEntry) throw new Error(ACCESS_MESSAGES.read);
+        history.push(timestamp);
+        result.set(row.entry_id, history);
+      }
+    }
+    return result;
+  }
   private readonly baseUrl: string;
   private readonly refreshToken: string;
   private cachedJwt: string | null = null;

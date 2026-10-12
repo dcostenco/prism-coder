@@ -26,7 +26,7 @@ export function isDashboardSettingValueAllowed(key: string, value: string): bool
   if (["auto_capture", "hivemind_enabled", "task_router_enabled"].includes(key)) {
     return value === "true" || value === "false";
   }
-  if (key === "PRISM_DARK_FACTORY_ENABLED") return value === "true" || value === "false";
+  if (key === "PRISM_DARK_FACTORY_ENABLED" || key === "PRISM_ACTR_ENABLED") return value === "true" || value === "false";
   if (key === "agent_name") return value.length <= 80 && !/[<>]/.test(value);
   if (key === "default_role") return /^[a-zA-Z0-9._:-]{0,64}$/.test(value);
   if (key === "autoload_projects") {

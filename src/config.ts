@@ -362,7 +362,7 @@ export const PRISM_GRAPH_PRUNE_MAX_PROJECTS_PER_SWEEP = parseInt(
 // a composite similarity + activation model.
 
 /** Master switch for ACT-R activation-based re-ranking. */
-export const PRISM_ACTR_ENABLED = process.env.PRISM_ACTR_ENABLED === "true";
+export const PRISM_ACTR_ENABLED = process.env.PRISM_ACTR_ENABLED !== "false";
 
 /** ACT-R decay parameter d in t^(-d). Higher = faster forgetting. (Paper default: 0.5) */
 export const PRISM_ACTR_DECAY = parseFloat(process.env.PRISM_ACTR_DECAY || "0.5");

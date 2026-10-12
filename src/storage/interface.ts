@@ -908,6 +908,12 @@ export interface StorageBackend {
    */
   logAccess(entryId: string, contextHash?: string): void;
 
+  /** Optional atomic batch transport: records events and legacy timestamps once. */
+  recordAccesses?(entryIds: string[], contextHash?: string): Promise<void>;
+
+  /** Bounded candidate-only graph read for cloud ACT-R spreading activation. */
+  getCandidateLinks?(entryIds: string[]): Promise<Array<{ source_id: string; target_id: string; strength: number }>>;
+
   /**
    * Batch-fetch access timestamps for multiple entries in a single query.
    * Uses SQL window functions: ROW_NUMBER() OVER (PARTITION BY entry_id

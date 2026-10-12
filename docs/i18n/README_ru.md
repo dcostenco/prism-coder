@@ -61,6 +61,12 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
 
 ## Get started
 
+Memory search automatically applies ACT-R ranking: relevance plus recency,
+frequency and memory associations. No upvote or prompt instruction is required.
+To opt out, use **Account & Settings → Preferences → Automatic Memory Ranking
+(ACT-R)**, then restart your AI client. `PRISM_ACTR_ENABLED=false` also disables
+it. This ranking is separate from the neural graph's stored importance filter.
+
 ```bash
 npm install -g prism-mcp-server
 prism connect
@@ -163,6 +169,17 @@ or by re-enabling after each run.
 
 <details>
 <summary>Release history (optional)</summary>
+
+## What's New in v20.21.25
+
+Semantic memory search now automatically applies ACT-R ranking, combining
+relevance with recency, frequency and associations. **Account & Settings →
+Preferences → Automatic Memory Ranking (ACT-R)** lets you opt out after an AI
+client restart; an explicit environment value takes precedence.
+
+Synalux Cloud uses authenticated, owner-scoped access-history and candidate-link
+APIs. Cloud deployment requires the matching Portal history migration. Stored
+importance thresholds remain separate, and HRR drift detection remains independent.
 
 ## What's New in v20.21.24
 

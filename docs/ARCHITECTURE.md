@@ -694,6 +694,11 @@ trajectory encoding. Compares current session work against the stated goal.
 
 Three domains (BCBA / Coding / AAC) with domain-specific safety signals.
 
+HRR drift detection and ACT-R retrieval ranking can run together. They serve
+different operations: HRR encodes the session trajectory for goal comparison;
+ACT-R reorders retrieved memories. Enabling ACT-R does not change HRR vectors,
+drift thresholds or trigger a new HRR retrieval stage.
+
 ### 10.3 Behavioral Verification (v19+)
 
 **File:** `src/tools/behavioralVerifierHandler.ts`
@@ -708,7 +713,18 @@ Fail-closed when portal is unreachable.
 
 Retrieval re-ranking based on the ACT-R cognitive architecture.
 Composite similarity + activation model replaces simple Ebbinghaus decay.
-Gated behind `PRISM_ACTR_ENABLED` (default `false`).
+Enabled by default. The dashboard's **Account & Settings → Preferences →
+Automatic Memory Ranking (ACT-R)** switch persists an opt-out. Restart the AI
+client after changing it; explicit `PRISM_ACTR_ENABLED=true|false` overrides the
+saved preference. The dashboard shows saved and active state for its own process.
+Retrieval records only returned memories; Synalux Cloud stores owner/workspace-scoped
+access timestamps and hashed context through Portal, without query text.
+ACT-R reorders search results; the graph's importance thresholds still filter the
+separate stored integer score. No historical scores are automatically rewritten.
+Cloud access history begins with new retrievals after the migration is deployed;
+older memories use creation time until first retrieved. History-read failure is
+reported as relevance-only fallback. Automatic ranking does not enable destructive
+access-log pruning; the existing explicit environment opt-in preserves that policy.
 
 ---
 
@@ -871,7 +887,7 @@ The `--storage` flag prevents split-brain when CLI env differs from MCP server c
 | `PRISM_HDC_EXPLAINABILITY_ENABLED` | `true` | Include explainability in HDC responses |
 | `PRISM_HDC_POLICY_FALLBACK_THRESHOLD` | `0.85` | HDC fallback confidence |
 | `PRISM_HDC_POLICY_CLARIFY_THRESHOLD` | `0.95` | HDC clarify confidence |
-| `PRISM_ACTR_ENABLED` | `false` | Enable ACT-R activation re-ranking |
+| `PRISM_ACTR_ENABLED` | `true` | Override saved ACT-R automatic ranking preference; `false` opts out |
 | `PRISM_TASK_ROUTER_ENABLED` | `false` | Enable local vs. cloud task routing |
 
 ### 13.8 Miscellaneous

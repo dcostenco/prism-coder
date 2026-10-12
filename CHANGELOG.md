@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.25 — 2026-10-12
+
+- Enable ACT-R semantic memory ranking by default, with a saved dashboard
+  preference, an explicit environment override and restart-aware status.
+- Route Synalux access history and candidate associations through authenticated,
+  owner-scoped Portal batch APIs. Store context hashes and server timestamps.
+- Preserve semantic confidence checks after reranking, record returned graph
+  memories, and report relevance-only fallback when history is unavailable.
+- Secure legacy Supabase history identity and DDL-upgrade grants, including
+  alternate installation paths. Keep stored importance and HRR drift unchanged.
+
 ## 20.21.24 — 2026-10-11
 
 - Preserve supplied initial importance when saving through Synalux cloud, while

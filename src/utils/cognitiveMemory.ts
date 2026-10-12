@@ -28,11 +28,11 @@ import {
   parameterizedSigmoid,
 } from "./actrActivation.js";
 import {
-  PRISM_ACTR_ENABLED,
   PRISM_ACTR_DECAY,
   PRISM_ACTR_SIGMOID_MIDPOINT,
   PRISM_ACTR_SIGMOID_STEEPNESS,
 } from "../config.js";
+import { isActrEnabled } from "./actrEnablement.js";
 
 /**
  * Computes the effective importance of a memory, combining the semantic
@@ -70,7 +70,7 @@ export function computeEffectiveImportance(
     const referenceDateStr = lastAccessedStr || createdAtStr;
     const referenceDate = new Date(referenceDateStr);
 
-    if (!PRISM_ACTR_ENABLED) {
+    if (!isActrEnabled()) {
         // ── Legacy Ebbinghaus Decay (v5.2, deprecated) ──
         const diffMs = Math.max(0, now.getTime() - referenceDate.getTime());
         const daysSinceAccess = diffMs / (1000 * 60 * 60 * 24);
@@ -119,6 +119,9 @@ export function recordMemoryAccess(ids: string[], contextHash?: string): void {
 
     // Fire and forget, don't block execution
     getStorage().then(storage => {
+        if (storage.recordAccesses) {
+            return storage.recordAccesses(ids, contextHash);
+        }
         // v7.0: Log access events to memory_access_log via buffer
         for (const id of ids) {
             storage.logAccess(id, contextHash);

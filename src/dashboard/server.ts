@@ -48,6 +48,7 @@ import { DASHBOARD_READ_MESSAGES } from "./readMessages.js";
 import { isDashboardSettingKeyAllowed, isDashboardSettingValueAllowed } from "./settingsPolicy.js";
 import { isTrustedRequest, isRebindGuardedPath } from "./hostGuard.js";
 import { darkFactoryEnablementState, DARK_FACTORY_SETTINGS_UNAVAILABLE } from "../darkfactory/enablement.js";
+import { actrEnablementState } from "../utils/actrEnablement.js";
 import {
   resolveDashboardToken,
   requestHasToken,
@@ -793,10 +794,11 @@ return false;}
       // ─── API: Settings — GET (v3.0 Dashboard Settings) ───
       if (url.pathname === "/api/settings" && req.method === "GET") {
         try {
-          const { getAllSettings } = await import("../storage/configStorage.js");
+          const { getAllSettings, initConfigStorage } = await import("../storage/configStorage.js");
+          await initConfigStorage();
           const settings = await getAllSettings();
           res.writeHead(200, { "Content-Type": "application/json" });
-          return res.end(JSON.stringify({ settings, darkFactory: darkFactoryEnablementState() }));
+          return res.end(JSON.stringify({ settings, darkFactory: darkFactoryEnablementState(), actr: actrEnablementState() }));
         } catch {
           res.writeHead(503, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ error: DARK_FACTORY_SETTINGS_UNAVAILABLE }));

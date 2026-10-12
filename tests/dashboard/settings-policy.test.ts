@@ -65,6 +65,9 @@ describe("dashboard settings write policy", () => {
     ["PRISM_DARK_FACTORY_ENABLED", "TRUE"],
     ["PRISM_DARK_FACTORY_ENABLED", ""],
     ["PRISM_DARK_FACTORY_ENABLED", "1"],
+    ["PRISM_ACTR_ENABLED", "TRUE"],
+    ["PRISM_ACTR_ENABLED", ""],
+    ["PRISM_ACTR_ENABLED", "1"],
   ])("rejects invalid or injectable %s values", (key, value) => {
     expect(isDashboardSettingValueAllowed(key, value)).toBe(false);
   });

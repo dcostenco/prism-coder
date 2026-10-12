@@ -96,7 +96,6 @@ import {
   compositeRetrievalScore,
 } from "../utils/actrActivation.js";
 import {
-  PRISM_ACTR_ENABLED,
   PRISM_ACTR_DECAY,
   PRISM_ACTR_WEIGHT_SIMILARITY,
   PRISM_ACTR_WEIGHT_ACTIVATION,
@@ -104,6 +103,8 @@ import {
   PRISM_ACTR_SIGMOID_STEEPNESS,
   PRISM_ACTR_MAX_ACCESSES_PER_ENTRY,
 } from "../config.js";
+import { isActrEnabled } from "../utils/actrEnablement.js";
+import { createHash } from "node:crypto";
 import { HdcStateMachine } from "../sdm/stateMachine.js";
 import { ConceptDictionary } from "../sdm/conceptDictionary.js";
 import { PolicyGateway } from "../sdm/policyGateway.js";
@@ -475,7 +476,7 @@ export async function sessionSearchMemoryHandler(args: unknown) {
   } = args as any;
 
   debugLog(
-    `[session_search_memory] Semantic search: query="${query}", ` +
+    `[session_search_memory] Semantic search: queryHash=${createHash("sha256").update(query).digest("hex")}, ` +
     `project=${project || "all"}, limit=${limit}, threshold=${similarity_threshold}` +
     `${context_boost ? ", context_boost=ON" : ""}`
   );
@@ -510,7 +511,7 @@ export async function sessionSearchMemoryHandler(args: unknown) {
       }
       if (contextParts.length > 0) {
         effectiveQuery = `[${contextParts.join("; ")}] ${query}`;
-        debugLog(`[session_search_memory] Context boost applied: "${effectiveQuery.substring(0, 100)}..."`);
+        debugLog(`[session_search_memory] Context boost applied (${effectiveQuery.length} characters)`);
       }
     } catch {
       // Context load failed — proceed with unmodified query (graceful degradation)
@@ -549,7 +550,8 @@ export async function sessionSearchMemoryHandler(args: unknown) {
     // If we only fetch `limit` rows, the re-ranker can only shuffle those exact
     // results — a memory at rank #(limit+1) by similarity but accessed 500 times
     // would never surface. Fetch 4× or minimum 20, then slice after re-ranking.
-    const candidateLimit = PRISM_ACTR_ENABLED
+    const actrEnabled = isActrEnabled();
+    const candidateLimit = actrEnabled
       ? Math.min(Math.max(limit * 4, 20), 50)
       : Math.min(limit, 20);
     const results = await storage.searchMemory({
@@ -601,6 +603,7 @@ export async function sessionSearchMemoryHandler(args: unknown) {
 
     // ── v7.0: ACT-R Re-Ranking Pipeline ──────────────────────────
     const resultIds = results.map((r: any) => r.id).filter(Boolean);
+    const policyCandidates = [...results].sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0)).slice(0, limit);
     const now = new Date();
 
     // Accumulate ACT-R metrics for trace output
@@ -611,7 +614,7 @@ export async function sessionSearchMemoryHandler(args: unknown) {
       composites: number[];
     } | null = null;
 
-    if (PRISM_ACTR_ENABLED && resultIds.length > 0) {
+    if (actrEnabled && resultIds.length > 0) {
       try {
         // Step A: Bulk-fetch access logs for all candidate IDs
         const accessLogMap = await storage.getAccessLog(resultIds, PRISM_ACTR_MAX_ACCESSES_PER_ENTRY);
@@ -619,7 +622,14 @@ export async function sessionSearchMemoryHandler(args: unknown) {
         // Step B: Fetch outbound links for spreading activation
         const candidateIdSet = new Set(resultIds);
         const linksMap = new Map<string, Array<{ target_id: string; strength: number }>>();
-        for (const id of resultIds) {
+        if (storage.getCandidateLinks) {
+          const links = await storage.getCandidateLinks(resultIds);
+          for (const link of links) {
+            const outgoing = linksMap.get(link.source_id) ?? [];
+            outgoing.push({ target_id: link.target_id, strength: link.strength });
+            linksMap.set(link.source_id, outgoing);
+          }
+        } else for (const id of resultIds) {
           try {
             const links = await storage.getLinksFrom(id, PRISM_USER_ID, 0.0, 20);
             linksMap.set(id, links.map((l: any) => ({
@@ -683,6 +693,7 @@ export async function sessionSearchMemoryHandler(args: unknown) {
           `mean composite=${(actrMetrics.composites.reduce((a, b) => a + b, 0) / actrMetrics.composites.length).toFixed(3)}`
         );
       } catch (actrErr) {
+        actrMetrics = null;
         // ACT-R failures are non-fatal — degrade to similarity-only ordering
         debugLog(`[session_search_memory] ACT-R re-ranking failed (non-fatal): ${actrErr instanceof Error ? actrErr.message : String(actrErr)}`);
       }
@@ -694,15 +705,17 @@ export async function sessionSearchMemoryHandler(args: unknown) {
     results.splice(limit);
 
     if (PRISM_HDC_ENABLED && results.length > 0) {
-      const topScore = PRISM_ACTR_ENABLED ? (results[0] as any)._actr_composite : results[0].similarity;
-      const secondScore = results.length > 1 ? (PRISM_ACTR_ENABLED ? (results[1] as any)._actr_composite : results[1].similarity) : 0;
+      // Policy thresholds are calibrated to semantic relevance, not activation.
+      const topScore = policyCandidates[0]?.similarity;
+      const secondScore = policyCandidates.length > 1 ? policyCandidates[1].similarity : 0;
       const gapDistance = (topScore || 0) - (secondScore || 0);
 
       const fallbackThreshold = PRISM_HDC_POLICY_FALLBACK_THRESHOLD || 0.85;
       const clarifyThreshold = PRISM_HDC_POLICY_CLARIFY_THRESHOLD || 0.95;
       const gapThreshold = clarifyThreshold - fallbackThreshold;
 
-      if ((topScore || 0) < fallbackThreshold || (results.length > 1 && gapDistance < gapThreshold)) {
+      if ((topScore || 0) < fallbackThreshold || (policyCandidates.length > 1 && gapDistance < gapThreshold)
+        || (results[0].similarity ?? 0) < fallbackThreshold) {
         return {
           content: [{
             type: "text",
@@ -723,7 +736,7 @@ export async function sessionSearchMemoryHandler(args: unknown) {
     // v7.0: Writes to both access_log buffer AND legacy last_accessed_at
     const finalIds = results.map((r: any) => r.id).filter(Boolean);
     if (finalIds.length > 0) {
-      const queryHash = query.substring(0, 64);
+      const queryHash = createHash("sha256").update(query).digest("hex");
       recordMemoryAccess(finalIds, queryHash);
     }
 
@@ -758,6 +771,9 @@ export async function sessionSearchMemoryHandler(args: unknown) {
       type: "text",
       text: `${searchResultsHeader(results.length, isHybridSearchResults(results))}\n\n${formatted}`,
     }];
+    if (actrEnabled && resultIds.length > 0 && !actrMetrics) {
+      contentBlocks.push({ type: "text", text: "Automatic memory ranking unavailable for this search; returning relevance ordering." });
+    }
 
     // Phase 1: content[1] = machine-readable MemoryTrace (only when enable_trace=true)
     // topScore is read from results[0].similarity — this is the cosine distance
@@ -782,7 +798,7 @@ export async function sessionSearchMemoryHandler(args: unknown) {
         totalMs,
         project: project || null,
         // v7.0: ACT-R observability
-        actrEnabled: PRISM_ACTR_ENABLED,
+        actrEnabled: actrMetrics !== null,
         actrBaseLevelMean: actrMetrics ? mean(actrMetrics.baseLevels) : undefined,
         actrSpreadingMean: actrMetrics ? mean(actrMetrics.spreadings) : undefined,
         actrCompositeMean: actrMetrics ? mean(actrMetrics.composites) : undefined,
@@ -844,6 +860,8 @@ export async function sessionSearchMemoryHandler(args: unknown) {
             text: contentBlocks[0].text +
               `\n\n🔗 Graph-connected memories (${enrichedEntries.length} via 1-hop expansion):\n\n${graphFormatted}`,
           };
+          const deliveredGraphIds = enrichedEntries.map((entry: any) => entry.id).filter(Boolean);
+          if (deliveredGraphIds.length > 0) recordMemoryAccess(deliveredGraphIds, createHash("sha256").update(query).digest("hex"));
 
           // Fire-and-forget: reinforce traversed links
           for (const directId of directIds) {

@@ -81,6 +81,7 @@ import {
   YDC_API_KEY,
 } from "./config.js";
 import { initializeDarkFactoryEnabled, isDarkFactoryEnabled } from "./darkfactory/enablement.js";
+import { initializeActrEnabled } from "./utils/actrEnablement.js";
 import { startWatchdog, drainAlerts } from "./hivemindWatchdog.js";
 import { startScheduler } from "./backgroundScheduler.js";
 import { startDarkFactoryRunner } from "./darkfactory/runner.js";
@@ -1457,6 +1458,7 @@ export async function startServer() {
   // initConfigStorage() is local SQLite only (~5ms), safe to await.
   await initConfigStorage();
   initializeDarkFactoryEnabled();
+  initializeActrEnabled();
 
   // v4.6.0: Initialize OTel AFTER the settings cache is warm so that
   // initTelemetry() can read otel_enabled/otel_endpoint from getSettingSync()

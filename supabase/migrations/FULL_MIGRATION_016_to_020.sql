@@ -579,30 +579,31 @@ DO $$ BEGIN
 END $$;
 
 -- DDL execution function (SECURITY DEFINER)
-CREATE OR REPLACE FUNCTION prism_apply_ddl(
-  p_version  INTEGER,
-  p_name     TEXT,
-  p_sql      TEXT
-)
-RETURNS JSON
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
+-- The automatic upgrader must never execute caller-supplied SQL for tenant clients.
+CREATE OR REPLACE FUNCTION public.prism_apply_ddl(p_version integer, p_name text, p_sql text)
+RETURNS json LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
 AS $$
-DECLARE
-  v_count INTEGER;
+DECLARE existing_name text;
 BEGIN
-  SELECT count(*) INTO v_count FROM prism_schema_versions WHERE version = p_version;
-  IF v_count > 0 THEN
-    RETURN json_build_object('status', 'already_applied', 'version', p_version);
-  END IF;
-  EXECUTE p_sql;
-  INSERT INTO prism_schema_versions (version, name) VALUES (p_version, p_name);
-  RETURN json_build_object('status', 'applied', 'version', p_version);
-EXCEPTION WHEN OTHERS THEN
-  RAISE EXCEPTION 'prism_apply_ddl migration % (%) failed: %', p_version, p_name, SQLERRM;
+    IF p_version IS NULL OR p_version < 1 OR p_name IS NULL OR length(btrim(p_name)) = 0
+       OR p_sql IS NULL OR length(btrim(p_sql)) = 0 THEN
+        RAISE EXCEPTION 'Invalid migration identity or SQL' USING ERRCODE = '22023';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('prism_apply_ddl'));
+    SELECT name INTO existing_name FROM public.prism_schema_versions WHERE version = p_version;
+    IF FOUND THEN
+        IF existing_name IS DISTINCT FROM p_name THEN
+            RAISE EXCEPTION 'Migration version/name conflict' USING ERRCODE = '22023';
+        END IF;
+        RETURN json_build_object('status','already_applied','version',p_version,'name',p_name);
+    END IF;
+    EXECUTE p_sql;
+    INSERT INTO public.prism_schema_versions(version,name) VALUES (p_version,p_name);
+    RETURN json_build_object('status','applied','version',p_version,'name',p_name);
 END;
 $$;
+REVOKE ALL ON FUNCTION public.prism_apply_ddl(integer,text,text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.prism_apply_ddl(integer,text,text) TO service_role;
 
 -- ==============================================================================
 -- ALL MIGRATIONS (016–020) + AUTO-MIGRATION INFRA COMPLETE ✅

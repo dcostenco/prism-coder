@@ -22,6 +22,7 @@
  */
 
 import { supabaseRpc } from "../utils/supabaseApi.js";
+import { ACTR_AUTH_SQL } from "./actrSupabaseMigration.js";
 
 // ─── Migration Definitions ───────────────────────────────────────
 // Add new migrations here. The version number must be unique and
@@ -817,6 +818,7 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_research_tasks_status ON public.research_tasks(status, created_at ASC);
       `
       },
+        { version: 40, name: "actr_authenticated_history", sql: ACTR_AUTH_SQL },
       ];
 
 
