@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.26 — 2026-10-13
+
+- Create the E2E sync device key without a check-then-write window. The key is
+  written and flushed to a private temporary file, then linked into place, so a
+  concurrent first run sees either no key or the complete key and never
+  replaces an existing one. Filesystems without hard links fall back to an
+  exclusive create. Resolves a CodeQL file-system race alert.
+- Write the cancellation test probes as fixed source files instead of building
+  code from strings, resolving CodeQL code-sanitization alerts in the tests.
+
 ## 20.21.25 — 2026-10-12
 
 - Enable ACT-R semantic memory ranking by default, with a saved dashboard
