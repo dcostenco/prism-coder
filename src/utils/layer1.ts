@@ -327,11 +327,11 @@ export function reservedCategory(prompt: string): string | null {
     // The artifact exemption sits BETWEEN the two groups in
     // classifyDeterministicLayer1, and omitting it here made the label disagree
     // with the verdict: "add numeric validation fields to the auth token
-    // verification handler" classifies OBVIOUS_NOT_RESERVED, while this reported
-    // "auth / session / token code". Harmless when the deterministic verdict is
-    // used directly, but the label is also read on paths that skip that fast
-    // path — prompts over MAX_CLASSIFIER_PROMPT_LENGTH, and image requests — so
-    // it could name a rule that did not fire.
+    // verification handler" is never refused by a rule (the classifier reads
+    // it), while this reported "auth / session / token code". Harmless when the
+    // deterministic verdict is used directly, but the label is also read on
+    // paths that skip that fast path — prompts over MAX_CLASSIFIER_PROMPT_LENGTH,
+    // and image requests — so it could name a rule that did not fire.
     if (
         NON_OPERATIONAL_ARTIFACT_CONTEXT.test(prompt) &&
         NON_OPERATIONAL_ARTIFACT_ACTION.test(prompt)
@@ -348,6 +348,11 @@ const NON_OPERATIONAL_ARTIFACT_CONTEXT =
     /(?:\b(?:test\s+fixture|fixture\s+label|unit\s+test|old\s+comment|fields?|columns?|labels?|filename|file\s+name|docs?|legal\s+(?:label|phrase|clause)|hook\s+order|dead\s+exports?|type\s+annotation|table\s+scan|add\s+index)\b|\/docs\/|\.[cm]?[jt]sx?\b)/i;
 const NON_OPERATIONAL_ARTIFACT_ACTION =
     /\b(?:review\b[\s\S]{0,120}\bhook\s+order|delete\b[\s\S]{0,120}\bdocs?|unit\s+tests?|add\b[\s\S]{0,120}\b(?:fields?|index|labels?|numeric\s+validation)|remove\b[\s\S]{0,120}\bcomments?|old\s+comment\b[\s\S]{0,120}\bremove)\b/i;
+// More than one clause. The exemption vouches for one harmless clause, never
+// for what rides along with it ("review X for hook order and then write the JWT
+// validation" was served locally in 0 ms). A list of separators: it narrows the
+// exemption; it does not prove a request is one instruction.
+const MORE_THAN_ONE_CLAUSE = /[;,&+\n]|\s-\s|\.\s|\b(?:and|then|also|plus|but|before|after|while|so|as\s+well\s+as)\b/i;
 
 /**
  * Deterministic policy floor for unambiguous intents.
@@ -392,8 +397,14 @@ export function classifyDeterministicLayer1(userPrompt: string, opts?: Determini
     if (opts?.operational === false) {
         return matchesAny(userPrompt, ROUTINE_BCBA_INTENT_RULES) ? "OBVIOUS_NOT_RESERVED" : null;
     }
+    // Cleared by rule only as one harmless clause that matches no reserved rule.
+    // Anything else of this shape is read by the classifier: never cleared by
+    // rule with a second task riding along, and never refused by a rule either
+    // (an auth_bypass fixture label, or a trailing ", please", is not reserved
+    // work).
     if (isNonOperationalArtifact(userPrompt)) {
-        return "OBVIOUS_NOT_RESERVED";
+        return MORE_THAN_ONE_CLAUSE.test(userPrompt) || matchesAny(userPrompt, RESERVED_INTENT_RULES)
+            ? null : "OBVIOUS_NOT_RESERVED";
     }
     if (matchesAny(userPrompt, RESERVED_INTENT_RULES)) return "OBVIOUS_RESERVED";
     if (matchesAny(userPrompt, ROUTINE_BCBA_INTENT_RULES)) return "OBVIOUS_NOT_RESERVED";

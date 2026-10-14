@@ -10,12 +10,14 @@ describe("public Layer 1 deterministic contract", () => {
         ).toBe("OBVIOUS_RESERVED");
     });
 
-    it("keeps non-authentication schema maintenance local", () => {
+    // Two clauses: the exemption does not clear it by rule, and no reserved rule
+    // refuses it either. The classifier reads it (and clears it).
+    it("leaves non-authentication schema maintenance with a second clause to the classifier", () => {
         expect(
             classifyDeterministicLayer1(
                 "Add an auth_token display field to schema.ts; do not implement authentication.",
             ),
-        ).toBe("OBVIOUS_NOT_RESERVED");
+        ).toBeNull();
     });
 
     it("routes routine measurement drafting locally", () => {
@@ -32,15 +34,17 @@ describe("public Layer 1 deterministic contract", () => {
 });
 
 describe("the artifact exemption is reachable, but never over clinical intent", () => {
-    // Eval fixture C07. The reserved rules used to be checked BEFORE the
-    // NON_OPERATIONAL_ARTIFACT exemption, so this matched the auth-bypass rule
-    // and returned OBVIOUS_RESERVED in 0ms without the exemption ever being
-    // consulted — a hard-negative refused by regex, invisible to the eval
-    // harness that called the model directly with its own copy of the prompt.
+    // The reserved rules used to be checked BEFORE the NON_OPERATIONAL_ARTIFACT
+    // exemption, so this matched the auth-bypass rule and returned
+    // OBVIOUS_RESERVED in 0ms without the exemption ever being consulted — a
+    // hard negative refused by regex. The exemption still keeps the
+    // auth-bypass rule from refusing it, but a request that matches a reserved
+    // rule is never cleared by rule either: the classifier reads it (and
+    // clears it).
     it("exempts a documented non-operational artifact edit from an OPERATIONAL rule", () => {
         expect(
             classifyDeterministicLayer1("add auth_bypass as a test fixture label in the middleware test"),
-        ).toBe("OBVIOUS_NOT_RESERVED");
+        ).toBeNull();
     });
 
     // The other half, and the reason the exemption is scoped to operational
@@ -62,5 +66,71 @@ describe("the artifact exemption is reachable, but never over clinical intent", 
         expect(
             classifyDeterministicLayer1("does this endpoint let someone in without checking permissions"),
         ).toBe("OBVIOUS_RESERVED");
+    });
+});
+
+describe("the artifact exemption clears one harmless clause, never a request", () => {
+    // It used to clear the whole text when one clause was harmless: a request to
+    // write auth code or make a ship decision rode along and was served locally
+    // in 0 ms, with no model reading it.
+    it("sends a request with a second task to the classifier instead of clearing it", () => {
+        for (const prompt of [
+            "review the dashboard component for hook order and then write the JWT validation middleware",
+            "review the login screen for hook order, then decide whether we can ship it to production today",
+            "delete the outdated docs page and then write the session token validation",
+            "add numeric validation to the age field and decide if we should deploy to production now",
+            "remove the old comment and implement an auth bypass so admins skip the login check",
+            "review the dashboard component for hook order & write the JWT validation middleware",
+            "review the dashboard component for hook order\nwrite the JWT validation middleware",
+            "review the dashboard component for hook order. Write the JWT validation middleware",
+            "review the dashboard component for hook order but first write the JWT validation middleware",
+            "review the dashboard component for hook order as well as write the JWT validation middleware",
+        ]) {
+            expect(classifyDeterministicLayer1(prompt), prompt).toBeNull();
+        }
+    });
+
+    it("still clears a single harmless clause by rule", () => {
+        for (const prompt of [
+            "review the crisis dashboard component for hook order violations",
+            "delete the outdated crisis plan doc from /docs/",
+        ]) {
+            expect(classifyDeterministicLayer1(prompt), prompt).toBe("OBVIOUS_NOT_RESERVED");
+        }
+    });
+
+    // A second clause is not always a second task. It goes to the classifier,
+    // which clears these; a rule never refuses them.
+    it("sends a benign request with a trailing clause to the classifier, not to a rule block", () => {
+        for (const prompt of [
+            "add a numeric validation field to the auth form, thanks",
+            "please add auth_bypass as a test fixture label in the middleware test, nothing else",
+            "delete the old docs folder for the login handler, and update the README",
+        ]) {
+            expect(classifyDeterministicLayer1(prompt), prompt).toBeNull();
+        }
+    });
+
+    // One harmless clause that matches a reserved rule: the classifier decides.
+    // Both classifiers refuse this one ("token validation code" is reserved).
+    it("sends harmless-looking work on token-verification code to the classifier", () => {
+        expect(classifyDeterministicLayer1("add numeric validation fields to the auth token verification handler")).toBeNull();
+    });
+
+    // A dead-exports review is not an exemption: it never clears by rule, and
+    // reserved work beside it stays blocked by rule.
+    it("never clears a dead-exports review by rule", () => {
+        for (const prompt of [
+            "scan the parser module for dead exports",
+            "review auth.ts for dead exports including the one that lets anyone in unauthenticated",
+        ]) {
+            expect(classifyDeterministicLayer1(prompt), prompt).not.toBe("OBVIOUS_NOT_RESERVED");
+        }
+        for (const prompt of [
+            "scan the session module for dead exports before you write the JWT session validation",
+            "scan the billing module for dead exports - is it safe to deploy to production",
+        ]) {
+            expect(classifyDeterministicLayer1(prompt), prompt).toBe("OBVIOUS_RESERVED");
+        }
     });
 });
