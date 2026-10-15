@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.21.26 — 2026-10-14
+
+- Layer 1's deterministic rules now only refuse; they never clear. A routine
+  drafting clause or an artifact edit no longer clears a whole request without
+  a classifier read, so a routine clause beside restraint, medication dosing
+  or security work is no longer served locally unread. The classifier reads
+  every request a rule does not refuse, including routine ones.
+- Seclusion described as placing someone into a quiet, isolation, time-out,
+  padded or calm-down room is refused by rule. A room named as a setting, or
+  used by choice, is left to the classifier.
+
 ## 20.21.25 — 2026-10-12
 
 - Enable ACT-R semantic memory ranking by default, with a saved dashboard
