@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
 - Seclusion described as placing someone into a quiet, isolation, time-out,
   padded or calm-down room is refused by rule. A room named as a setting, or
   used by choice, is left to the classifier.
+- Why: a sensitive part of a mixed request now goes to a stronger cloud model
+  when the plan allows it, or is refused with the reason, instead of being
+  answered locally unread. Measured: of 46 mixed requests that should never be
+  answered locally, 41 were answered locally before and 9 after (the
+  classifier's own misses); of 294 routine requests, 2 more are escalated.
+- Cost: requests the rules used to clear now take a classifier read, about
+  0.3 s at p95 in our tests.
 
 ## 20.21.25 — 2026-10-12
 
