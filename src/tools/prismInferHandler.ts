@@ -351,7 +351,6 @@ export async function layer1HedgeSecondRead(o: {
     freeBytes: number;
     ollamaUrl: string;
     guardModel: string;
-    promptFastPath: boolean;
     probeClassifierLimits: (url: string, model: string) => Promise<{ numCtx: number | null; overheadBound: number | null }>;
     /** The pinned exclusion policy (inferencePolicy.ts); null means no second read. */
     policy: SecondReadExclusionPolicy | null;
@@ -383,7 +382,6 @@ export async function layer1HedgeSecondRead(o: {
     const big = resolveOllamaName("prism-coder:9b", o.installed);
     const tier = MODEL_TIERS.find(t => t.tag === "prism-coder:9b");
     if (!o.installed.has(big) || big === o.guardModel || tier === undefined) return skip("no_9b");
-    const readPrompt = !o.promptFastPath;
     const messages = o.args.messages ?? [];
     const turnReads = messages.flatMap((m, index) => historyTurnWindows(m.content).filter(w => w.trim()).map(text => ({ text, index, role: m.role })));
     const turnTexts = turnReads.map(t => t.text);
@@ -397,13 +395,13 @@ export async function layer1HedgeSecondRead(o: {
         const excluded = secondReadExclusion(policy, t, conversation);
         if (excluded) return skip(excluded);
     }
-    if (readPrompt && o.args.prompt.length > MAX_CLASSIFIER_PROMPT_LENGTH) return skip("prompt_oversize");
+    if (o.args.prompt.length > MAX_CLASSIFIER_PROMPT_LENGTH) return skip("prompt_oversize");
 
     type Read = { model: string; text: string; kind: "prompt" | "turn" | "context"; label: string };
     const reads: Read[] = [];
     const seen = new Set<string>();
     const add = (r: Read) => { const k = `${r.model}\0${r.kind === "prompt" ? "\0prompt" : r.text}`; if (!seen.has(k)) { seen.add(k); reads.push(r); } };
-    if (readPrompt) add({ model: big, text: o.args.prompt, kind: "prompt", label: "9b:prompt" });
+    add({ model: big, text: o.args.prompt, kind: "prompt", label: "9b:prompt" });
     for (let i = turnReads.length - 1; i >= 0; i--) add({ model: big, text: turnReads[i].text, kind: "turn", label: `9b:turn:${turnReads[i].index}:${turnReads[i].role}` });
     for (let i = ctxTexts.length - 1; i >= 0; i--) add({ model: big, text: ctxTexts[i], kind: "context", label: `9b:context:${i}` });
     for (let i = ctxTexts.length - 1; i >= 0; i--) add({ model: o.guardModel, text: ctxTexts[i], kind: "context", label: `4b:context:${i}` });
@@ -438,7 +436,7 @@ export async function layer1HedgeSecondRead(o: {
     if (!known(ctxBig) || !known(ctxSmall) || !known(overBig) || !known(overSmall)) return skip("unprobeable");
     const fitsIn = (ctx: number, over: number) => (t: string) =>
         Buffer.byteLength(layer1ClassifierContent(t), "utf8") + over + LAYER1_CLASSIFIER_OUTPUT_TOKENS <= ctx;
-    if (![...turnTexts, ...(readPrompt ? [o.args.prompt] : []), ...ctxTexts].every(fitsIn(ctxBig, overBig))) return skip("unfit");
+    if (![...turnTexts, o.args.prompt, ...ctxTexts].every(fitsIn(ctxBig, overBig))) return skip("unfit");
     if (!ctxTexts.every(fitsIn(ctxSmall, overSmall))) return skip("unfit");
 
     const budget = { calls: 0, consecutiveErrors: 0, tripped: false };
@@ -2521,25 +2519,17 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // The current prompt is a request: its deterministic floor runs
             // here explicitly (not only inside the classifier entry point, so
             // an injected classifier cannot skip it), in the same proximity
-            // slices as a turn; then, unless the routine fast path below
-            // applies, it is read alone with its images and that verdict is
-            // kept like a turn's.
-            let promptRoutine = true;
+            // slices as a turn; then it is read alone with its images and that
+            // verdict is kept like a turn's. The floor only refuses, so there is
+            // no fast path: a prompt a rule does not refuse is always read.
             for (const slice of windowsOf(args.prompt, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
                 const promptDet = classifyDeterministicLayer1(slice);
                 if (promptDet) l1 = raise(l1, promptDet, "rules");
-                if (promptDet !== "OBVIOUS_NOT_RESERVED") promptRoutine = false;
             }
             // The classifier entry point's own whole-prompt deterministic pass
             // is switched off here — it would undo the slicing above (words
-            // 14k chars apart firing one rule; review round 18). The routine
-            // fast path it provided is kept explicitly and on ITS boundary: a
-            // prompt of at most 4,000 chars whose rules verdict is routine,
-            // with no images, skips the model. Longer prompts always reach
-            // the entry point, whose full-text keyword floor must run
-            // (review round 19: skipping it there bypassed that floor).
-            const promptFastPath = promptRoutine && args.prompt.length <= MAX_CLASSIFIER_PROMPT_LENGTH && (resolvedImages?.length ?? 0) === 0;
-            if (l1 !== "OBVIOUS_RESERVED" && !promptFastPath) {
+            // 14k chars apart firing one rule; review round 18).
+            if (l1 !== "OBVIOUS_RESERVED") {
                 l1 = raise(l1, await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false, ...(classifierInput ? { classifierInput } : {}) }), "prompt");
             }
             // 3. Context, raise only: one window per turn and one for the
@@ -2600,7 +2590,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             } else if (modelHedgeOnly) {
                 const second = await layer1HedgeSecondRead({
                     l1fn, args, installed, listLoaded: deps.listLoaded, freeBytes: deps.freemem(), ollamaUrl: deps.ollamaUrl,
-                    guardModel: l1Model, promptFastPath,
+                    guardModel: l1Model,
                     probeClassifierLimits: deps.probeClassifierLimits ?? probeClassifierLimits,
                     policy: await (deps.secondReadPolicy ?? getSecondReadPolicy)().catch(() => null),
                 });

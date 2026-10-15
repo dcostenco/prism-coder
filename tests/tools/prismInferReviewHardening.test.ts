@@ -1053,12 +1053,12 @@ describe("R16 round nineteen", () => {
         const r = await runInfer(args({ prompt, messages: HISTORY }), deps({ callLayer1: viaReal }));
         expect(r.backend, JSON.stringify(r.attempts.slice(0, 3))).not.toBe("refused");
     });
-    it("the routine fast path survives: a prompt the rules call routine in every slice skips the prompt-alone model call", async () => {
+    it("no routine fast path: the prompt-alone model call happens even when the rules see routine work", async () => {
         const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
         const routine = "Write an operational definition for hand raising during circle time.";
-        expect(classifyDeterministicLayer1(routine)).toBe("OBVIOUS_NOT_RESERVED");
+        expect(classifyDeterministicLayer1(routine)).toBeNull();
         await runInfer(args({ prompt: routine, messages: HISTORY }), deps({ callLayer1 }));
-        expect(callLayer1.mock.calls.some(c => String(c[0]) === routine)).toBe(false);
+        expect(callLayer1.mock.calls.some(c => String(c[0]) === routine)).toBe(true);
     });
     it("an UNCERTAIN read of a long turn's HEAD is kept fail-closed: the context read only covers the tail", async () => {
         const filler = "The schedule for the reading group was moved to Thursday. ";
@@ -1083,19 +1083,15 @@ describe("R17 round twenty", () => {
         const r = await runInfer(args({ prompt, messages: HISTORY }), deps({ callLayer1: viaReal }));
         expect(r.backend).toBe("refused");
     });
-    it("the fast path still applies at its old boundary: a routine prompt of at most 4,000 chars skips the model", async () => {
+    it("routine prompts of any length reach the model: at 4,000 chars and past it", async () => {
         const callLayer1 = vi.fn(async () => "OBVIOUS_NOT_RESERVED" as const);
-        const routine = "Write an operational definition for hand raising during circle time.";
-        await runInfer(args({ prompt: routine, messages: HISTORY }), deps({ callLayer1 }));
-        expect(callLayer1.mock.calls.some(c => String(c[0]) === routine)).toBe(false);
-        // exactly the boundary: 4,000 chars takes the fast path, 4,001 does not
         const unit = "Write an operational definition for hand raising during circle time. ";
         const at = unit.repeat(80).slice(0, 4_000);
         const over = unit.repeat(80).slice(0, 4_001);
-        expect(classifyDeterministicLayer1(at)).toBe("OBVIOUS_NOT_RESERVED");
-        expect(classifyDeterministicLayer1(over)).toBe("OBVIOUS_NOT_RESERVED");
+        expect(classifyDeterministicLayer1(at)).toBeNull();
+        expect(classifyDeterministicLayer1(over)).toBeNull();
         await runInfer(args({ prompt: at, messages: HISTORY }), deps({ callLayer1 }));
-        expect(callLayer1.mock.calls.some(c => String(c[0]) === at)).toBe(false);
+        expect(callLayer1.mock.calls.some(c => String(c[0]) === at)).toBe(true);
         await runInfer(args({ prompt: over, messages: HISTORY }), deps({ callLayer1 }));
         expect(callLayer1.mock.calls.some(c => String(c[0]) === over)).toBe(true);
     });

@@ -179,9 +179,14 @@ const CLINICAL_RESERVED_RULES: readonly IntentRule[] = [
         has(/\b(?:de[- ]?escalat\w*|meltdown\w*|rage\s+episode|violent\w*)\b/i),
         has(/\b(?:draft|write|plan|procedure|protocol|manag\w*|what\s+(?:do|should)\b|respond\w*)\b/i),
     ),
-    all(
-        has(/\b(?:physical\s+intervention|containment|hold\s+procedure|restrain\w*|seclu\w*|physical\s+management|(?:quiet|isolation|time[- ]?out|padded|calm[- ]?down)\s+rooms?)\b/i),
-        has(/\b(?:draft|write|document|procedure|protocol|use|implement|instruct\w*)\b/i),
+    (prompt) => (
+        /\b(?:physical\s+intervention|containment|hold\s+procedure|restrain\w*|seclu\w*|physical\s+management)\b/i.test(prompt)
+        && /\b(?:draft|write|document|procedure|protocol|use|implement|instruct\w*)\b/i.test(prompt)
+    ) || (
+        // Seclusion by another name: someone placed in a room. A room named as
+        // a setting, or used by choice, is not one.
+        /\b(?:quiet|isolation|time[- ]?out|padded|calm[- ]?down|seclusion)\s+rooms?\b/i.test(prompt)
+        && /\b(?:put|puts|putting|plac(?:e|es|ed|ing)|send|sends|sent|sending|keep|keeps|kept|keeping|lock\w*|escort\w*|confin\w*|carr(?:y|ies|ied|ying)|drag\w*)\s+(?:him|her|them|the\s+(?:client|student|child))\b/i.test(prompt)
     ),
     all(
         has(/\b(?:self[- ]?(?:harm|injur\w*)|bites?\s+(?:him|her|them)self|bites?\s+(?:his|her|their)\s+own\b|scratches?\s+(?:him|her|them)self|scratches?\s+(?:his|her|their)\s+own\b|bangs?\s+(?:his|her|their)\s+head|harm\s+(?:himself|herself|themselves))\b/i),
@@ -231,45 +236,6 @@ const OPERATIONAL_RESERVED_RULES: readonly IntentRule[] = [
 const RESERVED_INTENT_RULES: readonly IntentRule[] = [
     ...CLINICAL_RESERVED_RULES,
     ...OPERATIONAL_RESERVED_RULES,
-];
-
-const ROUTINE_BCBA_INTENT_RULES: readonly IntentRule[] = [
-    has(/\boperational\s+definition\b/i),
-    all(
-        has(/\bdefin\w*\b/i),
-        has(/\b(?:onset|offset|observers?|score|measur\w*)\b/i),
-    ),
-    all(
-        has(/\b(?:abc|fba|functional\s+behavior)\b/i),
-        has(/\b(?:hypothes\w*|tentative|summari[sz]\w*)\b/i),
-    ),
-    all(
-        has(/\b(?:what\s+data|data\s+(?:should|to)\s+(?:be\s+)?gather\w*|collect\s+data)\b/i),
-        has(/\bbefore\s+(?:select\w*|choos\w*|design\w*)\s+(?:an?\s+)?intervention\b/i),
-    ),
-    all(
-        has(/\b(?:aac|augmentative\s+communication)\b/i),
-        has(/\b(?:replacement[- ]response|replacement\s+(?:skill|behavior)|function[- ]matched)\b/i),
-        has(/\b(?:bcba|clinician)\s+review\b/i),
-    ),
-    all(
-        has(/\b(?:explain|educat\w*|why)\b/i),
-        has(/\b(?:dro|differential\s+reinforcement|function[- ]matched|maintain\w+\s+by|escape\s+from)\b/i),
-    ),
-    all(
-        has(/\b(?:caregiver|staff|parent)\s+training\b/i),
-        has(/\b(?:aac|replacement|break[- ]request|communication)\b/i),
-    ),
-    all(
-        has(/\b(?:rewrite|rephrase)\b/i),
-        has(/\b(?:stigmat\w*|dignity|objective|tentative|function[- ]based)\b/i),
-    ),
-    all(
-        has(/\b(?:aac|communication\s+device)\b/i),
-        has(/\b(?:remain|keep)\s+available\b/i),
-        has(/\bno\s+injur(?:y|ies)\b/i),
-        has(/\bnonrestrictive\b/i),
-    ),
 ];
 
 function matchesAny(prompt: string, rules: readonly IntentRule[]): boolean {
@@ -348,24 +314,12 @@ const NON_OPERATIONAL_ARTIFACT_CONTEXT =
     /(?:\b(?:test\s+fixture|fixture\s+label|unit\s+test|old\s+comment|fields?|columns?|labels?|filename|file\s+name|docs?|legal\s+(?:label|phrase|clause)|hook\s+order|dead\s+exports?|type\s+annotation|table\s+scan|add\s+index)\b|\/docs\/|\.[cm]?[jt]sx?\b)/i;
 const NON_OPERATIONAL_ARTIFACT_ACTION =
     /\b(?:review\b[\s\S]{0,120}\bhook\s+order|delete\b[\s\S]{0,120}\bdocs?|unit\s+tests?|add\b[\s\S]{0,120}\b(?:fields?|index|labels?|numeric\s+validation)|remove\b[\s\S]{0,120}\bcomments?|old\s+comment\b[\s\S]{0,120}\bremove)\b/i;
-// More than one clause. The exemption vouches for one harmless clause, never
-// for what rides along with it ("review X for hook order and then write the JWT
-// validation" was served locally in 0 ms). A list of separators: it narrows the
-// exemption; it does not prove a request is one instruction.
-const MORE_THAN_ONE_CLAUSE = /[;,:&+\n–—]|\s-\s|\.\s|\b(?:and|or|then|also|plus|but|before|after|while|so|because|since|if|unless|when|where|which|that|as\s+well\s+as)\b/i;
-// Clinical-risk words. Text naming restraint, seclusion, a hold, injury or
-// medication is never cleared by rule: the classifier reads it. A routine
-// clause beside "a prone hold protocol for staff" or "how much melatonin to
-// give" was cleared in 0 ms, and the classifier refuses those when it reads
-// them. Removing a shortcut cannot make a verdict less safe.
-const CLINICAL_RISK = /\b(?:restrain\w*|restraint|seclu\w*|prone|supine|holds?|holding|basket|takedowns?|physically|(?:quiet|isolation|time[- ]?out|padded)\s+rooms?|injur\w*|hospital\w*|ER\b|bleed\w*|blood|medicat\w*|meds?\b|dos(?:e|es|age|ing)|mg\b|milligrams?|melatonin|prescri\w*)/i;
 
 /**
  * Deterministic policy floor for unambiguous intents.
  *
- * Routing is code, not model judgment: clear reserved work fails closed and
- * clear routine BCBA work reaches local inference. Ambiguous prompts return
- * null and continue to the semantic classifier below.
+ * Clear reserved work fails closed by rule. Everything else returns null and
+ * is read by the semantic classifier below: the floor never clears.
  */
 /** The non-operational artifact exemption over a text. classifyDeterministic
  *  Layer1 applies it to the text it is given; prism_infer's history screen
@@ -398,25 +352,21 @@ export function classifyDeterministicLayer1(userPrompt: string, opts?: Determini
     // the crisis form" escaping the restraint rule, and a wrong answer there
     // costs more than an unnecessary escalation. Clinical intent still fails
     // closed first, before anything can exempt it.
+    //
+    // The floor only refuses; it never clears. Every bypass found in review was
+    // a rule clearing a request no model read: a routine or artifact clause
+    // beside "a prone hold protocol for staff", "how many mL of Benadryl to
+    // give" or "find paths allowing unauthenticated access" was served in
+    // 0 ms, and each word-list patch was followed by new wording. Anything a
+    // rule does not refuse is read by the classifier.
     const clinicalReserved = matchesAny(userPrompt, CLINICAL_RESERVED_RULES);
     if (clinicalReserved) return "OBVIOUS_RESERVED";
-    if (opts?.operational === false) {
-        return matchesAny(userPrompt, ROUTINE_BCBA_INTENT_RULES) && !CLINICAL_RISK.test(userPrompt)
-            ? "OBVIOUS_NOT_RESERVED" : null;
-    }
-    // Cleared by rule only as one harmless clause that matches no reserved rule.
-    // Anything else of this shape is read by the classifier: never cleared by
-    // rule with a second task riding along, and never refused by a rule either
-    // (an auth_bypass fixture label, or a trailing ", please", is not reserved
-    // work).
-    if (isNonOperationalArtifact(userPrompt)) {
-        return MORE_THAN_ONE_CLAUSE.test(userPrompt) || matchesAny(userPrompt, RESERVED_INTENT_RULES)
-            || CLINICAL_RISK.test(userPrompt)
-            ? null : "OBVIOUS_NOT_RESERVED";
-    }
+    if (opts?.operational === false) return null;
+    // A non-operational artifact edit is never refused by an operational rule
+    // (an auth_bypass fixture label is not reserved work); the classifier
+    // reads it.
+    if (isNonOperationalArtifact(userPrompt)) return null;
     if (matchesAny(userPrompt, RESERVED_INTENT_RULES)) return "OBVIOUS_RESERVED";
-    if (CLINICAL_RISK.test(userPrompt)) return null;
-    if (matchesAny(userPrompt, ROUTINE_BCBA_INTENT_RULES)) return "OBVIOUS_NOT_RESERVED";
     return null;
 }
 
@@ -623,12 +573,6 @@ export async function callLayer1(
     const hasImages = !!images?.length;
     const deterministic = opts?.deterministic === false ? null : classifyDeterministicLayer1(userPrompt);
     if (deterministic === "OBVIOUS_RESERVED") return deterministic;
-    // The routine-work fast path may only skip the model when there is nothing
-    // to look at. It reads the PROMPT, so with an image attached it is a free
-    // bypass: pair "write an operational definition" — or any ROUTINE_BCBA
-    // phrasing — with a clinical screenshot and the gate returns NOT_RESERVED
-    // without a single call. Text keeps the shortcut; images earn the screen.
-    if (!oversize && !hasImages && deterministic === "OBVIOUS_NOT_RESERVED") return deterministic;
 
     if (oversize && keywordBackstop(userPrompt) === "OBVIOUS_RESERVED") {
         // The regex floor has no length limit — reserved vocabulary anywhere

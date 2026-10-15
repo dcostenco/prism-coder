@@ -326,18 +326,19 @@ describe("bounds on the second read", () => {
         expect(alone.length).toBeGreaterThanOrEqual(2);
         expect(alone.join("").length).toBeGreaterThanOrEqual(long.trim().length - 10);
     });
-    it("the 9b's prompt read is the model's own read (deterministic:false), and a routine prompt the rules clear is not read", async () => {
+    it("the 9b's prompt read is the model's own read (deterministic:false), and a routine prompt is read too", async () => {
         let l1 = classifier(hedge);
         await runInfer(ask(), deps({ callLayer1: l1 as unknown as InferDeps["callLayer1"] }));
         const promptCall = l1.mock.calls.find(c => c[2] === BIG && c[0] === PROMPT);
         expect((promptCall?.[5] as { deterministic?: boolean } | undefined)?.deterministic).toBe(false);
-        // a routine prompt: the 4b hedges on a TURN, the 9b re-reads, and the prompt stays on the fast path
+        // a routine prompt: the 4b hedges on a TURN, the 9b re-reads, and the
+        // prompt is read as well (the rules never clear it)
         const routine = "Write an operational definition for hand raising during circle time.";
         _resetLayer1HistoryCacheForTest();
         l1 = classifier((m, t) => (m === SMALL && t === HISTORY[0].content ? "UNCERTAIN" : "OBVIOUS_NOT_RESERVED"));
         const r = await runInfer(ask({ prompt: routine }), deps({ callLayer1: l1 as unknown as InferDeps["callLayer1"] }));
         expect(reasons(r)).toContain("layer1_hedge_second_read_9b");
-        expect(calls(l1, BIG)).not.toContain(routine);
+        expect(calls(l1, BIG)).toContain(routine);
     });
     it("only a clean 9b read clears: an UNCERTAIN_LENGTH does not overturn the hedge", async () => {
         const l1 = classifier((m, t) => (m === SMALL ? (t === PROMPT ? "UNCERTAIN" : "OBVIOUS_NOT_RESERVED") : t === PROMPT ? "UNCERTAIN_LENGTH" : "OBVIOUS_NOT_RESERVED"));
