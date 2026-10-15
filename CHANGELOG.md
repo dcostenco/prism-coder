@@ -22,8 +22,8 @@ All notable changes to this project will be documented in this file.
   were answered locally before and 9 after (32 fewer); of 294 routine
   requests, 2 more are escalated.
 - Unchanged limits (use them when reviewing local answers): a request the
-  classifier misses still runs locally; when the classifier fails and no cloud
-  answers, text that passes the keyword check still runs locally; a request
+  classifier misses still runs locally; some classifier failures fall back to
+  a keyword check, and text that passes it can still run locally; a request
   with images stays on the device.
 - Cost: requests that used the shortcut now need a classifier read, unless
   screening has already marked them reserved. That is the price of closing the

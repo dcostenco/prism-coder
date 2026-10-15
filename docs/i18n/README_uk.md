@@ -176,9 +176,9 @@ or by re-enabling after each run.
 Layer 1 screening. A BCBA who asks in one message for an operational
 definition and how many mL of a drug to give, or a developer who asks for a
 code review and then authentication code, now has that request screened by
-Layer 1's rules and classifier, which stop early once the request or
-conversation is already marked reserved. Before, it could be answered by a
-small local model with no classifier read.
+Layer 1's rules and, unless the request or conversation is already marked
+reserved, a classifier read. Before, it could be answered by a small local
+model with no classifier read.
 
 - **Rules no longer clear requests.** Before, one routine clause let Layer 1's
   rules clear the whole request, so it skipped the classifier. "Write an
@@ -210,8 +210,8 @@ small local model with no classifier read.
   whether a local answer needs your review:
   - The classifier can miss a request, and a missed request still runs
     locally. The 9 above are such misses.
-  - When the classifier fails and no cloud answers, text that passes the
-    keyword check still runs locally.
+  - Some classifier failures fall back to a keyword check, and text that
+    passes it can still run locally.
   - A request with images is processed on this device even when flagged, and
     is never sent to the cloud.
 - **Cost:** requests that used the shortcut now need a classifier read, unless
