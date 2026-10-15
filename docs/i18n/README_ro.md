@@ -176,8 +176,9 @@ or by re-enabling after each run.
 Layer 1 screening. A BCBA who asks in one message for an operational
 definition and how many mL of a drug to give, or a developer who asks for a
 code review and then authentication code, now has that request screened by
-Layer 1's rules and, unless a rule already flags it, by the classifier. Before,
-it could be answered by a small local model with no classifier read.
+Layer 1's rules and classifier, which stop early once the request or
+conversation is already marked reserved. Before, it could be answered by a
+small local model with no classifier read.
 
 - **Rules no longer clear requests.** Before, one routine clause let Layer 1's
   rules clear the whole request, so it skipped the classifier. "Write an
@@ -186,9 +187,9 @@ it could be answered by a small local model with no classifier read.
   "review the dashboard component for hook order and then write the JWT
   validation middleware". Now rules can only mark a request reserved. The
   routine shortcut is gone for a single prompt and for the current prompt of a
-  follow-up; screening stops early only once the request or conversation is
-  already marked reserved. A long prompt that reaches the classifier is read
-  as excerpts, as before.
+  follow-up; the prompt's classifier read is skipped only if the request or
+  conversation is already marked reserved. A long prompt that reaches the
+  classifier is read as excerpts, as before.
 - **What happens to a flagged request.** A text request that a rule marks
   reserved, or that the classifier flags, goes to a stronger cloud model when
   your plan includes cloud and the call does not pass `cloud_fallback: false`.
@@ -213,9 +214,10 @@ it could be answered by a small local model with no classifier read.
     keyword check still runs locally.
   - A request with images is processed on this device even when flagged, and
     is never sent to the cloud.
-- **Cost:** requests that used the shortcut now need a classifier read, the
-  price of closing the bypass. In our tests that read took about 0.3 s at the
-  95th percentile.
+- **Cost:** requests that used the shortcut now need a classifier read, unless
+  screening has already marked them reserved. That added check is the price of
+  closing the bypass; in our tests the read took about 0.3 s at the 95th
+  percentile.
 
 ## What's New in v20.21.25
 

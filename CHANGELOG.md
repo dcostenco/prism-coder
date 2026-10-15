@@ -9,22 +9,25 @@ All notable changes to this project will be documented in this file.
   clears a whole request without a classifier read, so a routine clause beside
   restraint, medication dosing or security work no longer lets the request run
   locally unread. The shortcut is gone for a single prompt and for the
-  current prompt of a follow-up; screening stops early only once the request
-  or conversation is already marked reserved.
+  current prompt of a follow-up; the prompt's classifier read is skipped only
+  if the request or conversation is already marked reserved.
 - Placement phrases for a quiet, isolation, time-out, padded or calm-down room
   ("put him in the quiet room until he calms down") are marked reserved by
-  rule. Other mentions of these rooms are left to the classifier.
+  rule, so these placement requests get reserved handling even without the
+  word "seclusion". Other mentions of these rooms are left to the classifier.
 - Why: a flagged text request goes to a stronger cloud model when the plan
   includes cloud and the call does not pass `cloud_fallback: false`, or is
   refused with the reason, instead of running locally with no classifier read.
   Measured: of 46 mixed requests that should never be answered locally, 41
   were answered locally before and 9 after (32 fewer); of 294 routine
   requests, 2 more are escalated.
-- Unchanged limits: a request the classifier misses still runs locally; when
-  the classifier fails and no cloud answers, text that passes the keyword
-  check still runs locally; a request with images stays on the device.
-- Cost: requests that used the shortcut now need a classifier read, about
-  0.3 s at the 95th percentile in our tests.
+- Unchanged limits (use them when reviewing local answers): a request the
+  classifier misses still runs locally; when the classifier fails and no cloud
+  answers, text that passes the keyword check still runs locally; a request
+  with images stays on the device.
+- Cost: requests that used the shortcut now need a classifier read, unless
+  screening has already marked them reserved. That is the price of closing the
+  bypass: about 0.3 s at the 95th percentile in our tests.
 
 ## 20.21.25 — 2026-10-12
 
