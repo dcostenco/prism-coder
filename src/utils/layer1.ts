@@ -180,7 +180,7 @@ const CLINICAL_RESERVED_RULES: readonly IntentRule[] = [
         has(/\b(?:draft|write|plan|procedure|protocol|manag\w*|what\s+(?:do|should)\b|respond\w*)\b/i),
     ),
     all(
-        has(/\b(?:physical\s+intervention|containment|hold\s+procedure|restrain\w*|seclu\w*|physical\s+management)\b/i),
+        has(/\b(?:physical\s+intervention|containment|hold\s+procedure|restrain\w*|seclu\w*|physical\s+management|(?:quiet|isolation|time[- ]?out|padded|calm[- ]?down)\s+rooms?)\b/i),
         has(/\b(?:draft|write|document|procedure|protocol|use|implement|instruct\w*)\b/i),
     ),
     all(
@@ -352,7 +352,13 @@ const NON_OPERATIONAL_ARTIFACT_ACTION =
 // for what rides along with it ("review X for hook order and then write the JWT
 // validation" was served locally in 0 ms). A list of separators: it narrows the
 // exemption; it does not prove a request is one instruction.
-const MORE_THAN_ONE_CLAUSE = /[;,&+\n]|\s-\s|\.\s|\b(?:and|then|also|plus|but|before|after|while|so|as\s+well\s+as)\b/i;
+const MORE_THAN_ONE_CLAUSE = /[;,:&+\n–—]|\s-\s|\.\s|\b(?:and|or|then|also|plus|but|before|after|while|so|because|since|if|unless|when|where|which|that|as\s+well\s+as)\b/i;
+// Clinical-risk words. Text naming restraint, seclusion, a hold, injury or
+// medication is never cleared by rule: the classifier reads it. A routine
+// clause beside "a prone hold protocol for staff" or "how much melatonin to
+// give" was cleared in 0 ms, and the classifier refuses those when it reads
+// them. Removing a shortcut cannot make a verdict less safe.
+const CLINICAL_RISK = /\b(?:restrain\w*|restraint|seclu\w*|prone|supine|holds?|holding|basket|takedowns?|physically|(?:quiet|isolation|time[- ]?out|padded)\s+rooms?|injur\w*|hospital\w*|ER\b|bleed\w*|blood|medicat\w*|meds?\b|dos(?:e|es|age|ing)|mg\b|milligrams?|melatonin|prescri\w*)/i;
 
 /**
  * Deterministic policy floor for unambiguous intents.
@@ -395,7 +401,8 @@ export function classifyDeterministicLayer1(userPrompt: string, opts?: Determini
     const clinicalReserved = matchesAny(userPrompt, CLINICAL_RESERVED_RULES);
     if (clinicalReserved) return "OBVIOUS_RESERVED";
     if (opts?.operational === false) {
-        return matchesAny(userPrompt, ROUTINE_BCBA_INTENT_RULES) ? "OBVIOUS_NOT_RESERVED" : null;
+        return matchesAny(userPrompt, ROUTINE_BCBA_INTENT_RULES) && !CLINICAL_RISK.test(userPrompt)
+            ? "OBVIOUS_NOT_RESERVED" : null;
     }
     // Cleared by rule only as one harmless clause that matches no reserved rule.
     // Anything else of this shape is read by the classifier: never cleared by
@@ -404,9 +411,11 @@ export function classifyDeterministicLayer1(userPrompt: string, opts?: Determini
     // work).
     if (isNonOperationalArtifact(userPrompt)) {
         return MORE_THAN_ONE_CLAUSE.test(userPrompt) || matchesAny(userPrompt, RESERVED_INTENT_RULES)
+            || CLINICAL_RISK.test(userPrompt)
             ? null : "OBVIOUS_NOT_RESERVED";
     }
     if (matchesAny(userPrompt, RESERVED_INTENT_RULES)) return "OBVIOUS_RESERVED";
+    if (CLINICAL_RISK.test(userPrompt)) return null;
     if (matchesAny(userPrompt, ROUTINE_BCBA_INTENT_RULES)) return "OBVIOUS_NOT_RESERVED";
     return null;
 }
