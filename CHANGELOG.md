@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 20.21.26 — 2026-10-14
+## 20.21.26 — 2026-10-15
 
 - Layer 1's deterministic rules no longer clear requests; they can only mark
   a request reserved. A routine drafting clause or an artifact edit no longer
@@ -18,9 +18,9 @@ All notable changes to this project will be documented in this file.
 - Why: a flagged text request goes to a stronger cloud model when the plan
   includes cloud and the call does not pass `cloud_fallback: false`, or is
   refused with the reason, instead of running locally with no classifier read.
-  Measured: of 46 mixed requests that should never be answered locally, 41
-  were answered locally before and 9 after (32 fewer); of 294 routine
-  requests, 2 more are escalated.
+  Measured: of 46 mixed requests built to test this bypass, which should
+  never be answered locally, 41 were cleared to run locally before and 9 after
+  (32 fewer); of 294 routine requests, 2 more are escalated.
 - Unchanged limits (use them when reviewing local answers): a request the
   classifier misses still runs locally; some classifier failures fall back to
   a keyword check, and text that passes it can still run locally; a request

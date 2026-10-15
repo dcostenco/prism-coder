@@ -173,12 +173,13 @@ or by re-enabling after each run.
 ## What's New in v20.21.26
 
 **Why it matters:** routine wording no longer lets a mixed request skip
-Layer 1 screening. A BCBA who asks in one message for an operational
+Layer 1, the safety screen that decides whether a request may run on your
+device. A BCBA who asks in one message for an operational
 definition and how many mL of a drug to give, or a developer who asks for a
 code review and then authentication code, now has that request screened by
 Layer 1's rules and, unless the request or conversation is already marked
-reserved, a classifier read. Before, it could be answered by a small local
-model with no classifier read.
+reserved, a classifier read. Before, it could be answered by a local model
+with no classifier read.
 
 - **Rules no longer clear requests.** Before, one routine clause let Layer 1's
   rules clear the whole request, so it skipped the classifier. "Write an
@@ -199,13 +200,15 @@ model with no classifier read.
   run on your device when the local model can answer.
 - **Seclusion by another name.** Placement phrases such as "put him in the
   quiet room until he calms down" (also isolation, time-out, padded and
-  calm-down rooms) are now marked reserved by rule. This catches restrictive
-  placement requests that never use the word "seclusion". Other mentions of
-  these rooms are left to the classifier.
-- **Measured:** of 46 mixed requests that should never be answered locally, 41
-  were answered locally before this release and 9 after: 32 fewer sensitive
-  requests answered locally. Of 294 routine requests, 2 more than before are
-  escalated (or refused, without cloud).
+  calm-down rooms) are now marked reserved by rule. This catches placement
+  requests of that shape (him, her, them, or the client, student or child
+  placed into the room) that never use the word "seclusion". Other wording,
+  and other mentions of these rooms, are left to the classifier.
+- **Measured:** of 46 mixed requests built to test this bypass, which should
+  never be answered locally, 41 were cleared to run locally before this
+  release and 9 after: 32 fewer sensitive requests reaching a local model. Of
+  294 routine requests, 2 more than before are escalated (or refused, without
+  cloud).
 - **Limits, unchanged in this release.** Keep them in mind when deciding
   whether a local answer needs your review:
   - The classifier can miss a request, and a missed request still runs
