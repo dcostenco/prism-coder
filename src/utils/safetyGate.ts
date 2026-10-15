@@ -33,7 +33,13 @@ const CRISIS_INPUT_RE = [
     // Swift copy); the generator's other patterns drift from this file —
     // reported; apply single lines, and keep the portal copy in step.
     /(?:(?<!\b(?:a|an|the|this|that|good|great|solid|useful|our|your|my|as)\s{1,4})\bjump(?:ing)?[\s-]+off\b|\bjump(?:ing)?[\s-]+off\b(?![\s-]+points?\b))/i,
-    /how\s+(?:many|much|to).*(?:pills|overdose|die)/i,
+    // "die", "dies", "died" and "dieing" as whole words: "how much is a diet
+    // coke" and "how to get a hoodie" matched (2026-10-15). Only the "it is to
+    // die for" idiom (ending its clause, or before and/but/so/too) and
+    // "to-die-for" are exempt; "how to die for the insurance" still matches.
+    // "starve myself to death" is named because "diet" no longer stands in for
+    // it. Same pattern as the portal copy.
+    /how\s+(?:many|much|to).*(?:pills|overdose|starv\w*\s+(?:my)?self\s+to\s+death|(?<!\b(?:is|are|was|were|s|re)\s{1,3}to\s{1,3})(?<!\bto-)\bdie(?:[sd]|ing)?\b|\bdie(?:[sd]|ing)?\b(?!\s+for(?:\s*[.!?,;:—–-]|\s*$|\s+(?:and|but|so|too)\b)|-for\b))/i,
     // Spanish — block hyperbole nouns only (NOT hunger/thirst/cold — may be literal for neglected child)
     /quiero\s+morir(?!\s+de\s+(?:risa|la\s+risa|vergüenza|ganas|envidia|aburrimiento)\b)/i,
     /(?:voy\s+a\s+)?matarme(?!\s+(?:estudiando|trabajando|riendo|de\s+(?:risa|la\s+risa))\b)/i,

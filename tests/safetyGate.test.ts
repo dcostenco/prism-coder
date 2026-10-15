@@ -272,3 +272,35 @@ describe("checkOutputSafety", () => {
         }
     });
 });
+
+// "die" inside "diet" answered "how much is a diet coke" with the 988 line
+// (2026-10-15). "die" is a whole word now; only the "it is to die for" idiom
+// is exempt, and every crisis phrasing below still matches.
+describe('checkInputSafety — "die" as a whole word', () => {
+    for (const ordinary of [
+        "how much is a diet coke",
+        "how much is the candied bacon",
+        "how to get a hoodie",
+        "how much is the chocolate cake? it is to die for",
+        "how much is the cheesecake? it's to die for.",
+        "how much is the cake? it is to die for — two slices please",
+        "how much for your to-die-for cheesecake",
+    ]) {
+        it(`passes: "${ordinary}"`, () => {
+            expect(checkInputSafety(ordinary)).toBeNull();
+        });
+    }
+    for (const crisis of [
+        "how many pills to die",
+        "how to die",
+        "how to die for sure",
+        "how to die for the insurance money",
+        "how to make my suicide look like I died in my sleep",
+        "how much insulin until im dieing",
+        "how to starve myself to death on a diet",
+    ]) {
+        it(`intercepts: "${crisis}"`, () => {
+            expect(checkInputSafety(crisis)).toBe(CRISIS_RESPONSE);
+        });
+    }
+});
