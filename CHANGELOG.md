@@ -4,21 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## 20.21.26 — 2026-10-14
 
-- Layer 1's deterministic rules now only refuse; they never clear. A routine
-  drafting clause or an artifact edit no longer clears a whole request without
-  a classifier read, so a routine clause beside restraint, medication dosing
-  or security work is no longer served locally unread. The classifier reads
-  every request a rule does not refuse, including routine ones.
-- Seclusion described as placing someone into a quiet, isolation, time-out,
-  padded or calm-down room is refused by rule. A room named as a setting, or
-  used by choice, is left to the classifier.
-- Why: a sensitive part of a mixed request now goes to a stronger cloud model
-  when the plan allows it, or is refused with the reason, instead of being
-  answered locally unread. Measured: of 46 mixed requests that should never be
-  answered locally, 41 were answered locally before and 9 after (the
-  classifier's own misses); of 294 routine requests, 2 more are escalated.
+- Layer 1's deterministic rules no longer clear requests; they can only mark
+  a request reserved. A routine drafting clause or an artifact edit no longer
+  clears a whole request without a classifier read, so a routine clause beside
+  restraint, medication dosing or security work no longer lets the request run
+  locally unread. A request no rule marks goes to the classifier, including
+  the current prompt of a follow-up.
+- Placement phrases for a quiet, isolation, time-out, padded or calm-down room
+  ("put him in the quiet room until he calms down") are marked reserved by
+  rule. Other mentions of these rooms are left to the classifier.
+- Why: a flagged text request goes to a stronger cloud model when the plan
+  includes cloud and the call does not pass `cloud_fallback: false`, or is
+  refused with the reason, instead of running locally with no classifier read.
+  Measured: of 46 mixed requests that should never be answered locally, 41
+  were answered locally before and 9 after; of 294 routine requests, 2 more
+  are escalated.
+- Unchanged limits: a request the classifier misses still runs locally; when
+  the classifier fails and no cloud answers, text that passes the keyword
+  check still runs locally; a request with images stays on the device.
 - Cost: requests the rules used to clear now take a classifier read, about
-  0.3 s at p95 in our tests.
+  0.3 s at the 95th percentile in our tests.
 
 ## 20.21.25 — 2026-10-12
 

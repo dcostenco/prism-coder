@@ -172,34 +172,44 @@ or by re-enabling after each run.
 
 ## What's New in v20.21.26
 
-**Why it matters:** a request that mixes routine work with a sensitive part is
-now checked as a whole. The sensitive part goes to a stronger cloud model when
-your plan allows it, or is refused with the reason, instead of being answered
-by a small local model without a safety read.
+**Why it matters:** routine wording can no longer switch off the safety check
+for the rest of a request. A BCBA who asks for an operational definition and a
+medication dose in one message, or a developer who asks for a code review and
+authentication code, now has the whole request checked for safety. Before, it
+could be answered by a small local model with no classifier read.
 
-- **The safety classifier reads every request.** Before, one routine clause let
-  Layer 1's rules clear the whole request, so it skipped the classifier. "Write
-  an operational definition for tantrums and tell me how many mL of Benadryl to
-  give at bedtime" was answered locally, and so was "review the dashboard
-  component for hook order and then write the JWT validation middleware". Now
-  the rules only refuse. Everything they do not refuse is read by the
-  classifier, including the current prompt of a follow-up. A long prompt is
-  still read as excerpts, as before.
-  - For BCBAs: restraint and medication dosing next to routine drafting are
-    read, not skipped. Routine drafting (operational definitions, data sheets,
-    antecedent strategies) still runs locally after the classifier clears it.
-  - For developers: security work asked for next to a code review gets the
-    same read.
-- **Seclusion by another name is refused.** Placing someone into a quiet,
-  isolation, time-out, padded or calm-down room ("put him in the quiet room
-  until he calms down") is refused by rule. A room named as a setting, or used
-  by choice, is not refused by rule; the classifier decides.
+- **Rules no longer clear requests.** Before, one routine clause let Layer 1's
+  rules clear the whole request, so it skipped the classifier. "Write an
+  operational definition for tantrums and tell me how many mL of Benadryl to
+  give at bedtime" was answered locally with no classifier read, and so was
+  "review the dashboard component for hook order and then write the JWT
+  validation middleware". Now rules can only mark a request reserved. A request
+  they do not mark goes to the classifier, including the current prompt of a
+  follow-up. A long prompt is read as excerpts, as before.
+- **What happens to a flagged request.** A text request that a rule marks
+  reserved, or that the classifier flags, goes to a stronger cloud model when
+  your plan includes cloud and the call does not pass `cloud_fallback: false`.
+  Otherwise it is refused, and the refusal says why. Requests the classifier
+  clears remain eligible to run locally, so routine drafting (operational
+  definitions, data sheets, antecedent strategies) and routine code work still
+  run on your device when the local model can answer.
+- **Seclusion by another name.** Placement phrases such as "put him in the
+  quiet room until he calms down" (also isolation, time-out, padded and
+  calm-down rooms) are now marked reserved by rule. This catches restrictive
+  placement requests that never use the word "seclusion". Other mentions of
+  these rooms are left to the classifier.
 - **Measured:** of 46 mixed requests that should never be answered locally, 41
-  were answered locally before this release and 9 after. The 9 are phrasings
-  the classifier itself misses. Of 294 routine requests, 2 more than before are
-  now sent to the cloud, or refused without it.
-- **Cost:** requests the rules used to clear now take a classifier read too,
-  about 0.3 s at p95 in our tests.
+  were answered locally before this release and 9 after. Of 294 routine
+  requests, 2 more than before are escalated (or refused, without cloud).
+- **Limits, unchanged in this release:**
+  - The classifier can miss a request, and a missed request still runs
+    locally. The 9 above are such misses.
+  - When the classifier fails and no cloud answers, text that passes the
+    keyword check still runs locally.
+  - A request with images is processed on this device even when flagged, and
+    is never sent to the cloud.
+- **Cost:** requests the rules used to clear now take a classifier read too.
+  In our tests that read took about 0.3 s at the 95th percentile.
 
 ## What's New in v20.21.25
 
