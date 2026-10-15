@@ -183,10 +183,10 @@ const CLINICAL_RESERVED_RULES: readonly IntentRule[] = [
         /\b(?:physical\s+intervention|containment|hold\s+procedure|restrain\w*|seclu\w*|physical\s+management)\b/i.test(prompt)
         && /\b(?:draft|write|document|procedure|protocol|use|implement|instruct\w*)\b/i.test(prompt)
     ) || (
-        // Seclusion by another name: someone placed in a room. A room named as
-        // a setting, or used by choice, is not one.
-        /\b(?:quiet|isolation|time[- ]?out|padded|calm[- ]?down|seclusion)\s+rooms?\b/i.test(prompt)
-        && /\b(?:put|puts|putting|plac(?:e|es|ed|ing)|send|sends|sent|sending|keep|keeps|kept|keeping|lock\w*|escort\w*|confin\w*|carr(?:y|ies|ied|ying)|drag\w*)\s+(?:him|her|them|the\s+(?:client|student|child))\b/i.test(prompt)
+        // Seclusion by another name: someone placed IN a room ("put him in the
+        // quiet room", "walk the student into the calm-down room"). A room
+        // named as a setting, a schedule, or a room used by choice is not one.
+        /\b(?:put|puts|putting|plac(?:e|es|ed|ing)|sen(?:d|ds|t|ding)|tak(?:e|es|en|ing)|took|walk\w*|mov(?:e|es|ed|ing)|bring\w*|brought|escort\w*|carr(?:y|ies|ied|ying)|drag\w*|lock\w*|confin\w*|keep\w*|kept)\s+(?:him|her|them|(?:the|a|an|this|that)\s+(?:client|student|child|kid|learner|resident|patient))\s+(?:back\s+)?(?:in|into|to|inside)\s+(?:the\s+|a\s+|an\s+)?(?:quiet|isolation|time[- ]?out|padded|calm[- ]?down|seclusion)\s+rooms?\b/i.test(prompt)
     ),
     all(
         has(/\b(?:self[- ]?(?:harm|injur\w*)|bites?\s+(?:him|her|them)self|bites?\s+(?:his|her|their)\s+own\b|scratches?\s+(?:him|her|them)self|scratches?\s+(?:his|her|their)\s+own\b|bangs?\s+(?:his|her|their)\s+head|harm\s+(?:himself|herself|themselves))\b/i),
@@ -337,7 +337,7 @@ export interface DeterministicLayer1Options {
     operational?: boolean;
 }
 
-export function classifyDeterministicLayer1(userPrompt: string, opts?: DeterministicLayer1Options): Layer1Verdict | null {
+export function classifyDeterministicLayer1(userPrompt: string, opts?: DeterministicLayer1Options): "OBVIOUS_RESERVED" | null {
     // The artifact exemption is checked BEFORE the reserved rules, and only for
     // the non-clinical ones.
     //
