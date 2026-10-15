@@ -170,6 +170,16 @@ or by re-enabling after each run.
 <details>
 <summary>Release history (optional)</summary>
 
+## What's New in v20.21.26
+
+Layer 1's deterministic rules now only refuse; they never clear a request. A
+routine drafting clause or an artifact edit no longer lets the rest of a request
+skip the safety classifier. So restraint, medication dosing or security work
+next to routine wording is refused instead of answered locally. Routine BCBA
+drafting still runs locally, after a classifier read. Seclusion described as
+placing someone into a quiet, isolation, time-out, padded or calm-down room is
+refused; a room named as a setting, or used by choice, is left to the classifier.
+
 ## What's New in v20.21.25
 
 Semantic memory search now automatically applies ACT-R ranking, combining
