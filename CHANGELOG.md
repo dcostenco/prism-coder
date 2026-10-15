@@ -8,8 +8,9 @@ All notable changes to this project will be documented in this file.
   a request reserved. A routine drafting clause or an artifact edit no longer
   clears a whole request without a classifier read, so a routine clause beside
   restraint, medication dosing or security work no longer lets the request run
-  locally unread. A request no rule marks goes to the classifier, including
-  the current prompt of a follow-up.
+  locally unread. The shortcut is gone for a single prompt and for the
+  current prompt of a follow-up; screening stops early only once the request
+  or conversation is already marked reserved.
 - Placement phrases for a quiet, isolation, time-out, padded or calm-down room
   ("put him in the quiet room until he calms down") are marked reserved by
   rule. Other mentions of these rooms are left to the classifier.
@@ -17,12 +18,12 @@ All notable changes to this project will be documented in this file.
   includes cloud and the call does not pass `cloud_fallback: false`, or is
   refused with the reason, instead of running locally with no classifier read.
   Measured: of 46 mixed requests that should never be answered locally, 41
-  were answered locally before and 9 after; of 294 routine requests, 2 more
-  are escalated.
+  were answered locally before and 9 after (32 fewer); of 294 routine
+  requests, 2 more are escalated.
 - Unchanged limits: a request the classifier misses still runs locally; when
   the classifier fails and no cloud answers, text that passes the keyword
   check still runs locally; a request with images stays on the device.
-- Cost: requests the rules used to clear now take a classifier read, about
+- Cost: requests that used the shortcut now need a classifier read, about
   0.3 s at the 95th percentile in our tests.
 
 ## 20.21.25 — 2026-10-12

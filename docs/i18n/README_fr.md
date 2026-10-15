@@ -172,20 +172,23 @@ or by re-enabling after each run.
 
 ## What's New in v20.21.26
 
-**Why it matters:** routine wording can no longer switch off the safety check
-for the rest of a request. A BCBA who asks for an operational definition and a
-medication dose in one message, or a developer who asks for a code review and
-authentication code, now has the whole request checked for safety. Before, it
-could be answered by a small local model with no classifier read.
+**Why it matters:** routine wording no longer lets a mixed request skip
+Layer 1 screening. A BCBA who asks in one message for an operational
+definition and how many mL of a drug to give, or a developer who asks for a
+code review and then authentication code, now has that request screened by
+Layer 1's rules and, unless a rule already flags it, by the classifier. Before,
+it could be answered by a small local model with no classifier read.
 
 - **Rules no longer clear requests.** Before, one routine clause let Layer 1's
   rules clear the whole request, so it skipped the classifier. "Write an
   operational definition for tantrums and tell me how many mL of Benadryl to
   give at bedtime" was answered locally with no classifier read, and so was
   "review the dashboard component for hook order and then write the JWT
-  validation middleware". Now rules can only mark a request reserved. A request
-  they do not mark goes to the classifier, including the current prompt of a
-  follow-up. A long prompt is read as excerpts, as before.
+  validation middleware". Now rules can only mark a request reserved. The
+  routine shortcut is gone for a single prompt and for the current prompt of a
+  follow-up; screening stops early only once the request or conversation is
+  already marked reserved. A long prompt that reaches the classifier is read
+  as excerpts, as before.
 - **What happens to a flagged request.** A text request that a rule marks
   reserved, or that the classifier flags, goes to a stronger cloud model when
   your plan includes cloud and the call does not pass `cloud_fallback: false`.
@@ -199,17 +202,20 @@ could be answered by a small local model with no classifier read.
   placement requests that never use the word "seclusion". Other mentions of
   these rooms are left to the classifier.
 - **Measured:** of 46 mixed requests that should never be answered locally, 41
-  were answered locally before this release and 9 after. Of 294 routine
-  requests, 2 more than before are escalated (or refused, without cloud).
-- **Limits, unchanged in this release:**
+  were answered locally before this release and 9 after: 32 fewer sensitive
+  requests answered locally. Of 294 routine requests, 2 more than before are
+  escalated (or refused, without cloud).
+- **Limits, unchanged in this release.** Keep them in mind when deciding
+  whether a local answer needs your review:
   - The classifier can miss a request, and a missed request still runs
     locally. The 9 above are such misses.
   - When the classifier fails and no cloud answers, text that passes the
     keyword check still runs locally.
   - A request with images is processed on this device even when flagged, and
     is never sent to the cloud.
-- **Cost:** requests the rules used to clear now take a classifier read too.
-  In our tests that read took about 0.3 s at the 95th percentile.
+- **Cost:** requests that used the shortcut now need a classifier read, the
+  price of closing the bypass. In our tests that read took about 0.3 s at the
+  95th percentile.
 
 ## What's New in v20.21.25
 
