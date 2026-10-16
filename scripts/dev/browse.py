@@ -2209,10 +2209,24 @@ def _stdin_lines_with_idle_timeout(timeout_sec):
     except Exception:
         yield from stream
         return
+    # Read the descriptor directly and split lines here. stream.readline()
+    # pulled a whole chunk into Python's own buffer and returned one line; the
+    # rest sat there while select() watched the empty pipe, so commands that
+    # had already arrived waited for the producer's next write, or for this
+    # timeout. A producer that pauses between blocks (waiting on a result the
+    # held-back commands would produce) deadlocked until then (2026-10-16).
+    pending = b""
     while True:
+        newline = pending.find(b"\n")
+        if newline >= 0:
+            line, pending = pending[:newline + 1], pending[newline + 1:]
+            yield line.decode("utf-8", "replace")
+            continue
         try:
             ready, _, _ = select.select([fileno], [], [], timeout_sec)
         except Exception:
+            if pending:
+                yield pending.decode("utf-8", "replace")
             yield from stream
             return
         if not ready:
@@ -2224,10 +2238,12 @@ def _stdin_lines_with_idle_timeout(timeout_sec):
             }))
             sys.stdout.flush()
             return
-        line = stream.readline()
-        if not line:
+        chunk = os.read(fileno, 65536)
+        if not chunk:
+            if pending:
+                yield pending.decode("utf-8", "replace")
             return
-        yield line
+        pending += chunk
 
 
 def run_pipe(session, sanitize=False, cleanup=False, fail_fast=False, cleanup_files=None):

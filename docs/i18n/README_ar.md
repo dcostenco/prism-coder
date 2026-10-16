@@ -170,6 +170,22 @@ or by re-enabling after each run.
 <details>
 <summary>Release history (optional)</summary>
 
+## What's New in v20.21.27
+
+**Why it matters:** a script that feeds Prism Browser through a pipe can
+now pause between blocks of commands. Before, commands that had already
+arrived waited for the next write, or for the 600 s idle timeout, so a
+script that checked a result before sending more stalled and then failed.
+
+- **Every piped command runs when it arrives.** The reader waited on
+  `select()` for new pipe data while `readline()` had already buffered the
+  commands sent so far. It now reads the descriptor itself and splits lines
+  in its own buffer. Measured with two commands written together and an 8 s
+  pause before a third: the second ran 8 s late before, and with the first
+  now.
+- **Unchanged:** the idle timeout, `\` line continuation, comment lines, and
+  the fallback for streams `select()` cannot watch.
+
 ## What's New in v20.21.26
 
 **Why it matters:** routine wording no longer lets a mixed request skip
