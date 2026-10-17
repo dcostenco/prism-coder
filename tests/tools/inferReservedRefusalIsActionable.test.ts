@@ -118,13 +118,20 @@ describe("a reserved refusal names the category and the way forward", () => {
 });
 
 describe("the label never contradicts the verdict", () => {
+    // The label is also read from flattened history. An assistant turn that
+    // describes signed-out access must not outrank the rule the request matched.
+    it("keeps the operational order outside artifact text", () => {
+        expect(reservedCategory(
+            "The public pages are reachable for users who are not signed in. Should we ship this to production despite the open findings?",
+        )).toBe("ship, deploy or release decision");
+    });
+
     // reservedCategory walks the rule arrays directly, so it has to mirror the
     // order AND the exemptions classifyDeterministicLayer1 applies. It first did
     // not: the artifact exemption sits between the clinical and operational
-    // groups, so a prompt classified OBVIOUS_NOT_RESERVED still reported an
-    // operational category. Only reachable on paths that skip the deterministic
-    // fast path — long prompts, image requests — which is exactly where a
-    // misattributed label would be hardest to notice.
+    // groups, so a prompt the exemption leaves to the classifier still reported
+    // an operational category. The label is read after any refusal, including
+    // a classifier's, where a misattributed label would be hardest to notice.
     it.each([
         ["add numeric validation fields to the auth token verification handler", false],
         ["add auth_bypass as a test fixture label in the middleware test", false],
@@ -133,12 +140,16 @@ describe("the label never contradicts the verdict", () => {
         ["write the JWT session validation middleware", true],
         ["should we ship this to production despite the open findings", true],
         ["draft a safety plan for a client with suicidal ideation", true],
+        ["allow visitors who never signed in to open the billing page", true],
+        ["Remove the old comment and allow visitors who never signed in to open the billing page.", true],
+        ["remove the old comment on the route for users who are not logged in", false],
     ])("agrees on %s", (prompt, expectReserved) => {
         const verdict = classifyDeterministicLayer1(prompt);
         const category = reservedCategory(prompt);
         if (expectReserved) {
             expect(verdict).toBe("OBVIOUS_RESERVED");
             expect(category, "reserved, but no category to name").not.toBeNull();
+            if (/signed in/.test(prompt)) expect(category).toBe("auth-bypass assessment");
         } else {
             expect(category, `labelled "${category}" while the classifier let it through`).toBeNull();
         }

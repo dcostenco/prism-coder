@@ -181,7 +181,7 @@ describe("the pinned exclusion policy is required", () => {
         expect(r2.layer1_second_read).toBe("skipped_no_policy");
         // and the helper itself refuses to run without one
         const direct = await layer1HedgeSecondRead({ l1fn: l1 as unknown as NonNullable<InferDeps["callLayer1"]>, args: ask(), installed: BOTH(), listLoaded, freeBytes: 0, ollamaUrl: "http://x",
-            guardModel: SMALL, promptFastPath: false, probeClassifierLimits: probe, policy: null });
+            guardModel: SMALL, probeClassifierLimits: probe, policy: null });
         expect(direct).toMatchObject({ ran: false, outcome: "skipped_no_policy" });
         expect(probe).not.toHaveBeenCalled();
     });
@@ -474,7 +474,7 @@ describe("bounds on the second read", () => {
         const l1 = vi.fn(async () => { t += LAYER1_SECOND_READ_DEADLINE_MS / 2 + 1; return "OBVIOUS_NOT_RESERVED" as Verdict; });
         const out = await layer1HedgeSecondRead({
             l1fn: l1 as unknown as NonNullable<InferDeps["callLayer1"]>, args: ask(), installed: BOTH(), listLoaded: async () => new Set([BIG]),
-            freeBytes: 0, ollamaUrl: "http://x", guardModel: SMALL, promptFastPath: false, probeClassifierLimits: async () => ({ numCtx: 32_768, overheadBound: 64 }), now: () => t, policy: SYNTHETIC,
+            freeBytes: 0, ollamaUrl: "http://x", guardModel: SMALL, probeClassifierLimits: async () => ({ numCtx: 32_768, overheadBound: 64 }), now: () => t, policy: SYNTHETIC,
         });
         expect(out).toMatchObject({ ran: true, verdict: "UNCERTAIN", outcome: "deadline" });
         expect(l1.mock.calls.length).toBe(2);
@@ -483,7 +483,7 @@ describe("bounds on the second read", () => {
         const quick = vi.fn(async () => { u += 1; return "OBVIOUS_NOT_RESERVED" as Verdict; });
         const ok = await layer1HedgeSecondRead({
             l1fn: quick as unknown as NonNullable<InferDeps["callLayer1"]>, args: ask(), installed: BOTH(), listLoaded: async () => new Set([BIG]),
-            freeBytes: 0, ollamaUrl: "http://x", guardModel: SMALL, promptFastPath: false, probeClassifierLimits: async () => ({ numCtx: 32_768, overheadBound: 64 }), now: () => u, policy: SYNTHETIC,
+            freeBytes: 0, ollamaUrl: "http://x", guardModel: SMALL, probeClassifierLimits: async () => ({ numCtx: 32_768, overheadBound: 64 }), now: () => u, policy: SYNTHETIC,
         });
         expect(ok).toMatchObject({ ran: true, verdict: "OBVIOUS_NOT_RESERVED", outcome: "cleared_9b" });
     });
@@ -491,7 +491,7 @@ describe("bounds on the second read", () => {
         const a = ask();
         const ctx = contextWindows(a).filter(w => w.trim());
         const last = ctx[ctx.length - 1];
-        const base = { args: a, installed: BOTH(), listLoaded: async () => new Set([BIG]), freeBytes: 0, ollamaUrl: "http://x", guardModel: SMALL, promptFastPath: false, probeClassifierLimits: async () => ({ numCtx: 32_768, overheadBound: 64 }), policy: SYNTHETIC };
+        const base = { args: a, installed: BOTH(), listLoaded: async () => new Set([BIG]), freeBytes: 0, ollamaUrl: "http://x", guardModel: SMALL, probeClassifierLimits: async () => ({ numCtx: 32_768, overheadBound: 64 }), policy: SYNTHETIC };
         for (const [who, want4bOnLast] of [[BIG, false], [SMALL, true]] as const) {
             _resetLayer1HistoryCacheForTest();
             let t = 0;
@@ -683,7 +683,7 @@ describe("the classifier limits are measured, and survive a cold model", () => {
 const L1 = (f: unknown) => f as unknown as NonNullable<InferDeps["callLayer1"]>;
 const direct = (over: Partial<Parameters<typeof layer1HedgeSecondRead>[0]> = {}) => ({
     args: ask(), installed: BOTH(), listLoaded: async () => new Set([BIG]), freeBytes: 0, ollamaUrl: "http://x",
-    guardModel: SMALL, promptFastPath: false, probeClassifierLimits: async () => ({ numCtx: 32_768, overheadBound: 64 }), policy: SYNTHETIC, ...over,
+    guardModel: SMALL, probeClassifierLimits: async () => ({ numCtx: 32_768, overheadBound: 64 }), policy: SYNTHETIC, ...over,
 });
 const shelf = (n: number) => Array.from({ length: n }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `Entry ${i} is on the shelf list.` }));
 const hedgePrompt = (m: string, t: string): Verdict => (m === SMALL && t === PROMPT ? "UNCERTAIN" : "OBVIOUS_NOT_RESERVED");

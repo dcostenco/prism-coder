@@ -11,7 +11,7 @@ import { callLayer1 } from "../../src/utils/layer1.js";
  *   PRISM_LIVE_TEST=1 npx vitest run tests/utils/layer1ImageScreenLive.test.ts
  *
  * The mocked suite in layer1ImageScreen.test.ts pins the PLUMBING — that a
- * non-answer escalates, that the fast path cannot skip the screen, that the
+ * non-answer escalates, that routine words cannot skip the screen, that the
  * parse reads an enumerated positive correctly. None of it can prove the model
  * actually detects anything, because the model is stubbed. Only this file can,
  * and it needs a real prism-coder:4b, so it is opt-in and skipped by default.

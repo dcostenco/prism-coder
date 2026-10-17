@@ -20,6 +20,9 @@
  * tier gating, and HIPAA audit are enforced in one place.
  */
 
+import { ownedOmlxGenerate, recoverOwnedOmlx } from "../utils/omlxOwned.js";
+import { OmlxError, createOmlxRuntime, guardedOmlxGenerate, omlxModelTarget, withInferenceResourceLease, withOllamaResourceLease, OMLX_MIN_AVAILABLE_BYTES, type OmlxRuntime, type OmlxTarget } from "../utils/omlxProvider.js";
+import { OMLX_LAYER1_MODEL, omlxLayer1Fetch } from "../utils/omlxLayer1.js";
 import { createHash } from "node:crypto";
 import { type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { pickLocalModel, fmtGb, MODEL_TIERS, resolveOllamaName } from "../utils/modelPicker.js";
@@ -53,7 +56,7 @@ import {
     passesCodingQualityGate,
 } from "../utils/codingQualityPolicy.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
-import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, keywordBackstop, reservedCategory, MAX_CLASSIFIER_PROMPT_LENGTH, layer1ClassifierContent, secondReadExclusion, type Layer1Verdict, type SecondReadExclusionPolicy, type ClassifierInputPolicy } from "../utils/layer1.js";
+import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, keywordBackstop, windowsOf, reservedCategory, MAX_CLASSIFIER_PROMPT_LENGTH, layer1ClassifierContent, secondReadExclusion, type Layer1Verdict, type SecondReadExclusionPolicy, type ClassifierInputPolicy } from "../utils/layer1.js";
 import { getSecondReadPolicy, getAnswerCheckPolicy, getClassifierInputPolicy } from "../utils/inferencePolicy.js";
 import { pseudonymizeForCheck } from "../utils/pseudonymize.js";
 import { answerGroundingBytes, answerGroundingContent, parseGroundingVerdict, arithmeticSlips, arithmeticCorrection, ANSWER_GROUNDING_OUTPUT_TOKENS, ANSWER_GROUNDING_THINK, ANSWER_GROUNDING_THINK_TOKENS, ANSWER_GROUNDING_TIMEOUT_MS, ANSWER_GROUNDING_RETRY_TIMEOUT_MS, ANSWER_GROUNDING_FOLLOW_UP_TOKENS, type AnswerGroundingVerdict, type AnswerCheckPolicy } from "../utils/answerGrounding.js";
@@ -232,24 +235,7 @@ export const HISTORY_TURN_WINDOW_OVERLAP = 200;
  *  one intent. */
 export const DETERMINISTIC_FLOOR_WINDOW_CHARS = 7_200;
 export const DETERMINISTIC_FLOOR_WINDOW_OVERLAP = 3_800;
-export function windowsOf(content: string, size: number, overlap: number): string[] {
-    if (content.length <= size) return [content];
-    const isHigh = (i: number) => { const c = content.charCodeAt(i); return c >= 0xd800 && c <= 0xdbff; };
-    const isLow = (i: number) => { const c = content.charCodeAt(i); return c >= 0xdc00 && c <= 0xdfff; };
-    const out: string[] = [];
-    const step = size - overlap;
-    for (let i = 0; i < content.length; i += step) {
-        // Never cut a surrogate pair: a window that starts on a low or ends
-        // on a high surrogate is malformed text for the classifier.
-        let start = i;
-        if (start > 0 && isLow(start)) start += 1;
-        let end = Math.min(content.length, start + size);
-        if (end < content.length && isHigh(end - 1)) end += 1;
-        out.push(content.slice(start, end));
-        if (end >= content.length) break;
-    }
-    return out;
-}
+export { windowsOf };
 export function historyTurnWindows(content: string): string[] {
     return windowsOf(content, HISTORY_TURN_WINDOW_CHARS, HISTORY_TURN_WINDOW_OVERLAP);
 }
@@ -644,7 +630,8 @@ export const PRISM_INFER_TOOL: Tool = {
         openWorldHint: true,
     },
     description:
-        "Run an inference on a local prism-coder model (Ollama) to save cloud tokens. " +
+        "Run local inference (Ollama by default). Explicit local_backend=omlx uses authenticated " +
+        "loopback oMLX for text-only code/reviewer drafts, without Ollama/cloud substitution or final sign-off. " +
         "Owns model selection across 27B / 9B / 4B / 2B using an explicit `model_ceiling` or " +
         "the caller's `task_complexity`, then validates loaded memory size, model context, " +
         "entitlements, installed models, and free RAM at call time. " +
@@ -681,12 +668,11 @@ export const PRISM_INFER_TOOL: Tool = {
             messages: {
                 type: "array",
                 description:
-                    "Prior turns of THIS conversation, oldest first; `prompt` stays the current turn. " +
-                    "Send only accepted turns, as a brief, not a transcript; text only. A paid Synalux " +
-                    "plan feature: the plan sets turn and character caps; free plan or no portal is " +
-                    "refused (multi_turn_not_in_plan); over-cap or malformed history is refused with " +
-                    "the caps named, never trimmed. Turns are safety-screened, counted against the " +
-                    "tier's context, forwarded to the cloud on escalation (32 KB cap), never stored.",
+                    "Prior accepted text turns of THIS conversation, oldest first; prompt is current. " +
+                    "Brief, not transcript. A paid Synalux plan feature; plan sets turn/character caps. " +
+                    "Unavailable: multi_turn_not_in_plan. Malformed/over-cap: refused with caps named, " +
+                    "never trimmed. Safety-screened, charged to context, forwarded on cloud escalation " +
+                    "(32 KB cap), never stored.",
                 items: {
                     type: "object",
                     properties: {
@@ -710,6 +696,14 @@ export const PRISM_INFER_TOOL: Tool = {
                 description: "Sampling temperature; default 0 = deterministic.",
                 default: 0,
             },
+            local_backend: {
+                type: "string", enum: ["ollama", "omlx"],
+                description: "Default Ollama; explicit oMLX is text-only code mode, no backend substitution.",
+            },
+            local_model: {
+                type: "string",
+                description: "Explicit oMLX only: exact advertised model ID; otherwise use trusted local configuration.",
+            },
             model_ceiling: {
                 type: "string",
                 enum: ["27b", "9b", "4b", "2b"],
@@ -726,8 +720,7 @@ export const PRISM_INFER_TOOL: Tool = {
             project: {
                 type: "string",
                 description:
-                    "Prism project whose dashboard-depth handoff and recent session memory go to the " +
-                    "local worker as historical data.",
+                    "Project whose dashboard-depth handoff/recent session memory is historical worker context.",
             },
             context_depth: {
                 type: "string",
@@ -745,14 +738,13 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             timeout_ms: {
                 type: "number",
-                description: "Per-call timeout override. Default by tier: 27B 120s, 9B 60s, 4B 20s, 2B 15s.",
+                description: "Timeout override. Ollama: 27B 120s, 9B 60s, 4B 20s, 2B 15s. oMLX generation/check budget: 300s.",
             },
             evidence: {
                 type: "array",
                 description:
-                    "Snippets the output must be grounded in. With `verify: true`, every assertive " +
-                    "claim (numbers, names, dates, codes, $ amounts) must be ENTAILED by a snippet " +
-                    "or the draft is refused.",
+                    "Evidence snippets. With verify:true every assertive claim must be ENTAILED by " +
+                    "a snippet or the draft is refused.",
                 items: {
                     type: "object",
                     properties: {
@@ -765,9 +757,8 @@ export const PRISM_INFER_TOOL: Tool = {
             verify: {
                 type: "boolean",
                 description:
-                    "L3 grounding verifier; default true when `evidence` is given. A second model " +
-                    "(qwen3.5:4b by default) checks the draft against `evidence`; NEUTRAL or " +
-                    "CONTRADICTED claims are refused.",
+                    "L3 grounding; default true with evidence. A second model (default qwen3.5:4b) " +
+                    "checks the draft; NEUTRAL/CONTRADICTED claims are refused.",
             },
             verifier_model: {
                 type: "string",
@@ -792,8 +783,7 @@ export const PRISM_INFER_TOOL: Tool = {
                 maxItems: MAX_ROUTE_TOOLS,
                 items: { type: "string" },
                 description:
-                    "Tool names advertised to the route model; well-formed calls outside this list " +
-                    "are suppressed in route mode. Default: Prism's seven trained routing tools.",
+                    "Advertised route tools; other calls are suppressed. Default: Prism's seven trained tools.",
             },
             route_guard: {
                 type: "string",
@@ -811,8 +801,7 @@ export const PRISM_INFER_TOOL: Tool = {
             think: {
                 type: "boolean",
                 description:
-                    "<think> reasoning. Default true for chat/code, false for route; better on complex " +
-                    "tasks, adds ~2-5s.",
+                    "Reasoning override. Ollama uses tier/mode defaults; oMLX preserves local configuration when omitted.",
             },
             strict_entitlements: {
                 type: "boolean",
@@ -834,6 +823,32 @@ export const PRISM_INFER_TOOL: Tool = {
         },
         required: ["prompt"],
     },
+    outputSchema: {
+        type: "object",
+        properties: {
+            output: { type: "string" },
+            backend: { type: "string" },
+            model_picked: { type: ["string", "null"] },
+            used_cloud: { type: "boolean" },
+            ram_free_mb: { type: "number" },
+            latency_ms: { type: "number" },
+            attempts: {
+                type: "array", items: {
+                    type: "object", properties: { tier: { type: "string" }, reason: { type: "string" } },
+                    required: ["tier", "reason"], additionalProperties: false,
+                },
+            },
+            gate_outcome: {
+                type: "object", properties: {
+                    status: { type: "string", enum: ["success", "degraded", "refused"] },
+                    reason: { type: "string" }, served_anyway: { type: "boolean" },
+                },
+                required: ["status", "served_anyway"], additionalProperties: false,
+            },
+            next_step: { type: "string" },
+        },
+        required: ["output", "backend", "model_picked", "used_cloud", "ram_free_mb", "latency_ms", "attempts"],
+    },
 };
 
 // ─── Arg validation ────────────────────────────────────────────
@@ -852,6 +867,8 @@ export interface PrismInferArgs {
     messages?: InferHistoryTurn[];
     max_tokens?: number;
     temperature?: number;
+    local_backend?: "ollama" | "omlx";
+    local_model?: string;
     model_ceiling?: "27b" | "9b" | "4b" | "2b";
     /** Deterministic workload hint forwarded by session_task_route. */
     task_complexity?: number;
@@ -943,6 +960,9 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
         if (a.images.some((i: unknown) => typeof i !== "string" || !i.trim())) return false;
     }
     if (a.messages !== undefined && messagesProblem(a.messages) !== null) return false;
+    if (a.local_backend !== undefined && a.local_backend !== "ollama" && a.local_backend !== "omlx") return false;
+    if (a.local_model !== undefined && (a.local_backend !== "omlx" || typeof a.local_model !== "string" || !a.local_model.trim())) return false;
+    if (a.local_backend === "omlx" && (a.mode !== "code" || (Array.isArray(a.images) && a.images.length > 0))) return false;
     if (a.max_tokens !== undefined && typeof a.max_tokens !== "number") return false;
     if (a.temperature !== undefined && typeof a.temperature !== "number") return false;
     if (a.cloud_fallback !== undefined && typeof a.cloud_fallback !== "boolean") return false;
@@ -1122,6 +1142,61 @@ export async function listOllamaLoaded(url: string = PRISM_LOCAL_LLM_URL): Promi
     }
 }
 
+/** The existing reversible Ollama unload operation, never a cache deletion. */
+export async function unloadOllamaModel(url: string, model: string, fetchImpl: typeof fetch = fetch): Promise<void> {
+    try {
+        const response = await fetchImpl(`${url}/api/generate`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model, keep_alive: 0 }),
+            signal: AbortSignal.timeout(3_000), redirect: "error",
+        });
+        if (!response.ok) throw new Error();
+        const acknowledgement = await response.json() as { done?: unknown; done_reason?: unknown; error?: unknown };
+        if (acknowledgement.done !== true || acknowledgement.error !== undefined
+            || (acknowledgement.done_reason !== undefined && acknowledgement.done_reason !== "unload")) throw new Error();
+    } catch { throw new OmlxError("omlx_ollama_unload_failed"); }
+}
+// Measured 2026-10-15: the 4b's unload is acknowledged in 38 ms and leaves
+// /api/ps about 250 ms later. The timeout leaves room for the larger tiers.
+const OLLAMA_UNLOAD_DRAIN_TIMEOUT_MS = 10_000;
+const OLLAMA_UNLOAD_POLL_INTERVAL_MS = 100;
+
+/** An unload acknowledgment can precede buffer release. Only a fresh empty
+ * loaded set unlocks oMLX; never unload a newcomer while waiting. */
+export async function waitForOllamaUnloadDrain(
+    listLoaded: OmlxRuntime["listLoaded"], initial: ReadonlySet<string>,
+    timeoutMs = OLLAMA_UNLOAD_DRAIN_TIMEOUT_MS, pollIntervalMs = OLLAMA_UNLOAD_POLL_INTERVAL_MS,
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let loaded: Set<string>;
+        try {
+            loaded = await Promise.race([
+                Promise.resolve().then(listLoaded),
+                new Promise<never>((_resolve, reject) => {
+                    timer = setTimeout(() => reject(new OmlxError("omlx_ollama_state_unavailable")), deadline - Date.now());
+                }),
+            ]);
+        } catch { throw new OmlxError("omlx_ollama_state_unavailable"); }
+        finally { if (timer) clearTimeout(timer); }
+        if (Date.now() > deadline) break;
+        if (loaded.size === 0) return;
+        if ([...loaded].some(model => !initial.has(model))) throw new OmlxError("omlx_memory_contention");
+        await new Promise(resolve => setTimeout(resolve, Math.min(pollIntervalMs, Math.max(0, deadline - Date.now()))));
+    }
+    throw new OmlxError("omlx_ollama_unload_incomplete");
+}
+
+async function strictLoaded(url: string): Promise<Set<string>> {
+    try {
+        const response = await fetch(`${url}/api/ps`, { signal: AbortSignal.timeout(3_000), redirect: "error" });
+        if (!response.ok) throw new Error();
+        const data = await response.json() as { models?: { name?: unknown }[] };
+        if (!Array.isArray(data.models) || data.models.some(model => typeof model?.name !== "string" || !model.name)) throw new Error();
+        return new Set(data.models.map(model => model.name as string));
+    } catch { throw new OmlxError("omlx_ollama_state_unavailable"); }
+}
 interface OllamaChatResp {
     message?: { content?: string };
     error?: string;
@@ -1976,6 +2051,7 @@ export interface PrismInferResult {
  * Accepts injected dependencies so tests can mock Ollama / synalux.
  */
 export interface InferDeps {
+    omlx?: OmlxRuntime;
     freemem: () => number;
     listTags: () => Promise<Set<string> | null>;
     listLoaded: () => Promise<Set<string>>;
@@ -2105,6 +2181,35 @@ const _evictionMutex = (() => {
 })();
 
 export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<PrismInferResult> {
+    const started = Date.now();
+    return withInferenceResourceLease(args.local_backend === "omlx", async () => {
+        let releaseDevice: (() => Promise<void>) | undefined;
+        const runtime = args.local_backend === "omlx" ? deps.omlx : undefined;
+        // Every owned generation, so the device outlives its marker writes.
+        const generations = new Set<Promise<unknown>>();
+        const scopedDeps = runtime ? { ...deps, omlx: { ...runtime, detect: async (model?: string) => {
+            const target = await runtime.detect(model);
+            releaseDevice = await runtime.acquire(undefined, { recoveryProviderId: target.url });
+            // Before Layer 1 or anything else: a stale marker of this provider
+            // is cleared on proof, or the call is refused.
+            await runtime.recover?.(target);
+            return target;
+        }, generate: (target: OmlxTarget, request: Parameters<OmlxRuntime["generate"]>[1], signal: AbortSignal) => {
+            const generation = runtime.generate(target, request, signal);
+            generations.add(generation.catch(() => undefined));
+            return generation;
+        } } } : deps;
+        try {
+            return { ...await runInferWithResources(args, scopedDeps), latency_ms: Date.now() - started };
+        } finally {
+            // guardedOmlxGenerate may answer first; the lease waits for the jobs.
+            await Promise.all(generations);
+            await releaseDevice?.();
+        }
+    });
+}
+
+async function runInferWithResources(args: PrismInferArgs, deps: InferDeps): Promise<PrismInferResult> {
     const t0 = Date.now();
     const temperature = args.temperature ?? 0;
 
@@ -2133,6 +2238,12 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         };
     }
 
+    return args.local_backend === "omlx"
+        ? runInferAfterInputSafety(args, deps, t0, temperature)
+        : withOllamaResourceLease(() => runInferAfterInputSafety(args, deps, t0, temperature));
+}
+
+async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t0: number, temperature: number): Promise<PrismInferResult> {
     // ── Entitlement enforcement ──────────────────────────────────
     // Resolved per call (§5.5) — getEntitlements dedupes via a 5-min cache.
     // Free users without auth get 4b ceiling, 50 calls/day, 512 max tokens.
@@ -2196,7 +2307,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // explicit request still behaves as before and is refused at the point of
     // use with its attempt named.
     const planDefault = ent.features.cloud_fallback && !(args.images?.length);
-    let allowCloud = (args.cloud_fallback ?? planDefault) && ent.features.cloud_fallback;
+    let allowCloud = args.local_backend !== "omlx" && (args.cloud_fallback ?? planDefault) && ent.features.cloud_fallback;
 
     // Verification only for paid plans (free users skip L3 grounding)
     const canVerify = ent.features.grounding_verifier;
@@ -2363,8 +2474,66 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // Discover which tags Ollama actually has + which are already warm.
     // Already-loaded models don't need RAM headroom — they're reusing
     // memory Ollama allocated previously.
+    let omlxTarget: OmlxTarget | undefined;
+    const omlxRuntime = args.local_backend === "omlx" ? deps.omlx : undefined;
+    if (args.local_backend === "omlx") {
+        if (mode !== "code" || args.images?.length) throw new Error("prism_infer: oMLX requires text-only code mode");
+        if (!omlxRuntime) throw new Error("prism_infer: omlx_runtime_unavailable");
+        // No trusted binding maps an oMLX model to a logical tier, and the
+        // configured Flash model outweighs every Ollama tier. Below the top
+        // ceiling, from the caller or the plan, refuse before any network,
+        // classification or residency change.
+        if (effectiveCeiling !== "27b") {
+            attempts.push({ tier: "omlx", reason: "omlx_model_ceiling" });
+            if (wantReport) return refusedResult("omlx_model_ceiling");
+            throw new Error("prism_infer: omlx_model_ceiling; explicit oMLX needs the top model ceiling");
+        }
+        if (!Number.isInteger(localMaxTokens) || localMaxTokens <= 0
+            || !Number.isFinite(temperature) || temperature < 0
+            || (args.timeout_ms !== undefined && (!Number.isInteger(args.timeout_ms) || args.timeout_ms <= 0 || args.timeout_ms > 900_000))) {
+            throw new Error("prism_infer: invalid bounded oMLX generation parameters");
+        }
+        try { omlxTarget = await omlxRuntime.detect(args.local_model); }
+        catch (error) {
+            const reason = error instanceof OmlxError ? error.reason : "omlx_detection_unavailable";
+            attempts.push({ tier: "omlx", reason });
+            if (wantReport) return refusedResult(reason);
+            throw new Error(`prism_infer: ${reason}; explicit oMLX will not substitute another backend`);
+        }
+        // Fit is conservative in UTF-8 bytes; refuse before changing Ollama state.
+        const inputBytes = Buffer.byteLength(args.prompt + (args.system ?? ""), "utf8")
+            + (args.messages ?? []).reduce((n, turn) => n + Buffer.byteLength(turn.content, "utf8") + 8, 0);
+        if (inputBytes + localMaxTokens + 1_300 > omlxTarget.contextTokens) {
+            throw new Error("prism_infer: omlx_ctx_insufficient");
+        }
+        attempts.push({ tier: "omlx", reason: "authenticated_model_detected" });
+    }
     const installed = await deps.listTags();
     const loaded = await deps.listLoaded();
+    if (omlxTarget && installed === null) throw new Error("prism_infer: omlx_classifier_unavailable");
+    // Ollama is unloaded during an explicit oMLX call (owner, 2026-10-15; this
+    // replaces plan section 4's "never evict another Ollama user's weights").
+    // Under the device lease, before classification: unload every resident
+    // model reversibly (the weights stay on disk and reload on the next Ollama
+    // call) and wait until Ollama reports none. A failed unload, a model that
+    // does not drain, or a newcomer loading meanwhile refuses. After this, a
+    // model that appears is refused per read by guardedOmlxGenerate.
+    if (omlxTarget && omlxRuntime) {
+        let residency: string | null = null;
+        try {
+            const initial = new Set(await omlxRuntime.listLoaded());
+            for (const model of initial) await omlxRuntime.unload(model);
+            if (initial.size > 0) {
+                await waitForOllamaUnloadDrain(() => omlxRuntime.listLoaded(), initial);
+                attempts.push({ tier: "omlx", reason: `omlx_ollama_unloaded:${initial.size}` });
+            }
+        } catch (error) { residency = error instanceof OmlxError ? error.reason : "omlx_ollama_state_unavailable"; }
+        if (residency) {
+            attempts.push({ tier: "omlx", reason: residency });
+            if (wantReport) return refusedResult(residency);
+            throw new Error(`prism_infer: ${residency}; oMLX generation refused`);
+        }
+    }
     if (installed === null) {
         attempts.push({ tier: "ollama_probe", reason: "unreachable" });
     }
@@ -2415,8 +2584,23 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     }
     let secondReadModel: string | null = null;
     if (installed) {
-        const l1fn = deps.callLayer1 ?? defaultCallLayer1;
-        const l1Model = resolveOllamaName("prism-coder:4b", installed);
+        // Explicit oMLX classifies on its own server: every read (the prompt,
+        // history and context windows) goes to the oMLX classifier through the
+        // owned path, inside this call's device lease. Nothing is loaded into
+        // Ollama, and the history cache keys carry the oMLX model's name.
+        // A target that cannot carry the credential fails the read (ERROR), and
+        // explicit oMLX refuses ERROR; it never falls back to Ollama.
+        const baseL1 = deps.callLayer1 ?? defaultCallLayer1;
+        const generationTarget = omlxTarget, runtime = omlxRuntime;
+        const omlxL1Fetch = generationTarget && runtime
+            ? omlxLayer1Fetch(async request =>
+                guardedOmlxGenerate(runtime, omlxModelTarget(generationTarget, OMLX_LAYER1_MODEL), request, deps.freemem))
+            : undefined;
+        const l1fn = omlxL1Fetch
+            ? (...[prompt, url, model, , images, opts]: Parameters<typeof defaultCallLayer1>) =>
+                baseL1(prompt, url, model, omlxL1Fetch, images, opts)
+            : baseL1;
+        const l1Model = omlxL1Fetch ? OMLX_LAYER1_MODEL : resolveOllamaName("prism-coder:4b", installed);
         secondReadModel = null;
         // The classifier must be able to SEE what it is classifying. Ollama
         // accepts `images` on a text-only model and silently ignores them
@@ -2442,6 +2626,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 );
             }
         }
+        // Explicit oMLX: errors are never served (strictErrors), and the rules
+        // only refuse; the classifier reads everything they would clear.
+        const omlxL1Opts = omlxTarget ? { strictErrors: true, readOversizeWhole: true } as const : undefined;
         // 4th arg is fetchImpl (default), 5th is the images the classifier must see.
         // Single turn: one call, unchanged. With history, three layers: the
         // deterministic floor per turn, every turn read alone (every verdict
@@ -2455,8 +2642,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         if (!args.messages?.length) {
             // Single turn: one call; the classifier-input policy is passed when there is one.
             l1 = classifierInput
-                ? await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { classifierInput })
-                : await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages);
+                ? await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { classifierInput, ...omlxL1Opts })
+                : await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, ...(omlxL1Opts ? [omlxL1Opts] : []));
             if (l1 !== "OBVIOUS_NOT_RESERVED") l1Layer = "prompt";
         } else {
             l1 = "OBVIOUS_NOT_RESERVED";
@@ -2530,7 +2717,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // is switched off here — it would undo the slicing above (words
             // 14k chars apart firing one rule; review round 18).
             if (l1 !== "OBVIOUS_RESERVED") {
-                l1 = raise(l1, await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false, ...(classifierInput ? { classifierInput } : {}) }), "prompt");
+                l1 = raise(l1, await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false, ...(classifierInput ? { classifierInput } : {}), ...omlxL1Opts }), "prompt");
             }
             // 3. Context, raise only: one window per turn and one for the
             // prompt (see contextWindows), cached like any window. Skipped
@@ -2587,6 +2774,11 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 // A read the 4b could not answer is not a hedge the 9b may overturn.
                 attempts.push({ tier: "layer1", reason: "layer1_hedge_second_read_skipped_classifier_error" });
                 entMeta.layer1_second_read = "skipped_classifier_error";
+            } else if (modelHedgeOnly && omlxL1Fetch) {
+                // On explicit oMLX the 9b already read every window: the hedge
+                // stands and refuses.
+                attempts.push({ tier: "layer1", reason: "layer1_hedge_second_read_skipped_omlx" });
+                entMeta.layer1_second_read = "skipped_omlx";
             } else if (modelHedgeOnly) {
                 const second = await layer1HedgeSecondRead({
                     l1fn, args, installed, listLoaded: deps.listLoaded, freeBytes: deps.freemem(), ollamaUrl: deps.ollamaUrl,
@@ -2756,11 +2948,31 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 );
             }
         }
+        // Explicit oMLX never serves on the keyword backstop alone: a classifier
+        // that could not answer a read is not permission (plan section 4), and
+        // there is no cloud to escalate to. Ordinary callers keep their policy.
+        if (omlxTarget && l1 === "ERROR") {
+            attempts.push({ tier: "omlx", reason: "omlx_classifier_error" });
+            if (wantReport) return refusedResult("omlx_classifier_error");
+            throw new Error("prism_infer: omlx_classifier_error; explicit oMLX does not serve on the keyword backstop alone");
+        }
         if (l1 === "OBVIOUS_NOT_RESERVED") {
             debugLog(`[prism_infer] Layer 1 verdict=OBVIOUS_NOT_RESERVED — proceeding local`);
         }
     }
     // ── end Layer 1 ─────────────────────────────────────────────────────────
+
+    // Explicit oMLX classified on oMLX, so nothing of this call's is in Ollama.
+    // Anything resident now belongs to another user: guardedOmlxGenerate
+    // refuses generation (omlx_memory_contention) before any request.
+    const omlxDeadline = Date.now() + (args.timeout_ms ?? 300_000);
+    const callLocal: InferDeps["callLocal"] = omlxTarget && omlxRuntime
+        ? async (_url, _model, prompt, system, maxTokens, temperature, timeoutMs, think, _images, history) => {
+            const messages = [...(system === undefined ? [] : [{ role: "system", content: system }]),
+                ...(history ?? []), { role: "user", content: prompt }];
+            return guardedOmlxGenerate(omlxRuntime, omlxTarget, { messages, maxTokens, temperature: args.temperature, timeoutMs: Math.min(timeoutMs, omlxDeadline - Date.now()), think }, deps.freemem);
+        }
+        : deps.callLocal;
 
     // A second read ran the 9b after free RAM and the warm set were read
     // above (and may have loaded it, or found it unloaded since); eviction and
@@ -2781,20 +2993,21 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     let withheldReason: "answer_ungrounded" | "answer_unverified" | null = null;
 
     if (installed) {
+        const servingTiers = omlxTarget ? [{ tag: omlxTarget.model, weightsGb: 0, minFreeGb: OMLX_MIN_AVAILABLE_BYTES / 1024 ** 3, ctxTokens: omlxTarget.contextTokens }] : MODEL_TIERS;
         // F4 fix: guard ceiling-not-found — Math.max(0,-1) silently targets tier 0 (27b).
         // Instead of defaulting to the largest tier, treat not-found as "no ceiling" (start=0).
         const ceilIdx = effectiveCeiling
             ? MODEL_TIERS.findIndex(t => t.tag.endsWith(`:${effectiveCeiling}`))
             : -1;
-        const ceilStart = ceilIdx >= 0 ? ceilIdx : 0;
+        const ceilStart = omlxTarget ? 0 : ceilIdx >= 0 ? ceilIdx : 0;
 
         // Auto-evict: if the ceiling tier is installed but not warm and prism's
         // own smaller tier models are warm, unload them to make room.
         // Operates only on prism tier models — never evicts arbitrary Ollama models
         // the caller doesn't own (F1). Uses an in-process mutex to prevent a
         // concurrent request from evicting a model mid-inference (F3).
-        let freeAfterEvict = genFreeBytes;
-        if (genLoaded && genLoaded.size > 0) {
+        let freeAfterEvict = omlxTarget ? deps.freemem() : genFreeBytes;
+        if (!omlxTarget && genLoaded && genLoaded.size > 0) {
             const ceilTier = MODEL_TIERS[ceilIdx >= 0 ? ceilIdx : 0];
             const ceilName = ceilTier ? resolveOllamaName(ceilTier.tag, installed) : null;
             const ceilInstalled = ceilName ? installed.has(ceilName) : false;
@@ -2849,11 +3062,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                         // F2 fix: await each evict call; log failures; don't proceed blind.
                         const evictResults = await Promise.allSettled(
                             tierModelsToEvict.map(m =>
-                                fetch(`${deps.ollamaUrl}/api/generate`, {
-                                    method: "POST",
-                                    body: JSON.stringify({ model: m, keep_alive: 0 }),
-                                    signal: AbortSignal.timeout(3_000),
-                                })
+                                unloadOllamaModel(deps.ollamaUrl, m)
                             )
                         );
                         const failed = evictResults.filter(r => r.status === "rejected").length;
@@ -2946,14 +3155,14 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         // so the tier cannot be chosen on it, and a digit that is silently
         // wrong reads exactly like a digit that is right. The saving was worth
         // less than measured; the failure is worth more.
-        for (let i = ceilStart; i < MODEL_TIERS.length; i++) {
-            const tier = MODEL_TIERS[i];
+        for (let i = ceilStart; i < servingTiers.length; i++) {
+            const tier = servingTiers[i];
             // Accept the tier whether Ollama reports it as bare (`prism-coder:27b`)
             // or namespaced (`dcostenco/prism-coder:27b`, the form `ollama pull`
             // produces from a HF repo). resolveOllamaName returns the actual
             // name Ollama knows so /api/generate finds the model.
-            const ollamaName = resolveOllamaName(tier.tag, installed);
-            if (!installed.has(ollamaName)) {
+            const ollamaName = omlxTarget ? omlxTarget.model : resolveOllamaName(tier.tag, installed);
+            if (!omlxTarget && !installed.has(ollamaName)) {
                 attempts.push({ tier: tier.tag, reason: "not_pulled" });
                 continue;
             }
@@ -2990,7 +3199,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // unprobeable means fall back to the table, never unlock.
             let liveCtx: number | null = null;
             try {
-                liveCtx = await (deps.probeNumCtx ?? probeNumCtx)(deps.ollamaUrl, ollamaName);
+                liveCtx = omlxTarget ? omlxTarget.contextTokens : await (deps.probeNumCtx ?? probeNumCtx)(deps.ollamaUrl, ollamaName);
             } catch {
                 liveCtx = null;
             }
@@ -3009,13 +3218,17 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // shape) and cached, including negatives.
             const MAX_TEMPLATE_OVERHEAD = 1_300;
             let CTX_TEMPLATE_MARGIN = 64;
-            if (promptBodyEst + MAX_TEMPLATE_OVERHEAD > effectiveCtx) {
+            if (!omlxTarget && promptBodyEst + MAX_TEMPLATE_OVERHEAD > effectiveCtx) {
                 const probed = await (deps.probeTemplateOverhead ?? probeTemplateOverhead)(
                     deps.ollamaUrl, ollamaName, effectiveSystem != null,
                 );
                 if (probed != null) CTX_TEMPLATE_MARGIN = probed;
             }
-            const promptTokensEst = promptBodyEst + CTX_TEMPLATE_MARGIN;
+            const promptTokensEst = omlxTarget
+                ? Buffer.byteLength(args.prompt + (effectiveSystem ?? ""), "utf8")
+                    + (args.messages ?? []).reduce((n, turn) => n + Buffer.byteLength(turn.content, "utf8") + 8, 0)
+                    + MAX_TEMPLATE_OVERHEAD + localMaxTokens
+                : promptBodyEst + CTX_TEMPLATE_MARGIN;
 
             if (promptTokensEst > effectiveCtx) {
                 attempts.push({
@@ -3031,24 +3244,24 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 continue;
             }
             anyViable = true;
-            const timeout = args.timeout_ms ?? DEFAULT_TIMEOUTS[tier.tag] ?? 60_000;
-            const enableThink = resolveThinkingMode(args, mode, tier);
+            const timeout = args.timeout_ms ?? (omlxTarget ? 300_000 : DEFAULT_TIMEOUTS[tier.tag] ?? 60_000);
+            const enableThink = omlxTarget ? args.think : resolveThinkingMode(args, mode, tier);
             // Reasoning must not crowd out the answer: a tier that thinks needs
             // its own floor, or the hard_truncation retry cuts the thinking back
             // off and lands on the configuration this tier is worst in.
             const tierTokens = enableThink && tier.minLocalTokens
                 ? Math.min(Math.max(localMaxTokens, tier.minLocalTokens), 8192)
                 : localMaxTokens;
-            let result = await deps.callLocal(
+            let result = await callLocal(
                 deps.ollamaUrl, ollamaName, args.prompt, effectiveSystem, tierTokens, temperature, timeout, enableThink, resolvedImages, ...historyArgs(args),
             );
             // Think-only retry: model burned all tokens on <think>, empty content.
             // Retry same model with think=false rather than falling to a smaller tier.
             // One-shot: think=false cannot re-trigger think_only (no thinking to burn).
-            if (!result.ok && result.reason === "think_only" && enableThink) {
+            if (!omlxTarget && !result.ok && result.reason === "think_only" && enableThink) {
                 debugLog(`[prism_infer] ${tier.tag} returned think-only — retrying with think=false`);
                 recordThinkOnlyRetry();
-                result = await deps.callLocal(
+                result = await callLocal(
                     deps.ollamaUrl, ollamaName, args.prompt, effectiveSystem, tierTokens, temperature, timeout, false, resolvedImages, ...historyArgs(args),
                 );
             }
@@ -3117,7 +3330,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 // collapses (adversarial review 2026-09-16), and the prompt
                 // alone would never reach the floor.
                 const inputChars = args.prompt.length + historyChars(args);
-                const looksTruncated = halfCtx != null
+                const looksTruncated = !omlxTarget && halfCtx != null
                     && result.promptTokens != null
                     && Math.abs(result.promptTokens - halfCtx) <= 8
                     && inputChars >= halfCtx;
@@ -3165,10 +3378,10 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 // there); this is chat/code on a small budget. One shot only —
                 // think=false has no reasoning left to cut, so a second retry would
                 // be pure latency.
-                if (!gate.pass && gate.reason === "hard_truncation" && enableThink) {
+                if (!omlxTarget && !gate.pass && gate.reason === "hard_truncation" && enableThink) {
                     debugLog(`[prism_infer] ${tier.tag} truncated mid-answer — retrying with think=false`);
                     attempts.push({ tier: tier.tag, reason: "hard_truncation_retry" });
-                    const retried = await deps.callLocal(
+                    const retried = await callLocal(
                         deps.ollamaUrl, ollamaName, args.prompt, effectiveSystem, tierTokens, temperature, timeout, false, resolvedImages, ...historyArgs(args),
                     );
                     if (retried.ok) {
@@ -3245,7 +3458,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                         // Same images and history as the first call: a repair
                         // of a follow-up without its context "repairs" against
                         // nothing (adversarial review 2026-09-16).
-                        const repaired = await deps.callLocal(
+                        const repaired = await callLocal(
                             deps.ollamaUrl,
                             ollamaName,
                             repair.prompt,
@@ -3253,7 +3466,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                             maxTokens,
                             0,
                             timeout,
-                            false,
+                            omlxTarget ? args.think : false,
                             resolvedImages,
                             ...historyArgs(args),
                         );
@@ -3324,9 +3537,9 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                             // overhead, the reasoning budget and the one follow-up turn: a
                             // request Ollama truncates would let the check pass an answer
                             // against a conversation it only partly read.
-                            const runtimeCtx = await (deps.probeLoadedContext ?? probeLoadedContext)(deps.ollamaUrl, ollamaName).catch(() => null);
+                            const runtimeCtx = omlxTarget ? omlxTarget.contextTokens : await (deps.probeLoadedContext ?? probeLoadedContext)(deps.ollamaUrl, ollamaName).catch(() => null);
                             const checkCtx = runtimeCtx ?? effectiveCtx;
-                            const overhead = (await Promise.resolve((deps.probeTemplateOverhead ?? probeTemplateOverhead)(deps.ollamaUrl, ollamaName, true)).catch(() => null)) ?? MAX_TEMPLATE_OVERHEAD;
+                            const overhead = omlxTarget ? MAX_TEMPLATE_OVERHEAD : (await Promise.resolve((deps.probeTemplateOverhead ?? probeTemplateOverhead)(deps.ollamaUrl, ollamaName, true)).catch(() => null)) ?? MAX_TEMPLATE_OVERHEAD;
                             const need = answerGroundingBytes(policy, args.messages ?? [], args.prompt, output)
                                 + estimateImageTokens(resolvedImages?.length ?? 0) + overhead
                                 + (ANSWER_GROUNDING_THINK ? ANSWER_GROUNDING_THINK_TOKENS : ANSWER_GROUNDING_OUTPUT_TOKENS)
@@ -3336,6 +3549,21 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                                 : (await (deps.groundAnswer ?? groundAnswer)({
                                     policy, ollamaUrl: deps.ollamaUrl, model: ollamaName, messages: args.messages ?? [], prompt: args.prompt,
                                     answer: output, images: resolvedImages?.length ? resolvedImages : undefined, numCtx: checkCtx,
+                                    ...(omlxTarget && omlxRuntime ? { fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+                                        const body = JSON.parse(String(init?.body));
+                                        const checked = await guardedOmlxGenerate(omlxRuntime, omlxTarget, {
+                                            // The check's own sampling, not the caller's: temperature 0 and
+                                            // the thinking setting of each attempt.
+                                            messages: body.messages, maxTokens: body.options.num_predict,
+                                            temperature: typeof body.options?.temperature === "number" ? body.options.temperature : 0,
+                                            timeoutMs: Math.min(args.timeout_ms ?? 300_000, omlxDeadline - Date.now()),
+                                            think: typeof body.think === "boolean" ? body.think : false,
+                                        }, deps.freemem);
+                                        return new Response(JSON.stringify(checked.ok ? {
+                                            done: true, done_reason: checked.doneReason,
+                                            message: { content: checked.text, thinking: checked.thinking }, prompt_eval_count: checked.promptTokens,
+                                        } : { error: checked.reason }), { status: checked.ok ? 200 : 503 });
+                                    }) as typeof fetch } : {}),
                                 }).catch(() => ({ verdict: "ERROR" as const }))).verdict;
                         }
                         attempts.push({ tier: tier.tag, reason: `answer_check:local_${local.toLowerCase()}` });
@@ -3393,7 +3621,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 }
 
                 return await applyVerification(output, gatedArgs, deps, {
-                    backend: `ollama-${tier.tag.replace("prism-coder:", "")}`,
+                    backend: omlxTarget ? "omlx" : `ollama-${tier.tag.replace("prism-coder:", "")}`,
                     model_picked: tier.tag,
                     ram_free_mb: ramFreeMb,
                     latency_ms: Date.now() - t0,
@@ -3624,6 +3852,13 @@ async function applyVerification(
  */
 export function productionInferDeps(): InferDeps {
     return {
+        omlx: createOmlxRuntime({
+            listLoaded: () => strictLoaded(PRISM_LOCAL_LLM_URL),
+            unload: model => unloadOllamaModel(PRISM_LOCAL_LLM_URL, model),
+            // Every explicit oMLX call is owned through the provider's control routes.
+            generate: (target, request, signal) => ownedOmlxGenerate(target, request, signal),
+            recover: target => recoverOwnedOmlx(target),
+        }, PRISM_LOCAL_LLM_URL),
         freemem: () => getAvailableMemoryBytes(),
         listTags: () => listOllamaTags(PRISM_LOCAL_LLM_URL),
         listLoaded: () => listOllamaLoaded(PRISM_LOCAL_LLM_URL),
@@ -3731,8 +3966,42 @@ export function inferResponseHeader(
     );
 }
 
-export async function prismInferHandler(args: unknown): Promise<{
+const STRUCTURED_INFER_FIELDS = [
+    "output", "backend", "model_picked", "ram_free_mb", "latency_ms", "used_cloud",
+    "next_step", "plan", "history_turns", "layer1_second_read", "refusal_layer",
+    "prompt_tokens", "completion_tokens", "quality_gate_failed", "entitlements_source",
+] as const satisfies readonly (keyof PrismInferResult)[];
+
+/** Public machine contract. Never spread runtime objects, authentication,
+ * verifier internals, or an unchecked route draft into the MCP envelope. */
+export function inferStructuredResult(result: PrismInferResult): Record<string, unknown> {
+    const structured: Record<string, unknown> = {};
+    for (const field of STRUCTURED_INFER_FIELDS) {
+        if (result[field] !== undefined) structured[field] = result[field];
+    }
+    structured.attempts = result.attempts.map(({ tier, reason }) => ({ tier, reason }));
+    if (result.gate_outcome) {
+        const { status, reason, served_anyway } = result.gate_outcome;
+        structured.gate_outcome = { status, served_anyway, ...(reason === undefined ? {} : { reason }) };
+    }
+    if (result.multi_turn) {
+        const { enabled, max_turns, max_chars } = result.multi_turn;
+        structured.multi_turn = { enabled, max_turns, max_chars };
+    }
+    if (result.verification) {
+        const { action, refusalClaim } = result.verification;
+        structured.verification = { action, ...(refusalClaim === undefined ? {} : { refusalClaim }) };
+    }
+    if (result.route_guard) {
+        const { action, source, reason } = result.route_guard;
+        structured.route_guard = { action, source, ...(reason === undefined ? {} : { reason }) };
+    }
+    return structured;
+}
+
+export async function prismInferHandler(args: unknown, deps?: InferDeps): Promise<{
     content: Array<{ type: "text"; text: string }>;
+    structuredContent?: Record<string, unknown>;
     isError?: boolean;
 }> {
     if (!isPrismInferArgs(args)) {
@@ -3747,7 +4016,7 @@ export async function prismInferHandler(args: unknown): Promise<{
     }
     try {
         const prepared = await prepareMemoryAwareInferArgs(args);
-        const result = await runInfer(prepared.args, productionInferDeps());
+        const result = await runInfer(prepared.args, deps ?? productionInferDeps());
 
         debugLog(`[prism_infer] backend=${result.backend} model=${result.model_picked} latency=${result.latency_ms}ms free=${result.ram_free_mb}MB`);
 
@@ -3799,6 +4068,7 @@ export async function prismInferHandler(args: unknown): Promise<{
                 // for the host to show the user.
                 ...(result.next_step ? [{ type: "text" as const, text: `Next step: ${result.next_step}` }] : []),
             ],
+            structuredContent: inferStructuredResult(result),
         };
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

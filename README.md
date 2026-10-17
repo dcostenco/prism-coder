@@ -59,6 +59,66 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
   never sent to the cloud), and local/cloud usage is recorded for
   review.
 
+### Explicit on-device oMLX drafts
+
+`prism_infer` keeps Ollama's four-tier routing by default. For an explicitly
+selected text-only code or advisory reviewer draft, pass `local_backend: "omlx"`,
+`mode: "code"`, and optionally `local_model` with the exact advertised model ID.
+This path authenticates `/v1/models` before classification or any Ollama unload;
+an unavailable, unauthenticated, or mismatched model refuses without substitution.
+It reads `OMLX_API_KEY` or the local `~/.omlx/settings.json` key, and model/context
+settings from `~/.omlx/model_settings.json`; `OMLX_MODEL` and a loopback-only
+`OMLX_BASE_URL` can select local configuration. Redirects are refused.
+
+**Requires** an oMLX build with Prism's control routes, which is not yet
+distributed; with stock oMLX every call is refused. Generation runs as an owned
+job through those routes, so a timeout or cancel is reported only once the
+server confirms the request stopped. An unconfirmed stop refuses later calls
+(`omlx_stop_unproved`, `omlx_provider_busy`).
+
+Before classification, Prism unloads every model Ollama has loaded
+(`keep_alive: 0`; the weights stay on disk and reload on the next Ollama call)
+and waits up to 10 seconds for Ollama to report none. A failed unload, a model
+that does not drain, or one loading meanwhile refuses the call; a newcomer is
+never unloaded. Ollama must be reachable for this step. An OS-owned loopback
+lease on port 19438 excludes other candidate MCP processes; ordinary calls within
+one process share this lease. A busy lease refuses (`omlx_resource_busy`) before
+classification or unloading, and process exit releases it without lock-file
+cleanup. In-process inference and classification wait while an oMLX call owns
+the device. Unknown Ollama state, newly loaded Ollama weights, or available
+memory below a 2 GiB reserve aborts/withholds the generation. Model caches and
+daemons remain in place. Legacy/unmodified MCP processes do not honor the lease;
+their contention is observed and rejected by the watcher.
+
+**Safety screen.** The classifier on this path is the public
+`dcostenco/prism-coder-9b-mlx-8bit`, installed under the name
+`prism-coder-9b-mlx-8bit` in oMLX's model folder (about 9.2 GB while loaded).
+Layer 1's rules only refuse here; the classifier reads everything else, and a
+prompt over 4,000 characters is read whole in 3,600-character windows (the most
+severe verdict stands), never as an excerpt. A classifier failure, an unreadable
+answer, or a missing classifier refuses the call; there is no keyword or Ollama
+fallback. A classifier read may take up to 90 seconds, so a classifier that
+macOS paged out during a long idle is waited for rather than refused.
+
+Configured oMLX sampling and reasoning are preserved unless `temperature` or
+`think` is explicit, including through repairs. Generic thinking-disable retries
+are disabled for oMLX, so a model with no thinking budget in oMLX's model
+settings can spend its whole answer reasoning and is refused `think_only`: give
+it a budget there, or pass `think: false`. The default 300-second budget bounds
+oMLX generation, repairs, and history answer checks; `timeout_ms` may override it
+up to 900 seconds. Context sizing uses conservative UTF-8 bytes and the
+configured window.
+
+The same entitlement, reserved-content, history, quality, output-safety, and
+verification policies apply. Explicit oMLX never falls back to Ollama/cloud
+inference. `cloud_fallback: false`, `verify: false`, and `route_guard: "local"`
+keep content-bearing cloud channels disabled for a local draft. Result metadata
+reports `backend: "omlx"`, the selected model, tokens, and `gate_outcome`.
+The MCP envelope carries this public metadata in `structuredContent` alongside
+the existing human header/output text; `next_step` remains available in both.
+Runtime authentication and internal verifier traces are excluded.
+A draft is advisory and requires independent host review; it is not final sign-off.
+
 ## Get started
 
 Memory search automatically applies ACT-R ranking: relevance plus recency,
@@ -169,6 +229,43 @@ or by re-enabling after each run.
 
 <details>
 <summary>Release history (optional)</summary>
+
+## What's New in v20.22.0
+
+**Why it matters:** on Apple Silicon, `prism_infer` can now draft code on an
+oMLX server instead of Ollama, opt-in per call, behind its own safety screen.
+Separately, Layer 1 now marks two more kinds of auth request reserved, on every
+path.
+
+- **Opt-in oMLX backend:** `local_backend: "omlx"` with `mode: "code"`, text
+  only. Nothing changes for calls that do not ask for it. It **requires** an
+  oMLX build with Prism's control routes, which is not yet distributed; with
+  stock oMLX every call is refused.
+- **Its own safety screen:** the 9b classifier on the same oMLX server reads
+  every request; rules only refuse. In our tests, of 327 labelled sensitive
+  requests, the 9b alone let 2 run locally, against 19 for the 4b classifier
+  on Ollama; two rules written after reviewing those rows bring this path to
+  0, so 0 is not an out-of-sample figure. Of 294 routine requests, 2 were
+  escalated (27 on Ollama). Of 135 adversarial probes, 3 ran locally, all one
+  shape (a documentation field).
+- **Speed and cost:** a classifier read took about 0.37 s at the 95th
+  percentile on an idle machine and up to 0.65 s under load. The first read
+  after a long idle took 14.5 s, because macOS had paged the classifier out,
+  so Prism waits up to 90 s for it instead of refusing. The classifier holds
+  about 9.2 GB while loaded (9.7 GB peak).
+- **Fails closed:** a classifier failure, an unreadable answer or a missing
+  model refuses the call; it never falls back to a keyword check or to
+  Ollama. A long prompt is read whole, in windows, not as an excerpt.
+- **Frees memory first:** Ollama's loaded models are unloaded before the call
+  (they reload on the next Ollama call), so the two runtimes do not hold large
+  models at once.
+- **Layer 1, every path:** a request that decides whether signed-out,
+  anonymous or guest users may reach a route, page or endpoint (granting or
+  blocking it), makes one public, or gives them admin rights is marked
+  reserved by rule, and so is code that exchanges an authorization code for
+  tokens. Measured on the 327 sensitive requests on
+  the default Ollama path: 18 now run locally, against 19 before; routine
+  escalations are unchanged (27 of 294).
 
 ## What's New in v20.21.27
 

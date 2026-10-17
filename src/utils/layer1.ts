@@ -1,3 +1,4 @@
+import { withInferenceResourceLease, withOllamaResourceLease } from "./omlxProvider.js";
 /**
  * Layer 1 semantic pre-classifier for prism_infer.
  * ─────────────────────────────────────────────────────────────
@@ -212,11 +213,49 @@ const CLINICAL_RESERVED_RULES: readonly IntentRule[] = [
 /** Operational intents — auth code, auth bypass, ship/deploy decisions, PHI
  *  assessment. Reserved, but a documented non-operational artifact edit may
  *  exempt them (see classifyDeterministicLayer1). */
+const SIGNED_OUT_TEXT = String.raw`(?:(?:never|not|without)\s+(?:having\s+)?(?:been\s+)?(?:signed|signing|logged|logging)\s+in|unauthenticated|(?:signed|logged)[- ]out|anonymous|guests?|without\s+an?\s+account|every(?:one|body)|any(?:one|body)|the\s+public|unregistered|non[- ]?(?:logged[- ]in|members?)|strangers)`;
+// The signed-out party, up to four words before the signed-out phrase and an
+// optional noun after it: "someone who never signed in", "logged-out users".
+const SIGNED_OUT_PARTY = String.raw`(?:\w+\s+){0,4}?${SIGNED_OUT_TEXT}(?:\s+(?:users?|visitors?|people|clients?|members?))?`;
+const ACCESS_VERB = String.raw`(?:reach|access|open|visit)`;
+const GRANTS_SIGNED_OUT_ACCESS = new RegExp(String.raw`\b(?:` + [
+    String.raw`be\s+${ACCESS_VERB}ed\s+by\s+${SIGNED_OUT_PARTY}`,
+    String.raw`${SIGNED_OUT_TEXT}(?:\s+\w+)?\s+(?:can|could|may|might|should|must|needs?\s+to|ha(?:ve|s)\s+to)\s+(?:still\s+|also\s+)?(?:be\s+able\s+to\s+)?${ACCESS_VERB}`,
+    String.raw`(?:(?:allow|permit|let)\w*|can|could|may|might)\s+${SIGNED_OUT_PARTY}\s+(?:to\s+|still\s+)?${ACCESS_VERB}`,
+    String.raw`(?:reachable|accessible|open|available|visible)\s+(?:to|for|by)\s+${SIGNED_OUT_PARTY}`,
+    String.raw`(?:block|deny|denie|reject|protect|guard|restrict)\w*\s+${SIGNED_OUT_PARTY}`,
+].join("|") + String.raw`)\b`, "i");
+// Granting or withholding access to a route or page for someone who never
+// signed in is an auth-bypass decision: "can be reached by someone who
+// never signed in", "a visitor who is not logged in may open it", "allow
+// visitors who never signed in to open it", "reachable for users who are
+// not signed in", "block visitors who are not logged in". The classifier
+// misses many of these (measured), so the rule stays broad and fails
+// closed, ahead of the artifact exemption. A report that only names
+// signed-out visitors goes to the classifier.
+// Places a grant can open. This list only refuses, so a word too many
+// over-blocks; it never clears.
+const PLACE_TEXT = String.raw`(?:routes?|endpoints?|pages?|apis?|resources?|urls?|paths?|dashboards?|panels?|portals?|consoles?|screens?)`;
+const PLACE = new RegExp(String.raw`\b${PLACE_TEXT}\b`, "i");
+// "make the admin page public": the place word right before "public", so "make
+// the public pages load faster" is not one.
+const MAKES_PLACE_PUBLIC = new RegExp(String.raw`\bmak\w*\s+(?:\w+\s+){0,4}?${PLACE_TEXT}\s+public\b(?!-)`, "i");
+// "giving guests the admin role": a signed-out or unrestricted party given
+// admin rights needs no place word. Rights, not work: "administrative tasks"
+// and "admin training" are not grants.
+const GRANTS_SIGNED_OUT_ADMIN = new RegExp(String.raw`\b(?:giv|grant|assign|promot)\w*\s+${SIGNED_OUT_PARTY}\s+(?:the\s+|an?\s+)?(?:admin|administrator|administrative)\s+(?:roles?|rights?|access|privileges?|accounts?|sessions?|permissions?)\b`, "i");
+const SIGNED_OUT_ACCESS_RULE: IntentRule = (prompt) =>
+    (PLACE.test(prompt) && (GRANTS_SIGNED_OUT_ACCESS.test(prompt) || MAKES_PLACE_PUBLIC.test(prompt)))
+    || GRANTS_SIGNED_OUT_ADMIN.test(prompt);
+
 const OPERATIONAL_RESERVED_RULES: readonly IntentRule[] = [
     all(
         has(/\b(?:write|implement|create|build|add|modify|update|fix|refactor)\b/i),
         has(/\b(?:auth\w*|login|jwt|tokens?|sessions?|api\s+keys?)\b/i),
-        has(/\b(?:verify|verification|validat\w*|check\w*|middleware|handler)\b/i),
+        // An OAuth callback that trades a code for tokens is auth code even when
+        // it never says verify or check. Only an auth code or an auth token
+        // counts: exchanging design tokens is not.
+        has(/\b(?:verify|verification|validat\w*|check\w*|middleware|handler|exchang\w*\b[\s\S]{0,40}\b(?:(?:authori[sz]ation|oauth|auth)\s+codes?|(?:access|refresh|id|bearer|oauth|auth|session)\s+tokens?|codes?\s+for\s+(?:an?\s+|the\s+)?(?:\w+\s+)?tokens?))\b/i),
     ),
     all(
         has(/\b(?:does|can|could|whether|write|implement|create|build|add|modify|update|fix|refactor)\b/i),
@@ -231,6 +270,7 @@ const OPERATIONAL_RESERVED_RULES: readonly IntentRule[] = [
         has(/\b(?:expos\w*|intercept\w*|leak\w*|access\w*)\b/i),
         has(/\b(?:phi|patient\s+(?:records?|data)|health\s+(?:records?|data))\b/i),
     ),
+    SIGNED_OUT_ACCESS_RULE,
 ];
 
 const RESERVED_INTENT_RULES: readonly IntentRule[] = [
@@ -267,6 +307,7 @@ const OPERATIONAL_RESERVED_LABELS: readonly string[] = [
     "auth-bypass assessment",
     "ship, deploy or release decision",
     "PHI exposure assessment",
+    "auth-bypass assessment",
 ];
 
 // Positional alignment is load-bearing — a rule added without a label would
@@ -294,15 +335,20 @@ export function reservedCategory(prompt: string): string | null {
     // classifyDeterministicLayer1, and omitting it here made the label disagree
     // with the verdict: "add numeric validation fields to the auth token
     // verification handler" is never refused by a rule (the classifier reads
-    // it), while this reported "auth / session / token code". Harmless when the
-    // deterministic verdict is used directly, but the label is also read on
-    // paths that skip that fast path — prompts over MAX_CLASSIFIER_PROMPT_LENGTH,
-    // and image requests — so it could name a rule that did not fire.
+    // it), while this reported "auth / session / token code". The label is
+    // also read after a classifier refusal, so it must never name a rule that
+    // did not fire.
+    // The signed-out access rule runs ahead of the exemption there, so it names
+    // the refusal for artifact-shaped text. Elsewhere the operational rules keep
+    // their order: this label is also read from flattened history, where an
+    // assistant turn must not outrank the rule the request itself matched.
     if (
         NON_OPERATIONAL_ARTIFACT_CONTEXT.test(prompt) &&
         NON_OPERATIONAL_ARTIFACT_ACTION.test(prompt)
     ) {
-        return null;
+        return SIGNED_OUT_ACCESS_RULE(prompt)
+            ? OPERATIONAL_RESERVED_LABELS[OPERATIONAL_RESERVED_RULES.indexOf(SIGNED_OUT_ACCESS_RULE)]
+            : null;
     }
     for (let i = 0; i < OPERATIONAL_RESERVED_RULES.length; i++) {
         if (OPERATIONAL_RESERVED_RULES[i](prompt)) return OPERATIONAL_RESERVED_LABELS[i];
@@ -362,6 +408,10 @@ export function classifyDeterministicLayer1(userPrompt: string, opts?: Determini
     const clinicalReserved = matchesAny(userPrompt, CLINICAL_RESERVED_RULES);
     if (clinicalReserved) return "OBVIOUS_RESERVED";
     if (opts?.operational === false) return null;
+    // Ahead of the artifact exemption: the classifier misses requests that grant
+    // or withhold signed-out access (measured), so an artifact clause beside
+    // one must not hand it to the classifier.
+    if (SIGNED_OUT_ACCESS_RULE(userPrompt)) return "OBVIOUS_RESERVED";
     // A non-operational artifact edit is never refused by an operational rule
     // (an auth_bypass fixture label is not reserved work); the classifier
     // reads it.
@@ -533,6 +583,35 @@ export function buildOversizeExcerpt(prompt: string): string {
     );
 }
 
+/** Overlapping windows of `content`, `size` chars each. Shared with the
+ *  history screen in prismInferHandler. */
+export function windowsOf(content: string, size: number, overlap: number): string[] {
+    if (content.length <= size) return [content];
+    const isHigh = (i: number) => { const c = content.charCodeAt(i); return c >= 0xd800 && c <= 0xdbff; };
+    const isLow = (i: number) => { const c = content.charCodeAt(i); return c >= 0xdc00 && c <= 0xdfff; };
+    const out: string[] = [];
+    const step = size - overlap;
+    for (let i = 0; i < content.length; i += step) {
+        // Never cut a surrogate pair: a window that starts on a low or ends
+        // on a high surrogate is malformed text for the classifier.
+        let start = i;
+        if (start > 0 && isLow(start)) start += 1;
+        let end = Math.min(content.length, start + size);
+        if (end < content.length && isHigh(end - 1)) end += 1;
+        out.push(content.slice(start, end));
+        if (end >= content.length) break;
+    }
+    return out;
+}
+
+/** Explicit oMLX reads an oversize prompt whole, in windows the size of a
+ *  history turn's, never as an excerpt. */
+const OVERSIZE_WINDOW_CHARS = 3_600;
+const OVERSIZE_WINDOW_OVERLAP = 200;
+const VERDICT_SEVERITY: Record<Layer1Verdict, number> = {
+    OBVIOUS_NOT_RESERVED: 0, UNCERTAIN_LENGTH: 1, ERROR: 2, UNCERTAIN: 3, OBVIOUS_RESERVED: 4,
+};
+
 /**
  * Run the Layer 1 classifier with retry on cold-model timeout.
  * Returns a verdict; never throws.
@@ -544,7 +623,7 @@ export function buildOversizeExcerpt(prompt: string): string {
  * reserved/uncertain excerpt verdicts keep full reserved handling;
  * a clean excerpt returns UNCERTAIN_LENGTH.
  */
-export async function callLayer1(
+async function callLayer1Unleased(
     userPrompt: string,
     ollamaUrl: string,
     model: string,
@@ -565,13 +644,21 @@ export async function callLayer1(
          *  keyword backstop read the full request, and a request with images
          *  is classified as written. */
         classifierInput?: ClassifierInputPolicy | null;
+        /** Report a classifier failure on an oversize excerpt as ERROR rather
+         *  than UNCERTAIN_LENGTH. Explicit oMLX sets it: with no cloud to
+         *  escalate to, an excerpt nobody read is not clearance. */
+        strictErrors?: boolean;
+        /** Read an oversize prompt whole, window by window, instead of as an
+         *  excerpt. Explicit oMLX sets it with strictErrors. */
+        readOversizeWhole?: boolean;
     },
 ): Promise<Layer1Verdict> {
     if (!userPrompt || !userPrompt.trim()) return "ERROR";
 
     const oversize = userPrompt.length > MAX_CLASSIFIER_PROMPT_LENGTH;
     const hasImages = !!images?.length;
-    const deterministic = opts?.deterministic === false ? null : classifyDeterministicLayer1(userPrompt);
+    const deterministic = opts?.deterministic === false ? null
+        : classifyDeterministicLayer1(userPrompt);
     if (deterministic === "OBVIOUS_RESERVED") return deterministic;
 
     if (oversize && keywordBackstop(userPrompt) === "OBVIOUS_RESERVED") {
@@ -579,6 +666,20 @@ export async function callLayer1(
         // in the full text (including the middle the excerpt can't see)
         // short-circuits to reserved handling.
         return "OBVIOUS_RESERVED";
+    }
+    // Explicit oMLX: the classifier reads every request a rule does not refuse,
+    // so an oversize prompt is read whole, window by window, and the most
+    // severe verdict stands. An excerpt would serve what it never read (a
+    // dosing question in the middle of pasted session notes).
+    if (oversize && opts?.readOversizeWhole) {
+        let worst: Layer1Verdict = "OBVIOUS_NOT_RESERVED";
+        for (const window of windowsOf(userPrompt, OVERSIZE_WINDOW_CHARS, OVERSIZE_WINDOW_OVERLAP)) {
+            if (!window.trim()) continue;
+            const verdict = await callLayer1Unleased(window, ollamaUrl, model, fetchImpl, images, opts);
+            if (VERDICT_SEVERITY[verdict] > VERDICT_SEVERITY[worst]) worst = verdict;
+            if (worst === "OBVIOUS_RESERVED") break;
+        }
+        return worst;
     }
     const excerpt = oversize ? buildOversizeExcerpt(userPrompt) : userPrompt;
     const classifierInput = opts?.classifierInput && !hasImages ? classifierCopy(excerpt, opts.classifierInput) : excerpt;
@@ -772,6 +873,7 @@ export async function callLayer1(
     const verdict: Layer1Verdict = (hasImages && settled === "ERROR") ? "UNCERTAIN" : settled;
 
     if (!oversize) return verdict;
+    if (opts?.strictErrors && verdict === "ERROR") return "ERROR";
 
     // §5.3 oversize mapping:
     //   excerpt OBVIOUS_RESERVED / UNCERTAIN → keep full reserved handling
@@ -781,4 +883,9 @@ export async function callLayer1(
     //     floor the normal-size ERROR path falls back to via the caller.
     if (verdict === "OBVIOUS_RESERVED" || verdict === "UNCERTAIN") return verdict;
     return "UNCERTAIN_LENGTH";
+}
+
+/** Classifiers invoked outside prism_infer share its device resource gate. */
+export function callLayer1(...args: Parameters<typeof callLayer1Unleased>): ReturnType<typeof callLayer1Unleased> {
+    return withInferenceResourceLease(false, () => withOllamaResourceLease(() => callLayer1Unleased(...args)));
 }

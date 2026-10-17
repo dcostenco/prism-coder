@@ -289,8 +289,8 @@ describe("only a clean NO permits local processing", () => {
     });
 });
 
-describe("the deterministic fast path must not skip the screen", () => {
-    it("screens the image even when the WORDS are deterministically routine", async () => {
+describe("routine words never skip the image screen", () => {
+    it("screens the image even when the words are routine", async () => {
         // Measured 8/8: routine BCBA phrasing returned OBVIOUS_NOT_RESERVED with
         // an EMPTY call log — neither screen nor classifier saw the picture.
         const { fn, calls } = mockFetch({ screenAnswer: "YES" });

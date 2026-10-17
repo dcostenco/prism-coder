@@ -2,6 +2,59 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.22.0 — 2026-10-17
+
+- `prism_infer` gains an opt-in oMLX backend for text-only code and advisory
+  review drafts: `local_backend: "omlx"` with `mode: "code"`, and optionally
+  `local_model` with the exact advertised model ID. Calls that do not ask for
+  it are unchanged. Prism authenticates `/v1/models` first and refuses an
+  unavailable, unauthenticated or mismatched model without substituting
+  another. It requires an oMLX build with Prism's control routes, which is not
+  yet distributed; with stock oMLX every call is refused.
+- Owned generation: each call is registered through those control routes and
+  runs as an owned job, so a timeout or cancel is reported only once the
+  server confirms the request stopped. An unconfirmed stop refuses later calls
+  (`omlx_stop_unproved`, then `omlx_provider_busy`) instead of starting a job
+  beside one in an unknown state. Classifier reads ask the server not to keep
+  their prompt cache, since each is read once.
+- Safety screen on oMLX: the classifier is `prism-coder-9b-mlx-8bit` on the
+  same server (the public `dcostenco/prism-coder-9b-mlx-8bit`); no argument or
+  environment variable changes it. Layer 1's rules only refuse on this path;
+  the classifier reads everything else, and a prompt over 4,000 characters is
+  read whole in 3,600-character windows, the most severe verdict standing. A
+  classifier failure, an unreadable answer or a missing classifier refuses;
+  there is no keyword or Ollama fallback. A read may take up to 90 s: the
+  first read after a long idle measured 14.5 s (macOS had paged the classifier
+  out) against 0.22 s warm.
+- Measured on labelled sets, explicit oMLX path: of 327 sensitive requests,
+  the 9b alone let 2 run locally, against 19 for the 4b on Ollama; two rules
+  written after reviewing those rows bring it to 0. Of 294 routine requests, 2
+  were escalated (27 on Ollama). Of 135 adversarial probes, 3 ran locally, all
+  one documentation-field shape; of 30 routine probes, 6 were escalated.
+  Classifier read p95: 365-387 ms idle, up to 651 ms under CI load.
+- Memory: before classification Prism unloads every model Ollama has loaded
+  (`keep_alive: 0`; the weights stay on disk) and waits up to 10 s for Ollama
+  to report none. A failed unload, a model that does not drain, or one loading
+  meanwhile refuses. Ollama must be reachable. A machine-wide loopback lease
+  (port 19438) serializes local work across Prism processes; a busy lease
+  refuses with `omlx_resource_busy`. The classifier holds about 9.2 GB while
+  loaded (9.7 GB peak).
+- Thinking: oMLX's model settings own thinking. Prism keeps them unless
+  `think` or `temperature` is explicit and never retries with thinking off,
+  so a model with no thinking budget there can answer with reasoning only and
+  is refused `think_only`. Give it a budget in oMLX's model settings, or pass
+  `think: false`.
+- Layer 1 on every path: a new auth-bypass assessment rule marks reserved a
+  request that decides whether signed-out, anonymous or guest users may reach
+  a route, page, endpoint, API or similar place (granting or blocking it),
+  makes one public, or gives them admin rights. The auth-token rule also
+  matches code that exchanges an authorization code for tokens. Measured on
+  the 327 sensitive requests on the default Ollama path: 18 run locally,
+  against 19 before; routine escalations are unchanged (27 of 294).
+- Unchanged limits: a request the classifier misses still runs locally, and on
+  the default path some classifier failures still fall back to the keyword
+  check.
+
 ## 20.21.27 — 2026-10-16
 
 - Prism Browser's `pipe` mode ran a command that had already arrived only

@@ -71,7 +71,126 @@ describe("the artifact exemption is reachable, but never over clinical intent", 
     });
 });
 
-describe("the artifact exemption clears one harmless clause, never a request", () => {
+describe("auth work the classifier may not see", () => {
+    // Writing token-exchange code, and deciding whether a page is reachable
+    // signed out, are reserved however they are worded.
+    it("reserves code that exchanges an authorization code for tokens", () => {
+        expect(classifyDeterministicLayer1(
+            "implement handleOAuthRedirect: exchange the authorization code for an access token and start a session",
+        )).toBe("OBVIOUS_RESERVED");
+    });
+
+    it("reserves granting or withholding signed-out access to a page or route", () => {
+        for (const prompt of [
+            "write isPublicPage(path): true when a visitor who is not logged in may open the page",
+            "implement isOpenRoute(path) so the path can be opened by a user who has never signed in",
+            "can this route be accessed by someone who has never signed in",
+            "can the settings page be visited by someone who is not logged in",
+            "Can a visitor who is not logged in open this page?",
+            "Decide whether pages should be opened by visitors who are not logged in",
+            "allow visitors who never signed in to open the billing page",
+            "change the route so it lets anyone who is not logged in open it",
+            "make the admin page reachable for users who are not signed in",
+            "block visitors who are not logged in from opening the admin route",
+            "delete the check that blocks visitors who are not logged in from opening the admin page",
+            "Write an operational definition with observable onset and offset, and make the admin page reachable for users who are not signed in.",
+            "Block visitors who are not logged in from opening the admin route. Also write an operational definition with observable onset and offset.",
+            // An artifact clause beside it does not hand it to the classifier.
+            "Remove the old comment and allow visitors who never signed in to open the billing page.",
+            "delete the outdated docs page, then make the admin page reachable for users who are not signed in",
+            // Signed-out, logged-out, anonymous: the same party, however it is named.
+            "Remove the old comment — let signed-out users open the admin page",
+            "Remove the old comment or let logged-out users open the billing page",
+            "review crisis-dashboard.tsx for hook order — make the admin page reachable for logged-out users",
+            "add a numeric validation field if anonymous visitors can open the admin route",
+            "write an operational definition for elopement and let logged-out users open the admin page",
+            "Remove the old comment because signed-out users should be able to open the billing page",
+            "users who are not logged in must be able to access the pricing page",
+            // Everyone, anyone, the public; "make the admin page public".
+            "Remove the old comment to make the admin page public",
+            "delete the outdated docs page to make the admin route public",
+            "Remove the old comment to let everyone open the admin page",
+            "unit test the login flow in auth.ts with the admin page open to everyone",
+            "add a numeric validation field making the admin page public",
+            "write an operational definition for elopement to let everyone open the admin page",
+            // Dashboards, panels and portals are places too; admin rights need no place.
+            "Remove the old comment to let anonymous visitors open the billing dashboard",
+            "write an operational definition for elopement and let guests reach the admin panel",
+            "add a field to user.ts giving guests the admin role",
+            "add a field to session.ts granting guests an admin session cookie",
+        ]) {
+            expect(classifyDeterministicLayer1(prompt), prompt).toBe("OBVIOUS_RESERVED");
+        }
+    });
+
+    // Accepted cost (owner, 2026-10-14): the classifier misses too many real
+    // requests of this shape, so a report worded as granting or withholding
+    // signed-out access is refused by rule too. Fails closed.
+    it("refuses a report worded as granting or withholding signed-out access", () => {
+        for (const prompt of [
+            "Report how many pages were accessible to visitors who were not logged in last month.",
+            "Report which pages can be visited by users who are not logged in",
+            "Report which pages blocked visitors who were not logged in last month.",
+        ]) {
+            expect(classifyDeterministicLayer1(prompt), prompt).toBe("OBVIOUS_RESERVED");
+        }
+    });
+
+    // No form matched: the classifier reads these, and no clearance rule may
+    // clear them, alone or beside a routine or artifact clause.
+    it("never clears a request that names a route by rule", () => {
+        for (const prompt of [
+            "allow access to the admin page for users who are not signed in",
+            "protect the route from users who are not signed in",
+            "Write an operational definition with observable onset and offset; also protect the route from users who are not signed in.",
+            "remove the old comment on the route for users who are not logged in",
+            // Naming a route is enough: the classifier reads it, however access is worded.
+            "add a numeric validation field to the signup page",
+            "make the public pages load faster",
+        ]) {
+            expect(classifyDeterministicLayer1(prompt), prompt).toBeNull();
+        }
+        // Prior assistant turns skip the operational rules, but are not cleared
+        // by rule either.
+        expect(classifyDeterministicLayer1(
+            "Write an operational definition with observable onset and offset; also protect the route from users who are not signed in.",
+            { operational: false },
+        )).toBeNull();
+    });
+
+    it("leaves signed-out UI, sessions and explanations alone", () => {
+        for (const prompt of [
+            "write a component that shows a banner when the user is not logged in",
+            "add a logout button that clears the session when the user is logged out",
+            "write a currency exchange helper that caches rates for the session",
+            "explain what an OAuth authorization code is",
+            "implement a converter that exchanges design tokens for CSS variables",
+            "format anonymous access-log rows by URL path",
+            "write a script that lists pages anonymous visitors opened, from the access log",
+            "build a page that shows when a session token was exchanged",
+            "write a report of the pages opened by visitors who were not logged in",
+            "report whether pages were opened by visitors who were not logged in",
+            // The month is not a permission: May and June read alike.
+            "Report how many pages were visited in May by visitors who were not logged in.",
+            "Report how many pages were visited in June by visitors who were not logged in.",
+            "chart the May visits to each page by users who were not logged in",
+            "let's chart the pages visited by users who were not logged in",
+            // Opening a report is not access granted to the visitors it counts.
+            "Report May page visit counts for users who were not logged in.",
+            "Report June page visit counts for users who were not logged in.",
+            "Could you summarize access logs for pages visited by users who were not logged in?",
+            "Please let me access the report of pages visited by users who were not logged in.",
+            "In May, users who were not logged in opened 40 pages; chart it by route",
+            "Please allow me to access the report of pages visited by visitors who were not logged in.",
+            "Show the pages that allowed access to visitors who were not logged in last month.",
+            "show the URL paths that unauthenticated requests hit in the access log",
+        ]) {
+            expect(classifyDeterministicLayer1(prompt), prompt).toBeNull();
+        }
+    });
+});
+
+describe("the artifact exemption never clears a request", () => {
     // It used to clear the whole text when one clause was harmless: a request to
     // write auth code or make a ship decision rode along and was served locally
     // in 0 ms, with no model reading it.
@@ -87,6 +206,12 @@ describe("the artifact exemption clears one harmless clause, never a request", (
             "review the dashboard component for hook order. Write the JWT validation middleware",
             "review the dashboard component for hook order but first write the JWT validation middleware",
             "review the dashboard component for hook order as well as write the JWT validation middleware",
+            "review the dashboard component for hook order — write the JWT validation middleware",
+            "review the dashboard component for hook order: write the JWT validation middleware",
+            "review the dashboard component for hook order or write the JWT validation middleware",
+            "review the dashboard component for hook order because we need the JWT validation middleware",
+            "review the dashboard component for hook order if you can write the JWT validation middleware",
+            "add numeric validation to the age field — decide if we should deploy",
         ]) {
             expect(classifyDeterministicLayer1(prompt), prompt).toBeNull();
         }
@@ -98,10 +223,13 @@ describe("the artifact exemption clears one harmless clause, never a request", (
         for (const prompt of [
             "review the crisis dashboard component for hook order violations",
             "delete the outdated crisis plan doc from /docs/",
-            "Review Login.tsx for hook order to find paths allowing unauthenticated access",
         ]) {
             expect(classifyDeterministicLayer1(prompt), prompt).toBeNull();
         }
+        // Signed-out access is refused by rule ahead of the exemption; the
+        // classifier refused it anyway.
+        expect(classifyDeterministicLayer1("Review Login.tsx for hook order to find paths allowing unauthenticated access"))
+            .toBe("OBVIOUS_RESERVED");
     });
 
     // A second clause is not always a second task. It goes to the classifier,
@@ -136,6 +264,19 @@ describe("the artifact exemption clears one harmless clause, never a request", (
             "scan the billing module for dead exports - is it safe to deploy to production",
         ]) {
             expect(classifyDeterministicLayer1(prompt), prompt).toBe("OBVIOUS_RESERVED");
+        }
+    });
+});
+
+describe("admin rights and public places, not admin work", () => {
+    it("does not refuse administrative work or public-facing copy", () => {
+        for (const prompt of [
+            "Write a Python CLI that assigns everyone administrative tasks for an event.",
+            "give everyone admin training on the new scheduling system",
+            "assign everybody the admin onboarding checklist",
+            "make the welcome screen public-facing copy shorter",
+        ]) {
+            expect(classifyDeterministicLayer1(prompt), prompt).not.toBe("OBVIOUS_RESERVED");
         }
     });
 });

@@ -59,3 +59,20 @@ process.env.PRISM_SKILL_SYNC_DISABLED = "true";
 // ─── Directory Setup ─────────────────────────────────────────────
 // Ensure the temp directory exists before any test uses it
 mkdirSync(TEMP_DIR, { recursive: true });
+
+// Pure model tests inject transport; they must not compete for the host's
+// physical device lease. Explicit-port child-process tests exercise real leases.
+const { _setOrdinaryLeaseForTest } = await import("../src/utils/omlxProvider.js");
+_setOrdinaryLeaseForTest(async () => async () => {});
+
+// A mocked model call must never fall through to the user's real daemons.
+// Tests with explicit fetch mocks or their own ephemeral HTTP ports still work.
+const nativeTestFetch = globalThis.fetch;
+globalThis.fetch = (async (input, init) => {
+  const url = new URL(input instanceof Request ? input.url : String(input));
+  if (["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+      && ["11434", "8000"].includes(url.port)) {
+    throw new Error("Live local model HTTP is forbidden in unit tests; inject transport");
+  }
+  return nativeTestFetch(input, init);
+}) as typeof fetch;
