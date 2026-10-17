@@ -12,20 +12,24 @@ All notable changes to this project will be documented in this file.
   see them. A script that writes a block of commands and then waits for their
   result before writing more (a database check between two screens, say)
   stalled until the timeout and then failed. The reader now reads the
-  descriptor itself and splits lines in its own buffer, so every command runs
-  as soon as it arrives. Short commands were affected most: a chunk larger
-  than the 8 KB buffer left data in the pipe and masked the stall.
+  descriptor itself and decodes it as the text stream did (one incremental
+  decoder in the stream's encoding and error policy, universal newlines), so
+  every command runs as soon as it arrives. Short commands were affected
+  most: a chunk larger than the 8 KB buffer left data in the pipe and masked
+  the stall.
 - Measured (`tests/pipe-reader-check.py`, run by
-  `tests/browser-pipe-reader.test.ts`): two commands written together, then a
-  3 s pause before a third. Before, the second came out only with the third;
-  now it comes out before the third is written. Against the CLI with an 8 s
-  pause, "two" ran with "one" instead of 8 s later.
+  `tests/browser-pipe-reader.test.ts`): two commands written together, then
+  the third written only once the reader has handed over the second. Before,
+  the second came out only with the third; now before the third is written.
+  Against the CLI with a 6 s pause, "two" ran with "one" instead of 6 s
+  later. The same check covers CRLF continuations, UTF-16 with a character
+  split across reads, a bare CR, and the timeout case below.
 - Unchanged: the idle timeout, the `\` line continuation (CRLF endings still
-  join, as the stream's newline handling used to make them), comment lines,
-  and a stream `select()` cannot watch, which is now read blocking without
-  losing a partial line. One difference: a line left incomplete at the idle
-  timeout is dropped with the run; before, the reader could block on it past
-  the timeout.
+  join), comment lines, and a stream `select()` cannot watch, which is now
+  read blocking without losing a partial line. One difference: at the idle
+  timeout, a command still being written (a partial line, or a `\`
+  continuation whose tail never came) is dropped, never run cut short.
+  Before, the reader could block on a partial line past the timeout.
 
 ## 20.21.26 — 2026-10-15
 

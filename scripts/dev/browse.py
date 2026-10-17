@@ -42,8 +42,10 @@ MODES:
 """
 
 import argparse
+import codecs
 import datetime
 import hashlib
+import io
 import json
 import os
 import random
@@ -2198,10 +2200,16 @@ def run_repl(session, sanitize=False, cleanup=False, fail_fast=False):
 # ---------------------------------------------------------------------------
 # Pipe/batch mode
 # ---------------------------------------------------------------------------
+class _PipeIdleTimeout(Exception):
+    """The producer held the pipe open past the idle timeout."""
+
+
 def _stdin_lines_with_idle_timeout(timeout_sec):
     """
     Yield stdin lines, giving up if the producer holds the pipe open without
     sending anything. Falls back to plain iteration for non-selectable streams.
+    Raises _PipeIdleTimeout at the timeout, so a command still being written
+    is dropped rather than run cut short.
     """
     stream = sys.stdin
     try:
@@ -2215,23 +2223,24 @@ def _stdin_lines_with_idle_timeout(timeout_sec):
     # had already arrived waited for the producer's next write, or for this
     # timeout. A producer that pauses between blocks (waiting on a result the
     # held-back commands would produce) deadlocked until then (2026-10-16).
-    encoding = getattr(stream, "encoding", None) or "utf-8"
-    errors = getattr(stream, "errors", None) or "replace"
-
-    def text(raw):
-        # The stream's universal newlines are gone with it: CRLF becomes LF
-        # here, so a backslash continuation written from Windows still joins.
-        if raw.endswith(b"\r\n"):
-            raw = raw[:-2] + b"\n"
-        return raw.decode(encoding, errors)
-
-    pending = b""
+    #
+    # Decode as the text stream did: one incremental decoder for the whole
+    # stream, in its encoding and error policy, with universal newlines. A
+    # character split across two reads stays whole, and CRLF and a bare CR
+    # both end a line, so a backslash continuation written from Windows
+    # still joins.
+    decoder = io.IncrementalNewlineDecoder(
+        codecs.getincrementaldecoder(getattr(stream, "encoding", None) or "utf-8")(
+            getattr(stream, "errors", None) or "strict"),
+        translate=True,
+    )
+    pending = ""
     selectable = True
     while True:
-        newline = pending.find(b"\n")
+        newline = pending.find("\n")
         if newline >= 0:
             line, pending = pending[:newline + 1], pending[newline + 1:]
-            yield text(line)
+            yield line
             continue
         if selectable:
             try:
@@ -2249,19 +2258,32 @@ def _stdin_lines_with_idle_timeout(timeout_sec):
                     "message": f"No input for {timeout_sec}s. Closing browser to prevent zombie process.",
                 }))
                 sys.stdout.flush()
-                return
+                raise _PipeIdleTimeout()
         chunk = os.read(fileno, 65536)
         if not chunk:
+            pending += decoder.decode(b"", final=True)
             if pending:
-                yield text(pending)
+                yield pending
             return
-        pending += chunk
+        pending += decoder.decode(chunk)
+
+
+def _pipe_commands(timeout_sec):
+    """
+    The pipe's commands, continuations joined. At the idle timeout the reader
+    raises before the joiner can flush, so a continued command whose tail never
+    came is dropped, not run as its head alone.
+    """
+    try:
+        yield from _join_continuations(_stdin_lines_with_idle_timeout(timeout_sec))
+    except _PipeIdleTimeout:
+        return
 
 
 def run_pipe(session, sanitize=False, cleanup=False, fail_fast=False, cleanup_files=None):
     """Read commands from stdin, one per line. Returns True when all succeeded."""
     had_error = False
-    for line in _join_continuations(_stdin_lines_with_idle_timeout(PIPE_IDLE_TIMEOUT)):
+    for line in _pipe_commands(PIPE_IDLE_TIMEOUT):
         line = line.strip()
         if not line or line.startswith('#'):
             continue
