@@ -70,8 +70,10 @@ It reads `OMLX_API_KEY` or the local `~/.omlx/settings.json` key, and model/cont
 settings from `~/.omlx/model_settings.json`; `OMLX_MODEL` and a loopback-only
 `OMLX_BASE_URL` can select local configuration. Redirects are refused.
 
-**Requires** an oMLX build with Prism's control routes, which is not yet
-distributed; with stock oMLX every call is refused. Generation runs as an owned
+**Requires** an oMLX build with Prism's control routes: the
+[`prism-v0.7.1rc1` branch of dcostenco/omlx](https://github.com/dcostenco/omlx/tree/prism-v0.7.1rc1), upstream oMLX
+0.7.1rc1 plus those routes ([install and settings](https://github.com/dcostenco/omlx/blob/prism-v0.7.1rc1/PRISM.md)). With stock
+oMLX every call is refused. Generation runs as an owned
 job through those routes, so a timeout or cancel is reported only once the
 server confirms the request stopped. An unconfirmed stop refuses later calls
 (`omlx_stop_unproved`, `omlx_provider_busy`).
@@ -238,9 +240,10 @@ Separately, Layer 1 now marks two more kinds of auth request reserved, on every
 path.
 
 - **Opt-in oMLX backend:** `local_backend: "omlx"` with `mode: "code"`, text
-  only. Nothing changes for calls that do not ask for it. It **requires** an
-  oMLX build with Prism's control routes, which is not yet distributed; with
-  stock oMLX every call is refused.
+  only. Nothing changes for calls that do not ask for it. It **requires** the
+  oMLX build with Prism's control routes, published as the
+  [`prism-v0.7.1rc1` branch of dcostenco/omlx](https://github.com/dcostenco/omlx/tree/prism-v0.7.1rc1)
+  ([install and settings](https://github.com/dcostenco/omlx/blob/prism-v0.7.1rc1/PRISM.md)); with stock oMLX every call is refused.
 - **Its own safety screen:** the 9b classifier on the same oMLX server reads
   every request; rules only refuse. In our tests, of 327 labelled sensitive
   requests, the 9b alone let 2 run locally, against 19 for the 4b classifier

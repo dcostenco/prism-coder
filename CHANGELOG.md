@@ -9,8 +9,10 @@ All notable changes to this project will be documented in this file.
   `local_model` with the exact advertised model ID. Calls that do not ask for
   it are unchanged. Prism authenticates `/v1/models` first and refuses an
   unavailable, unauthenticated or mismatched model without substituting
-  another. It requires an oMLX build with Prism's control routes, which is not
-  yet distributed; with stock oMLX every call is refused.
+  another. It requires an oMLX build with Prism's control routes, published as
+  the `prism-v0.7.1rc1` branch of https://github.com/dcostenco/omlx (upstream
+  oMLX 0.7.1rc1 plus those routes; install and settings in its PRISM.md); with
+  stock oMLX every call is refused.
 - Owned generation: each call is registered through those control routes and
   runs as an owned job, so a timeout or cancel is reported only once the
   server confirms the request stopped. An unconfirmed stop refuses later calls
