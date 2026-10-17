@@ -2215,33 +2215,45 @@ def _stdin_lines_with_idle_timeout(timeout_sec):
     # had already arrived waited for the producer's next write, or for this
     # timeout. A producer that pauses between blocks (waiting on a result the
     # held-back commands would produce) deadlocked until then (2026-10-16).
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    errors = getattr(stream, "errors", None) or "replace"
+
+    def text(raw):
+        # The stream's universal newlines are gone with it: CRLF becomes LF
+        # here, so a backslash continuation written from Windows still joins.
+        if raw.endswith(b"\r\n"):
+            raw = raw[:-2] + b"\n"
+        return raw.decode(encoding, errors)
+
     pending = b""
+    selectable = True
     while True:
         newline = pending.find(b"\n")
         if newline >= 0:
             line, pending = pending[:newline + 1], pending[newline + 1:]
-            yield line.decode("utf-8", "replace")
+            yield text(line)
             continue
-        try:
-            ready, _, _ = select.select([fileno], [], [], timeout_sec)
-        except Exception:
-            if pending:
-                yield pending.decode("utf-8", "replace")
-            yield from stream
-            return
-        if not ready:
-            audit_log("pipe_idle_timeout", "", f"timeout={timeout_sec}s")
-            print(json.dumps({
-                "status": "error",
-                "action": "pipe",
-                "message": f"No input for {timeout_sec}s. Closing browser to prevent zombie process.",
-            }))
-            sys.stdout.flush()
-            return
+        if selectable:
+            try:
+                ready, _, _ = select.select([fileno], [], [], timeout_sec)
+            except Exception:
+                # A descriptor select() cannot watch (a Windows pipe): read it
+                # blocking from here on, keeping any partial line already read.
+                selectable = False
+                ready = True
+            if not ready:
+                audit_log("pipe_idle_timeout", "", f"timeout={timeout_sec}s")
+                print(json.dumps({
+                    "status": "error",
+                    "action": "pipe",
+                    "message": f"No input for {timeout_sec}s. Closing browser to prevent zombie process.",
+                }))
+                sys.stdout.flush()
+                return
         chunk = os.read(fileno, 65536)
         if not chunk:
             if pending:
-                yield pending.decode("utf-8", "replace")
+                yield text(pending)
             return
         pending += chunk
 

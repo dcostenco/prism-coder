@@ -10,24 +10,26 @@ import { fileURLToPath } from 'node:url';
 // deadlocked until the timeout (found by a POS e2e script, 2026-10-16).
 const script = fileURLToPath(new URL('./pipe-reader-check.py', import.meta.url));
 
+// browse.py needs Python 3.9 (it uses `dict[str, dict]` annotations).
 function python(): string | null {
   for (const candidate of ['python3', 'python']) {
-    const probe = spawnSync(candidate, ['-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)'], { encoding: 'utf8' });
+    const probe = spawnSync(
+      candidate,
+      ['-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)'],
+      { encoding: 'utf8', timeout: 10_000 },
+    );
     if (probe.status === 0) return candidate;
   }
   return null;
 }
 
+const py = python();
+
 describe('prism browser pipe reader', () => {
-  it('hands over a command that has already arrived without waiting for the next write', () => {
-    const py = python();
-    if (!py) {
-      console.warn('no python3 on this host; pipe reader check skipped');
-      return;
-    }
+  (py ? it : it.skip)('hands over a command that has already arrived, and joins a CRLF continuation', () => {
     expect(existsSync(script)).toBe(true);
-    const result = spawnSync(py, ['-I', script], { encoding: 'utf8', timeout: 30_000 });
+    const result = spawnSync(py as string, ['-I', script], { encoding: 'utf8', timeout: 60_000 });
     expect(result.stdout + result.stderr).toContain('PIPE_READER_OK');
     expect(result.status).toBe(0);
-  }, 40_000);
+  }, 70_000);
 });

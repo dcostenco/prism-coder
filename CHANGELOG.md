@@ -5,21 +5,27 @@ All notable changes to this project will be documented in this file.
 ## 20.21.27 — 2026-10-16
 
 - Prism Browser's `pipe` mode ran a command that had already arrived only
-  when the next one was written, or when its idle timeout fired (600 s). The
-  reader waited on `select()` for new pipe data while `readline()` had
-  already pulled the commands sent so far into Python's own buffer, where
-  `select()` could not see them. A script that writes a block of commands and
-  then waits for their result before writing more (a database check between
-  two screens, say) stalled until the timeout and then failed. The reader now
-  reads the descriptor itself and splits lines in its own buffer, so every
-  command runs as soon as it arrives. Short commands were affected most: a
-  chunk larger than the 8 KB buffer left data in the pipe and masked the
-  stall.
-- Measured: two commands written together, then an 8 s pause before a third.
-  Before, the second ran 8 s late, with the third; now it runs with the first
-  (`tests/pipe-reader-check.py`, run by `tests/browser-pipe-reader.test.ts`).
-- Unchanged: the idle timeout, the `\` line continuation, comment lines, and
-  the fallback for streams `select()` cannot watch.
+  when the next one was written; if nothing more came, the idle timeout
+  (600 s) ended the run with that command never run. The reader waited on
+  `select()` for new pipe data while `readline()` had already pulled the
+  commands sent so far into Python's own buffer, where `select()` could not
+  see them. A script that writes a block of commands and then waits for their
+  result before writing more (a database check between two screens, say)
+  stalled until the timeout and then failed. The reader now reads the
+  descriptor itself and splits lines in its own buffer, so every command runs
+  as soon as it arrives. Short commands were affected most: a chunk larger
+  than the 8 KB buffer left data in the pipe and masked the stall.
+- Measured (`tests/pipe-reader-check.py`, run by
+  `tests/browser-pipe-reader.test.ts`): two commands written together, then a
+  3 s pause before a third. Before, the second came out only with the third;
+  now it comes out before the third is written. Against the CLI with an 8 s
+  pause, "two" ran with "one" instead of 8 s later.
+- Unchanged: the idle timeout, the `\` line continuation (CRLF endings still
+  join, as the stream's newline handling used to make them), comment lines,
+  and a stream `select()` cannot watch, which is now read blocking without
+  losing a partial line. One difference: a line left incomplete at the idle
+  timeout is dropped with the run; before, the reader could block on it past
+  the timeout.
 
 ## 20.21.26 — 2026-10-15
 

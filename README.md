@@ -180,11 +180,13 @@ script that checked a result before sending more stalled and then failed.
 - **Every piped command runs when it arrives.** The reader waited on
   `select()` for new pipe data while `readline()` had already buffered the
   commands sent so far. It now reads the descriptor itself and splits lines
-  in its own buffer. Measured with two commands written together and an 8 s
-  pause before a third: the second ran 8 s late before, and with the first
-  now.
-- **Unchanged:** the idle timeout, `\` line continuation, comment lines, and
-  the fallback for streams `select()` cannot watch.
+  in its own buffer. Measured with two commands written together and a pause
+  before a third: the second came out only with the third before, and before
+  the third is written now.
+- **Unchanged:** the idle timeout, `\` line continuation (CRLF endings
+  included), comment lines, and streams `select()` cannot watch, now read
+  blocking. A line left incomplete at the idle timeout is dropped with the
+  run.
 
 ## What's New in v20.21.26
 
