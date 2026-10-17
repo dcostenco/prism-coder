@@ -2207,9 +2207,10 @@ class _PipeIdleTimeout(Exception):
 def _stdin_lines_with_idle_timeout(timeout_sec):
     """
     Yield stdin lines, giving up if the producer holds the pipe open without
-    sending anything. Falls back to plain iteration for non-selectable streams.
-    Raises _PipeIdleTimeout at the timeout, so a command still being written
-    is dropped rather than run cut short.
+    sending anything. Iterates the stream itself when it has no descriptor,
+    and reads blocking when select() cannot watch the descriptor. Raises
+    _PipeIdleTimeout at the timeout, so a command still being written is
+    dropped rather than run cut short.
     """
     stream = sys.stdin
     try:

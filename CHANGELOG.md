@@ -22,8 +22,11 @@ All notable changes to this project will be documented in this file.
   the third written only once the reader has handed over the second. Before,
   the second came out only with the third; now before the third is written.
   Against the CLI with a 6 s pause, "two" ran with "one" instead of 6 s
-  later. The same check covers CRLF continuations, UTF-16 with a character
-  split across reads, a bare CR, and the timeout case below.
+  later. The same check covers, with each read boundary forced: CRLF
+  continuations, UTF-16 split inside characters, CRLF split between reads, a
+  bare or trailing CR, an unterminated tail at EOF, a strict decoding error,
+  the blocking fallback taking over mid-line, and the timeout case below
+  (skipped where `select()` cannot watch a pipe).
 - Unchanged: the idle timeout, the `\` line continuation (CRLF endings still
   join), comment lines, and a stream `select()` cannot watch, which is now
   read blocking without losing a partial line. One difference: at the idle
