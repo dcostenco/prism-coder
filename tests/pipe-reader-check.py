@@ -178,15 +178,25 @@ def check_stream_decoding(browse):
 
 
 def check_fallback_keeps_partial_line(browse):
+    prefix, rest = b'eval "par', b'tial"\n'
     write_fd = use_pipe_as_stdin()
-    os.write(write_fd, b'eval "par')
-    late = threading.Timer(0.3, lambda: (
-        os.write(write_fd, b'tial"\n'), os.close(write_fd)))
-    late.start()
-    # select() answers once (the partial line is read), then fails.
-    with select_fails_after(browse, 1):
-        lines = list(browse._stdin_lines_with_idle_timeout(timeout_sec=10))
-    late.join()
+    os.write(write_fd, prefix + rest)
+    os.close(write_fd)
+    # The first read stops inside the line; select() answers that once, then
+    # fails as on Windows, so the fallback takes over holding a partial line.
+    real = browse.os
+    reads = {"n": 0}
+
+    def first_read_partial(fd, n):
+        reads["n"] += 1
+        return real.read(fd, min(n, len(prefix)) if reads["n"] == 1 else n)
+
+    browse.os = _Proxy(real, read=first_read_partial)
+    try:
+        with select_fails_after(browse, 1):
+            lines = list(browse._stdin_lines_with_idle_timeout(timeout_sec=10))
+    finally:
+        browse.os = real
     if lines != ['eval "partial"\n']:
         return f"the fallback split a partial line: {lines!r}"
     return None
