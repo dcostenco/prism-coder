@@ -1,6 +1,6 @@
 /** Durable cooperative ownership. Provider completion/idle evidence must come
  * from a qualified adapter, never task text or client-fetch abortion. */
-import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { constants, closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 
@@ -57,11 +57,13 @@ export function uuidv7(now = Date.now()): string {
 }
 
 function readMarker(path: string, providerHash: string): Marker | undefined {
-    try { if (!lstatSync(path).isFile()) throw new Error("owned_job_marker_invalid"); }
+    // One open and no stat before it, so nothing can change between a check and
+    // the read: O_NOFOLLOW refuses a symlink, O_NONBLOCK keeps a FIFO from
+    // blocking, and fstat checks the file actually opened.
+    let fd: number;
+    try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw new Error("owned_job_marker_invalid"); }
-    let fd: number | undefined;
     try {
-        fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
         const stat = fstatSync(fd);
         if (!stat.isFile() || stat.size > MAX_MARKER_BYTES) throw new Error();
         const bytes = Buffer.alloc(MAX_MARKER_BYTES + 1);
@@ -77,7 +79,7 @@ function readMarker(path: string, providerHash: string): Marker | undefined {
                 || (!v.provider_started && v.provider_request_id !== null)))) throw new Error();
         return { ...v, version: 2, provider_request_id: v.version === 1 ? null : v.provider_request_id } as Marker;
     } catch { throw new Error("owned_job_marker_invalid"); }
-    finally { if (fd !== undefined) closeSync(fd); }
+    finally { closeSync(fd); }
 }
 function persist(path: string, marker: Marker): void {
     // <hash>.<uuid>.pending: the only temporary name the device quarantine scan accepts.
