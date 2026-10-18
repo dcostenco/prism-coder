@@ -50,7 +50,7 @@ describe("the owned-job marker reader", () => {
         const script = `import { recoverOwnedJob } from ${JSON.stringify(new URL("../../src/utils/omlxJobControl.ts", import.meta.url).href)};
             recoverOwnedJob({ providerId: ${JSON.stringify(PROVIDER)}, stateDirectory: ${JSON.stringify(dir)}, observe: async () => ({ idle_verified: true }) })
                 .then(() => { console.log("resolved"); }, (error) => { console.log(error.message); });`;
-        const out = execFileSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", script], { encoding: "utf8", timeout: 3000 });
+        const out = execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { encoding: "utf8", timeout: 3000 });
         expect(out.trim()).toBe("owned_job_marker_invalid");
     });
 

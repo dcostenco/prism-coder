@@ -2511,6 +2511,9 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     const installed = await deps.listTags();
     const loaded = await deps.listLoaded();
     if (omlxTarget && installed === null) throw new Error("prism_infer: omlx_classifier_unavailable");
+    // Explicit oMLX: timeout_ms bounds the whole call, the Ollama unload and
+    // classification included.
+    const omlxDeadline = Date.now() + (args.timeout_ms ?? 300_000);
     // Ollama is unloaded during an explicit oMLX call (owner, 2026-10-15; this
     // replaces plan section 4's "never evict another Ollama user's weights").
     // Under the device lease, before classification: unload every resident
@@ -2538,8 +2541,6 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         attempts.push({ tier: "ollama_probe", reason: "unreachable" });
     }
 
-    // Explicit oMLX: timeout_ms bounds the whole call, classification included.
-    const omlxDeadline = Date.now() + (args.timeout_ms ?? 300_000);
     // ── §E Layer 1 semantic pre-classifier ──────────────────────────────────
     // Runs for ALL tiers when Ollama is reachable. RESERVED text escalates
     // to cloud if available; otherwise refuse (fail-closed); a request with
