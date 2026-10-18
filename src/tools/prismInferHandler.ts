@@ -2482,11 +2482,13 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         // No trusted binding maps an oMLX model to a logical tier, and the
         // configured Flash model outweighs every Ollama tier. Below the top
         // ceiling, from the caller or the plan, refuse before any network,
-        // classification or residency change.
-        if (effectiveCeiling !== "27b") {
+        // classification or residency change. A task_complexity hint only picks
+        // Ollama's starting tier (session_task_route recommends one for every
+        // code task), so it is not a ceiling here; an explicit model_ceiling is.
+        if (clampCeiling(args.model_ceiling ?? "27b", ent.model_ceiling) !== "27b") {
             attempts.push({ tier: "omlx", reason: "omlx_model_ceiling" });
             if (wantReport) return refusedResult("omlx_model_ceiling");
-            throw new Error("prism_infer: omlx_model_ceiling; explicit oMLX needs the top model ceiling");
+            throw new Error("prism_infer: omlx_model_ceiling; explicit oMLX needs the top model ceiling from model_ceiling and the plan");
         }
         if (!Number.isInteger(localMaxTokens) || localMaxTokens <= 0
             || !Number.isFinite(temperature) || temperature < 0

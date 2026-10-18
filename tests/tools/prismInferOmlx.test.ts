@@ -282,7 +282,9 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         const cases: [string, Partial<PrismInferArgs>, PrismEntitlements][] = [
             ["plan ceiling", {}, { ...ENT, model_ceiling: "9b" }],
             ["caller ceiling", { model_ceiling: "2b" }, ENT],
-            ["complexity hint", { task_complexity: 2 }, ENT],
+            // An explicit ceiling still wins over a hint, and a hint cannot lift the plan.
+            ["caller ceiling with a high hint", { model_ceiling: "9b", task_complexity: 9 }, ENT],
+            ["plan ceiling with a high hint", { task_complexity: 9 }, { ...ENT, model_ceiling: "9b" }],
         ];
         for (const [label, extra, entitlements] of cases) {
             for (const escalation of ["report", undefined] as const) {
@@ -294,6 +296,21 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
                 expect(f.omlx.detect, label).not.toHaveBeenCalled(); expect(f.omlx.acquire, label).not.toHaveBeenCalled();
                 expect(f.deps.callLayer1, label).not.toHaveBeenCalled(); expect(f.omlx.unload, label).not.toHaveBeenCalled();
                 expect(f.omlx.generate, label).not.toHaveBeenCalled(); expect(f.deps.callCloud, label).not.toHaveBeenCalled();
+            }
+        }
+    });
+    // session_task_route puts task_complexity in its recommended_args; a caller that
+    // copies them into an explicit oMLX call was refused in 8 ms (2026-10-18).
+    it("a complexity hint picks Ollama's starting tier, so it never refuses explicit oMLX", async () => {
+        for (const task_complexity of [1, 4, 6, 9]) {
+            for (const escalation of ["report", undefined] as const) {
+                const f = fixture();
+                const result = await runInfer(ask({ task_complexity, escalation }), f.deps);
+                expect(result, `complexity ${task_complexity}`).toMatchObject({ backend: "omlx", output: OUTPUT, gate_outcome: { status: "success" } });
+                expect(f.events, `complexity ${task_complexity}`).toEqual(["detect", "classify", "generate"]);
+                // The hint's fast-task "no thinking" shortcut is Ollama's too: the oMLX server's settings own thinking.
+                expect(vi.mocked(f.omlx.generate).mock.calls[0][1].think, `complexity ${task_complexity}`).toBeUndefined();
+                expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
             }
         }
     });

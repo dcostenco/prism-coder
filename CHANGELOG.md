@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.22.2 — 2026-10-18
+
+- Explicit oMLX: a `task_complexity` hint no longer refuses the call. The hint
+  picks Ollama's starting tier, and `session_task_route` recommends one for
+  every code task, so a caller that passed its recommended arguments with
+  `local_backend: "omlx"` was refused with `omlx_model_ceiling` before
+  detection. Only an explicit `model_ceiling` below the top tier, or a plan
+  below it, still refuses. The hint also leaves thinking alone on oMLX, where
+  the server's settings own it.
+
 ## 20.22.1 — 2026-10-18
 
 - Explicit oMLX: `timeout_ms` now starts before the safety screen, and each
