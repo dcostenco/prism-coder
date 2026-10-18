@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.22.1 — 2026-10-18
+
+- Explicit oMLX: `timeout_ms` now starts before the safety screen, and each
+  classifier read is bounded by the call's remaining budget as well as its own
+  90 s. Before, the budget started only after classification, so a prompt over
+  4,000 characters, read in 3,600-character windows of up to two 90 s attempts
+  each, could hold the device lease for minutes on a stalled server while
+  `timeout_ms` counted nothing.
+- Explicit oMLX: a classifier read that fails (ERROR) already decides the call
+  on this path, so the remaining windows of an oversize prompt are no longer
+  read after it.
+- The 20.22.0 note "a read may take up to 90 s" described one attempt; a read
+  has two attempts, each followed by the owned path's stop confirmation.
+- Tests: the owned-job marker reader's size limit is pinned by a valid marker
+  padded past 4 KB, and the FIFO case runs in a child process with a kill timer
+  so a blocking open fails the test instead of hanging the run.
+
 ## 20.22.0 — 2026-10-17
 
 - `prism_infer` gains an opt-in oMLX backend for text-only code and advisory

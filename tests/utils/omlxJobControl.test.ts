@@ -43,17 +43,24 @@ describe("the owned-job marker reader", () => {
     });
 
     it("refuses a FIFO without blocking on it", async () => {
+        // In a child with a kill timer: a blocking open would wedge this process,
+        // and vitest's timeout cannot interrupt a synchronous open.
         const dir = await stateDir();
         execFileSync("mkfifo", [join(dir, markerName)]);
-        await expect(recoverOwnedJob({ providerId: PROVIDER, stateDirectory: dir, observe: idle() })).rejects.toThrow("owned_job_marker_invalid");
-    }, 3000);
+        const script = `import { recoverOwnedJob } from ${JSON.stringify(new URL("../../src/utils/omlxJobControl.ts", import.meta.url).href)};
+            recoverOwnedJob({ providerId: ${JSON.stringify(PROVIDER)}, stateDirectory: ${JSON.stringify(dir)}, observe: async () => ({ idle_verified: true }) })
+                .then(() => { console.log("resolved"); }, (error) => { console.log(error.message); });`;
+        const out = execFileSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", script], { encoding: "utf8", timeout: 3000 });
+        expect(out.trim()).toBe("owned_job_marker_invalid");
+    });
 
     it("refuses a directory and an oversize file", async () => {
         const dir = await stateDir();
         await mkdir(join(dir, markerName));
         await expect(recoverOwnedJob({ providerId: PROVIDER, stateDirectory: dir, observe: idle() })).rejects.toThrow("owned_job_marker_invalid");
         const big = await stateDir();
-        await writeFile(join(big, markerName), JSON.stringify({ ...marker(true), pad: "x".repeat(5000) }));
+        // valid JSON of a valid marker, refused only by the size limit
+        await writeFile(join(big, markerName), JSON.stringify(marker(true)) + " ".repeat(5000));
         await expect(recoverOwnedJob({ providerId: PROVIDER, stateDirectory: big, observe: idle() })).rejects.toThrow("owned_job_marker_invalid");
     });
 

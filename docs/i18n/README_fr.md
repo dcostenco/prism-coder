@@ -99,8 +99,11 @@ Layer 1's rules only refuse here; the classifier reads everything else, and a
 prompt over 4,000 characters is read whole in 3,600-character windows (the most
 severe verdict stands), never as an excerpt. A classifier failure, an unreadable
 answer, or a missing classifier refuses the call; there is no keyword or Ollama
-fallback. A classifier read may take up to 90 seconds, so a classifier that
-macOS paged out during a long idle is waited for rather than refused.
+fallback. Each classifier read is bounded by 90 seconds and by the call's
+remaining `timeout_ms`, so a classifier that macOS paged out during a long idle
+is waited for rather than refused, and an oversize prompt read in windows
+cannot outlast the call budget; the first unrecoverable read ends the
+classification.
 
 Configured oMLX sampling and reasoning are preserved unless `temperature` or
 `think` is explicit, including through repairs. Generic thinking-disable retries
@@ -231,6 +234,21 @@ or by re-enabling after each run.
 
 <details>
 <summary>Release history (optional)</summary>
+
+## What's New in v20.22.1
+
+**Why it matters:** on explicit oMLX, a long prompt could keep the device busy
+for minutes while being classified, and `timeout_ms` did not limit it.
+
+- **The call budget now covers classification.** `timeout_ms` (default 300 s)
+  starts before the safety screen, and each classifier read is bounded by the
+  remaining budget as well as its own 90 s.
+- **A failed read ends the classification.** An oversize prompt is read in
+  3,600-character windows; a read that fails already means refusal on this
+  path, so the remaining windows are no longer read. Before, a stalled server
+  could cost about four minutes per window.
+- **Tests:** the owned-job marker tests pin the size limit and the
+  non-blocking open directly.
 
 ## What's New in v20.22.0
 

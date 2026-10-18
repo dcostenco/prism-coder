@@ -33,8 +33,12 @@ function chatMessages(value: unknown): { role: string; content: string }[] | und
  *    deadline.
  *  - Every request asks the provider not to keep its prompt cache: a classifier
  *    request is unique and never reused. */
-export function omlxLayer1Fetch(generate: (request: OmlxRequest) => Promise<LocalGeneration>): typeof fetch {
+export function omlxLayer1Fetch(generate: (request: OmlxRequest) => Promise<LocalGeneration>, remainingMs: () => number = () => OMLX_LAYER1_TIMEOUT_MS): typeof fetch {
     return (async (_input: string | URL | Request, init?: RequestInit) => {
+        // Each read is bounded by the call's remaining timeout_ms as well, so an
+        // oversize prompt read in windows cannot outlast the budget the caller set.
+        const timeoutMs = Math.min(OMLX_LAYER1_TIMEOUT_MS, Math.floor(remainingMs()));
+        if (timeoutMs <= 0) return Response.json({ error: "timeout" }, { status: 503 });
         let body: { messages?: unknown; options?: { num_predict?: unknown; temperature?: unknown }; think?: unknown };
         try { body = JSON.parse(String(init?.body)); } catch { return new Response(null, { status: 400 }); }
         if (!body || typeof body !== "object" || !("messages" in body)) return new Response(null, { status: 404 });
@@ -44,7 +48,7 @@ export function omlxLayer1Fetch(generate: (request: OmlxRequest) => Promise<Loca
             return new Response(null, { status: 400 });
         const temperature = body.options?.temperature;
         const result = await generate({ messages, maxTokens, temperature: typeof temperature === "number" ? temperature : 0,
-            timeoutMs: OMLX_LAYER1_TIMEOUT_MS, think: body.think === true, cacheStore: false });
+            timeoutMs, think: body.think === true, cacheStore: false });
         return result.ok
             ? Response.json({ done: true, done_reason: result.doneReason, message: { role: "assistant", content: result.text } })
             : Response.json({ error: result.reason }, { status: 503 });

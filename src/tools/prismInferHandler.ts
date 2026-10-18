@@ -2538,6 +2538,8 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         attempts.push({ tier: "ollama_probe", reason: "unreachable" });
     }
 
+    // Explicit oMLX: timeout_ms bounds the whole call, classification included.
+    const omlxDeadline = Date.now() + (args.timeout_ms ?? 300_000);
     // ── §E Layer 1 semantic pre-classifier ──────────────────────────────────
     // Runs for ALL tiers when Ollama is reachable. RESERVED text escalates
     // to cloud if available; otherwise refuse (fail-closed); a request with
@@ -2594,7 +2596,8 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         const generationTarget = omlxTarget, runtime = omlxRuntime;
         const omlxL1Fetch = generationTarget && runtime
             ? omlxLayer1Fetch(async request =>
-                guardedOmlxGenerate(runtime, omlxModelTarget(generationTarget, OMLX_LAYER1_MODEL), request, deps.freemem))
+                guardedOmlxGenerate(runtime, omlxModelTarget(generationTarget, OMLX_LAYER1_MODEL), request, deps.freemem),
+                () => omlxDeadline - Date.now())
             : undefined;
         const l1fn = omlxL1Fetch
             ? (...[prompt, url, model, , images, opts]: Parameters<typeof defaultCallLayer1>) =>
@@ -2965,7 +2968,6 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     // Explicit oMLX classified on oMLX, so nothing of this call's is in Ollama.
     // Anything resident now belongs to another user: guardedOmlxGenerate
     // refuses generation (omlx_memory_contention) before any request.
-    const omlxDeadline = Date.now() + (args.timeout_ms ?? 300_000);
     const callLocal: InferDeps["callLocal"] = omlxTarget && omlxRuntime
         ? async (_url, _model, prompt, system, maxTokens, temperature, timeoutMs, think, _images, history) => {
             const messages = [...(system === undefined ? [] : [{ role: "system", content: system }]),

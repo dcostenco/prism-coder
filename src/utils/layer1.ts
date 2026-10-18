@@ -677,7 +677,9 @@ async function callLayer1Unleased(
             if (!window.trim()) continue;
             const verdict = await callLayer1Unleased(window, ollamaUrl, model, fetchImpl, images, opts);
             if (VERDICT_SEVERITY[verdict] > VERDICT_SEVERITY[worst]) worst = verdict;
-            if (worst === "OBVIOUS_RESERVED") break;
+            // Reserved decides the call; under strict errors so does ERROR, so the
+            // remaining windows are never read for a verdict already final.
+            if (worst === "OBVIOUS_RESERVED" || (opts?.strictErrors && verdict === "ERROR")) break;
         }
         return worst;
     }

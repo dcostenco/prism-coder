@@ -44,6 +44,25 @@ describe("Layer 1 on explicit oMLX: callLayer1 through the owned-path adapter", 
         expect(requests).toHaveLength(1);
     }, 10_000);
 
+    it("bounds each read by the call's remaining budget, and starts none with no budget left", async () => {
+        let remaining = 5_000;
+        const requests: OmlxRequest[] = [];
+        const fetchImpl = omlxLayer1Fetch(async request => { requests.push(request); return { ok: true, text: "OBVIOUS_NOT_RESERVED", doneReason: "stop" }; }, () => remaining);
+        expect(await callLayer1(PROMPT, OLLAMA, OMLX_LAYER1_MODEL, fetchImpl, undefined, { strictErrors: true })).toBe("OBVIOUS_NOT_RESERVED");
+        expect(requests.map(r => r.timeoutMs)).toEqual([5_000]);
+        remaining = 0;
+        expect(await callLayer1(PROMPT, OLLAMA, OMLX_LAYER1_MODEL, fetchImpl, undefined, { strictErrors: true })).toBe("ERROR");
+        expect(requests).toHaveLength(1);
+    });
+
+    it("stops reading an oversize prompt at the first unrecoverable window under strict errors", async () => {
+        const long = "a harmless sentence about sorting numbers. ".repeat(300); // ~13,000 chars: 4 windows
+        const { requests, fetchImpl } = recording(() => ({ ok: false, reason: "timeout" }));
+        expect(await callLayer1(long, OLLAMA, OMLX_LAYER1_MODEL, fetchImpl, undefined, { strictErrors: true, readOversizeWhole: true })).toBe("ERROR");
+        // both attempts of the first window, and nothing for the other three
+        expect(requests.length).toBeLessThanOrEqual(2);
+    });
+
     // 2026-10-17: the first explicit-oMLX call after a long idle was refused
     // (omlx_classifier_error) because the 9b's first read took over 15 s.
     it("waits out a cold first read slower than 15 s instead of refusing", async () => {
