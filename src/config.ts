@@ -485,7 +485,7 @@ export const PRISM_TURBOQUANT_TIEBREAKER_EPSILON =
 //
 // Set PRISM_LOCAL_LLM_ENABLED=true to activate.
 // Set PRISM_LOCAL_LLM_MODEL to override the model tag.
-// Set PRISM_LOCAL_LLM_URL to override the Ollama endpoint (default: localhost:11434).
+// Set PRISM_LOCAL_LLM_URL to override the Ollama endpoint (default: 127.0.0.1:11434).
 // Set PRISM_LOCAL_LLM_TIMEOUT_MS to override per-call timeout (default: 60000, max: 300000).
 // Set PRISM_STRICT_LOCAL_MODE=true to block cloud fallback when local LLM is enabled (HIPAA).
 
@@ -497,9 +497,10 @@ export const PRISM_LOCAL_LLM_ENABLED =
 export const PRISM_LOCAL_LLM_MODEL =
   (process.env.PRISM_LOCAL_LLM_MODEL || "prism-coder:9b").trim();
 
-/** Ollama base URL. Override for remote Ollama instances. */
+/** Numeric loopback avoids queuing local health probes behind getaddrinfo work.
+ * Explicit overrides still support custom hostnames and IPv6-only listeners. */
 export const PRISM_LOCAL_LLM_URL =
-  (process.env.PRISM_LOCAL_LLM_URL || "http://localhost:11434").trim();
+  (process.env.PRISM_LOCAL_LLM_URL || "http://127.0.0.1:11434").trim();
 
 /** Per-call timeout in ms. Prevents stalled background tasks. Capped at 300s. */
 export const PRISM_LOCAL_LLM_TIMEOUT_MS = (() => {

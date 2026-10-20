@@ -401,7 +401,7 @@ export async function inspectOmlx(options: OmlxConnectionOptions & { timeoutMs?:
     const advertised = data.map(entry => entry.id as string);
     if (new Set(advertised).size !== advertised.length) throw new OmlxError("omlx_inspection_models_invalid");
     if (typeof raw.version !== "string" || raw.version.length > 32 || raw.version.includes(apiKey)
-        || !/^[0-9]+\.[0-9]+\.[0-9]+(?:[.+-][A-Za-z0-9.-]+)?$/.test(raw.version)
+        || !/^[0-9]+\.[0-9]+\.[0-9]+(?:rc[0-9]+)?(?:[.+-][A-Za-z0-9.-]+)?$/.test(raw.version)
         || typeof raw.uptime_seconds !== "number" || !Number.isFinite(raw.uptime_seconds) || raw.uptime_seconds < 0
         || !STATUS_COUNTS.every(key => Number.isSafeInteger(raw[key]) && (raw[key] as number) >= 0)
         || ![raw.model_memory_used, raw.model_memory_max].every(value => typeof value === "number" && Number.isFinite(value) && value >= 0)) {
