@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.22.3 — 2026-10-20
+
+- Default the local Ollama endpoint to `http://127.0.0.1:11434`, avoiding
+  `localhost` DNS lookup on resource probes. Explicit URL overrides, including
+  IPv6, remain supported; IPv6-only servers need an explicit URL.
+- Accept valid oMLX `rcN` version labels during read-only inspection without
+  changing authentication, status-counter, memory or qualification checks.
+  Inspection still reports generation disabled and the provider not qualified.
+- Point the current oMLX setup instructions to the stable Prism integration
+  based on upstream `v0.7.1`; the required Prism control routes remain mandatory.
+
 ## 20.22.2 — 2026-10-18
 
 - Explicit oMLX: a `task_complexity` hint no longer refuses the call. The hint
