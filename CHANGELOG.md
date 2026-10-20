@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## 20.22.3 — 2026-10-20
 
+- Update Hono to 4.13.11 and Vite to 8.2.4, addressing their static-path
+  middleware bypass and development editor-launch advisories respectively.
 - Default the local Ollama endpoint to `http://127.0.0.1:11434`, avoiding
   `localhost` DNS lookup on resource probes. Explicit URL overrides, including
   IPv6, remain supported; IPv6-only servers need an explicit URL.

@@ -237,6 +237,8 @@ or by re-enabling after each run.
 
 ## What's New in v20.22.3
 
+- **Dependency fixes:** Hono 4.13.11 addresses its static-path middleware
+  bypass advisory; Vite 8.2.4 addresses its development editor-launch advisories.
 - **Local resource probes use numeric loopback by default.** The default
   Ollama endpoint is now `http://127.0.0.1:11434`, so a stalled `localhost`
   DNS lookup cannot block those probes. Explicit URL overrides are preserved;
