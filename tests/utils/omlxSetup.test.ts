@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, readFile, writeFile, lstat, unlink, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, lstat, unlink, chmod, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -30,6 +30,23 @@ async function fixture(overrides: Record<string, unknown> = {}) {
 }
 
 describe("opt-in managed oMLX setup", () => {
+    it("refuses symlinked state rather than reading outside the managed installation", async () => {
+        const f = await fixture();
+        await mkdir(f.manager.root, { recursive: true });
+        const outside = join(f.home, "outside.json");
+        await writeFile(outside, JSON.stringify({ commit: OMLX_SETUP_COMMIT }));
+        await symlink(outside, join(f.manager.root, "runtime.json"));
+        await expect(f.manager.status()).rejects.toThrow();
+        expect(await readFile(outside, "utf8")).toBe(JSON.stringify({ commit: OMLX_SETUP_COMMIT }));
+    });
+    it.each(["directory", "oversized"])("refuses %s state before parsing it", async kind => {
+        const f = await fixture();
+        await mkdir(f.manager.root, { recursive: true });
+        const marker = join(f.manager.root, "runtime.json");
+        if (kind === "directory") await mkdir(marker);
+        else await writeFile(marker, " ".repeat(2 * 1024 ** 2 + 1));
+        await expect(f.manager.status()).rejects.toThrow("setup_state_invalid");
+    });
     it("stops an owned group after its host is killed, without relying on host signal handlers", async () => {
         const parent = spawn(process.execPath, ["--import", "tsx", fileURLToPath(new URL("../fixtures/omlx-runner-crash.mjs", import.meta.url))], { stdio: ["ignore", "pipe", "pipe"] });
         let group: number | undefined, child: number | undefined;

@@ -1,7 +1,8 @@
 /** Opt-in, pinned oMLX setup. This module never controls an existing daemon. */
 import { execFile, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { appendFile, lstat, open, readFile, rename, statfs, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { appendFile, lstat, open, rename, statfs, writeFile } from "node:fs/promises";
 import { createConnection, createServer } from "node:net";
 import { arch, homedir, platform, release, totalmem } from "node:os";
 import { join } from "node:path";
@@ -68,9 +69,22 @@ export const runSetupCommand: Runner = (program, args, options) => new Promise((
 
 async function readJson(path: string): Promise<any> {
     try {
-        const stat = await lstat(path);
-        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_LOG_BYTES) throw new Error("setup_state_invalid");
-        return JSON.parse(await readFile(path, "utf8"));
+        const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+        try {
+            const stat = await file.stat();
+            if (!stat.isFile() || stat.size > MAX_LOG_BYTES) throw new Error("setup_state_invalid");
+            // Validate and read the same inode, with a hard bound even if an
+            // existing writer grows it after stat. Never reopen the pathname.
+            const buffer = Buffer.alloc(MAX_LOG_BYTES + 1);
+            let size = 0;
+            while (size < buffer.length) {
+                const part = await file.read(buffer, size, buffer.length - size, size);
+                if (!part.bytesRead) break;
+                size += part.bytesRead;
+            }
+            if (size > MAX_LOG_BYTES) throw new Error("setup_state_invalid");
+            return JSON.parse(buffer.toString("utf8", 0, size));
+        } finally { await file.close(); }
     } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
 }
 async function exists(path: string): Promise<boolean> {
