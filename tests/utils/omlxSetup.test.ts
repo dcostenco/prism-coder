@@ -139,6 +139,18 @@ describe("opt-in managed oMLX setup", () => {
         await f.manager.install(); await f.manager.waitForInstall();
         expect((await f.manager.status()).job?.state).toBe("complete");
     });
+    it("keeps startup cache discovery and cluster publishing inside the managed installation", async () => {
+        const f = await fixture({ serverPort: 0, startTimeoutMs: 2000 });
+        await f.manager.install(); await f.manager.waitForInstall();
+        const observed = join(f.home, "startup-env.json");
+        const executable = join(f.manager.root, "runtime-" + OMLX_SETUP_COMMIT.slice(0, 12), "bin", "omlx");
+        await writeFile(executable, "#!" + process.execPath + "\n" +
+            "require('node:fs').writeFileSync(" + JSON.stringify(observed) + ",JSON.stringify({home:process.env.HOME,cache:process.env.HF_HUB_CACHE,shim:process.env.OMLX_CLUSTER_SHIM_DIRECTORY}));process.exit(1);\n");
+        await chmod(executable, 0o700);
+        await expect(f.manager.start()).rejects.toThrow("Managed oMLX did not start");
+        expect(JSON.parse(await readFile(observed, "utf8"))).toEqual({ home: process.env.HOME,
+            cache: join(f.manager.basePath, "hf-cache"), shim: join(f.manager.basePath, "bin") });
+    });
     it("surfaces immediate server startup failure instead of a false starting response", async () => {
         const f = await fixture({ serverPort: 0, startTimeoutMs: 2000 });
         await f.manager.install(); await f.manager.waitForInstall();
@@ -169,7 +181,7 @@ describe("opt-in managed oMLX setup", () => {
         for (let index = 0; index < downloads.length; index++) expect(downloads[index].args).toContain(OMLX_SETUP_MODELS[index].revision);
         expect(await readFile(join(f.home, ".omlx", "settings.json"), "utf8")).toBe(original);
         const settings = JSON.parse(await readFile(join(f.manager.basePath, "settings.json"), "utf8"));
-        expect(settings).toMatchObject({ scheduler: { chunked_prefill: true }, server: { host: "127.0.0.1", port: 8001 }, cache: { ssd_cache_max_size: "10GB" } });
+        expect(settings).toMatchObject({ scheduler: { chunked_prefill: true }, server: { host: "127.0.0.1", port: 8001 }, cache: { ssd_cache_max_size: "10GB" }, huggingface: { hf_cache_enabled: false } });
         expect((await lstat(join(f.manager.basePath, "settings.json"))).mode & 0o777).toBe(0o600);
         const profiles = JSON.parse(await readFile(join(f.manager.basePath, "model_settings.json"), "utf8"));
         expect(Object.values(profiles.models)).toEqual(expect.arrayContaining([expect.objectContaining({ mtp_enabled: false, specprefill_enabled: false, is_pinned: false })]));

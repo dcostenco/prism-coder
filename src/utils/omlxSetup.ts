@@ -9,7 +9,7 @@ import { mkdirUsable } from "./usableDirectory.js";
 import { inspectOmlx } from "./omlxProvider.js";
 import { OMLX_SETUP_WORKER_SOURCE } from "./omlxSetupWorker.js";
 
-export const OMLX_SETUP_COMMIT = "8fd50b6a2515adba2f0a740600a7b9ac056077cd";
+export const OMLX_SETUP_COMMIT = "3b2697cb0e77c3c69099bc6ba23a11ac14fd5d6b";
 export const OMLX_SETUP_MODELS = Object.freeze([
     { id: "prism-coder-9b-mlx-8bit", repo: "dcostenco/prism-coder-9b-mlx-8bit", revision: "923f646aca17cfce6b96084ab1608e1c142655a1", label: "Prism 9B classifier", approximateGB: 9 },
     { id: "Qwen3.8-27B-oQ4e-mtp", repo: "Jundot/Qwen3.8-27B-oQ4e-mtp", revision: "49c1d60367d976a730a725ea3bbed32a8e94b878", label: "Qwen3.8 27B coder", approximateGB: 16 },
@@ -233,6 +233,7 @@ export class OmlxSetupManager {
         await stage("Configuring the managed server");
         const settings = { server: { host: "127.0.0.1", port: SERVER_PORT },
             model: { model_dirs: [join(this.basePath, "models")] }, scheduler: { chunked_prefill: true },
+            huggingface: { hf_cache_enabled: false },
             auth: { api_key: randomBytes(32).toString("hex"), skip_api_key_verification: false },
             sampling: { max_context_window: 32768, max_tokens: 4096 },
             cache: { ssd_cache_max_size: "10GB", hot_cache_max_size: "0" },
@@ -266,6 +267,10 @@ export class OmlxSetupManager {
             await new Promise<void>(resolve => probe.close(() => resolve()));
             const log = await open(join(this.root, "server.log"), "a", 0o600);
             const env = Object.fromEntries(["PATH", "HOME", "TMPDIR", "LANG"].flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []));
+            // The managed runtime must neither discover shared cached weights
+            // nor replace the interpreter advertised by another installation.
+            env.HF_HUB_CACHE = join(this.basePath, "hf-cache");
+            env.OMLX_CLUSTER_SHIM_DIRECTORY = join(this.basePath, "bin");
             let child;
             try {
                 child = spawn(join(this.runtime, "bin", "omlx"), ["serve", "--base-path", this.basePath],
