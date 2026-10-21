@@ -17,6 +17,7 @@
 import { ANALYTICS_DATE_PATTERN, ANALYTICS_METRIC_IDS, DASHBOARD_READ_MESSAGES } from './readMessages.js';
 import { DARK_FACTORY_SETTINGS_UNAVAILABLE } from '../darkfactory/enablement.js';
 import { ACTR_SETTINGS_UNAVAILABLE, ACTR_UI } from '../utils/actrEnablement.js';
+import { localCodingPanelHTML, localCodingScript } from './localCodingUI.js';
 
 export function renderDashboardLocalOpenHTML(): string {
     return `<!DOCTYPE html>
@@ -484,6 +485,10 @@ export function renderDashboardHTML(version: string): string {
     .skill-save-btn { background: var(--accent-purple); color: #fff; border: none; border-radius: var(--radius-sm);
       padding: 0.45rem 1rem; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
     .skill-save-btn:hover { opacity: 0.85; }
+    #spanel-local .setting-desc { font-size: 0.8rem; line-height: 1.55; }
+    #spanel-local a { color: var(--accent-purple); text-underline-offset: 3px; }
+    #spanel-local button, #spanel-local select, #spanel-local input { min-height: 40px; }
+    #spanel-local button:disabled { opacity: 0.5; cursor: default; }
     .skill-upload-btn { background: none; border: 1px solid var(--border-glass); color: var(--text-secondary);
       border-radius: var(--radius-sm); padding: 0.45rem 0.85rem; font-size: 0.82rem; cursor: pointer; transition: all 0.2s; }
     .skill-upload-btn:hover { border-color: var(--accent-purple); color: var(--accent-purple); }
@@ -1242,6 +1247,7 @@ export function renderDashboardHTML(version: string): string {
         <div class="settings-tabs">
           <button class="s-tab active" id="stab-account" onclick="switchSettingsTab('account')">👤 Account</button>
           <button class="s-tab" id="stab-settings" onclick="switchSettingsTab('settings')">⚙️ Preferences</button>
+          <button class="s-tab" id="stab-local" onclick="switchSettingsTab('local')">Local Coding</button>
           <button class="s-tab" id="stab-skills" onclick="switchSettingsTab('skills')">📜 Skills</button>
           <button class="s-tab" id="stab-providers" onclick="switchSettingsTab('providers')">🤖 AI Providers</button>
           <button class="s-tab" id="stab-observability" onclick="switchSettingsTab('observability')">🔭 Observability</button>
@@ -1254,6 +1260,7 @@ export function renderDashboardHTML(version: string): string {
           </div>
         </div>
 
+        ${localCodingPanelHTML()}
         <!-- Settings panel (existing content) -->
         <div class="s-tab-panel" id="spanel-settings">
 
@@ -3663,13 +3670,14 @@ document.getElementById('settingsModal').addEventListener('click', function (e) 
 // ─── Skills Tab JS ───────────────────────────────────────────
 var _skillsCache = {}; // role → content cache
 function switchSettingsTab(tab) {
-    ['account', 'settings', 'skills', 'providers', 'observability'].forEach(function (t) {
+    ['account', 'settings', 'local', 'skills', 'providers', 'observability'].forEach(function (t) {
         document.getElementById('stab-' + t).classList.toggle('active', t === tab);
         document.getElementById('spanel-' + t).classList.toggle('active', t === tab);
     });
     if (tab === 'account') {
         loadIdentityChip();
     }
+    if (tab === 'local') loadLocalCoding(true);
     if (tab === 'skills') {
         var role = document.getElementById('skillRoleSelect').value;
         loadSkillForRole(role);
@@ -4851,6 +4859,7 @@ function renderIntentHealthCard(data) {
     container.innerHTML = html;
 }
 
+${localCodingScript()}
 </script>
 </body>
 </html>`;

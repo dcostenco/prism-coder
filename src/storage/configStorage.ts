@@ -370,10 +370,10 @@ export async function getSessionContextReceipt(
   }
 }
 
-export async function getSetting(key: string, defaultValue = ""): Promise<string> {
+export async function getSetting(key: string, defaultValue = "", options: { fresh?: boolean } = {}): Promise<string> {
   await initConfigStorage();
   // Serve from cache when warm (the common case after startup).
-  if (settingsCache && key in settingsCache) {
+  if (!options.fresh && settingsCache && key in settingsCache) {
     return settingsCache[key];
   }
   const client = getClient();

@@ -1,7 +1,7 @@
 /** Explicit, authenticated on-device oMLX transport and resource coordination.
  * Application safety/quality/entitlement policy remains in prismInferHandler. */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, readdirSync, type BigIntStats } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import type { OwnedAcknowledgement, OwnedAction, OwnedProviderRequest } from "./omlxJobControl.js";
 import type { ControlEndpoint } from "./omlxControl.js";
+import { operationStatus } from "./omlxControl.js";
 
 export const OMLX_LEASE_PORT = 19438;
 export const OMLX_MIN_AVAILABLE_BYTES = 2 * 1024 ** 3;
@@ -245,23 +246,32 @@ async function localJson(path: string): Promise<Record<string, any>> {
     }
 }
 export interface OmlxConnectionOptions {
-    home?: string; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch;
+    home?: string; basePath?: string; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch;
+}
+export async function omlxConfigurationDirectory(options: OmlxConnectionOptions = {}): Promise<string> {
+    if (options.basePath) return options.basePath;
+    const home = options.home ?? homedir();
+    // Isolated callers supply a home and never consult this machine's settings.
+    const source = options.home === undefined
+        ? (await (await import("./localCodingSettings.js")).readLocalCodingSettings()).source : "existing";
+    return source === "managed" ? join(home, ".prism-mcp", "omlx", "server") : join(home, ".omlx");
 }
 async function connection(options: OmlxConnectionOptions) {
     const env = options.env ?? process.env;
-    const home = options.home ?? homedir();
+    const directory = await omlxConfigurationDirectory(options);
     const [settings, profiles] = await Promise.all([
-        localJson(join(home, ".omlx", "settings.json")),
-        localJson(join(home, ".omlx", "model_settings.json")),
+        localJson(join(directory, "settings.json")),
+        localJson(join(directory, "model_settings.json")),
     ]);
-    const apiKey = env.OMLX_API_KEY || settings.auth?.api_key;
+    const managed = directory === join(options.home ?? homedir(), ".prism-mcp", "omlx", "server");
+    const apiKey = (!managed && env.OMLX_API_KEY) || settings.auth?.api_key;
     if (typeof apiKey !== "string" || !apiKey.trim()) throw new OmlxError("omlx_auth_unavailable");
-    const url = loopbackUrl(env.OMLX_BASE_URL || `http://${settings.server?.host ?? "127.0.0.1"}:${settings.server?.port ?? 8000}/v1`);
-    return { settings, profiles, apiKey, url };
+    const url = loopbackUrl((!managed && env.OMLX_BASE_URL) || `http://${settings.server?.host ?? "127.0.0.1"}:${settings.server?.port ?? 8000}/v1`);
+    return { settings, profiles, apiKey, url, directory, managed };
 }
 /** Exposed profile IDs resolve through persisted oMLX records, never name
  * heuristics. This observes request context only, not checkpoint qualification. */
-async function configuredContext(model: string, models: Record<string, any>, settings: Record<string, any>, home: string): Promise<number> {
+async function configuredContext(model: string, models: Record<string, any>, settings: Record<string, any>, directory: string): Promise<number> {
     const matches: Record<string, any>[] = [];
     for (const [id, base] of Object.entries(models)) {
         if (base && typeof base === "object" && !Array.isArray(base)
@@ -269,7 +279,7 @@ async function configuredContext(model: string, models: Record<string, any>, set
     }
     if (model.includes(":")) {
         let profileMatches = 0;
-        const document = await localJson(join(home, ".omlx", "model_profiles.json"));
+        const document = await localJson(join(directory, "model_profiles.json"));
         if (Object.keys(document).length && (document.version !== 1 || !document.profiles
             || typeof document.profiles !== "object" || Array.isArray(document.profiles))) throw new OmlxError("omlx_profile_config_invalid");
         for (const [id, records] of Object.entries(document.profiles ?? {})) {
@@ -297,9 +307,7 @@ async function configuredContext(model: string, models: Record<string, any>, set
     if (!Number.isInteger(context) || context <= 0) throw new OmlxError("omlx_context_unknown");
     return context;
 }
-export async function detectOmlx(requestedModel?: string, options: OmlxConnectionOptions = {}): Promise<OmlxTarget> {
-    const env = options.env ?? process.env;
-    const { settings, profiles, apiKey, url } = await connection(options);
+function selectedModel(requestedModel: string | undefined, env: NodeJS.ProcessEnv, settings: Record<string, any>, profiles: Record<string, any>) {
     const models = profiles.models && typeof profiles.models === "object" ? profiles.models : {};
     const defaults = Object.keys(models).filter(id => models[id]?.is_default === true);
     const singleFlash = Object.keys(models).length === 1 && /Flash-Next/i.test(Object.keys(models)[0])
@@ -307,7 +315,29 @@ export async function detectOmlx(requestedModel?: string, options: OmlxConnectio
     const model = requestedModel ?? env.OMLX_MODEL ?? settings.integrations?.codex_model
         ?? (defaults.length === 1 ? defaults[0] : singleFlash);
     if (typeof model !== "string" || !model.trim()) throw new OmlxError("omlx_model_not_configured");
-    const contextTokens = await configuredContext(model, models, settings, options.home ?? homedir());
+    return { model, models };
+}
+
+/** Configuration only: Auto never starts a daemon or probes another backend. */
+export async function configuredOmlxModel(requestedModel?: string, options: OmlxConnectionOptions = {}): Promise<string | undefined> {
+    const env = options.env ?? process.env, directory = await omlxConfigurationDirectory(options);
+    const [settings, profiles] = await Promise.all([
+        localJson(join(directory, "settings.json")), localJson(join(directory, "model_settings.json")),
+    ]);
+    const managed = directory === join(options.home ?? homedir(), ".prism-mcp", "omlx", "server");
+    if (!((!managed && env.OMLX_API_KEY) || settings.auth?.api_key)) return undefined;
+    try { return selectedModel(requestedModel, managed ? { ...env, OMLX_MODEL: undefined } : env, settings, profiles).model; }
+    catch (error) {
+        if (error instanceof OmlxError && error.reason === "omlx_model_not_configured") return undefined;
+        throw error;
+    }
+}
+
+export async function detectOmlx(requestedModel?: string, options: OmlxConnectionOptions = {}): Promise<OmlxTarget> {
+    const env = options.env ?? process.env;
+    const { settings, profiles, apiKey, url, directory, managed } = await connection(options);
+    const { model, models } = selectedModel(requestedModel, managed ? { ...env, OMLX_MODEL: undefined } : env, settings, profiles);
+    const contextTokens = await configuredContext(model, models, settings, directory);
     try {
         const response = await (options.fetchImpl ?? fetch)(`${url}/models`, {
             headers: { Authorization: `Bearer ${apiKey}` },
@@ -632,6 +662,16 @@ export async function readOwnedOmlxCompletion(target: OmlxTarget, jobId: string,
 export function omlxControlEndpoint(target: OmlxTarget, fetchImpl: typeof fetch = fetch): ControlEndpoint | undefined {
     const apiKey = credentials.get(target);
     return apiKey ? Object.freeze({ base: new URL(target.url).origin + "/prism-control/v1", apiKey, fetchImpl }) : undefined;
+}
+
+/** Probe a fresh, nonexistent operation without registering or cancelling it. */
+export async function hasOmlxControl(target: OmlxTarget, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+    const endpoint = omlxControlEndpoint(target, fetchImpl);
+    if (!endpoint) return false;
+    try {
+        const reply = await operationStatus(endpoint, randomUUID(), randomUUID());
+        return reply.status === 404 && (reply.body as { detail?: unknown })?.detail === "Control operation unknown";
+    } catch { return false; }
 }
 
 export function createOmlxRuntime(resources: Pick<OmlxRuntime, "listLoaded" | "unload" | "generate"> & Pick<Partial<OmlxRuntime>, "detect" | "recover">,

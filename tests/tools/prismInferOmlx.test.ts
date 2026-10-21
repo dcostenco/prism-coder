@@ -51,6 +51,28 @@ function fixture() {
 }
 
 describe("explicit oMLX through the centralized prism_infer pipeline", () => {
+    it("Auto keeps a plan-limited code call on Ollama even with no caller ceiling", async () => {
+        const f = fixture();
+        f.deps.entitlements = { ...ENT, model_ceiling: "9b" };
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", envOverride: null, configured: true });
+        const result = await runInfer(ask({ local_backend: undefined }), f.deps);
+        expect(result.backend).not.toBe("omlx");
+        expect(result.backend).not.toBe("refused");
+        expect(f.deps.callLocal).toHaveBeenCalled();
+        expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it("applies the saved coding preference before acquiring the correct device lease", async () => {
+        const f = fixture();
+        f.deps.codingPreference = vi.fn(async () => ({ saved: "auto", effective: "auto", envOverride: null, configured: true, model: MODEL }));
+        expect(await runInfer(ask({ local_backend: undefined }), f.deps)).toMatchObject({ backend: "omlx", model_picked: MODEL });
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+        expect(f.deps.listTags).not.toHaveBeenCalled();
+    });
+    it("does not consult preferences when a task explicitly names its backend", async () => {
+        const f = fixture(); f.deps.codingPreference = vi.fn(async () => { throw new Error("must not read preferences"); });
+        expect(await runInfer(ask(), f.deps)).toMatchObject({ backend: "omlx" });
+        expect(f.deps.codingPreference).not.toHaveBeenCalled();
+    });
     it("detects first, classifies with the oMLX classifier without touching Ollama, and reports actual metadata", async () => {
         const f = fixture(); const result = await runInfer(ask({ local_model: MODEL }), f.deps);
         expect(f.events).toEqual(["detect", "classify", "generate"]);
@@ -112,34 +134,35 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         expect(f.deps.callLayer1).not.toHaveBeenCalled(); expect(f.omlx.unload).not.toHaveBeenCalled();
         expect(f.omlx.generate).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
     });
-    it("unloads every model resident in Ollama and waits until none remain, before classification", async () => {
+    it("preserves every resident Ollama model and refuses contention before classification", async () => {
         const f = fixture(); f.loaded.add("prism-coder:27b"); f.loaded.add("other-user-model");
         const result = await runInfer(ask(), f.deps);
-        expect(f.events).toEqual(["detect", "unload:prism-coder:27b", "unload:other-user-model", "classify", "generate"]);
-        expect(f.loaded.size).toBe(0);
-        expect(result).toMatchObject({ backend: "omlx", output: OUTPUT, gate_outcome: { status: "success" } });
-        expect(result.attempts).toContainEqual({ tier: "omlx", reason: "omlx_ollama_unloaded:2" });
+        expect(f.events).toEqual(["detect"]);
+        expect([...f.loaded]).toEqual(["prism-coder:27b", "other-user-model"]);
+        expect(f.omlx.unload).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ backend: "refused", output: "", gate_outcome: { reason: "omlx_memory_contention" } });
     });
-    it("refuses before classification when an Ollama unload fails", async () => {
+    it("never attempts an Ollama unload in either escalation mode", async () => {
         for (const escalation of ["report", undefined] as const) {
             const f = fixture(); f.loaded.add("other-user-model");
             f.omlx.unload = vi.fn(async () => { throw new OmlxError("omlx_ollama_unload_failed"); });
             const run = runInfer(ask({ escalation }), f.deps);
             if (escalation === "report") {
                 expect(await run).toMatchObject({ backend: "refused", output: "", used_cloud: false,
-                    gate_outcome: { status: "refused", reason: "omlx_ollama_unload_failed", served_anyway: false } });
-            } else await expect(run).rejects.toThrow("omlx_ollama_unload_failed");
+                    gate_outcome: { status: "refused", reason: "omlx_memory_contention", served_anyway: false } });
+            } else await expect(run).rejects.toThrow("omlx_memory_contention");
+            expect(f.omlx.unload).not.toHaveBeenCalled();
             expect(f.deps.callLayer1).not.toHaveBeenCalled(); expect(f.omlx.generate).not.toHaveBeenCalled();
             expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
         }
     });
-    it("refuses, and never unloads the newcomer, when a model loads while Ollama drains", async () => {
-        const f = fixture(); f.loaded.add("other-user-model");
-        f.omlx.unload = vi.fn(async model => { f.events.push("unload:" + model); f.loaded.delete(model); f.loaded.add("newcomer"); });
-        expect(await runInfer(ask(), f.deps)).toMatchObject({ backend: "refused",
-            gate_outcome: { status: "refused", reason: "omlx_memory_contention", served_anyway: false } });
-        expect(f.omlx.unload).toHaveBeenCalledTimes(1); expect([...f.loaded]).toEqual(["newcomer"]);
-        expect(f.deps.callLayer1).not.toHaveBeenCalled(); expect(f.omlx.generate).not.toHaveBeenCalled();
+    it("runs oMLX classification and generation without querying Ollama model tags or ordinary loaded models", async () => {
+        const f = fixture();
+        f.deps.listTags = vi.fn(async () => { throw new Error("Ollama must not be needed"); });
+        f.deps.listLoaded = vi.fn(async () => { throw new Error("ordinary Ollama probe must not run"); });
+        expect(await runInfer(ask(), f.deps)).toMatchObject({ backend: "omlx", output: OUTPUT });
+        expect(f.deps.listTags).not.toHaveBeenCalled(); expect(f.deps.listLoaded).not.toHaveBeenCalled();
+        expect(f.omlx.listLoaded).toHaveBeenCalled(); expect(f.deps.callLayer1).toHaveBeenCalled();
     });
     it("refuses, and unloads nothing, when any model appears in Ollama during classification", async () => {
         const f = fixture();
@@ -522,10 +545,11 @@ describe("explicit oMLX classification through the real callLayer1 and the owned
         expect(vi.mocked(f.omlx.generate).mock.calls.every(([target]) => target.model === OMLX_LAYER1_MODEL)).toBe(true);
     });
 
-    it("still refuses when Ollama's tag list is unreadable, before any classifier read", async () => {
+    it("classifies through real oMLX ownership even when Ollama is unavailable", async () => {
         const f = owned(() => ({ ok: true, text: "OBVIOUS_NOT_RESERVED", doneReason: "stop" }));
         f.deps.listTags = vi.fn(async () => null);
-        await expect(runInfer(ask(), f.deps)).rejects.toThrow("omlx_classifier_unavailable");
-        expect(f.classifierRequests).toHaveLength(0); expect(f.events).not.toContain("generate");
+        expect(await runInfer(ask(), f.deps)).toMatchObject({ backend: "omlx", output: OUTPUT });
+        expect(f.classifierRequests.length).toBeGreaterThan(0);
+        expect(f.deps.listTags).not.toHaveBeenCalled();
     });
 });

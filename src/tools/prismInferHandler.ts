@@ -64,6 +64,7 @@ import { recordInference, recordThinkOnlyRetry, formatInferenceMetrics, estimate
 import { appendInferMetric } from "../storage/inferMetricsLedger.js";
 import { getStorage } from "../storage/index.js";
 import { getSetting } from "../storage/configStorage.js";
+import { localCodingPreference, resolveLocalCodingBackend, type LocalCodingPreference } from "../utils/localCodingPreference.js";
 import {
     DEFAULT_PRISM_ROUTE_TOOLS,
     applyLocalRouteContract,
@@ -630,7 +631,7 @@ export const PRISM_INFER_TOOL: Tool = {
         openWorldHint: true,
     },
     description:
-        "Run local inference (Ollama by default). Explicit local_backend=omlx uses authenticated " +
+        "Run local inference using the saved coding backend preference. Explicit local_backend overrides it. oMLX uses authenticated " +
         "loopback oMLX for text-only code/reviewer drafts, without Ollama/cloud substitution or final sign-off. " +
         "Owns model selection across 27B / 9B / 4B / 2B using an explicit `model_ceiling` or " +
         "the caller's `task_complexity`, then validates loaded memory size, model context, " +
@@ -698,7 +699,7 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             local_backend: {
                 type: "string", enum: ["ollama", "omlx"],
-                description: "Default Ollama; explicit oMLX is text-only code mode, no backend substitution.",
+                description: "Override saved coding backend. oMLX: text-only code; no backend substitution.",
             },
             local_model: {
                 type: "string",
@@ -1188,9 +1189,24 @@ export async function waitForOllamaUnloadDrain(
     throw new OmlxError("omlx_ollama_unload_incomplete");
 }
 
-async function strictLoaded(url: string): Promise<Set<string>> {
+export function isOllamaConnectionRefused(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+    if ((error as NodeJS.ErrnoException).code === "ECONNREFUSED") return true;
+    if (error instanceof AggregateError) return error.errors.length > 0 && error.errors.every(isOllamaConnectionRefused);
+    return error.cause !== undefined && isOllamaConnectionRefused(error.cause);
+}
+
+export async function strictLoaded(url: string, fetchImpl: typeof fetch = fetch): Promise<Set<string>> {
+    let response: Response;
     try {
-        const response = await fetch(`${url}/api/ps`, { signal: AbortSignal.timeout(3_000), redirect: "error" });
+        response = await fetchImpl(`${url}/api/ps`, { signal: AbortSignal.timeout(3_000), redirect: "error" });
+    } catch (error) {
+        // A closed local listener needs no daemon startup. Timeouts, DNS errors,
+        // HTTP errors and malformed state are unknown and still refuse.
+        if (isOllamaConnectionRefused(error)) return new Set();
+        throw new OmlxError("omlx_ollama_state_unavailable");
+    }
+    try {
         if (!response.ok) throw new Error();
         const data = await response.json() as { models?: { name?: unknown }[] };
         if (!Array.isArray(data.models) || data.models.some(model => typeof model?.name !== "string" || !model.name)) throw new Error();
@@ -2051,6 +2067,7 @@ export interface PrismInferResult {
  * Accepts injected dependencies so tests can mock Ollama / synalux.
  */
 export interface InferDeps {
+    codingPreference?: () => Promise<LocalCodingPreference>;
     omlx?: OmlxRuntime;
     freemem: () => number;
     listTags: () => Promise<Set<string> | null>;
@@ -2182,6 +2199,20 @@ const _evictionMutex = (() => {
 
 export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<PrismInferResult> {
     const started = Date.now();
+    // Explicit calls never consult preferences. Other modes and images keep
+    // their supported path; resolve before taking the backend's device lease.
+    const intercepted = [...(args.messages ?? []).filter(turn => turn.role === "user").map(turn => turn.content), args.prompt].some(text => Boolean(checkInputSafety(text)));
+    if (!intercepted && !args.local_backend && args.mode === "code" && !args.images?.length && deps.codingPreference) {
+        const preference = await deps.codingPreference();
+        // Auto eligibility uses the same plan snapshot as the later gate,
+        // before choosing a device lease. Explicit selections remain strict.
+        if (preference.effective === "auto") deps = { ...deps, entitlements: deps.entitlements ?? await getEntitlements() };
+        const selectionArgs = preference.effective === "auto"
+            ? { ...args, model_ceiling: clampCeiling(args.model_ceiling ?? "27b", deps.entitlements!.model_ceiling) } : args;
+        const backend = resolveLocalCodingBackend(selectionArgs, preference);
+        args = { ...args, local_backend: backend,
+            ...(backend === "omlx" && !args.local_model && preference.model ? { local_model: preference.model } : {}) };
+    }
     return withInferenceResourceLease(args.local_backend === "omlx", async () => {
         let releaseDevice: (() => Promise<void>) | undefined;
         const runtime = args.local_backend === "omlx" ? deps.omlx : undefined;
@@ -2510,28 +2541,16 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         }
         attempts.push({ tier: "omlx", reason: "authenticated_model_detected" });
     }
-    const installed = await deps.listTags();
-    const loaded = await deps.listLoaded();
-    if (omlxTarget && installed === null) throw new Error("prism_infer: omlx_classifier_unavailable");
-    // Explicit oMLX: timeout_ms bounds the whole call, the Ollama unload and
-    // classification included.
+    const installed = omlxTarget ? new Set<string>() : await deps.listTags();
+    const loaded = omlxTarget ? new Set<string>() : await deps.listLoaded();
+    // oMLX classification and generation share one bounded deadline.
     const omlxDeadline = Date.now() + (args.timeout_ms ?? 300_000);
-    // Ollama is unloaded during an explicit oMLX call (owner, 2026-10-15; this
-    // replaces plan section 4's "never evict another Ollama user's weights").
-    // Under the device lease, before classification: unload every resident
-    // model reversibly (the weights stay on disk and reload on the next Ollama
-    // call) and wait until Ollama reports none. A failed unload, a model that
-    // does not drain, or a newcomer loading meanwhile refuses. After this, a
-    // model that appears is refused per read by guardedOmlxGenerate.
+    // Observe contention without starting Ollama or evicting another job.
+    // Guarded reads keep monitoring for newcomers throughout generation.
     if (omlxTarget && omlxRuntime) {
         let residency: string | null = null;
         try {
-            const initial = new Set(await omlxRuntime.listLoaded());
-            for (const model of initial) await omlxRuntime.unload(model);
-            if (initial.size > 0) {
-                await waitForOllamaUnloadDrain(() => omlxRuntime.listLoaded(), initial);
-                attempts.push({ tier: "omlx", reason: `omlx_ollama_unloaded:${initial.size}` });
-            }
+            if ((await omlxRuntime.listLoaded()).size > 0) throw new OmlxError("omlx_memory_contention");
         } catch (error) { residency = error instanceof OmlxError ? error.reason : "omlx_ollama_state_unavailable"; }
         if (residency) {
             attempts.push({ tier: "omlx", reason: residency });
@@ -3857,6 +3876,7 @@ async function applyVerification(
  */
 export function productionInferDeps(): InferDeps {
     return {
+        codingPreference: localCodingPreference,
         omlx: createOmlxRuntime({
             listLoaded: () => strictLoaded(PRISM_LOCAL_LLM_URL),
             unload: model => unloadOllamaModel(PRISM_LOCAL_LLM_URL, model),

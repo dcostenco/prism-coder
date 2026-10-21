@@ -59,70 +59,17 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
   never sent to the cloud), and local/cloud usage is recorded for
   review.
 
-### Explicit on-device oMLX drafts
+### On-device oMLX coding
 
-`prism_infer` keeps Ollama's four-tier routing by default. For an explicitly
-selected text-only code or advisory reviewer draft, pass `local_backend: "omlx"`,
-`mode: "code"`, and optionally `local_model` with the exact advertised model ID.
-This path authenticates `/v1/models` before classification or any Ollama unload;
-an unavailable, unauthenticated, or mismatched model refuses without substitution.
-It reads `OMLX_API_KEY` or the local `~/.omlx/settings.json` key, and model/context
-settings from `~/.omlx/model_settings.json`; `OMLX_MODEL` and a loopback-only
-`OMLX_BASE_URL` can select local configuration. Redirects are refused.
-
-**Requires** the [stable Prism integration of oMLX](https://github.com/dcostenco/omlx),
-based on upstream `v0.7.1` with Prism's control routes
-([install and settings](https://github.com/dcostenco/omlx/blob/main/PRISM.md)). With stock
-oMLX every call is refused. Generation runs as an owned
-job through those routes, so a timeout or cancel is reported only once the
-server confirms the request stopped. An unconfirmed stop refuses later calls
-(`omlx_stop_unproved`, `omlx_provider_busy`).
-
-Before classification, Prism unloads every model Ollama has loaded
-(`keep_alive: 0`; the weights stay on disk and reload on the next Ollama call)
-and waits up to 10 seconds for Ollama to report none. A failed unload, a model
-that does not drain, or one loading meanwhile refuses the call; a newcomer is
-never unloaded. Ollama must be reachable for this step. An OS-owned loopback
-lease on port 19438 excludes other candidate MCP processes; ordinary calls within
-one process share this lease. A busy lease refuses (`omlx_resource_busy`) before
-classification or unloading, and process exit releases it without lock-file
-cleanup. In-process inference and classification wait while an oMLX call owns
-the device. Unknown Ollama state, newly loaded Ollama weights, or available
-memory below a 2 GiB reserve aborts/withholds the generation. Model caches and
-daemons remain in place. Legacy/unmodified MCP processes do not honor the lease;
-their contention is observed and rejected by the watcher.
-
-**Safety screen.** The classifier on this path is the public
-`dcostenco/prism-coder-9b-mlx-8bit`, installed under the name
-`prism-coder-9b-mlx-8bit` in oMLX's model folder (about 9.2 GB while loaded).
-Layer 1's rules only refuse here; the classifier reads everything else, and a
-prompt over 4,000 characters is read whole in 3,600-character windows (the most
-severe verdict stands), never as an excerpt. A classifier failure, an unreadable
-answer, or a missing classifier refuses the call; there is no keyword or Ollama
-fallback. Each classifier read is bounded by 90 seconds and by the call's
-remaining `timeout_ms`, so a classifier that macOS paged out during a long idle
-is waited for rather than refused, and an oversize prompt read in windows
-cannot outlast the call budget; the first unrecoverable read ends the
-classification.
-
-Configured oMLX sampling and reasoning are preserved unless `temperature` or
-`think` is explicit, including through repairs. Generic thinking-disable retries
-are disabled for oMLX, so a model with no thinking budget in oMLX's model
-settings can spend its whole answer reasoning and is refused `think_only`: give
-it a budget there, or pass `think: false`. The default 300-second budget bounds
-oMLX generation, repairs, and history answer checks; `timeout_ms` may override it
-up to 900 seconds. Context sizing uses conservative UTF-8 bytes and the
-configured window.
-
-The same entitlement, reserved-content, history, quality, output-safety, and
-verification policies apply. Explicit oMLX never falls back to Ollama/cloud
-inference. `cloud_fallback: false`, `verify: false`, and `route_guard: "local"`
-keep content-bearing cloud channels disabled for a local draft. Result metadata
-reports `backend: "omlx"`, the selected model, tokens, and `gate_outcome`.
-The MCP envelope carries this public metadata in `structuredContent` alongside
-the existing human header/output text; `next_step` remains available in both.
-Runtime authentication and internal verifier traces are excluded.
-A draft is advisory and requires independent host review; it is not final sign-off.
+On Apple Silicon, choose **Settings → Local Coding** in `prism dashboard` to
+install oMLX and its model pack or use an existing server. Auto prefers configured
+oMLX for eligible coding; a saved preference or explicit task choice can select
+Ollama instead. This path requires
+Prism's oMLX integration and its separate classifier; stock oMLX is insufficient.
+See [oMLX setup, tested models, results, and failure handling](docs/omlx.md), or
+start with the [quickstart beside Ollama](#optional-omlx-for-local-coding).
+Explicit oMLX never falls back to Ollama or cloud inference; drafts still need
+host review and tests.
 
 ## Get started
 
@@ -1348,6 +1295,32 @@ requests are refused rather than answered blind when no tier (or the Layer 1
 safety classifier) can actually see the image, so a text-only model is never
 handed a prompt about a screenshot it never received. The 27b is text only.
 
+### Optional oMLX for local coding
+
+Use **Settings → Local Coding** in `prism dashboard` for opt-in installation,
+progress, retry, connection checks, and backend/model selection. Or use
+`prism local install` followed by `prism local start`. npm installation never
+downloads models automatically. The managed pack requires Apple Silicon,
+macOS 15+, Python 3.11–3.13, 32 GiB memory and 40 GiB free disk; it keeps existing
+servers and jobs running. Auto prefers configured oMLX for eligible coding;
+explicit smaller model ceilings stay on Ollama, and task overrides take priority.
+
+For manual setup, install the **Prism integration** of oMLX, its required
+9B classifier, and a drafting model such as Qwen3.8-27B oQ4e. Set a loopback API
+key, enable chunked prefill, disable MTP/DFlash/speculative prefill, and configure
+model context/thinking budgets. Then verify a call with `local_backend: "omlx"`,
+`mode: "code"`, and the exact advertised `local_model`. Ollama need not be
+running; Prism refuses device contention without unloading another job's models.
+
+Follow the [step-by-step oMLX guide](docs/omlx.md) for pinned install/download
+commands, server startup, a first MCP call, and troubleshooting. Its
+[tested model table](docs/omlx.md#tested-models-and-trade-offs) separates native
+oMLX checkpoints from the experimental Strata GGUF runtime. The
+[coding and review results](docs/omlx.md#observed-coding-and-review-results)
+show measured trade-offs and limits; they do not establish an overall winner.
+Stock oMLX cannot serve this Prism path, and explicit oMLX has no inference
+fallback. Local reviews remain advisory.
+
 ---
 
 ## What it does
@@ -1498,6 +1471,9 @@ and `verify` govern the other two channels.
 
 ## Models
 
+This section describes the default **Ollama fleet**. For explicit oMLX coding,
+see [tested oMLX models and trade-offs](docs/omlx.md#tested-models-and-trade-offs).
+
 The `prism-coder` fleet uses Qwen3.5 for MCP tool-routing AND general inference. The 9B and 27B are fine-tuned; the 2B and 4B use stock Qwen3.5-4B at different quantization levels. The 27B scored 100% on our internal 115-case tool-routing suite and 100% on an internal 15-problem coding eval, at $0 inference cost. These are self-run evaluations, not [BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html) leaderboard submissions.
 
 `prism_infer` supports three modes: `route` (tool routing, fast), `chat` (conversation) and `code` (code generation). Reasoning is decided by the **tier**, not the mode: a tier carrying `MODEL_TIERS.prefersThinking` also carries a `minLocalTokens` floor so reasoning cannot crowd out the answer, and only those tiers use `<think>` blocks (stripped before the response is served). The 9B does; the 4B and 2B do not, because on those tiers reasoning drew down the same `num_predict` budget the answer needed and returned an empty response. An explicit `think: true` still overrides, for a caller who has sized `max_tokens` for it. If the local model fails a quality gate (empty, think-only, or truncated), paid tiers automatically escalate to Gemini 3.6 Flash via the Synalux portal.
@@ -1568,7 +1544,7 @@ selection.
 
 | Layer | What | Model | Cost |
 |---|---|---|---|
-| **L1** | Crisis/medical safety gate | None (regex) | 0 ms |
+| **L1** | Crisis/medical safety rules and local classification | Backend-specific classifier (required 9B on oMLX) | Varies |
 | **L3-Registry** | Envelope validation + advertised-tool enforcement (all tiers) | None | 0 ms |
 | **L3-Route** | Authenticated deterministic route correction (Standard+) | None | Network latency |
 | **L3-Tier0** | Integer grounding (set membership) | None (deterministic) | 0 ms |
@@ -1613,10 +1589,14 @@ check, the local 9B passed 2/3 tasks; the local 27B and Gemini 3.6 Flash each
 passed 3/3. This is a self-published regression signal, not an independent
 leaderboard or a claim of broad model equivalence.
 
+For the separate October 2026 coding and advisory-review comparison, see
+[oMLX and Strata results and limitations](docs/omlx.md#observed-coding-and-review-results).
+
 ### Cloud Escalation (`cloud_fallback`)
 
-Prism always tries an eligible local model first. If the quality gate detects
-an empty, truncated, think-only, or looping response, or the safety screen
+For the default **Ollama backend**, Prism tries an eligible local model first.
+If the quality gate detects an empty, truncated, think-only, or looping
+response, or the safety screen
 finds the request uncertain or reserved, a paid plan escalates the request
 through Gemini 3.6 Flash. Free-tier routing stays local and reports the
 outcome without making a cloud call.
@@ -1626,6 +1606,9 @@ escalate, free plans never do. Pass `false` to forbid cloud inference fallback
 for a call, which the clinical delegation rules do for drafting; pass `true`
 to ask for it, which still requires a plan with cloud. A request that carries
 an image is never escalated; screenshots stay on this device.
+
+Explicit `local_backend: "omlx"` never falls back to cloud inference or Ollama,
+regardless of plan or `cloud_fallback`. See [oMLX behavior](docs/omlx.md#runtime-behavior-and-failure-handling).
 
 ---
 

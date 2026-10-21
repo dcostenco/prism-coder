@@ -43,6 +43,7 @@ import { buildVaultDirectory } from "../utils/vaultExporter.js";
 import { redactSettings } from "../tools/commonHelpers.js";
 import { handleGraphRoutes } from "./graphRouter.js";
 import { handleAccountRoutes } from "./accountRouter.js";
+import { handleLocalCodingRoutes } from "./localCodingRouter.js";
 import { createDashboardStorageAccessor } from "./storageAccessor.js";
 import { DASHBOARD_READ_MESSAGES } from "./readMessages.js";
 import { isDashboardSettingKeyAllowed, isDashboardSettingValueAllowed } from "./settingsPolicy.js";
@@ -763,6 +764,7 @@ return false;}
       }
 
       // ─── API: Synalux Account & Subscription ───
+      if (await handleLocalCodingRoutes(url, req, res)) return;
       if (url.pathname.startsWith("/api/account")) {
         if (await handleAccountRoutes(url, req, res)) return;
       }

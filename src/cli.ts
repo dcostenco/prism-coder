@@ -44,6 +44,35 @@ import {
 
 const program = new Command();
 
+const local = program.command('local').description('Local coding setup and backend preference');
+local.command('status').description('Show oMLX installation and saved coding preference').action(async () => {
+  const { omlxSetup } = await import('./utils/omlxSetup.js');
+  const { readLocalCodingSettings } = await import('./utils/localCodingSettings.js');
+  console.log(JSON.stringify({ settings: await readLocalCodingSettings(), managed: await omlxSetup.status() }, null, 2));
+});
+local.command('install').description('Opt in to isolated oMLX + pinned classifier/coder downloads (about 25 GB; 40 GiB free required)').action(async () => {
+  const { omlxSetup } = await import('./utils/omlxSetup.js');
+  try {
+    const job = await omlxSetup.install();
+    console.log(`oMLX setup ${job.id} started. Follow progress in Dashboard → Account & Settings → Local Coding.`);
+    await omlxSetup.waitForInstall();
+    const state = await omlxSetup.status();
+    if (state.job?.state !== 'complete') throw new Error(state.job?.error ?? 'oMLX setup did not complete.');
+    console.log('Installed. Run prism local start, then select Prism-managed installation in the Local Coding dashboard.');
+  } catch (error) { console.error(error instanceof Error ? error.message : 'oMLX setup failed.'); process.exitCode = 1; }
+});
+local.command('start').description('Start the installed managed oMLX server without replacing an existing daemon').action(async () => {
+  const { omlxSetup } = await import('./utils/omlxSetup.js');
+  try { console.log(JSON.stringify(await omlxSetup.start())); }
+  catch (error) { console.error(error instanceof Error ? error.message : 'Unable to start oMLX.'); process.exitCode = 1; }
+});
+local.command('backend <backend>').description('Save auto, omlx or ollama for coding; explicit tasks override it').action(async (backend: string) => {
+  const { readLocalCodingSettings, saveLocalCodingSettings, isLocalCodingBackend } = await import('./utils/localCodingSettings.js');
+  if (!isLocalCodingBackend(backend)) { console.error('Backend must be auto, omlx or ollama.'); process.exitCode = 1; return; }
+  await saveLocalCodingSettings({ ...await readLocalCodingSettings(), backend });
+  console.log(`Saved coding preference: ${backend}. Applies to new tasks; explicit task choices override it.`);
+});
+
 interface LoadJsonOutputMetadata {
   agentName?: string;
   effectiveRole?: string;
