@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.22.4 — 2026-10-22
+
+- Add Settings → Local Coding and `prism local` for opt-in installation of a
+  pinned oMLX server and classifier/coder model pack, with progress, retry and
+  managed startup on Apple Silicon. Existing oMLX servers remain supported.
+- Save Auto/oMLX/Ollama coding preferences without restarting Prism. Auto
+  prefers configured oMLX for eligible text-only coding; explicit task backend
+  choices override the saved preference.
+- Discover installed oMLX and Ollama models and save separate coder/reviewer
+  assignments for each backend. Both roles may use the same model; explicit
+  task model choices override saved assignments.
+- Show reported model sizes and conservative memory estimates without loading
+  models. Unavailable metadata stays unknown; an estimate does not guarantee fit.
+- Isolate managed model discovery, Hub cache and cluster launcher paths.
+  Competing Ollama residency refuses an oMLX call without unloading other jobs.
+- Read setup-state JSON through one bounded file handle without following
+  symlinks, closing the filesystem race identified by CodeQL.
+- Document setup requirements, supported model packs and the limits of the
+  local coding and advisory-review test results.
+- Controlled oMLX coding remains text-only. This release does not enable image
+  requests or establish picture-recognition quality.
+
 ## 20.22.3 — 2026-10-20
 
 - Update Hono to 4.13.11 and Vite to 8.2.4, addressing their static-path
