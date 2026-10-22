@@ -32,19 +32,47 @@ Open `prism dashboard`, then **Settings → Local Coding**. The panel provides:
   oMLX for text-only code calls with the top model ceiling. Explicit smaller
   ceilings stay on Ollama. Images and tool routing retain their supported path.
 - **oMLX connection:** your existing server, or a separate Prism-managed install.
-- **oMLX coding model:** an exact advertised ID, or an empty field for the
-  selected server's default.
+- **Coder and reviewer models:** independent selectors for oMLX and Ollama,
+  populated automatically from the selected servers' installed inventories.
+  The same model can serve both roles. Choose **Use backend default** to leave
+  a role unassigned. Replacing a model version requires a new selection and save,
+  with no code or skill edit.
+- **Memory information:** reported weight size, loaded memory when available,
+  a conservative cold-load estimate and current available RAM. Missing metadata
+  stays unknown. Estimates do not guarantee peak fit; context, buffers and other
+  jobs affect admission. Checking inventory does not load or download models.
 
 Save the preference and use **Check saved connection** to check the saved
 server, model advertisement, required classifier, and control-route availability.
-The saved preference applies to new tasks across local Prism processes without
-restarting them. `PRISM_LOCAL_CODING_BACKEND=auto|omlx|ollama` overrides the saved
+Updated Prism processes read the versioned preference for each new task without
+restarting. Older processes and rollback retain their previous legacy settings;
+new saves do not overwrite those records. `PRISM_LOCAL_CODING_BACKEND=auto|omlx|ollama` overrides the saved
 backend; an explicit task `local_backend` overrides both. A broken selected
 oMLX configuration fails rather than silently substituting a backend.
 
+Code requests use `local_role: "coder"` (the default) or `"reviewer"` to select
+the saved model for the effective backend. Omitting the role defaults the model
+lookup to coder while preserving legacy token/time budgets. An explicit role
+defaults to 4,096 tokens/600 seconds on oMLX or 1,024 tokens/300 seconds on Ollama;
+explicit budgets override these defaults. `local_model` overrides the role's
+assignment on either backend. An explicit backend still uses its saved role
+unless a model override is also supplied. Missing selected models are refused;
+an inventory inspection failure means availability is unknown, not that a model
+was removed. General inference, classifiers, embeddings and vision retain their
+existing selection paths.
+
+Selected Ollama models must report completion capability, parameter count and
+the architecture metadata needed for memory estimates. Nominal parameter size
+is rounded to billions for the plan/caller ceiling; complexity hints do not
+override saved choices. The selected path pins context to at most 4,096 tokens
+for generation and auxiliary calls. Unknown required metadata refuses admission
+rather than falling back to a named tier. The ordinary unassigned tier walk
+retains its existing behavior.
+
 For a new installation, choose **Install oMLX + recommended models**. It requires
 Apple Silicon, macOS 15+, Python 3.11–3.13, 32 GiB unified memory, and 40 GiB free
-disk. The fixed pack downloads about 25 GB. Review the linked model licenses
+disk. This optional starter pack downloads about 25 GB and does not restrict
+the installed models you can assign above. Review the linked model licenses
 first. Installation is opt-in; npm postinstall never downloads these models.
 Progress shows the current stage. **Retry / resume setup** resumes interrupted
 downloads and skips completed runtime/model stages. Retry checks disk space for
@@ -190,8 +218,8 @@ degraded output is not a successful draft. Inspect the code, then check that
 and the original list remains unchanged. A successful inference gate does not
 mean the code passed those checks.
 
-For a local advisory review, use the managed `prism-local-code` helper with an
-explicit installed reviewer model. Host reviewers are selected separately;
+For a local advisory review, use the managed `prism-local-code` helper with a
+saved or explicit installed reviewer model. Host reviewers are selected separately;
 there is no automatic cloud fallback or automatic reviewer approval.
 
 ## Tested models and trade-offs
@@ -319,8 +347,9 @@ Configured oMLX sampling and reasoning are preserved unless `temperature` or
 `think` is explicit, including through repairs. Generic thinking-disable retries
 are disabled for oMLX, so a model with no thinking budget in oMLX's model
 settings can spend its whole answer reasoning and is refused `think_only`: give
-it a budget there, or pass `think: false`. The default 300-second budget bounds
-oMLX generation, repairs, and history answer checks; `timeout_ms` may override it
+it a budget there, or pass `think: false`. The legacy 300-second budget (600
+seconds with an explicit `local_role`) bounds oMLX generation, repairs and
+history answer checks; `timeout_ms` may override it
 up to 900 seconds. Context sizing uses conservative UTF-8 bytes and the
 configured window.
 

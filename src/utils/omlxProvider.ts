@@ -368,6 +368,24 @@ export interface OmlxInspection {
     evidence_scope: "authenticated_server_counters_only";
 }
 
+/** Sanitized model inventory, not filesystem paths or a load/fit guarantee. */
+export async function inspectOmlxCodingModels(options: OmlxConnectionOptions = {}): Promise<import("./ollamaCodingModels.js").LocalCodingModelObservation[]> {
+    const { apiKey, url } = await connection(options);
+    const raw = await inspectionJson(`${url}/models/status`, apiKey, options.fetchImpl ?? fetch, PROBE_TIMEOUT_MS);
+    if (!Array.isArray(raw.models) || raw.models.length > MAX_ADVERTISED_MODELS) throw new OmlxError("omlx_inspection_models_invalid");
+    const ids = new Set<string>();
+    return raw.models.filter(entry => entry && typeof entry === "object" && ["llm", "vlm"].includes(entry.engine_type)).map(entry => {
+        if (typeof entry.id !== "string" || !MODEL_ID_PATTERN.test(entry.id) || entry.id.includes(apiKey) || ids.has(entry.id)
+            || typeof entry.loaded !== "boolean") throw new OmlxError("omlx_inspection_models_invalid");
+        ids.add(entry.id);
+        const positive = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) > 0;
+        return { id: entry.id, loaded: entry.loaded,
+            ...(positive(entry.estimated_size) ? { weightBytes: entry.estimated_size } : {}),
+            ...(entry.loaded && positive(entry.actual_size) ? { loadedBytes: entry.actual_size } : {}),
+            ...(positive(entry.max_context_window) ? { contextTokens: entry.max_context_window } : {}) };
+    });
+}
+
 async function inspectionJson(url: string, apiKey: string, fetchImpl: typeof fetch, timeoutMs: number): Promise<Record<string, unknown>> {
     const controller = new AbortController();
     const deadline = performance.now() + timeoutMs;

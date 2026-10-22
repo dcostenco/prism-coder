@@ -1,8 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { configuredOmlxModel, detectOmlx, hasOmlxControl, inspectOmlx, OmlxError } from "../utils/omlxProvider.js";
+import { configuredOmlxModel, detectOmlx, hasOmlxControl, inspectOmlx, inspectOmlxCodingModels, OmlxError } from "../utils/omlxProvider.js";
 import { localCodingPreference } from "../utils/localCodingPreference.js";
-import { readLocalCodingSettings, saveLocalCodingSettings } from "../utils/localCodingSettings.js";
+import { readLocalCodingSettings, saveLocalCodingSettings, resolveLocalCodingModel } from "../utils/localCodingSettings.js";
 import { omlxSetup, OmlxSetupError, OMLX_SETUP_MODELS } from "../utils/omlxSetup.js";
+import { inspectOllamaCodingModels } from "../utils/ollamaCodingModels.js";
+import { getAvailableMemoryBytes } from "../utils/availableMemory.js";
 
 const MAX_BODY_BYTES = 4096;
 export interface LocalCodingRouterDeps {
@@ -14,9 +16,13 @@ export interface LocalCodingRouterDeps {
     detect: typeof detectOmlx;
     control: typeof hasOmlxControl;
     configuredModel: typeof configuredOmlxModel;
+    omlxModels: typeof inspectOmlxCodingModels;
+    ollamaModels: typeof inspectOllamaCodingModels;
+    availableMemory: () => number;
 }
 const defaults: LocalCodingRouterDeps = { setup: omlxSetup, settings: readLocalCodingSettings, save: saveLocalCodingSettings,
-    preference: localCodingPreference, inspect: inspectOmlx, detect: detectOmlx, control: hasOmlxControl, configuredModel: configuredOmlxModel };
+    preference: localCodingPreference, inspect: inspectOmlx, detect: detectOmlx, control: hasOmlxControl, configuredModel: configuredOmlxModel,
+    omlxModels: inspectOmlxCodingModels, ollamaModels: inspectOllamaCodingModels, availableMemory: getAvailableMemoryBytes };
 function json(res: ServerResponse, status: number, value: unknown) {
     res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "private, no-store" });
     res.end(JSON.stringify(value));
@@ -49,15 +55,21 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
                 preference = { saved: settings.backend, effective: settings.backend, envOverride: null, configured: false };
             }
             const managed = await deps.setup.status();
+            const inventories = await Promise.allSettled([deps.omlxModels(), deps.ollamaModels()]);
+            const discovered = { omlx: inventories[0].status === "fulfilled" ? inventories[0].value : [],
+                ollama: inventories[1].status === "fulfilled" ? inventories[1].value : [] };
+            const discoveryErrors = { omlx: inventories[0].status === "rejected" ? "oMLX model metadata unavailable; memory requirements unknown." : null,
+                ollama: inventories[1].status === "rejected" ? "Ollama model inventory unavailable. Check the configured server." : null };
             let connection: { connected: boolean; control: boolean; model?: string; models: string[]; error?: string; adminUrl?: string } = { connected: false, control: false, models: [] };
             try {
                 const observation = await deps.inspect();
                 connection = { connected: true, control: false, models: observation.advertised_models, adminUrl: new URL(observation.url).origin + "/admin" };
-                const model = settings.model ?? await deps.configuredModel();
+                const model = resolveLocalCodingModel(settings, "omlx", "coder") ?? await deps.configuredModel();
                 if (model) { const target = await deps.detect(model); connection.model = model; connection.control = await deps.control(target); }
                 else connection.error = "Choose an advertised coding model and save the preference.";
             } catch (error) { connection.error = error instanceof OmlxError ? error.reason : "Connection check unavailable."; }
-            json(res, 200, { settings, preference, preferenceError, managed, connection, canManage: loopback(req),
+            json(res, 200, { settings, preference, preferenceError, managed, connection, discovered, discoveryErrors,
+                availableMemoryBytes: deps.availableMemory(), canManage: loopback(req),
                 requiredClassifier: OMLX_SETUP_MODELS[0].id }); return true;
         }
         if (req.method !== "POST") { json(res, 405, { error: "Method not allowed" }); return true; }

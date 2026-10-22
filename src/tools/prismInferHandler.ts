@@ -65,6 +65,8 @@ import { appendInferMetric } from "../storage/inferMetricsLedger.js";
 import { getStorage } from "../storage/index.js";
 import { getSetting } from "../storage/configStorage.js";
 import { localCodingPreference, resolveLocalCodingBackend, type LocalCodingPreference } from "../utils/localCodingPreference.js";
+import { isLocalCodingModelId, resolveLocalCodingModel, type LocalCodingRole } from "../utils/localCodingSettings.js";
+import { selectedOllamaCodingModel } from "../utils/ollamaCodingModels.js";
 import {
     DEFAULT_PRISM_ROUTE_TOOLS,
     applyLocalRouteContract,
@@ -107,6 +109,10 @@ const FAST_TASK_COMPLEXITY_MAX = 3;
 const BALANCED_TASK_COMPLEXITY_MAX = 6;
 const MAX_CODING_REPAIR_ATTEMPTS = 2;
 const MAX_ROUTE_TOOLS = 64;
+const CODING_ROLE_DEFAULTS = {
+    omlx: { maxTokens: 4096, timeoutMs: 600_000 },
+    ollama: { maxTokens: 1024, timeoutMs: 300_000 },
+} as const;
 
 // ─── Tool Definition ────────────────────────────────────────────
 
@@ -689,7 +695,7 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             max_tokens: {
                 type: "number",
-                description: "Max output tokens (default 1024, hard cap 8192).",
+                description: "Output cap 8192, default 1024. With local_role: oMLX defaults 4096.",
                 default: 1024,
             },
             temperature: {
@@ -699,12 +705,13 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             local_backend: {
                 type: "string", enum: ["ollama", "omlx"],
-                description: "Override saved coding backend. oMLX: text-only code; no backend substitution.",
+                description: "Override coding backend; oMLX is text-only. No substitution.",
             },
             local_model: {
                 type: "string",
-                description: "Explicit oMLX only: exact advertised model ID; otherwise use trusted local configuration.",
+                description: "Installed code model override; unavailable models refuse.",
             },
+            local_role: { type: "string", enum: ["coder", "reviewer"], description: "Coding role; default coder." },
             model_ceiling: {
                 type: "string",
                 enum: ["27b", "9b", "4b", "2b"],
@@ -715,13 +722,12 @@ export const PRISM_INFER_TOOL: Tool = {
                 minimum: 1,
                 maximum: 10,
                 description:
-                    "1-10 workload hint prism_infer (not the task router) uses to pick the initial " +
-                    "local tier and thinking mode; explicit model_ceiling/think win.",
+                    "1-10 tier/thinking hint for prism_infer; explicit model_ceiling/think win.",
             },
             project: {
                 type: "string",
                 description:
-                    "Project whose dashboard-depth handoff/recent session memory is historical worker context.",
+                    "Historical project memory; dashboard depth.",
             },
             context_depth: {
                 type: "string",
@@ -739,7 +745,7 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             timeout_ms: {
                 type: "number",
-                description: "Timeout override. Ollama: 27B 120s, 9B 60s, 4B 20s, 2B 15s. oMLX generation/check budget: 300s.",
+                description: "Milliseconds. Explicit local_role: oMLX 600s/Ollama 300s; otherwise legacy timeouts.",
             },
             evidence: {
                 type: "array",
@@ -870,6 +876,7 @@ export interface PrismInferArgs {
     temperature?: number;
     local_backend?: "ollama" | "omlx";
     local_model?: string;
+    local_role?: LocalCodingRole;
     model_ceiling?: "27b" | "9b" | "4b" | "2b";
     /** Deterministic workload hint forwarded by session_task_route. */
     task_complexity?: number;
@@ -962,7 +969,8 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     }
     if (a.messages !== undefined && messagesProblem(a.messages) !== null) return false;
     if (a.local_backend !== undefined && a.local_backend !== "ollama" && a.local_backend !== "omlx") return false;
-    if (a.local_model !== undefined && (a.local_backend !== "omlx" || typeof a.local_model !== "string" || !a.local_model.trim())) return false;
+    if (a.local_role !== undefined && (a.mode !== "code" || (a.local_role !== "coder" && a.local_role !== "reviewer") || (Array.isArray(a.images) && a.images.length > 0))) return false;
+    if (a.local_model !== undefined && (a.mode !== "code" || !isLocalCodingModelId(a.local_model) || (Array.isArray(a.images) && a.images.length > 0))) return false;
     if (a.local_backend === "omlx" && (a.mode !== "code" || (Array.isArray(a.images) && a.images.length > 0))) return false;
     if (a.max_tokens !== undefined && typeof a.max_tokens !== "number") return false;
     if (a.temperature !== undefined && typeof a.temperature !== "number") return false;
@@ -1343,9 +1351,9 @@ const templateOverheadCache = new Map<string, number | null>();
  * unmeasurable overhead must not become a zero.
  */
 export async function probeTemplateOverhead(
-    url: string, model: string, hasSystem: boolean,
+    url: string, model: string, hasSystem: boolean, numCtx?: number,
 ): Promise<number | null> {
-    const key = `${model}::${hasSystem}`;
+    const key = `${url}::${model}::${hasSystem}::${numCtx ?? "default"}`;
     if (templateOverheadCache.has(key)) return templateOverheadCache.get(key) ?? null;
     try {
         // Without a caller system, measure what callOllamaGenerate sends: an
@@ -1359,7 +1367,7 @@ export async function probeTemplateOverhead(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 model, messages, stream: false, think: false,
-                options: { num_predict: 1, temperature: 0 },
+                options: { num_predict: 1, temperature: 0, ...(numCtx === undefined ? {} : { num_ctx: numCtx }) },
             }),
             // Short, because this must never gate a request: a live ollama
             // answers a one-character prompt in milliseconds, and anything
@@ -1481,7 +1489,7 @@ export async function groundAnswer(o: {
                     messages,
                     stream: false,
                     think: withThinking,
-                    options: { num_predict: tokens, temperature: 0 },
+                    options: { num_predict: tokens, temperature: 0, ...(o.numCtx === undefined ? {} : { num_ctx: o.numCtx }) },
                 }),
                 signal: AbortSignal.timeout(timeoutMs),
                 // The conversation must not follow a redirect off this machine.
@@ -1609,6 +1617,7 @@ export async function callOllamaGenerate(
     think?: boolean,
     images?: string[],
     history?: InferHistoryTurn[],
+    contextTokens?: number,
 ): Promise<{ ok: true; text: string; doneReason?: string; promptTokens?: number; completionTokens?: number } | { ok: false; reason: string }> {
     try {
         // The caller's system message, or — when there is none — an empty one
@@ -1628,7 +1637,7 @@ export async function callOllamaGenerate(
             messages,
             stream: false,
             ...(think !== undefined ? { think } : {}),
-            options: { num_predict: maxTokens, temperature },
+            options: { num_predict: maxTokens, temperature, ...(contextTokens === undefined ? {} : { num_ctx: contextTokens }) },
         };
         const res = await fetch(`${url}/api/chat`, {
             method: "POST",
@@ -2067,12 +2076,13 @@ export interface PrismInferResult {
  * Accepts injected dependencies so tests can mock Ollama / synalux.
  */
 export interface InferDeps {
-    codingPreference?: () => Promise<LocalCodingPreference>;
+    codingPreference?: typeof localCodingPreference;
     omlx?: OmlxRuntime;
     freemem: () => number;
     listTags: () => Promise<Set<string> | null>;
     listLoaded: () => Promise<Set<string>>;
-    callLocal: (url: string, model: string, prompt: string, system: string | undefined, maxTokens: number, temperature: number, timeoutMs: number, think?: boolean, images?: string[], history?: InferHistoryTurn[]) => ReturnType<typeof callOllamaGenerate>;
+    callLocal: typeof callOllamaGenerate;
+    selectedOllamaModel?: typeof selectedOllamaCodingModel;
     callCloud: typeof callSynaluxInference;
     ollamaUrl: string;
     /** Injectable verifier for testing. When omitted, verification is skipped (portal-side). */
@@ -2199,19 +2209,32 @@ const _evictionMutex = (() => {
 
 export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<PrismInferResult> {
     const started = Date.now();
-    // Explicit calls never consult preferences. Other modes and images keep
-    // their supported path; resolve before taking the backend's device lease.
+    // Backend and model are independent overrides. Resolve before taking a
+    // device lease; never infer the reviewer role from prose or system text.
     const intercepted = [...(args.messages ?? []).filter(turn => turn.role === "user").map(turn => turn.content), args.prompt].some(text => Boolean(checkInputSafety(text)));
-    if (!intercepted && !args.local_backend && args.mode === "code" && !args.images?.length && deps.codingPreference) {
-        const preference = await deps.codingPreference();
+    if (!intercepted && args.mode === "code" && !args.images?.length && deps.codingPreference && !(args.local_backend && args.local_model)) {
+        let preference: LocalCodingPreference;
+        try { preference = await deps.codingPreference(args.local_role ?? "coder", args.local_backend); }
+        catch {
+            const reason = "local_coding_preference_invalid";
+            if (args.escalation === "report") return { output: "", backend: "refused", model_picked: null,
+                ram_free_mb: Math.round(deps.freemem() / 1024 ** 2), latency_ms: Date.now() - started, used_cloud: false,
+                attempts: [{ tier: "preference", reason }], gate_outcome: { status: "refused", reason, served_anyway: false } };
+            throw new Error(`prism_infer: ${reason}`);
+        }
         // Auto eligibility uses the same plan snapshot as the later gate,
         // before choosing a device lease. Explicit selections remain strict.
         if (preference.effective === "auto") deps = { ...deps, entitlements: deps.entitlements ?? await getEntitlements() };
         const selectionArgs = preference.effective === "auto"
             ? { ...args, model_ceiling: clampCeiling(args.model_ceiling ?? "27b", deps.entitlements!.model_ceiling) } : args;
         const backend = resolveLocalCodingBackend(selectionArgs, preference);
+        const model = resolveLocalCodingModel(preference, backend, args.local_role ?? "coder", args.local_model);
         args = { ...args, local_backend: backend,
-            ...(backend === "omlx" && !args.local_model && preference.model ? { local_model: preference.model } : {}) };
+            ...(model ? { local_model: model } : {}) };
+    }
+    if (args.local_role) {
+        const defaults = CODING_ROLE_DEFAULTS[args.local_backend === "omlx" ? "omlx" : "ollama"];
+        args = { ...args, max_tokens: args.max_tokens ?? defaults.maxTokens, timeout_ms: args.timeout_ms ?? defaults.timeoutMs };
     }
     return withInferenceResourceLease(args.local_backend === "omlx", async () => {
         let releaseDevice: (() => Promise<void>) | undefined;
@@ -2543,6 +2566,21 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     }
     const installed = omlxTarget ? new Set<string>() : await deps.listTags();
     const loaded = omlxTarget ? new Set<string>() : await deps.listLoaded();
+    let selectedOllama: Awaited<ReturnType<typeof selectedOllamaCodingModel>> | undefined;
+    if (!omlxTarget && args.local_model) {
+        if (mode !== "code" || args.images?.length) throw new Error("prism_infer: selected models require text-only code mode");
+        try {
+            if (installed === null) throw new Error("ollama_model_inventory_unavailable");
+            if (!installed.has(args.local_model)) throw new Error("ollama_model_not_installed");
+            selectedOllama = await (deps.selectedOllamaModel ?? selectedOllamaCodingModel)(deps.ollamaUrl, args.local_model,
+                clampCeiling(args.model_ceiling ?? "27b", ent.model_ceiling));
+        } catch (error) {
+            const reason = error instanceof Error && /^ollama_model_[a-z_]+$/.test(error.message) ? error.message : "ollama_model_metadata_unavailable";
+            attempts.push({ tier: args.local_model, reason });
+            if (wantReport) return refusedResult(reason);
+            throw new Error(`prism_infer: ${reason}; selected coding model will not be substituted`);
+        }
+    }
     // oMLX classification and generation share one bounded deadline.
     const omlxDeadline = Date.now() + (args.timeout_ms ?? 300_000);
     // Observe contention without starting Ollama or evicting another job.
@@ -2996,6 +3034,8 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                 ...(history ?? []), { role: "user", content: prompt }];
             return guardedOmlxGenerate(omlxRuntime, omlxTarget, { messages, maxTokens, temperature: args.temperature, timeoutMs: Math.min(timeoutMs, omlxDeadline - Date.now()), think }, deps.freemem);
         }
+        : selectedOllama ? (url, model, prompt, system, maxTokens, temperature, timeoutMs, think, images, history) =>
+            deps.callLocal(url, model, prompt, system, maxTokens, temperature, timeoutMs, think, images, history, selectedOllama!.ctxTokens)
         : deps.callLocal;
 
     // A second read ran the 9b after free RAM and the warm set were read
@@ -3017,21 +3057,21 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     let withheldReason: "answer_ungrounded" | "answer_unverified" | null = null;
 
     if (installed) {
-        const servingTiers = omlxTarget ? [{ tag: omlxTarget.model, weightsGb: 0, minFreeGb: OMLX_MIN_AVAILABLE_BYTES / 1024 ** 3, ctxTokens: omlxTarget.contextTokens }] : MODEL_TIERS;
+        const servingTiers = omlxTarget ? [{ tag: omlxTarget.model, weightsGb: 0, minFreeGb: OMLX_MIN_AVAILABLE_BYTES / 1024 ** 3, ctxTokens: omlxTarget.contextTokens }] : selectedOllama ? [selectedOllama] : MODEL_TIERS;
         // F4 fix: guard ceiling-not-found — Math.max(0,-1) silently targets tier 0 (27b).
         // Instead of defaulting to the largest tier, treat not-found as "no ceiling" (start=0).
         const ceilIdx = effectiveCeiling
             ? MODEL_TIERS.findIndex(t => t.tag.endsWith(`:${effectiveCeiling}`))
             : -1;
-        const ceilStart = omlxTarget ? 0 : ceilIdx >= 0 ? ceilIdx : 0;
+        const ceilStart = omlxTarget || selectedOllama ? 0 : ceilIdx >= 0 ? ceilIdx : 0;
 
         // Auto-evict: if the ceiling tier is installed but not warm and prism's
         // own smaller tier models are warm, unload them to make room.
         // Operates only on prism tier models — never evicts arbitrary Ollama models
         // the caller doesn't own (F1). Uses an in-process mutex to prevent a
         // concurrent request from evicting a model mid-inference (F3).
-        let freeAfterEvict = omlxTarget ? deps.freemem() : genFreeBytes;
-        if (!omlxTarget && genLoaded && genLoaded.size > 0) {
+        let freeAfterEvict = omlxTarget || selectedOllama ? deps.freemem() : genFreeBytes;
+        if (!omlxTarget && !selectedOllama && genLoaded && genLoaded.size > 0) {
             const ceilTier = MODEL_TIERS[ceilIdx >= 0 ? ceilIdx : 0];
             const ceilName = ceilTier ? resolveOllamaName(ceilTier.tag, installed) : null;
             const ceilInstalled = ceilName ? installed.has(ceilName) : false;
@@ -3185,14 +3225,14 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             // or namespaced (`dcostenco/prism-coder:27b`, the form `ollama pull`
             // produces from a HF repo). resolveOllamaName returns the actual
             // name Ollama knows so /api/generate finds the model.
-            const ollamaName = omlxTarget ? omlxTarget.model : resolveOllamaName(tier.tag, installed);
+            const ollamaName = omlxTarget ? omlxTarget.model : selectedOllama ? selectedOllama.tag : resolveOllamaName(tier.tag, installed);
             if (!omlxTarget && !installed.has(ollamaName)) {
                 attempts.push({ tier: tier.tag, reason: "not_pulled" });
                 continue;
             }
             // RAM gate — but skip the check if the tier is already warm in
             // Ollama. Reused models don't reallocate weight buffers.
-            const isWarm = genLoaded.has(ollamaName);
+            const isWarm = !selectedOllama && genLoaded.has(ollamaName);
             if (!isWarm && freeAfterEvict < tier.minFreeGb * (1024 ** 3)) {
                 attempts.push({ tier: tier.tag, reason: "ram_insufficient" });
                 continue;
@@ -3223,7 +3263,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             // unprobeable means fall back to the table, never unlock.
             let liveCtx: number | null = null;
             try {
-                liveCtx = omlxTarget ? omlxTarget.contextTokens : await (deps.probeNumCtx ?? probeNumCtx)(deps.ollamaUrl, ollamaName);
+                liveCtx = omlxTarget ? omlxTarget.contextTokens : selectedOllama ? selectedOllama.ctxTokens : await (deps.probeNumCtx ?? probeNumCtx)(deps.ollamaUrl, ollamaName);
             } catch {
                 liveCtx = null;
             }
@@ -3244,7 +3284,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             let CTX_TEMPLATE_MARGIN = 64;
             if (!omlxTarget && promptBodyEst + MAX_TEMPLATE_OVERHEAD > effectiveCtx) {
                 const probed = await (deps.probeTemplateOverhead ?? probeTemplateOverhead)(
-                    deps.ollamaUrl, ollamaName, effectiveSystem != null,
+                    deps.ollamaUrl, ollamaName, effectiveSystem != null, ...(selectedOllama ? [selectedOllama.ctxTokens] : []),
                 );
                 if (probed != null) CTX_TEMPLATE_MARGIN = probed;
             }
@@ -3561,9 +3601,9 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                             // overhead, the reasoning budget and the one follow-up turn: a
                             // request Ollama truncates would let the check pass an answer
                             // against a conversation it only partly read.
-                            const runtimeCtx = omlxTarget ? omlxTarget.contextTokens : await (deps.probeLoadedContext ?? probeLoadedContext)(deps.ollamaUrl, ollamaName).catch(() => null);
+                            const runtimeCtx = omlxTarget ? omlxTarget.contextTokens : selectedOllama ? selectedOllama.ctxTokens : await (deps.probeLoadedContext ?? probeLoadedContext)(deps.ollamaUrl, ollamaName).catch(() => null);
                             const checkCtx = runtimeCtx ?? effectiveCtx;
-                            const overhead = omlxTarget ? MAX_TEMPLATE_OVERHEAD : (await Promise.resolve((deps.probeTemplateOverhead ?? probeTemplateOverhead)(deps.ollamaUrl, ollamaName, true)).catch(() => null)) ?? MAX_TEMPLATE_OVERHEAD;
+                            const overhead = omlxTarget ? MAX_TEMPLATE_OVERHEAD : (await Promise.resolve((deps.probeTemplateOverhead ?? probeTemplateOverhead)(deps.ollamaUrl, ollamaName, true, ...(selectedOllama ? [selectedOllama.ctxTokens] : []))).catch(() => null)) ?? MAX_TEMPLATE_OVERHEAD;
                             const need = answerGroundingBytes(policy, args.messages ?? [], args.prompt, output)
                                 + estimateImageTokens(resolvedImages?.length ?? 0) + overhead
                                 + (ANSWER_GROUNDING_THINK ? ANSWER_GROUNDING_THINK_TOKENS : ANSWER_GROUNDING_OUTPUT_TOKENS)

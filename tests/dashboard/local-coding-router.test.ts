@@ -18,6 +18,7 @@ async function fixture(overrides = {}) {
             save: async value => { saved = parseLocalCodingSettings(value); },
             preference: async () => ({ saved: saved.backend, effective: saved.backend, envOverride: null, model: saved.model, configured: false }),
             inspect: async () => { throw new OmlxError("omlx_auth_unavailable"); },
+            omlxModels: async () => [], ollamaModels: async () => [], availableMemory: () => 20 * 1024 ** 3,
             ...overrides,
         });
         if (!handled) { res.writeHead(404); res.end(); }
@@ -31,6 +32,14 @@ async function fixture(overrides = {}) {
 }
 
 describe("dashboard local coding actions", () => {
+    it("discovers both backends and persists the same model for both roles", async () => {
+        const models = { omlx: { coder: "new/build", reviewer: "new/build" }, ollama: { coder: "future:tag", reviewer: "future:tag" } };
+        const f = await fixture({ ollamaModels: async () => [{ id: "future:tag", loaded: false, weightBytes: 12345678 }] });
+        expect((await f.post("/api/local-coding/preferences", { backend: "auto", source: "existing", models })).status).toBe(200);
+        expect(await (await fetch(f.base + "/api/local-coding")).json()).toMatchObject({ settings: { models },
+            discovered: { ollama: [{ id: "future:tag", weightBytes: 12345678 }] }, availableMemoryBytes: 20 * 1024 ** 3 });
+        expect(f.install).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled();
+    });
     it("keeps recovery controls available when preference inspection fails", async () => {
         const f = await fixture({ preference: async () => { throw new Error("broken config"); } });
         const result = await fetch(f.base + "/api/local-coding");

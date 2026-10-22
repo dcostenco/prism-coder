@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { runInfer, isPrismInferArgs, _resetLayer1HistoryCacheForTest, type InferDeps, type PrismInferArgs } from "../../src/tools/prismInferHandler.js";
+import { PRISM_INFER_TOOL, runInfer, isPrismInferArgs, _resetLayer1HistoryCacheForTest, type InferDeps, type PrismInferArgs } from "../../src/tools/prismInferHandler.js";
 import { FREE_ENTITLEMENTS, type PrismEntitlements } from "../../src/utils/entitlements.js";
 import { parseAnswerCheckPolicy, parseSecondReadPolicy } from "../../src/utils/inferencePolicy.js";
 import { callLayer1 } from "../../src/utils/layer1.js";
@@ -68,10 +68,71 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
         expect(f.deps.listTags).not.toHaveBeenCalled();
     });
-    it("does not consult preferences when a task explicitly names its backend", async () => {
+    it("does not consult preferences when a task explicitly names backend and model", async () => {
         const f = fixture(); f.deps.codingPreference = vi.fn(async () => { throw new Error("must not read preferences"); });
-        expect(await runInfer(ask(), f.deps)).toMatchObject({ backend: "omlx" });
+        expect(await runInfer(ask({ local_model: MODEL }), f.deps)).toMatchObject({ backend: "omlx" });
         expect(f.deps.codingPreference).not.toHaveBeenCalled();
+    });
+    it.each(["coder", "reviewer"] as const)("uses a shared discovered oMLX model for explicit backend and %s role", async local_role => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "ollama", effective: "ollama", configured: false, envOverride: null,
+            models: { omlx: { coder: MODEL, reviewer: MODEL } } });
+        expect(await runInfer(ask({ local_role }), f.deps)).toMatchObject({ backend: "omlx", model_picked: MODEL });
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+    });
+    it.each(["coder", "reviewer"] as const)("uses the selected Ollama %s model without a named-tier fallback", async local_role => {
+        const f = fixture(); const id = "org/next-build:tag";
+        f.deps.listTags = async () => new Set([id, "prism-coder:4b"]);
+        f.deps.codingPreference = async () => ({ saved: "ollama", effective: "ollama", configured: false, envOverride: null,
+            models: { ollama: { coder: id, reviewer: id } } });
+        f.deps.selectedOllamaModel = vi.fn(async () => ({ tag: id, ctxTokens: 4096, weightsGb: 10, minFreeGb: 15 }));
+        expect(await runInfer(ask({ local_backend: "ollama", local_role }), f.deps)).toMatchObject({ backend: "ollama-" + id, model_picked: id });
+        expect(f.deps.selectedOllamaModel).toHaveBeenCalledWith(f.deps.ollamaUrl, id, "27b");
+        const call = vi.mocked(f.deps.callLocal).mock.calls[0];
+        expect(call[1]).toBe(id); expect(call[10]).toBe(4096);
+        expect(call[4]).toBe(1024); expect(call[6]).toBe(300_000);
+        expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it('assigns oMLX role budgets after backend selection while preserving explicit budgets', async () => {
+        const f = fixture();
+        await runInfer(ask({ local_role: 'coder', local_model: MODEL }), f.deps);
+        expect(vi.mocked(f.omlx.generate).mock.calls[0][1].maxTokens).toBe(4096);
+        const explicit = fixture();
+        await runInfer(ask({ local_role: 'reviewer', local_model: MODEL, max_tokens: 512, timeout_ms: 10000 }), explicit.deps);
+        expect(vi.mocked(explicit.omlx.generate).mock.calls[0][1].maxTokens).toBe(512);
+        expect(vi.mocked(explicit.omlx.generate).mock.calls[0][1].timeoutMs).toBeLessThanOrEqual(10000);
+    });
+    it('documents explicit-role budgets and preserves legacy role-less budgets', async () => {
+        const properties = PRISM_INFER_TOOL.inputSchema.properties as Record<string, any>;
+        expect(properties.timeout_ms.description).toContain('oMLX 600s');
+        expect(properties.max_tokens.description).toContain('oMLX defaults 4096');
+        const f = fixture(); await runInfer(ask({ local_model: MODEL }), f.deps);
+        expect(vi.mocked(f.omlx.generate).mock.calls[0][1].maxTokens).toBe(1024);
+        expect(vi.mocked(f.omlx.generate).mock.calls[0][1].timeoutMs).toBeLessThanOrEqual(300_000);
+    });
+    it.each(["ollama_model_metadata_incomplete", "ollama_model_ceiling", "ollama_model_memory_unknown"])("refuses %s instead of substituting another model", async reason => {
+        const f = fixture(); const id = "new:tag";
+        f.deps.listTags = async () => new Set([id, "prism-coder:4b"]);
+        f.deps.selectedOllamaModel = async () => { throw new Error(reason); };
+        expect(await runInfer(ask({ local_backend: "ollama", local_model: id }), f.deps)).toMatchObject({ backend: "refused", gate_outcome: { reason } });
+        expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it.each([undefined, '9b'] as const)('treats complexity as a hint while preserving explicit ceiling %s', async model_ceiling => {
+        const f = fixture(); const id = 'future:tag';
+        f.deps.listTags = async () => new Set([id, 'prism-coder:4b']);
+        f.deps.selectedOllamaModel = vi.fn(async () => ({ tag: id, ctxTokens: 4096, weightsGb: 10, minFreeGb: 15 }));
+        await runInfer(ask({ local_backend: 'ollama', local_model: id, task_complexity: 2, model_ceiling }), f.deps);
+        expect(f.deps.selectedOllamaModel).toHaveBeenCalledWith(f.deps.ollamaUrl, id, model_ceiling ?? '27b');
+    });
+    it('returns a structured refusal for unreadable preferences without substituting a backend default', async () => {
+        const f = fixture(); f.deps.codingPreference = async () => { throw new Error('synthetic-secret'); };
+        expect(await runInfer(ask({ local_backend: 'ollama' }), f.deps)).toMatchObject({ backend: 'refused', output: '', gate_outcome: { reason: 'local_coding_preference_invalid' } });
+        expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it('does not call an unreachable inventory proof that a model is missing', async () => {
+        const f = fixture(); f.deps.listTags = async () => null;
+        expect(await runInfer(ask({ local_backend: 'ollama', local_model: 'future:tag' }), f.deps)).toMatchObject({ backend: 'refused', gate_outcome: { reason: 'ollama_model_inventory_unavailable' } });
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
     });
     it("detects first, classifies with the oMLX classifier without touching Ollama, and reports actual metadata", async () => {
         const f = fixture(); const result = await runInfer(ask({ local_model: MODEL }), f.deps);

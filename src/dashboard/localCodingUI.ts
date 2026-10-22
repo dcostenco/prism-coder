@@ -3,7 +3,7 @@ import { OMLX_SETUP_MODELS } from "../utils/omlxSetup.js";
 export function localCodingPanelHTML(): string {
     return `<div class="s-tab-panel" id="spanel-local">
       <div class="setting-section">Local coding</div>
-      <p class="setting-desc">Choose where coding drafts run. An explicit task choice overrides this preference. Tool routing and images keep their supported backend.</p>
+      <p class="setting-desc">Choose where coding drafts and local reviews run. Models are discovered from your servers. The same model can serve both roles. Explicit task choices override these preferences. Tool routing and images keep their supported backend.</p>
       <form id="local-coding-form" onsubmit="saveLocalCoding(event)" style="display:grid;gap:14px;margin-top:18px">
         <label class="setting-label" for="local-coding-backend">Preferred coding backend</label>
         <select class="setting-select" id="local-coding-backend" style="width:100%;max-width:100%" disabled>
@@ -13,9 +13,11 @@ export function localCodingPanelHTML(): string {
         <select class="setting-select" id="local-coding-source" style="width:100%;max-width:100%" disabled>
           <option value="existing">Existing oMLX server</option><option value="managed">Prism-managed installation</option>
         </select>
-        <label class="setting-label" for="local-coding-model">oMLX coding model (leave empty for the server default)</label>
-        <input class="setting-select" id="local-coding-model" list="local-coding-models" maxlength="256" placeholder="Exact model ID advertised by oMLX" style="width:100%;max-width:100%;box-sizing:border-box" disabled>
-        <datalist id="local-coding-models"></datalist>
+        ${["omlx", "ollama"].map(backend => `<fieldset style="min-width:0;border:1px solid var(--border-glass);border-radius:8px;padding:12px;display:grid;gap:10px"><legend class="setting-label">${backend === "omlx" ? "oMLX" : "Ollama"} models</legend>
+          ${["coder", "reviewer"].map(role => `<label class="setting-label" for="local-coding-${backend}-${role}">${role === "coder" ? "Coder" : "Reviewer"}</label><select class="setting-select" id="local-coding-${backend}-${role}" style="width:100%;max-width:100%" onchange="renderLocalCodingMemory()" disabled></select><p class="setting-desc" id="local-coding-${backend}-${role}-memory" style="margin:0;overflow-wrap:anywhere"></p>`).join("")}
+          <p class="setting-desc" id="local-coding-${backend}-discovery" style="margin:0;overflow-wrap:anywhere" role="status"></p>
+        </fieldset>`).join("")}
+        <p class="setting-desc" id="local-coding-memory" style="margin:0"></p>
         <div class="skill-actions" style="flex-wrap:wrap"><button class="skill-save-btn" id="local-coding-save" type="submit" disabled>Save coding preference</button><button class="skill-upload-btn" type="button" onclick="loadLocalCoding(false)">Check saved connection</button></div>
       </form>
       <p id="local-coding-saved" class="setting-desc" aria-live="polite"></p>
@@ -25,7 +27,7 @@ export function localCodingPanelHTML(): string {
       <p class="setting-desc">Use your existing server to avoid duplicate downloads. New setup installs the pinned Prism-compatible server in an isolated Python environment. Downloads are opt-in; npm installation never starts them.</p>
       <p class="setting-desc">Apple Silicon · macOS 15+ · Python 3.11–3.13 · 32 GiB unified memory · 40 GiB free disk. The standard install uses generic kernels; full Xcode builds can be faster.</p>
       <ul class="setting-desc" style="line-height:1.8;padding-left:20px">${OMLX_SETUP_MODELS.map(model => `<li><a href="https://huggingface.co/${model.repo}" target="_blank" rel="noopener noreferrer">${model.label}</a> — about ${model.approximateGB} GB</li>`).join("")}</ul>
-      <p class="setting-desc">Review the model licenses before downloading. Managed setup uses port 8001, keeps a 10 GB cache limit, and leaves existing oMLX and Ollama processes running. Prism's oMLX path requires a 27B model ceiling from the task and plan, plus available memory.</p>
+      <p class="setting-desc">This optional starter pack does not restrict your model choices above. Review the model licenses before downloading. Managed setup uses port 8001, keeps a 10 GB cache limit, and leaves existing oMLX and Ollama processes running. Prism's oMLX path requires a 27B model ceiling from the task and plan, plus available memory.</p>
       <div id="local-coding-setup-state" role="status" class="setting-desc" style="margin:14px 0"></div>
       <progress id="local-coding-progress" aria-label="oMLX setup progress" style="display:none;width:100%"></progress>
       <div class="skill-actions" style="flex-wrap:wrap"><button class="skill-save-btn" type="button" id="local-coding-install" onclick="localCodingAction('install')" disabled>Install oMLX + recommended models</button><button class="skill-upload-btn" type="button" id="local-coding-start" onclick="localCodingAction('start')" disabled>Start managed oMLX</button></div>
@@ -43,6 +45,22 @@ var localCodingPoll;
 var localCodingReadSequence = 0;
 var localCodingStartingUntil = 0;
 var localCodingActionError = '';
+var localCodingModels = {omlx:[],ollama:[]};
+var localCodingDiscoveryErrors = {};
+function localCodingGiB(bytes) { return (bytes / Math.pow(1024, 3)).toFixed(1) + ' GiB'; }
+function renderLocalCodingMemory() {
+    ['omlx','ollama'].forEach(function(backend) {
+        ['coder','reviewer'].forEach(function(role) {
+            var id = document.getElementById('local-coding-' + backend + '-' + role).value;
+            var model = localCodingModels[backend].filter(function(item) { return item.id === id; })[0];
+            var text = !id ? 'Uses the backend default. No role-specific model is saved.' : !model ? (localCodingDiscoveryErrors[backend] ? 'Inventory unavailable; model availability and memory are unknown.' : 'Saved model is unavailable. It will be refused rather than replaced.') :
+                (model.weightBytes ? 'Reported weights: ' + localCodingGiB(model.weightBytes) : 'Weight size unknown') +
+                (model.loadedBytes ? ' · Loaded memory: ' + localCodingGiB(model.loadedBytes) : model.loaded === true ? ' · Loaded; memory unknown' : model.loaded === false ? ' · Not loaded' : ' · Load status unknown') +
+                (model.weightBytes ? ' · Cold-load RAM estimate: at least ' + localCodingGiB(Math.max(model.weightBytes * 1.5, model.weightBytes + 2 * Math.pow(1024,3))) : ' · RAM requirements unknown');
+            document.getElementById('local-coding-' + backend + '-' + role + '-memory').textContent = text;
+        });
+    });
+}
 function localCodingRequest(path, body) {
     return fetch('/api/local-coding' + path, body === undefined ? {cache:'no-store'} : {
         method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
@@ -60,10 +78,8 @@ function loadLocalCoding(reset) {
         if (reset || !localCodingLoaded) {
             document.getElementById('local-coding-backend').value = settings.backend;
             document.getElementById('local-coding-source').value = settings.source;
-            document.getElementById('local-coding-model').value = settings.model || '';
-            localCodingLoaded = true;
         }
-        ['backend','source','model','save'].forEach(function(name) { document.getElementById('local-coding-' + name).disabled = !data.canManage || localCodingBusy; });
+        ['backend','source','save'].forEach(function(name) { document.getElementById('local-coding-' + name).disabled = !data.canManage || localCodingBusy; });
         document.getElementById('local-coding-backend').disabled = data.preference.envOverride !== null || !data.canManage || localCodingBusy;
         var override = data.preference.envOverride;
         document.getElementById('local-coding-saved').textContent = 'Saved: ' + settings.backend + ' · ' + settings.source + (override ? ' · Environment override: ' + override : ' · Applies to new tasks without restarting');
@@ -72,8 +88,30 @@ function loadLocalCoding(reset) {
         document.getElementById('local-coding-connection').textContent = !connection.connected ? 'oMLX not connected. Start or configure the selected server.' :
             'oMLX connected · ' + (connection.model || 'choose a coding model') + ' · ' + (connection.control ? 'Prism control available' : 'Prism control unavailable') + ' · ' + (classifier ? 'classifier advertised' : 'required classifier not advertised');
         if (connection.error) document.getElementById('local-coding-connection').textContent += ' · ' + connection.error;
-        var list = document.getElementById('local-coding-models'); list.textContent = '';
-        connection.models.forEach(function(id) { var option = document.createElement('option'); option.value = id; list.appendChild(option); });
+        localCodingModels = data.discovered || {omlx:[],ollama:[]};
+        localCodingDiscoveryErrors = data.discoveryErrors || {};
+        // Older compatible servers may advertise IDs without memory metadata.
+        if (!localCodingModels.omlx.length && connection.connected) localCodingModels.omlx = connection.models.map(function(id) { return {id:id}; });
+        ['omlx','ollama'].forEach(function(backend) {
+            ['coder','reviewer'].forEach(function(role) {
+                var select = document.getElementById('local-coding-' + backend + '-' + role);
+                var saved = settings.models && settings.models[backend] && settings.models[backend][role];
+                if (!saved && backend === 'omlx' && role === 'coder') saved = settings.model;
+                var value = reset || !localCodingLoaded ? saved || '' : select.value;
+                select.textContent = '';
+                var automatic = document.createElement('option'); automatic.value = ''; automatic.textContent = 'Use backend default'; select.appendChild(automatic);
+                localCodingModels[backend].forEach(function(model) { var option = document.createElement('option'); option.value = model.id; option.textContent = model.id; select.appendChild(option); });
+                if (value && !localCodingModels[backend].some(function(model) { return model.id === value; })) {
+                    var unavailable = document.createElement('option'); unavailable.value = value; unavailable.textContent = (localCodingDiscoveryErrors[backend] ? 'Availability unknown: ' : 'Unavailable: ') + value; select.appendChild(unavailable);
+                }
+                select.value = value;
+                select.disabled = !data.canManage || localCodingBusy;
+            });
+            document.getElementById('local-coding-' + backend + '-discovery').textContent = data.discoveryErrors && data.discoveryErrors[backend] || localCodingModels[backend].length + ' models detected. Refresh checks inventory without loading models.';
+        });
+        localCodingLoaded = true;
+        document.getElementById('local-coding-memory').textContent = 'Available RAM: ' + (data.availableMemoryBytes ? localCodingGiB(data.availableMemoryBytes) : 'unknown') + '. RAM estimates exclude workload-dependent peaks and do not guarantee a fit. Runtime admission checks still apply.';
+        renderLocalCodingMemory();
         var admin = document.getElementById('local-coding-admin');
         admin.style.display = connection.adminUrl ? 'inline' : 'none';
         if (connection.adminUrl) admin.href = connection.adminUrl;
@@ -98,9 +136,15 @@ function loadLocalCoding(reset) {
 }
 function saveLocalCoding(event) {
     event.preventDefault();
-    var model = document.getElementById('local-coding-model').value.trim();
     var settings = {backend:document.getElementById('local-coding-backend').value,source:document.getElementById('local-coding-source').value};
-    if (model) settings.model = model;
+    settings.models = {};
+    ['omlx','ollama'].forEach(function(backend) {
+        settings.models[backend] = {};
+        ['coder','reviewer'].forEach(function(role) {
+            var model = document.getElementById('local-coding-' + backend + '-' + role).value;
+            if (model) settings.models[backend][role] = model;
+        });
+    });
     localCodingBusy = true;
     localCodingActionError = '';
     localCodingReadSequence++;
