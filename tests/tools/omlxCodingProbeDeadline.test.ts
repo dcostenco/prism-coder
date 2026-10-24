@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
 const fixtureCredential = randomUUID();
 const { readFileMock } = vi.hoisted(() => ({ readFileMock: vi.fn() }));
 vi.mock("node:fs/promises", async original => ({
@@ -30,7 +31,7 @@ describe("local model probe deadlines", () => {
         const { inspectOmlxCodingModels } = await import("../../src/utils/omlxProvider.js");
         readFileMock.mockImplementation(async path => {
             await new Promise(resolve => setTimeout(resolve, 30));
-            return String(path).endsWith("/settings.json")
+            return basename(String(path)) === "settings.json"
                 ? JSON.stringify({ server: { host: "127.0.0.1", port: 8000 }, auth: { api_key: fixtureCredential } }) : "{}";
         });
         const fetcher = vi.fn(async () => new Response(JSON.stringify({ models: [] })));
