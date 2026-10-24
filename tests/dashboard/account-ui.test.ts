@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { JSDOM, VirtualConsole } from "jsdom";
-import { renderDashboardHTML, renderDashboardLocalOpenHTML } from "../../src/dashboard/ui.js";
+import { renderDashboardBillingReturnHTML, renderDashboardHTML, renderDashboardLocalOpenHTML } from "../../src/dashboard/ui.js";
 
 const pages: JSDOM[] = [];
 
@@ -41,10 +41,10 @@ function fixture(plan = "free", overrides: Partial<AccountFixture> = {}): Accoun
   };
 }
 
-async function openDashboard(account: AccountFixture | { error: string }, accountStatus = 200) {
+async function openDashboard(account: AccountFixture | { error: string }, accountStatus = 200, query = '') {
   const page = new JSDOM(renderDashboardHTML("test"), {
     runScripts: "outside-only",
-    url: "http://127.0.0.1:34119/",
+    url: `http://127.0.0.1:34119/${query}`,
     virtualConsole: new VirtualConsole(),
   });
   pages.push(page);
@@ -81,6 +81,15 @@ async function openDashboard(account: AccountFixture | { error: string }, accoun
 }
 
 describe("dashboard Account & Subscription UX", () => {
+  it("renders a token-free same-origin billing return bridge", () => {
+    const html = renderDashboardBillingReturnHTML();
+    expect(html).toContain("window.location.replace('/?settings=account')");
+    expect(html).toContain('href="/?settings=account"');
+    expect(html).not.toContain("token=");
+    expect(html).not.toContain("stripe");
+    expect(html).not.toContain("script src=");
+  });
+
   it("explains local browser access without presenting account redemption as a Free requirement", () => {
     const html = renderDashboardLocalOpenHTML();
     expect(html).toContain("Local dashboard access");
@@ -98,6 +107,13 @@ describe("dashboard Account & Subscription UX", () => {
     expect(["settings", "skills", "providers", "observability"].every(tab => Boolean(doc.getElementById(`stab-${tab}`)))).toBe(true);
     expect(["project", "search", "factory", "vm", "marketplace", "compliance"].every(tab => Boolean(doc.getElementById(`mtab-${tab}`)))).toBe(true);
     expect(page.window.getComputedStyle(doc.querySelector(".main-tabs") as Element).overflowX).toBe("auto");
+  });
+
+  it("opens Account settings and refreshes identity when returned from billing", async () => {
+    const { doc } = await openDashboard(fixture("standard"), 200, "?foo=keep&settings=account");
+    expect(doc.getElementById("settingsModal")?.classList.contains("active")).toBe(true);
+    expect(doc.getElementById("stab-account")?.classList.contains("active")).toBe(true);
+    expect(doc.getElementById("accountPanel")?.textContent).toContain("Dmitri Costenco");
   });
 
   it("shows an active signed-out Free state with optional account linking and plan discovery", async () => {

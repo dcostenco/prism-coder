@@ -27,7 +27,7 @@ import { createServer, getAllPossibleTools } from "../server.js";
 import { activeStorageBackend } from "../storage/index.js";
 import { readDashboardLedger } from "./ledgerReader.js";
 import { PRISM_USER_ID, SERVER_CONFIG } from "../config.js";
-import { renderDashboardHTML, renderDashboardLocalOpenHTML } from "./ui.js";
+import { renderDashboardBillingReturnHTML, renderDashboardHTML, renderDashboardLocalOpenHTML } from "./ui.js";
 import { registerDashboardAccessUrl } from "./dashboardAccess.js";
 import {
   createDashboardProbeResponse,
@@ -273,6 +273,21 @@ return false;}
 
     // ─── v5.1: Auth login endpoint (always accessible) ───
     const reqUrl = new URL(req.url || "/", `http://${req.headers.host}`);
+
+    if (req.method === "GET" && reqUrl.pathname === "/billing-return") {
+      if (!isTrustedRequest(
+        { host: req.headers.host, origin: req.headers.origin },
+        { configuredOrigin: process.env.PRISM_DASHBOARD_ORIGIN },
+      )) {
+        res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+        return res.end("Forbidden: untrusted Host or Origin");
+      }
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+      });
+      return res.end(renderDashboardBillingReturnHTML());
+    }
 
     // Authenticate the recorded listener before the CLI opens a browser. The
     // request and response use domain-separated HMACs over a fresh nonce, so a

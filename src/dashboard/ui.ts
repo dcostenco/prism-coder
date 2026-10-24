@@ -51,6 +51,14 @@ export function renderDashboardLocalOpenHTML(): string {
 </html>`;
 }
 
+export function renderDashboardBillingReturnHTML(): string {
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Returning to Prism</title></head>
+<body><main><p>Returning to your Prism dashboard…</p><p><a href="/?settings=account">Continue to Prism account settings</a></p></main>
+<script>window.location.replace('/?settings=account');</script>
+</body></html>`;
+}
+
 export function renderDashboardHTML(version: string): string {
     return `<!DOCTYPE html>
 <html lang="en">
@@ -2286,6 +2294,7 @@ function signOutAccount() {
                 case 4:
                     // Load identity chip once settings are available
                     loadIdentityChip();
+                    openAccountSettingsFromReturn();
                     return [2 /*return*/];
             }
         });
@@ -3658,6 +3667,11 @@ function openSettings() {
     document.getElementById('settingsModal').classList.add('active');
     loadIdentityChip();
     loadSettings();
+}
+function openAccountSettingsFromReturn() {
+    if (new URLSearchParams(window.location.search).get('settings') !== 'account') return;
+    openSettings();
+    switchSettingsTab('account');
 }
 function closeSettings() {
     document.getElementById('settingsModal').classList.remove('active');

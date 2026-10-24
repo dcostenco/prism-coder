@@ -291,7 +291,7 @@ export async function connectDashboardAccount(code: unknown, overrides: Partial<
   });
 }
 
-export async function openDashboardBilling(overrides: Partial<AccountRouterDeps> = {}): Promise<{ url: string; action: string }> {
+export async function openDashboardBilling(overrides: Partial<AccountRouterDeps> = {}, dashboardOriginOverride?: string): Promise<{ url: string; action: string }> {
   const deps = { ...defaultDeps, ...overrides };
   const origin = await portalOrigin(deps);
   if (await applyStoredSignOut(deps) || !deps.usablePortalKey()) {
@@ -299,9 +299,11 @@ export async function openDashboardBilling(overrides: Partial<AccountRouterDeps>
   }
   let jwt = await deps.getJwt();
   if (!jwt || isSynaluxSignedOut()) throw new Error("Synalux sign-in expired. Sign in again.");
+  const headers: Record<string, string> = { Authorization: `Bearer ${jwt}`, "X-Prism-Client": "prism-dashboard" };
+  if (dashboardOriginOverride !== undefined) headers["X-Prism-Dashboard-Origin"] = dashboardOriginOverride;
   const send = (token: string) => deps.fetcher(`${origin}/api/v1/prism/account`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "X-Prism-Client": "prism-dashboard" },
+    headers: { ...headers, Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(10_000),
     redirect: "error",
   });
@@ -350,6 +352,7 @@ export async function handleAccountRoutes(
   url: URL,
   req: http.IncomingMessage,
   res: http.ServerResponse,
+  overrides: Partial<AccountRouterDeps> = {},
 ): Promise<boolean> {
   if (url.pathname === "/api/account" && req.method === "GET") {
     try {
@@ -370,7 +373,7 @@ export async function handleAccountRoutes(
   }
   if (url.pathname === "/api/account/billing" && req.method === "POST") {
     try {
-      json(res, 200, await openDashboardBilling());
+      json(res, 200, await openDashboardBilling(overrides, url.origin));
     } catch (error) {
       json(res, 502, { error: error instanceof Error ? error.message : "Billing unavailable" });
     }

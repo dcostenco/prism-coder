@@ -102,6 +102,10 @@ features.
 
 To check your plan, open **⚙ Account & Settings → Account** in the dashboard.
 Free users see **Start 14-day trial**; paid users see **Manage subscription**.
+When you manage an existing subscription, Stripe returns to Account settings
+in the same local Prism dashboard. The local dashboard address is passed to
+Synalux; your dashboard access token stays on your machine. This return flow
+requires the matching Synalux billing callback support.
 During a trial, the same panel shows the paid tier and exact end date. No card
 is required to start. Add payment details before the end date to continue; if
 you do not, the subscription cancels and local Prism Free remains available.
