@@ -108,6 +108,16 @@ const workflowSteps = stepBlocks
     .filter((v, i, a) => a.indexOf(v) === i);
 
 describe("local-ci.sh runs what CI runs", () => {
+    it("keeps the pinned browser runtime on a supported Linux image without reducing the matrix", () => {
+        const matrix = workflow.match(/matrix:\s*\n([\s\S]*?)\n\s*fail-fast:/)?.[1];
+        expect(matrix).toBeDefined();
+        expect(matrix).toMatch(/os:\s*\[ubuntu-24\.04,\s*macos-latest\]/);
+        expect(matrix).toMatch(/node-version:\s*\[20\.x,\s*22\.x\]/);
+        expect(workflow).toContain("playwright==1.58.0");
+        expect(workflow).toContain("python -m playwright install --with-deps chromium");
+        expect(workflow).toContain("npm audit --audit-level=high");
+    });
+
     it("the workflow has steps to compare, so this suite is not vacuous", () => {
         expect(workflowSteps.length).toBeGreaterThan(8);
     });
