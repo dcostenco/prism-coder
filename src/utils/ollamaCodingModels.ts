@@ -13,19 +13,25 @@ export interface LocalCodingModelObservation {
     loaded: boolean;
     contextTokens?: number;
 }
+export interface LocalModelProbeOptions { deadlineMs?: number; signal?: AbortSignal }
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 
 /** Read-only metadata probes; never pulls or loads a model. */
-async function metadata(url: string, fetchImpl: typeof fetch, model?: string): Promise<Record<string, any>> {
+async function metadata(url: string, fetchImpl: typeof fetch, model?: string, options: LocalModelProbeOptions = {}): Promise<Record<string, any>> {
+    const check = () => { if (options.signal?.aborted || (options.deadlineMs !== undefined && Date.now() >= options.deadlineMs)) throw new Error("ollama_model_probe_deadline"); };
+    check();
+    const signal = AbortSignal.any([AbortSignal.timeout(3000), ...(options.signal ? [options.signal] : []),
+        ...(options.deadlineMs === undefined ? [] : [AbortSignal.timeout(Math.max(1, Math.ceil(options.deadlineMs - Date.now())))])]);
     const response = await fetchImpl(url, { ...(model === undefined ? {} : {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }),
-    }), redirect: "error", signal: AbortSignal.timeout(3000) });
+    }), redirect: "error", signal });
+    check();
     if (!response.ok || !response.body) throw new Error("ollama_model_metadata_unavailable");
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = []; let size = 0;
     try {
         for (;;) {
-            const part = await reader.read();
+            check(); const part = await reader.read(); check();
             if (part.done) break;
             size += part.value.byteLength;
             if (size > MAX_METADATA_BYTES) throw new Error("ollama_model_metadata_invalid");
@@ -37,8 +43,8 @@ async function metadata(url: string, fetchImpl: typeof fetch, model?: string): P
     return data as Record<string, any>;
 }
 
-export async function inspectOllamaCodingModels(url = PRISM_LOCAL_LLM_URL, fetchImpl: typeof fetch = fetch): Promise<LocalCodingModelObservation[]> {
-    const [tags, ps] = await Promise.all([metadata(`${url}/api/tags`, fetchImpl), metadata(`${url}/api/ps`, fetchImpl)]);
+export async function inspectOllamaCodingModels(url = PRISM_LOCAL_LLM_URL, fetchImpl: typeof fetch = fetch, options: LocalModelProbeOptions = {}): Promise<LocalCodingModelObservation[]> {
+    const [tags, ps] = await Promise.all([metadata(`${url}/api/tags`, fetchImpl, undefined, options), metadata(`${url}/api/ps`, fetchImpl, undefined, options)]);
     if (!Array.isArray(tags.models) || tags.models.length > MAX_MODELS || !Array.isArray(ps.models) || ps.models.length > MAX_MODELS) throw new Error("ollama_model_inventory_invalid");
     const ids = new Set<string>();
     return tags.models.map((model: any) => {
@@ -55,12 +61,12 @@ export async function inspectOllamaCodingModels(url = PRISM_LOCAL_LLM_URL, fetch
 /** A selected model gets one exact attempt, not a walk through named tiers.
  * Sizes plus overhead are an estimate, not a guarantee about peak RAM. */
 export async function selectedOllamaCodingModel(url: string, id: string, ceiling: string,
-    fetchImpl: typeof fetch = fetch): Promise<ModelChoice> {
+    fetchImpl: typeof fetch = fetch, options: LocalModelProbeOptions = {}): Promise<ModelChoice> {
     if (!isLocalCodingModelId(id)) throw new Error("ollama_model_id_invalid");
-    const models = await inspectOllamaCodingModels(url, fetchImpl);
+    const models = await inspectOllamaCodingModels(url, fetchImpl, options);
     const selected = models.find(model => model.id === id);
     if (!selected) throw new Error("ollama_model_not_installed");
-    const show = await metadata(`${url}/api/show`, fetchImpl, id);
+    const show = await metadata(`${url}/api/show`, fetchImpl, id, options);
     const info = show.model_info;
     const params = info?.["general.parameter_count"];
     const architecture = info?.["general.architecture"];

@@ -67,6 +67,7 @@ import { getSetting } from "../storage/configStorage.js";
 import { localCodingPreference, resolveLocalCodingBackend, type LocalCodingPreference } from "../utils/localCodingPreference.js";
 import { isLocalCodingModelId, resolveLocalCodingModel, type LocalCodingRole } from "../utils/localCodingSettings.js";
 import { selectedOllamaCodingModel } from "../utils/ollamaCodingModels.js";
+import { LOCAL_CODING_SELECTION_MS, selectUnassignedCodingModel } from "../utils/localCodingModelSelection.js";
 import {
     DEFAULT_PRISM_ROUTE_TOOLS,
     applyLocalRouteContract,
@@ -113,6 +114,8 @@ const CODING_ROLE_DEFAULTS = {
     omlx: { maxTokens: 4096, timeoutMs: 600_000 },
     ollama: { maxTokens: 1024, timeoutMs: 300_000 },
 } as const;
+const validOmlxTimeout = (value: number | undefined) => value === undefined
+    || (Number.isInteger(value) && value > 0 && value <= 900_000);
 
 // ─── Tool Definition ────────────────────────────────────────────
 
@@ -2077,6 +2080,7 @@ export interface PrismInferResult {
  */
 export interface InferDeps {
     codingPreference?: typeof localCodingPreference;
+    codingModel?: typeof selectUnassignedCodingModel;
     omlx?: OmlxRuntime;
     freemem: () => number;
     listTags: () => Promise<Set<string> | null>;
@@ -2228,7 +2232,39 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         const selectionArgs = preference.effective === "auto"
             ? { ...args, model_ceiling: clampCeiling(args.model_ceiling ?? "27b", deps.entitlements!.model_ceiling) } : args;
         const backend = resolveLocalCodingBackend(selectionArgs, preference);
-        const model = resolveLocalCodingModel(preference, backend, args.local_role ?? "coder", args.local_model);
+        let model = resolveLocalCodingModel(preference, backend, args.local_role ?? "coder", args.local_model);
+        const codingModel = deps.codingModel;
+        if (!model && codingModel) {
+            deps = { ...deps, entitlements: deps.entitlements ?? await getEntitlements() };
+            const ceiling = clampCeiling(args.model_ceiling ?? "27b", deps.entitlements!.model_ceiling);
+            // Preserve the existing oMLX ceiling refusal before any provider probe.
+            if (backend !== "omlx" || ceiling === "27b") {
+                if (backend === "omlx" && !validOmlxTimeout(args.timeout_ms))
+                    throw new Error("prism_infer: invalid bounded oMLX generation parameters");
+                const budget = args.timeout_ms ?? (args.local_role ? CODING_ROLE_DEFAULTS[backend].timeoutMs : undefined);
+                const deadlineMs = Math.min(Date.now() + LOCAL_CODING_SELECTION_MS, budget === undefined ? Infinity : started + budget);
+                let selectionTimer: ReturnType<typeof setTimeout> | undefined;
+                try {
+                    if (Date.now() >= deadlineMs) throw new Error("local_coding_selection_timeout");
+                    model = await Promise.race([
+                        codingModel({ backend, role: args.local_role ?? "coder", ceiling, ollamaUrl: deps.ollamaUrl, deadlineMs }),
+                        new Promise<never>((_resolve, reject) => {
+                            selectionTimer = setTimeout(() => reject(new Error("local_coding_selection_timeout")), deadlineMs - Date.now());
+                        }),
+                    ]);
+                    if (Date.now() >= deadlineMs) throw new Error("local_coding_selection_timeout");
+                    if (!isLocalCodingModelId(model)) throw new Error("local_coding_model_unavailable");
+                    if (budget !== undefined) args = { ...args, timeout_ms: Math.max(1, started + budget - Date.now()) };
+                } catch (error) {
+                    const reason = error instanceof Error && /^(local_coding_(selection_timeout|model_unavailable)|omlx_model_ceiling)$/.test(error.message)
+                        ? error.message : "local_coding_model_unavailable";
+                    if (args.escalation === "report") return { output: "", backend: "refused", model_picked: null,
+                        ram_free_mb: Math.round(deps.freemem() / 1024 ** 2), latency_ms: Date.now() - started, used_cloud: false,
+                        attempts: [{ tier: "selection", reason }], gate_outcome: { status: "refused", reason, served_anyway: false } };
+                    throw new Error(`prism_infer: ${reason}`);
+                } finally { clearTimeout(selectionTimer); }
+            }
+        }
         args = { ...args, local_backend: backend,
             ...(model ? { local_model: model } : {}) };
     }
@@ -2248,7 +2284,11 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             // is cleared on proof, or the call is refused.
             await runtime.recover?.(target);
             return target;
-        }, generate: (target: OmlxTarget, request: Parameters<OmlxRuntime["generate"]>[1], signal: AbortSignal) => {
+        }, ...(runtime.reclaim ? { reclaim: (...args: Parameters<NonNullable<OmlxRuntime["reclaim"]>>) => {
+            const reclaim = runtime.reclaim!(...args);
+            generations.add(reclaim.catch(() => undefined));
+            return reclaim;
+        } } : {}), generate: (target: OmlxTarget, request: Parameters<OmlxRuntime["generate"]>[1], signal: AbortSignal) => {
             const generation = runtime.generate(target, request, signal);
             generations.add(generation.catch(() => undefined));
             return generation;
@@ -2546,7 +2586,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         }
         if (!Number.isInteger(localMaxTokens) || localMaxTokens <= 0
             || !Number.isFinite(temperature) || temperature < 0
-            || (args.timeout_ms !== undefined && (!Number.isInteger(args.timeout_ms) || args.timeout_ms <= 0 || args.timeout_ms > 900_000))) {
+            || !validOmlxTimeout(args.timeout_ms)) {
             throw new Error("prism_infer: invalid bounded oMLX generation parameters");
         }
         try { omlxTarget = await omlxRuntime.detect(args.local_model); }
@@ -3917,6 +3957,7 @@ async function applyVerification(
 export function productionInferDeps(): InferDeps {
     return {
         codingPreference: localCodingPreference,
+        codingModel: selectUnassignedCodingModel,
         omlx: createOmlxRuntime({
             listLoaded: () => strictLoaded(PRISM_LOCAL_LLM_URL),
             unload: model => unloadOllamaModel(PRISM_LOCAL_LLM_URL, model),

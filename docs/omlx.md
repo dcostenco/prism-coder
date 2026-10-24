@@ -35,7 +35,7 @@ Open `prism dashboard`, then **Settings → Local Coding**. The panel provides:
 - **Coder and reviewer models:** independent selectors for oMLX and Ollama,
   populated automatically from the selected servers' installed inventories.
   The same model can serve both roles. Choose **Use backend default** to leave
-  a role unassigned. Replacing a model version requires a new selection and save,
+  a role unassigned and allow automatic selection. Replacing an assigned model version requires a new selection and save,
   with no code or skill edit.
 - **Memory information:** reported weight size, loaded memory when available,
   a conservative cold-load estimate and current available RAM. Missing metadata
@@ -60,6 +60,21 @@ unless a model override is also supplied. Missing selected models are refused;
 an inventory inspection failure means availability is unknown, not that a model
 was removed. General inference, classifiers, embeddings and vision retain their
 existing selection paths.
+
+For an unassigned text coding role, Prism selects from the effective backend's
+discovered models. If Synalux is configured, it may request one optional model
+recommendation using only the backend and role, with existing Synalux
+authentication. Prompts, images, history, local provider credentials, paths,
+memory readings and installed-model inventory are excluded from that request.
+Explicit and saved model choices, including the configured oMLX provider
+default, skip this lookup. Unavailable, timed-out or
+unusable recommendations fall back to generic local selection on the same
+backend. Selection does not install a model or change saved settings.
+
+Automatic selection still requires model metadata and the normal account,
+context, memory and execution checks. It refuses when no eligible local model
+can be established. oMLX retains its top-ceiling requirement. These checks do
+not qualify image input or make a local reviewer an approval authority.
 
 Selected Ollama models must report completion capability, parameter count and
 the architecture metadata needed for memory estimates. Nominal parameter size
@@ -326,9 +341,27 @@ one process share this lease. A busy lease refuses (`omlx_resource_busy`) before
 classification, and process exit releases it without lock-file
 cleanup. In-process inference and classification wait while an oMLX call owns
 the device. Unknown Ollama state, newly loaded Ollama weights, or available
-memory below a 2 GiB reserve aborts/withholds the generation. Model caches and
-daemons remain in place. Legacy/unmodified MCP processes do not honor the lease;
+memory below a 2 GiB reserve aborts/withholds the generation. Daemons and
+downloaded model files remain in place. Legacy/unmodified MCP processes do not honor the lease;
 their contention is observed and rejected by the watcher.
+
+Before a new classifier or generation starts, Prism reads oMLX's installed-model
+metadata. If a known, unloaded model's resident-size estimate plus the 2 GiB
+reserve exceeds the current RAM estimate, Prism requests idle-only unloading of
+other resident models, oldest first, and remeasures RAM before proceeding. It
+never adds advertised model sizes to a stale RAM sample. A warm requested model
+is protected and its weights are not counted again. Unknown sizes or unresolved
+aliases leave model-fit decisions to the native pool; they are not fit guarantees.
+
+Automatic reclamation requires the authenticated
+`POST /v1/models/{model_id}/unload-idle` API. Its pool lock protects pinned,
+loading, leased, active, scheduler-busy and indeterminate engines. A busy victim
+is skipped; unsupported endpoints, failed or unconfirmed unloads refuse the new
+generation. Prism never falls back to the manual unload API, which may abort
+active work. Older pinned server builds need this API update to reclaim models.
+The pressure watcher does not evict models during generation. A capacity RPC
+timeout does not prove teardown completion: the server retains its pool lock
+until teardown settles, and the client refuses the new generation.
 
 **Safety screen.** The classifier on this path is the public
 `dcostenco/prism-coder-9b-mlx-8bit`, installed under the name
