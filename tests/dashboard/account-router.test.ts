@@ -3,6 +3,7 @@ import {
   connectDashboardAccount,
   loadDashboardAccount,
   openDashboardBilling,
+  handleAccountRoutes,
   signOutDashboardAccount,
   type AccountRouterDeps,
 } from "../../src/dashboard/accountRouter.js";
@@ -218,7 +219,40 @@ describe("dashboard account service", () => {
   it("returns a validated Stripe Billing Portal URL for a signed-in user", async () => {
     const h = harness({ PRISM_SYNALUX_API_KEY: TOKEN });
     h.fetcher.mockResolvedValue(new Response(JSON.stringify({ url: "https://billing.stripe.com/p/session", action: "manage" }), { status: 200 }));
-    await expect(openDashboardBilling(h.deps)).resolves.toEqual({ url: "https://billing.stripe.com/p/session", action: "manage" });
+    await expect(openDashboardBilling(h.deps, "http://127.0.0.1:34119")).resolves.toEqual({ url: "https://billing.stripe.com/p/session", action: "manage" });
+    expect(h.fetcher.mock.calls[0][1]?.headers).toMatchObject({ "X-Prism-Dashboard-Origin": "http://127.0.0.1:34119" });
+  });
+
+  it("omits the dashboard-origin header for compatibility callers", async () => {
+    const h = harness({ PRISM_SYNALUX_API_KEY: TOKEN });
+    h.fetcher.mockResolvedValue(new Response(JSON.stringify({ url: "https://billing.stripe.com/p/session", action: "manage" }), { status: 200 }));
+    await openDashboardBilling(h.deps);
+    expect(h.fetcher.mock.calls[0][1]?.headers).not.toHaveProperty("X-Prism-Dashboard-Origin");
+  });
+
+  it.each(["http://127.0.0.1:34119", "http://[::1]:34120"])("forwards the actual handler origin on a 401 retry (%s)", async dashboardUrl => {
+    const h = harness({ PRISM_SYNALUX_API_KEY: TOKEN });
+    h.getJwt.mockResolvedValueOnce("jwt-stale").mockResolvedValueOnce("jwt-fresh");
+    h.fetcher
+      .mockResolvedValueOnce(new Response("", { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ url: "https://billing.stripe.com/p/session", action: "manage" }), { status: 200 }));
+    let status = 0;
+    let body = "";
+    const req = { method: "POST", headers: {}, socket: {} } as unknown as import("node:http").IncomingMessage;
+    const res = { writeHead: (code: number) => { status = code; }, end: (value?: string) => { body = value || ""; } } as unknown as import("node:http").ServerResponse;
+    await expect(handleAccountRoutes(new URL(`${dashboardUrl}/api/account/billing`), req, res, h.deps)).resolves.toBe(true);
+    expect(status).toBe(200);
+    expect(JSON.parse(body)).toEqual({ url: "https://billing.stripe.com/p/session", action: "manage" });
+    expect(h.fetcher.mock.calls.map(call => call[1]?.headers)).toEqual([
+      expect.objectContaining({ Authorization: "Bearer jwt-stale", "X-Prism-Dashboard-Origin": dashboardUrl }),
+      expect.objectContaining({ Authorization: "Bearer jwt-fresh", "X-Prism-Dashboard-Origin": dashboardUrl }),
+    ]);
+  });
+
+  it("surfaces the server compatibility error", async () => {
+    const h = harness({ PRISM_SYNALUX_API_KEY: TOKEN });
+    h.fetcher.mockResolvedValue(new Response(JSON.stringify({ error: "Dashboard origin required" }), { status: 400 }));
+    await expect(openDashboardBilling(h.deps)).rejects.toThrow("Dashboard origin required");
   });
 
   it("rejects an attacker-controlled billing redirect", async () => {
@@ -251,8 +285,10 @@ describe("dashboard account service", () => {
       .mockResolvedValueOnce(new Response("", { status: 401 }))
       .mockReturnValueOnce(new Promise<Response>((resolve) => { resolveRetry = resolve; }));
 
-    const billing = openDashboardBilling(h.deps);
+    const billing = openDashboardBilling(h.deps, "http://127.0.0.1:34119");
     await vi.waitFor(() => expect(h.fetcher).toHaveBeenCalledTimes(2));
+    expect(h.fetcher.mock.calls[0][1]?.headers).toMatchObject({ "X-Prism-Dashboard-Origin": "http://127.0.0.1:34119" });
+    expect(h.fetcher.mock.calls[1][1]?.headers).toMatchObject({ "X-Prism-Dashboard-Origin": "http://127.0.0.1:34119" });
     setSynaluxSignedOut(true);
     resolveRetry(new Response(JSON.stringify({ url: "https://billing.stripe.com/p/session", action: "manage" }), { status: 200 }));
 
