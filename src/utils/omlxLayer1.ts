@@ -1,15 +1,9 @@
-/** Layer 1 on explicit oMLX: callLayer1 runs unchanged, and its one model
- * request goes to the classifier model on the same provider, through the owned
- * path, inside the call's device lease. */
+/** Adapt classifier requests to the owned local oMLX provider. */
 import type { LocalGeneration, OmlxRequest } from "./omlxProvider.js";
 
-/** The 9b, converted to MLX at 8 bits: the classifier measured on oMLX. */
+/** Classifier model used by this adapter. */
 export const OMLX_LAYER1_MODEL = "prism-coder-9b-mlx-8bit";
-/** One classifier request. Longer than callLayer1's own per-attempt budget so a
- *  cold model answers the first attempt: a load from disk takes about 5 s, and
- *  the first read after a long idle exceeded 15 s (2026-10-17, refused) while a
- *  warm read takes under 1 s. The owned path proves every stop, so nothing is
- *  left running when it ends. */
+/** Maximum adapter request duration, further bounded by the caller's budget. */
 export const OMLX_LAYER1_TIMEOUT_MS = 90_000;
 
 function chatMessages(value: unknown): { role: string; content: string }[] | undefined {
@@ -24,15 +18,7 @@ function chatMessages(value: unknown): { role: string; content: string }[] | und
     return messages;
 }
 
-/** callLayer1's fetch on explicit oMLX. It makes no HTTP request; it answers
- *  callLayer1's own requests in process.
- *  - Only the chat request carries messages. The model-inspection lookup does
- *    not, and gets a 404, so callLayer1 leads with the empty system message the
- *    gate measured.
- *  - callLayer1's per-attempt signal is not forwarded: the owned job has its own
- *    deadline.
- *  - Every request asks the provider not to keep its prompt cache: a classifier
- *    request is unique and never reused. */
+/** Handle chat requests through the supplied local generator with cache storage disabled. */
 export function omlxLayer1Fetch(generate: (request: OmlxRequest) => Promise<LocalGeneration>, remainingMs: () => number = () => OMLX_LAYER1_TIMEOUT_MS): typeof fetch {
     return (async (_input: string | URL | Request, init?: RequestInit) => {
         // Each read is bounded by the call's remaining timeout_ms as well, so an
