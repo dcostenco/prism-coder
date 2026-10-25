@@ -1,4 +1,5 @@
 import { OMLX_SETUP_MODELS } from "../utils/omlxSetup.js";
+import { localImagePanelHTML, localImageScript } from "./localImageUI.js";
 
 export function localCodingPanelHTML(): string {
     return `<div class="s-tab-panel" id="spanel-local">
@@ -23,6 +24,7 @@ export function localCodingPanelHTML(): string {
       <p id="local-coding-saved" class="setting-desc" aria-live="polite"></p>
       <div id="local-coding-connection" class="setting-desc" role="status" style="margin:16px 0;padding:12px;border:1px solid var(--border-glass);border-radius:8px">Checking local coding setup…</div>
       <a id="local-coding-admin" target="_blank" rel="noopener noreferrer" style="display:none">Open oMLX settings</a>
+      ${localImagePanelHTML()}
       <div class="setting-section" style="margin-top:24px">Set up oMLX on this Mac</div>
       <p class="setting-desc">Use your existing server to avoid duplicate downloads. New setup installs the pinned Prism-compatible server in an isolated Python environment. Downloads are opt-in; npm installation never starts them.</p>
       <p class="setting-desc">Apple Silicon · macOS 15+ · Python 3.11–3.13 · 32 GiB unified memory · 40 GiB free disk. The standard install uses generic kernels; full Xcode builds can be faster.</p>
@@ -169,5 +171,5 @@ function localCodingAction(action) {
         return loadLocalCoding(false);
     }).catch(function(error) { localCodingBusy = false; localCodingActionError = error.message; document.getElementById('local-coding-error').textContent = error.message; loadLocalCoding(false); });
 }
-`;
+` + localImageScript();
 }

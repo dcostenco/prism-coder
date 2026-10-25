@@ -3677,7 +3677,7 @@ function switchSettingsTab(tab) {
     if (tab === 'account') {
         loadIdentityChip();
     }
-    if (tab === 'local') loadLocalCoding(true);
+    if (tab === 'local') { loadLocalCoding(true); loadLocalImages(true); }
     if (tab === 'skills') {
         var role = document.getElementById('skillRoleSelect').value;
         loadSkillForRole(role);

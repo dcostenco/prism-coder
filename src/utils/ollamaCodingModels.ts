@@ -1,6 +1,7 @@
 import { PRISM_LOCAL_LLM_URL } from "../config.js";
 import { isLocalCodingModelId } from "./localCodingSettings.js";
 import type { ModelChoice } from "./modelPicker.js";
+import { advertisedImageCapability, type LocalImageModelObservation } from "./localImageModels.js";
 
 const GIB = 1024 ** 3;
 const MAX_MODELS = 1024;
@@ -20,27 +21,95 @@ const positive = (value: unknown): value is number => typeof value === "number" 
 async function metadata(url: string, fetchImpl: typeof fetch, model?: string, options: LocalModelProbeOptions = {}): Promise<Record<string, any>> {
     const check = () => { if (options.signal?.aborted || (options.deadlineMs !== undefined && Date.now() >= options.deadlineMs)) throw new Error("ollama_model_probe_deadline"); };
     check();
-    const signal = AbortSignal.any([AbortSignal.timeout(3000), ...(options.signal ? [options.signal] : []),
-        ...(options.deadlineMs === undefined ? [] : [AbortSignal.timeout(Math.max(1, Math.ceil(options.deadlineMs - Date.now())))])]);
-    const response = await fetchImpl(url, { ...(model === undefined ? {} : {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }),
-    }), redirect: "error", signal });
-    check();
-    if (!response.ok || !response.body) throw new Error("ollama_model_metadata_unavailable");
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = []; let size = 0;
-    try {
-        for (;;) {
-            check(); const part = await reader.read(); check();
-            if (part.done) break;
-            size += part.value.byteLength;
-            if (size > MAX_METADATA_BYTES) throw new Error("ollama_model_metadata_invalid");
-            chunks.push(part.value);
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, ...(options.signal ? [options.signal] : [])]);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let response: Response | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let deadlineFired = false;
+    const work = async () => {
+        try {
+            check();
+            signal.throwIfAborted();
+            response = await fetchImpl(url, { ...(model === undefined ? {} : {
+                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }),
+            }), redirect: "error", signal });
+            check();
+            signal.throwIfAborted();
+            if (!response.ok || !response.body) throw new Error("ollama_model_metadata_unavailable");
+            reader = response.body.getReader();
+            const chunks: Uint8Array[] = []; let size = 0;
+            for (;;) {
+                check();
+                const part = await reader.read();
+                check();
+                signal.throwIfAborted();
+                if (part.done) break;
+                size += part.value.byteLength;
+                if (size > MAX_METADATA_BYTES) throw new Error("ollama_model_metadata_invalid");
+                chunks.push(part.value);
+            }
+            const data: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            check();
+            signal.throwIfAborted();
+            if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("ollama_model_metadata_invalid");
+            return data as Record<string, any>;
+        } finally {
+            if (reader) void reader.cancel().catch(() => {});
+            else void response?.body?.cancel().catch(() => {});
         }
-    } finally { void reader.cancel().catch(() => {}); }
-    const data: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("ollama_model_metadata_invalid");
-    return data as Record<string, any>;
+    };
+    let onAbort: () => void;
+    const aborted = new Promise<never>((_resolve, reject) => {
+        onAbort = () => {
+            void reader?.cancel().catch(() => {});
+            if (deadlineFired) { reject(new Error("ollama_model_probe_deadline")); return; }
+            try { check(); } catch (error) { reject(error); return; }
+            reject(new Error("ollama_model_metadata_unavailable"));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) onAbort();
+    });
+    try {
+        const remaining = options.deadlineMs === undefined ? Infinity : options.deadlineMs - Date.now();
+        const deadlineBound = remaining <= 3000;
+        const timeout = Math.min(3000, Math.max(1, Math.ceil(remaining)));
+        timer = setTimeout(() => { deadlineFired = deadlineBound; controller.abort(); }, timeout);
+        return await Promise.race([work(), aborted]);
+    } finally {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort!);
+        controller.abort();
+    }
+}
+
+/** At most two concurrent inventory probes then one exact selected-ID show.
+ * No cache: every refresh observes the current server, even after model replacement. */
+export async function inspectOllamaImageModels(selectedId?: string, url = PRISM_LOCAL_LLM_URL,
+    fetchImpl: typeof fetch = fetch): Promise<LocalImageModelObservation[]> {
+    if (selectedId !== undefined && !isLocalCodingModelId(selectedId)) throw new Error("ollama_model_id_invalid");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    try {
+        const [tags, ps] = await Promise.all([metadata(`${url}/api/tags`, fetchImpl, undefined, { signal: controller.signal }),
+            metadata(`${url}/api/ps`, fetchImpl, undefined, { signal: controller.signal })]);
+        if (!Array.isArray(tags.models) || tags.models.length > MAX_MODELS || !Array.isArray(ps.models) || ps.models.length > MAX_MODELS) throw new Error("ollama_model_inventory_invalid");
+        const ids = new Set<string>();
+        const models: LocalImageModelObservation[] = tags.models.map((entry: any) => {
+            if (!entry || !isLocalCodingModelId(entry.name) || ids.has(entry.name)) throw new Error("ollama_model_inventory_invalid");
+            ids.add(entry.name);
+            const loaded = ps.models.find((row: any) => row && (row.name === entry.name || row.model === entry.name));
+            return { id: entry.name, loaded: Boolean(loaded), capability: advertisedImageCapability("ollama", {}),
+                ...(positive(entry.size) ? { weightBytes: entry.size } : {}),
+                ...(positive(loaded?.size_vram) ? { loadedBytes: loaded.size_vram } : {}) };
+        });
+        const selected = models.find(model => model.id === selectedId);
+        if (selected) {
+            try { selected.capability = advertisedImageCapability("ollama", await metadata(`${url}/api/show`, fetchImpl, selected.id, { signal: controller.signal })); }
+            catch { /* Exact model remains installed; failed capability inspection stays unknown. */ }
+        }
+        return models;
+    } finally { clearTimeout(timer); controller.abort(); }
 }
 
 export async function inspectOllamaCodingModels(url = PRISM_LOCAL_LLM_URL, fetchImpl: typeof fetch = fetch, options: LocalModelProbeOptions = {}): Promise<LocalCodingModelObservation[]> {

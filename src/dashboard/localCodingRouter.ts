@@ -1,10 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { configuredOmlxModel, detectOmlx, hasOmlxControl, inspectOmlx, inspectOmlxCodingModels, OmlxError } from "../utils/omlxProvider.js";
+import { configuredOmlxModel, detectOmlx, hasOmlxControl, inspectOmlx, inspectOmlxCodingModels, inspectOmlxImageModels, OmlxError } from "../utils/omlxProvider.js";
 import { localCodingPreference } from "../utils/localCodingPreference.js";
 import { readLocalCodingSettings, saveLocalCodingSettings, resolveLocalCodingModel } from "../utils/localCodingSettings.js";
 import { omlxSetup, OmlxSetupError, OMLX_SETUP_MODELS } from "../utils/omlxSetup.js";
-import { inspectOllamaCodingModels } from "../utils/ollamaCodingModels.js";
+import { inspectOllamaCodingModels, inspectOllamaImageModels } from "../utils/ollamaCodingModels.js";
+import { isLocalCodingModelId } from "../utils/localCodingSettings.js";
 import { getAvailableMemoryBytes } from "../utils/availableMemory.js";
+import { readLocalImageSettings, saveLocalImageSettings } from "../utils/localImageSettings.js";
 
 const MAX_BODY_BYTES = 4096;
 export interface LocalCodingRouterDeps {
@@ -19,10 +21,16 @@ export interface LocalCodingRouterDeps {
     omlxModels: typeof inspectOmlxCodingModels;
     ollamaModels: typeof inspectOllamaCodingModels;
     availableMemory: () => number;
+    imageSettings: typeof readLocalImageSettings;
+    saveImageSettings: typeof saveLocalImageSettings;
+    omlxImageModels: typeof inspectOmlxImageModels;
+    ollamaImageModels: typeof inspectOllamaImageModels;
 }
 const defaults: LocalCodingRouterDeps = { setup: omlxSetup, settings: readLocalCodingSettings, save: saveLocalCodingSettings,
     preference: localCodingPreference, inspect: inspectOmlx, detect: detectOmlx, control: hasOmlxControl, configuredModel: configuredOmlxModel,
-    omlxModels: inspectOmlxCodingModels, ollamaModels: inspectOllamaCodingModels, availableMemory: getAvailableMemoryBytes };
+    omlxModels: inspectOmlxCodingModels, ollamaModels: inspectOllamaCodingModels, availableMemory: getAvailableMemoryBytes,
+    imageSettings: readLocalImageSettings, saveImageSettings: saveLocalImageSettings,
+    omlxImageModels: inspectOmlxImageModels, ollamaImageModels: inspectOllamaImageModels };
 function json(res: ServerResponse, status: number, value: unknown) {
     res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "private, no-store" });
     res.end(JSON.stringify(value));
@@ -30,13 +38,14 @@ function json(res: ServerResponse, status: number, value: unknown) {
 function loopback(req: IncomingMessage) {
     return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress ?? "");
 }
-async function readBody(req: IncomingMessage): Promise<unknown> {
+async function readBody(req: IncomingMessage, requireBody = false): Promise<unknown> {
     const chunks: Buffer[] = []; let size = 0;
     for await (const data of req) {
         const chunk = Buffer.from(data); size += chunk.length;
         if (size > MAX_BODY_BYTES) throw new Error("invalid_body");
         chunks.push(chunk);
     }
+    if (requireBody && size === 0) throw new Error("invalid_body");
     return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 /** Mounted only after the dashboard's Host, token and authentication gates. */
@@ -44,6 +53,20 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
     if (url.pathname !== "/api/local-coding" && !url.pathname.startsWith("/api/local-coding/")) return false;
     const deps = { ...defaults, ...overrides };
     try {
+        if (req.method === "GET" && url.pathname === "/api/local-coding/image-models") {
+            const selectedId = url.searchParams.get("ollamaModel") || undefined;
+            if (selectedId !== undefined && !isLocalCodingModelId(selectedId)) { json(res, 400, { error: "Invalid image model ID." }); return true; }
+            const settings = await deps.imageSettings();
+            const inventories = await Promise.allSettled([deps.omlxImageModels(), deps.ollamaImageModels(url.searchParams.has("ollamaModel") ? selectedId : settings.models?.ollama)]);
+            json(res, 200, { settings, selectionApplied: false, canManage: loopback(req), availableMemoryBytes: deps.availableMemory(),
+                discovered: { omlx: inventories[0].status === "fulfilled" ? inventories[0].value : [],
+                    ollama: inventories[1].status === "fulfilled" ? inventories[1].value : [] },
+                discoveryErrors: { omlx: inventories[0].status === "rejected" ? "oMLX image inventory unavailable." : null,
+                    ollama: inventories[1].status === "rejected" ? "Ollama image inventory unavailable." : null } }); return true;
+        }
+        if (req.method === "GET" && url.pathname === "/api/local-coding/image-preferences") {
+            json(res, 200, { settings: await deps.imageSettings(), selectionApplied: false }); return true;
+        }
         if (req.method === "GET" && url.pathname === "/api/local-coding") {
             const settings = await deps.settings();
             let preference, preferenceError: string | undefined;
@@ -81,7 +104,10 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
         if (!loopback(req) || !sameOrigin || !req.headers["content-type"]?.startsWith("application/json")) {
             json(res, 403, { error: "Open this dashboard on this Mac to change local coding setup." }); return true;
         }
-        const body = await readBody(req);
+        const body = await readBody(req, url.pathname === "/api/local-coding/image-preferences");
+        if (url.pathname === "/api/local-coding/image-preferences") {
+            await deps.saveImageSettings(body); json(res, 200, { saved: true, selectionApplied: false }); return true;
+        }
         if (url.pathname === "/api/local-coding/preferences") {
             await deps.save(body); json(res, 200, { saved: true }); return true;
         }

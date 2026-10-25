@@ -10,6 +10,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import type { OwnedAcknowledgement, OwnedAction, OwnedProviderRequest } from "./omlxJobControl.js";
 import type { ControlEndpoint } from "./omlxControl.js";
 import { operationStatus } from "./omlxControl.js";
+import { advertisedImageCapability, type LocalImageModelObservation } from "./localImageModels.js";
 
 export const OMLX_LEASE_PORT = 19438;
 export const OMLX_MIN_AVAILABLE_BYTES = 2 * 1024 ** 3;
@@ -390,6 +391,25 @@ export async function inspectOmlxCodingModels(options: OmlxConnectionOptions = {
             ...(positive(entry.estimated_size) ? { weightBytes: entry.estimated_size } : {}),
             ...(entry.loaded && positive(entry.actual_size) ? { loadedBytes: entry.actual_size } : {}),
             ...(positive(entry.max_context_window) ? { contextTokens: entry.max_context_window } : {}) };
+    });
+}
+
+/** Inventory advertisement only. Never loads a model or qualifies image execution. */
+export async function inspectOmlxImageModels(options: OmlxConnectionOptions = {}): Promise<LocalImageModelObservation[]> {
+    const { apiKey, url } = await connection(options);
+    const raw = await inspectionJson(`${url}/models/status`, apiKey, options.fetchImpl ?? fetch, PROBE_TIMEOUT_MS);
+    if (!Array.isArray(raw.models) || raw.models.length > MAX_ADVERTISED_MODELS) throw new OmlxError("omlx_inspection_models_invalid");
+    const ids = new Set<string>();
+    return raw.models.map(entry => {
+        if (!entry || typeof entry !== "object" || typeof entry.id !== "string" || !MODEL_ID_PATTERN.test(entry.id)
+            || entry.id.includes(apiKey) || ids.has(entry.id)) throw new OmlxError("omlx_inspection_models_invalid");
+        ids.add(entry.id);
+        const positive = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) > 0;
+        return { id: entry.id, capability: advertisedImageCapability("omlx", entry),
+            ...(typeof entry.loaded === "boolean" ? { loaded: entry.loaded } : {}),
+            ...(positive(entry.estimated_size) ? { weightBytes: entry.estimated_size } : {}),
+            ...(entry.loaded === true && positive(entry.actual_size) ? { loadedBytes: entry.actual_size } : {}),
+            ...(positive(entry.resident_estimated_size) ? { residentEstimateBytes: entry.resident_estimated_size } : {}) };
     });
 }
 
