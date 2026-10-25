@@ -10,7 +10,7 @@ import { mkdirUsable } from "./usableDirectory.js";
 import { inspectOmlx } from "./omlxProvider.js";
 import { OMLX_SETUP_WORKER_SOURCE } from "./omlxSetupWorker.js";
 
-export const OMLX_SETUP_COMMIT = "3b2697cb0e77c3c69099bc6ba23a11ac14fd5d6b";
+export const OMLX_SETUP_COMMIT = "883fd6d00464d0193146a1cba20a64fb7cd8e116";
 export const OMLX_SETUP_MODELS = Object.freeze([
     { id: "prism-coder-9b-mlx-8bit", repo: "dcostenco/prism-coder-9b-mlx-8bit", revision: "923f646aca17cfce6b96084ab1608e1c142655a1", label: "Prism 9B classifier", approximateGB: 9 },
     { id: "Qwen3.8-27B-oQ4e-mtp", repo: "Jundot/Qwen3.8-27B-oQ4e-mtp", revision: "49c1d60367d976a730a725ea3bbed32a8e94b878", label: "Qwen3.8 27B coder", approximateGB: 16 },
