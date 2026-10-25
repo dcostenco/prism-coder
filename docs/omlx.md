@@ -6,6 +6,35 @@ different preference or override it for each task. The model runs locally;
 the host still inspects the output and runs its own checks. Explicit oMLX calls
 never substitute Ollama or cloud inference when admission or generation fails.
 
+## Image model preferences (staged)
+
+The independent image-preferences API stores backend-bound model choices under
+`local_image_config_v1`, separately from coder/reviewer preferences. It starts
+unset and accepts future model IDs without a code change. Its GET and POST path,
+`/api/local-coding/image-preferences`, uses the dashboard's existing access gates.
+Saving returns `selectionApplied: false`: these choices do not yet select an
+inference model. In **Settings → Local coding → Image model**, choose an image
+backend and an independently discovered model for each server, then select
+**Save image preference**. The same model may also be assigned to coding roles.
+Missing saved choices stay visible; an unreachable server is shown as unknown
+availability rather than an absent model. Refresh preserves unsaved choices.
+
+Discovery reads oMLX's authenticated model inventory and Ollama's installed and
+loaded model metadata. Ollama vision capability is inspected lazily for the exact
+selected ID, with at most two concurrent inventory calls followed by one show
+call, a six-second overall budget and bounded response sizes. There is no
+capability cache: replacement builds are inspected again. Names and size labels
+never establish vision capability. Advertisements show yes, no or unknown with
+their source; they are not controlled-image test results. Reported weights,
+loaded memory and server resident estimates are distinct. Image peak RAM remains
+unknown; available RAM is advisory. Refresh/save never downloads, loads, unloads
+or runs a model, and the image selector does not choose the policy classifier.
+
+Existing image routing retains its behavior; controlled oMLX image
+execution still requires its own provider, lifecycle and screening qualification.
+New selected-image execution for Ollama is also deferred. These preferences do
+not enable image execution on either backend.
+
 ## Before installing
 
 - Complete [Prism setup](../README.md#get-started),

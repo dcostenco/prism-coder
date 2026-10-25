@@ -63,6 +63,16 @@ describe("dashboard local coding actions", () => {
         expect((await f.post("/api/local-coding/install")).status).toBe(202);
         expect(f.install).toHaveBeenCalledTimes(1);
     });
+    it("preserves no-body install and start actions", async () => {
+        const f = await fixture();
+        for (const action of ["install", "start"]) {
+            expect((await fetch(f.base + "/api/local-coding/" + action, {
+                method: "POST", headers: { "Content-Type": "application/json", Origin: f.base },
+            })).status).toBe(202);
+        }
+        expect(f.install).toHaveBeenCalledTimes(1);
+        expect(f.start).toHaveBeenCalledTimes(1);
+    });
     it("rejects cross-origin and cross-port writes before any install or save", async () => {
         const f = await fixture();
         for (const origin of ["https://untrusted.invalid", "http://127.0.0.1:1", "null"]) {
