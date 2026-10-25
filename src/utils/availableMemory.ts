@@ -1,18 +1,10 @@
 /**
- * Cross-platform "available memory" reader.
- * ─────────────────────────────────────────────────────────────
- * On Linux, `os.freemem()` returns MemFree which already excludes
- * cached pages — accurate. On macOS, `os.freemem()` returns only
- * "wired+free" pages and ignores inactive/speculative/purgeable
- * pages that the OS will reclaim on demand. That makes a fresh
- * MacBook with 48 GB RAM look like it has 2 GB free shortly after
- * any large process loads, which is wrong.
- *
- * We synthesise a Linux-style `MemAvailable` by parsing `vm_stat`
- * on darwin: free + inactive + speculative + (some) purgeable.
- * Falls back to `os.freemem()` on any error.
- *
- * Cached for 1 second to avoid spawning vm_stat per inference call.
+ * Cross-platform memory estimate, cached for one second.
+ * On macOS, vm_stat's printed free count excludes speculative pages.
+ * Add inactive pages as an estimate only: they may include anonymous memory
+ * that cannot be reclaimed promptly. Purgeable pages can overlap inactive
+ * pages and must not be added again. This is not Linux MemAvailable or a
+ * guarantee that a model will fit. Other platforms/errors use os.freemem().
  */
 
 import * as os from "os";
@@ -21,37 +13,44 @@ import { execSync } from "child_process";
 let cache: { ts: number; bytes: number } | null = null;
 const TTL_MS = 1000;
 
-const PAGE_SIZE = 16_384; // darwin default; we read it from vm_stat header when present
+const COUNTER_LABELS = ["Pages free", "Pages inactive", "Pages speculative"];
+const HEADER_PATTERN = /^Mach Virtual Memory Statistics: \(page size of ([0-9]+) bytes\)$/;
 
-/** Returns free + inactive + speculative + purgeable in bytes on darwin. */
+/** Parse one complete snapshot. A valid zero must not trigger a fallback. */
+export function parseDarwinMemoryEstimate(output: string): number | null {
+    const lines = output.split(/\r?\n/).map(line => line.trim());
+    const headers = lines.filter(line => line.startsWith("Mach Virtual Memory Statistics:"));
+    if (headers.length !== 1) return null;
+    const header = headers[0].match(HEADER_PATTERN);
+    if (!header) return null;
+    const pageSize = Number(header[1]);
+    if (!Number.isSafeInteger(pageSize) || pageSize <= 0) return null;
+    let pages = 0;
+    for (const label of COUNTER_LABELS) {
+        const matches = lines.filter(line => line.startsWith(label + ":"));
+        if (matches.length !== 1) return null;
+        const match = matches[0].slice(label.length + 1).trim().match(/^([0-9]+)\.$/);
+        if (!match) return null;
+        const value = Number(match[1]);
+        if (!Number.isSafeInteger(value)) return null;
+        pages += value;
+        if (!Number.isSafeInteger(pages)) return null;
+    }
+    const bytes = pages * pageSize;
+    return Number.isSafeInteger(bytes) ? bytes : null;
+}
+
 function darwinAvailable(): number | null {
     try {
-        const out = execSync("vm_stat", { encoding: "utf8", timeout: 1000 });
-        // Parse page size from "Mach Virtual Memory Statistics: (page size of 16384 bytes)"
-        const pageMatch = out.match(/page size of (\d+) bytes/);
-        const pageSize = pageMatch ? parseInt(pageMatch[1], 10) : PAGE_SIZE;
-        let pages = 0;
-        const keys = [
-            /Pages free:\s+(\d+)/,
-            /Pages inactive:\s+(\d+)/,
-            /Pages speculative:\s+(\d+)/,
-            /Pages purgeable:\s+(\d+)/,
-        ];
-        for (const re of keys) {
-            const m = out.match(re);
-            if (m) pages += parseInt(m[1], 10);
-        }
-        if (pages <= 0) return null;
-        return pages * pageSize;
+        return parseDarwinMemoryEstimate(execSync("/usr/bin/vm_stat", { encoding: "utf8", timeout: 1000 }));
     } catch {
         return null;
     }
 }
 
 /**
- * Returns "available memory" in bytes — analogous to Linux MemAvailable.
- * On darwin synthesises via vm_stat. On other platforms falls back to
- * os.freemem(). Cached for 1 s.
+ * Returns an advisory estimate in bytes. Runtime resource gates still apply.
+ * On macOS uses one vm_stat snapshot; elsewhere uses os.freemem(). Cached 1 s.
  */
 export function getAvailableMemoryBytes(): number {
     const now = Date.now();

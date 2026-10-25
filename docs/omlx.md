@@ -35,7 +35,7 @@ Open `prism dashboard`, then **Settings → Local Coding**. The panel provides:
 - **Coder and reviewer models:** independent selectors for oMLX and Ollama,
   populated automatically from the selected servers' installed inventories.
   The same model can serve both roles. Choose **Use backend default** to leave
-  a role unassigned. Replacing a model version requires a new selection and save,
+  a role unassigned and allow automatic selection. Replacing an assigned model version requires a new selection and save,
   with no code or skill edit.
 - **Memory information:** reported weight size, loaded memory when available,
   a conservative cold-load estimate and current available RAM. Missing metadata
@@ -60,6 +60,21 @@ unless a model override is also supplied. Missing selected models are refused;
 an inventory inspection failure means availability is unknown, not that a model
 was removed. General inference, classifiers, embeddings and vision retain their
 existing selection paths.
+
+For an unassigned text coding role, Prism selects from the effective backend's
+discovered models. If Synalux is configured, it may request one optional model
+recommendation using only the backend and role, with existing Synalux
+authentication. Prompts, images, history, local provider credentials, paths,
+memory readings and installed-model inventory are excluded from that request.
+Explicit and saved model choices, including the configured oMLX provider
+default, skip this lookup. Unavailable, timed-out or
+unusable recommendations fall back to generic local selection on the same
+backend. Selection does not install a model or change saved settings.
+
+Automatic selection still requires model metadata and the normal account,
+context, memory and execution checks. It refuses when no eligible local model
+can be established. oMLX retains its top-ceiling requirement. These checks do
+not qualify image input or make a local reviewer an approval authority.
 
 Selected Ollama models must report completion capability, parameter count and
 the architecture metadata needed for memory estimates. Nominal parameter size
@@ -87,6 +102,13 @@ features stay disabled. After installation, select **Start managed oMLX**, then
 choose **Prism-managed installation** and save. Existing servers remain running;
 an occupied port is an error, not permission to stop its owner.
 
+Managed setup and the source installation below pin
+[`883fd6d0`](https://github.com/dcostenco/omlx/commit/883fd6d00464d0193146a1cba20a64fb7cd8e116),
+based on upstream v0.7.1 and including the idle-unload API. A changed managed
+server pin uses a separate Python runtime and preserves valid downloaded models
+and existing settings. A running server keeps its current runtime until an
+explicit restart after its active jobs finish; setup does not restart it.
+
 Terminal equivalents after installing Prism:
 
 ```bash
@@ -112,7 +134,7 @@ For a new source installation, use an isolated Python environment:
 ```bash
 git clone https://github.com/dcostenco/omlx.git
 cd omlx
-git checkout 8fd50b6a2515adba2f0a740600a7b9ac056077cd
+git checkout 883fd6d00464d0193146a1cba20a64fb7cd8e116
 python3.11 -m venv .venv
 source .venv/bin/activate
 make install PYTHON="$VIRTUAL_ENV/bin/python"
@@ -121,7 +143,7 @@ make install PYTHON="$VIRTUAL_ENV/bin/python"
 Without full Xcode, use `make install-no-kernels` instead of `make install`.
 Some model families then use slower generic paths; do not compare that install's
 speed directly with a kernel-enabled result. See the integration's
-[installation notes](https://github.com/dcostenco/omlx/blob/8fd50b6a2515adba2f0a740600a7b9ac056077cd/README.md#from-source).
+[installation notes](https://github.com/dcostenco/omlx/blob/883fd6d00464d0193146a1cba20a64fb7cd8e116/README.md#from-source).
 
 Download the required classifier and the tested dense drafting model. These
 commands pin model revisions and use directory names matching the examples:
@@ -177,7 +199,7 @@ reconnect its MCP server after changing the environment. At
    context/KV cache and other applications. For Flash-Next on this integration,
    the tested variant uses PLE SSD and expert offload with PLE gather-ahead off.
 
-See the fork's [control-route and memory notes](https://github.com/dcostenco/omlx/blob/8fd50b6a2515adba2f0a740600a7b9ac056077cd/PRISM.md).
+See the fork's [control-route and memory notes](https://github.com/dcostenco/omlx/blob/883fd6d00464d0193146a1cba20a64fb7cd8e116/PRISM.md).
 The upstream retry/resumed-prefill output-loss condition described there has
 not been qualified as fixed by the stable upgrade.
 
@@ -326,9 +348,27 @@ one process share this lease. A busy lease refuses (`omlx_resource_busy`) before
 classification, and process exit releases it without lock-file
 cleanup. In-process inference and classification wait while an oMLX call owns
 the device. Unknown Ollama state, newly loaded Ollama weights, or available
-memory below a 2 GiB reserve aborts/withholds the generation. Model caches and
-daemons remain in place. Legacy/unmodified MCP processes do not honor the lease;
+memory below a 2 GiB reserve aborts/withholds the generation. Daemons and
+downloaded model files remain in place. Legacy/unmodified MCP processes do not honor the lease;
 their contention is observed and rejected by the watcher.
+
+Before a new classifier or generation starts, Prism reads oMLX's installed-model
+metadata. If a known, unloaded model's resident-size estimate plus the 2 GiB
+reserve exceeds the current RAM estimate, Prism requests idle-only unloading of
+other resident models, oldest first, and remeasures RAM before proceeding. It
+never adds advertised model sizes to a stale RAM sample. A warm requested model
+is protected and its weights are not counted again. Unknown sizes or unresolved
+aliases leave model-fit decisions to the native pool; they are not fit guarantees.
+
+Automatic reclamation requires the authenticated
+`POST /v1/models/{model_id}/unload-idle` API. Its pool lock protects pinned,
+loading, leased, active, scheduler-busy and indeterminate engines. A busy victim
+is skipped; unsupported endpoints, failed or unconfirmed unloads refuse the new
+generation. Prism never falls back to the manual unload API, which may abort
+active work. Older pinned server builds need this API update to reclaim models.
+The pressure watcher does not evict models during generation. A capacity RPC
+timeout does not prove teardown completion: the server retains its pool lock
+until teardown settles, and the client refuses the new generation.
 
 **Safety screen.** The classifier on this path is the public
 `dcostenco/prism-coder-9b-mlx-8bit`, installed under the name

@@ -1,26 +1,4 @@
-/**
- * RAM-Gated Local Model Picker
- * ─────────────────────────────────────────────────────────────
- * Cascade: 9b (default) → 4b (verifier) → 2b (mobile) → 27b (quality).
- *
- * The default ceiling is "9b" — NOT "27b". This means:
- *   - 9b is the primary model for routing + general inference (Qwen3.5-9B, 100% BFCL)
- *   - 4b is used as the grounding verifier (fast, small)
- *   - 2b is the mobile/iPhone first gate (Qwen3.5-2B, 99.1% BFCL)
- *   - 27b is only loaded when caller explicitly passes ceiling="27b"
- *     or when the task requires maximum quality (complex code gen, etc.)
- *
- * This saves 11GB+ RAM vs 27b and keeps response times fast.
- *
- *   tag                 weights    need free   ctx     role
- *   prism-coder:27b     ~15.7 GiB  ≥ 21 GiB     4K    quality (on-demand, Qwen3.5)
- *   prism-coder:9b      ~ 6.3 GiB  ≥  9 GiB     4K    default router (Qwen3.5, +vision)
- *   prism-coder:4b      ~ 3.3 GiB  ≥  5.2 GiB  32K    verifier (Qwen3.5, +vision)
- *   prism-coder:2b      ~ 3.1 GiB  ≥  4.5 GiB  32K    mobile / iPhone (Qwen3.5, +vision)
- *
- * Below 4.5 GiB free → no local pick (caller must use cloud). The vision
- * towers pushed 2026-08-14 raised that floor from 3 GiB.
- */
+/** Local model selection using installed tiers and available memory. */
 
 const GB = 1024 ** 3;
 
@@ -29,115 +7,41 @@ export interface ModelChoice {
     weightsGb: number;
     minFreeGb: number;
     ctxTokens: number;
-    /**
-     * This tier answers better when allowed to reason first, even for routing.
-     *
-     * Thinking was decided by MODE (`mode !== "route"`), but it is a property of
-     * the WEIGHTS. Measured 2026-08-14 on the 115-case routing suite through the
-     * production /api/chat path: the 9b scores 83.5% with thinking off and 95.7%
-     * with it on, while 2b/4b/27b are 100% either way — so route mode was
-     * forcing the one model that needs to think not to, and paying ~600 tokens
-     * of reasoning on three models that gain nothing from it.
-     */
+    /** Explicit reasoning preference for this tier, when specified. */
     prefersThinking?: boolean;
     /** Local token floor, so reasoning does not crowd out the answer. */
     minLocalTokens?: number;
 }
 
 /**
- * Tier table, ordered LARGEST → SMALLEST. Picker walks this and returns
- * the first row whose minFreeGb fits within freeBytes.
- *
- * ctxTokens (§5.4): aligned with the LIVE Modelfile `num_ctx` values
- * (verified via `ollama show <tag> --modelfile` on 2026-07-20). The values
- * are inverted from intuition — the 27b/9b Modelfiles bake num_ctx 4096
- * while 4b/2b bake 32768. The tier walk skips tiers whose ctx cannot hold
- * prompt + output (reason: ctx_insufficient) — Ollama otherwise silently
- * truncates the prompt and answers from the fragment. If a Modelfile's
- * num_ctx is ever raised, update the row here (a raise is a measured
- * decision with KV-cache RAM costed — plan v2 §5.4).
+ * Local tier metadata in selection order. Memory values use GiB.
+ * Weight estimates and admission requirements are separate quantities;
+ * context and memory limits remain subject to provider validation.
  */
-// Both fields are GiB (GB = 1024**3 above), NOT the decimal GB `ollama list`
-// prints — 3.31 GB of manifest layers is 3.09 GiB of RAM. The two fields want
-// OPPOSITE conservatism, so they are not the same number:
-//
-//   weightsGb  is credited as memory RECLAIMED when this tier is evicted
-//              (prismInferHandler eviction math). Overstating it makes the
-//              handler evict warm models on a promise it cannot keep, so this
-//              must never exceed the real size.
-//   minFreeGb  is the admission gate. Understating it admits a model that
-//              cannot fit, so this is deliberately padded above the weights for
-//              KV cache and activations — an image request also pays for the
-//              projector layer.
-//
-// Sizes are the sum of the published manifest layers after the 2026-08-14
-// vision push (2b 2.3 -> 3.09 GiB, 9b 5.8 -> 6.26 GiB), rounded DOWN for
-// weights and up for gates.
 export const MODEL_TIERS: ReadonlyArray<ModelChoice> = [
     { tag: 'prism-coder:27b',  weightsGb: 15.6, minFreeGb: 21, ctxTokens: 4_096 },
-    // The only tier that reasons before answering. ~600 tokens go to <think> on
-    // a routing turn, so the local floor must clear that plus the answer or the
-    // hard_truncation retry drops it back to its 83.5% configuration.
-    // ctxTokens STAYS 4_096 — deliberately, and it is currently an
-    // under-declaration. Measured 2026-08-16: the 2026-08-14 vision push
-    // republished this tag with NO PARAMETER lines at all (`ollama show
-    // --modelfile prism-coder:9b` prints TEMPLATE only), so Ollama grants its
-    // own default instead. On this host that default is 32768 — `ollama ps`
-    // reports CONTEXT 32768 and a live 18,575-token prompt was answered
-    // correctly rather than truncated. So the §5.4 gate is skipping this tier,
-    // and 27b above it, for prompts they could serve, falling through to 4b/2b.
-    //
-    // Raising the number here anyway would be FAIL-OPEN: on a host that has not
-    // adopted scripts/prism-coder-9b.Modelfile, or whose Ollama defaults lower
-    // (OLLAMA_CONTEXT_LENGTH, older builds), a 32k declaration lets an oversize
-    // prompt through to be silently truncated — precisely what §5.4 exists to
-    // prevent. Under-declaring only costs a tier; over-declaring costs a wrong
-    // answer with no signal.
-    //
-    // Correct sequence: (1) adopt the Modelfile so num_ctx is pinned at 32768
-    // rather than inherited, (2) then raise this to 32_768 — KV cost measured at
-    // +0.6 GB resident (6.3 -> 6.9 GB), well inside minFreeGb 9. The durable fix
-    // is to stop mirroring the Modelfile here at all and read num_ctx live from
-    // /api/show, which retires this whole class of staleness.
     { tag: 'prism-coder:9b',   weightsGb:  6.2, minFreeGb:  9, ctxTokens: 4_096,
       prefersThinking: true, minLocalTokens: 2_048 },
-    // prefersThinking: false is EXPLICIT, not absent — resolveThinkingMode
-    // distinguishes "this tier says no" from "this tier says nothing" and only
-    // overrides the mode default for the former. Measured 2026-08-16 against
-    // live Ollama on both tiers: reasoning draws down the same num_predict
-    // budget the answer needs, and neither tier has a minLocalTokens floor to
-    // protect it. Code generation at num_predict 1600 returned 319 tokens of
-    // pure reasoning and an EMPTY response; the identical prompt with thinking
-    // off produced a function passing 4/4 executed assertions. Extraction and
-    // vision at num_predict 600 gave 2503/2641 chars of reasoning and an empty
-    // response, versus a correct answer in 23 tokens with thinking off.
+    // An explicit false preference differs from an unspecified preference.
     { tag: 'prism-coder:4b',   weightsGb:  3.2, minFreeGb:  5.2, ctxTokens: 32_768,
       prefersThinking: false },
     { tag: 'prism-coder:2b',   weightsGb:  3, minFreeGb:  4.5, ctxTokens: 32_768,
       prefersThinking: false },
 ];
 
-/**
- * True when `installed` matches `tierTag` either as a bare tag
- * (`prism-coder:27b`) or as a namespaced HuggingFace-style tag
- * (`dcostenco/prism-coder:27b`). The README documents `ollama pull
- * dcostenco/prism-coder:27b`, so Ollama's /api/tags returns the
- * namespaced form — without this matcher the picker would never
- * see them and silently fall through to cloud.
- */
+/** Match a bare tier tag or its namespaced installed form. */
 function tagMatches(installed: string, tierTag: string): boolean {
     return installed === tierTag || installed.endsWith(`/${tierTag}`);
 }
 
-/** Default ceiling: 9b. Pass ceiling="27b" explicitly for max quality. */
+/** Default ceiling when the caller does not specify one. */
 export const DEFAULT_CEILING = "9b";
 
 /**
- * Pick the best viable tier for the given free RAM.
- * Default ceiling is 9b — use ceiling="27b" only for complex tasks.
+ * Pick the first installed tier that meets the local memory requirement.
  *
- * @param freeBytes  Result of os.freemem() — binary bytes
- * @param ceiling    Cap tier. Default "9b". Pass "27b" for complex tasks.
+ * @param freeBytes  Available-memory estimate in bytes.
+ * @param ceiling    Optional tier ceiling.
  * @param available  Optional whitelist of installed Ollama tags.
  */
 export function pickLocalModel(

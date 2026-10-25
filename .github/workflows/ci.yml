@@ -62,7 +62,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Playwright 1.58's browser dependencies support Ubuntu 24.04.
+        os: [ubuntu-24.04, macos-latest]
         node-version: [20.x, 22.x]
       fail-fast: false
 

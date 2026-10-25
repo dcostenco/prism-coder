@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { PRISM_INFER_TOOL, runInfer, isPrismInferArgs, _resetLayer1HistoryCacheForTest, type InferDeps, type PrismInferArgs } from "../../src/tools/prismInferHandler.js";
+import { PRISM_INFER_TOOL, runInfer, prismInferHandler, productionInferDeps, isPrismInferArgs, _resetLayer1HistoryCacheForTest, type InferDeps, type PrismInferArgs } from "../../src/tools/prismInferHandler.js";
+import { selectUnassignedCodingModel } from "../../src/utils/localCodingModelSelection.js";
 import { FREE_ENTITLEMENTS, type PrismEntitlements } from "../../src/utils/entitlements.js";
 import { parseAnswerCheckPolicy, parseSecondReadPolicy } from "../../src/utils/inferencePolicy.js";
 import { callLayer1 } from "../../src/utils/layer1.js";
@@ -51,6 +52,98 @@ function fixture() {
 }
 
 describe("explicit oMLX through the centralized prism_infer pipeline", () => {
+    it("binds automatic coding selection in production dependencies", () => {
+        expect(productionInferDeps().codingModel).toBe(selectUnassignedCodingModel);
+    });
+    it.each(["coder", "reviewer"] as const)("runs an unassigned %s on a discovered future model outside named tiers", async local_role => {
+        const f = fixture(); const id = "vendor/future-build";
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null });
+        const recommend = vi.fn(async () => undefined);
+        f.deps.codingModel = options => selectUnassignedCodingModel(options, {
+            recommend, omlxModels: async () => [{ id, loaded: false, weightBytes: 1024 ** 3, contextTokens: 65536 }],
+            omlxDefault: async () => undefined,
+        });
+        f.omlx.detect = vi.fn(async model => createOmlxTarget("http://127.0.0.1:8000/v1", model!, 65536, "synthetic-provider-key"));
+        const result = await runInfer(ask({ local_role }), f.deps);
+        expect(result).toMatchObject({ backend: "omlx", model_picked: id, used_cloud: false, output: OUTPUT });
+        expect(recommend.mock.calls[0].slice(0, 2)).toEqual(["omlx", local_role]);
+        expect(f.omlx.detect).toHaveBeenCalledWith(id);
+        expect(f.deps.listTags).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it.each(["coder", "reviewer"] as const)("keeps discovered Ollama %s selection on its exact-model path", async local_role => {
+        const f = fixture(); const id = "vendor/future:tag";
+        f.deps.codingPreference = async () => ({ saved: "ollama", effective: "ollama", configured: false, envOverride: null });
+        f.deps.codingModel = options => selectUnassignedCodingModel(options, {
+            recommend: async () => undefined, ollamaModels: async () => [{ id, loaded: false, weightBytes: 1024 ** 3 }],
+            ollamaChoice: async () => ({ tag: id, ctxTokens: 4096, weightsGb: 1, minFreeGb: 3 }),
+        });
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = vi.fn(async () => ({ tag: id, ctxTokens: 4096, weightsGb: 1, minFreeGb: 3 }));
+        const result = await runInfer(ask({ local_backend: "ollama", local_role }), f.deps);
+        expect(result).toMatchObject({ backend: "ollama-" + id, model_picked: id, used_cloud: false, output: OUTPUT });
+        expect(f.deps.selectedOllamaModel).toHaveBeenCalledWith(f.deps.ollamaUrl, id, "27b");
+        expect(vi.mocked(f.deps.callLocal).mock.calls[0][1]).toBe(id);
+        expect(f.omlx.detect).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it("does not consult automatic recommendations for explicit or saved model overrides", async () => {
+        for (const explicit of [true, false]) {
+            const f = fixture(); f.deps.codingModel = vi.fn(async () => { throw new Error("must not select"); });
+            f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
+                models: { omlx: { coder: MODEL, reviewer: MODEL } } });
+            expect(await runInfer(ask({ local_role: "reviewer", ...(explicit ? { local_model: MODEL } : {}) }), f.deps))
+                .toMatchObject({ backend: "omlx", model_picked: MODEL });
+            expect(f.deps.codingModel).not.toHaveBeenCalled();
+        }
+    });
+    it("keeps the configured oMLX profile ID through exact detection", async () => {
+        const f = fixture(); const id = "vendor/future-build:fast";
+        const recommend = vi.fn(async () => "other-build");
+        const inventory = vi.fn(async () => []);
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null });
+        f.deps.codingModel = options => selectUnassignedCodingModel(options, {
+            omlxDefault: async () => id, omlxModels: inventory, recommend,
+        });
+        f.omlx.detect = vi.fn(async model => createOmlxTarget("http://127.0.0.1:8000/v1", model!, 65536, "synthetic-provider-key"));
+        expect(await runInfer(ask(), f.deps)).toMatchObject({ backend: "omlx", model_picked: id, output: OUTPUT });
+        expect(f.omlx.detect).toHaveBeenCalledWith(id);
+        expect(recommend).not.toHaveBeenCalled(); expect(inventory).not.toHaveBeenCalled();
+    });
+    it("refuses a lower oMLX ceiling before automatic discovery", async () => {
+        const f = fixture(); f.deps.entitlements = { ...ENT, model_ceiling: "9b" };
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null });
+        f.deps.codingModel = vi.fn(async () => MODEL);
+        expect(await runInfer(ask(), f.deps)).toMatchObject({ backend: "refused", gate_outcome: { reason: "omlx_model_ceiling" } });
+        expect(f.deps.codingModel).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it("settles the caller deadline even when an injected selector ignores it", async () => {
+        const f = fixture(); let release!: (id: string) => void; let settled = false;
+        const held = new Promise<string>(resolve => { release = resolve; });
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null });
+        f.deps.codingModel = async () => held;
+        const pending = runInfer(ask({ timeout_ms: 5 }), f.deps).then(value => { settled = true; return value; });
+        try { await new Promise(r => setTimeout(r, 30)); expect(settled).toBe(true); }
+        finally { release(MODEL); await pending; }
+        expect(await pending).toMatchObject({ backend: "refused", gate_outcome: { reason: "local_coding_selection_timeout" } });
+        expect(f.omlx.detect).not.toHaveBeenCalled(); expect(f.omlx.generate).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it.each([900_500, 0, 0.5])("validates the original timeout %s before automatic selection changes the budget", async timeout_ms => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null });
+        f.deps.codingModel = vi.fn(async () => { await new Promise(r => setTimeout(r, 600)); return MODEL; });
+        await expect(runInfer(ask({ timeout_ms }), f.deps)).rejects.toThrow("invalid bounded oMLX generation parameters");
+        expect(f.deps.codingModel).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+        expect(f.omlx.generate).not.toHaveBeenCalled();
+    });
+    it("exercises the MCP envelope with the selected future model", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null });
+        f.deps.codingModel = vi.fn(async () => MODEL);
+        const result = await prismInferHandler(ask({ local_role: "reviewer" }), f.deps);
+        expect(result.isError).not.toBe(true);
+        expect(result.structuredContent).toMatchObject({ backend: "omlx", model_picked: MODEL, used_cloud: false });
+        expect(f.deps.codingModel).toHaveBeenCalledWith(expect.objectContaining({ backend: "omlx", role: "reviewer", ceiling: "27b" }));
+    });
     it("Auto keeps a plan-limited code call on Ollama even with no caller ceiling", async () => {
         const f = fixture();
         f.deps.entitlements = { ...ENT, model_ceiling: "9b" };
@@ -186,6 +279,18 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         await expect(runInfer(ask({ timeout_ms: 50 }), f.deps)).rejects.toThrow("no backend produced output");
         expect(f.events.indexOf("generation-settled")).toBeGreaterThan(-1);
         expect(f.events.indexOf("generation-settled")).toBeLessThan(f.events.indexOf("release"));
+    });
+    it("keeps the device lease until a timed out capacity operation settles", async () => {
+        const f = fixture();
+        f.omlx.acquire = vi.fn(async () => async () => { f.events.push("release"); });
+        f.omlx.reclaim = vi.fn(() => new Promise(resolve => setTimeout(() => {
+            f.events.push("reclaim-settled"); resolve();
+        }, 100)));
+        const result = await runInfer(ask({ timeout_ms: 20 }), f.deps).catch(error => error);
+        expect(f.events.indexOf("reclaim-settled")).toBeGreaterThan(-1);
+        expect(f.events.indexOf("release")).toBeGreaterThan(f.events.indexOf("reclaim-settled"));
+        expect(f.omlx.generate).not.toHaveBeenCalled();
+        expect(result).not.toMatchObject({ backend: "omlx" });
     });
     it("refuses unreadable Ollama state at admission without classifying", async () => {
         const f = fixture(); f.omlx.listLoaded = async () => { throw new Error("raw secret"); };
