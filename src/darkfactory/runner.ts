@@ -622,9 +622,20 @@ async function runnerTick(): Promise<void> {
           if (await locallyAuthorized(candidate, backend)) candidates.push(candidate);
         }
         discoveryOutcome = candidates.length ? 'busy' : 'idle';
+      } catch (error) {
+        if (!backend.factoryPollScope) throw error;
+        console.error(`[DarkFactory] Discovery scan failed: ${error instanceof Error ? error.message : String(error)}`);
+        // A failed queue read must not strand active work whose hint is already
+        // local. The execution loop still checks authority, leases and live state.
+        candidates = (await readFactoryPollSnapshot(backend.factoryPollScope)).candidates;
       } finally {
         if (pollRenewal) clearInterval(pollRenewal);
-        await poll?.finish(discoveryOutcome, Date.now(), candidates);
+        try { await poll?.finish(discoveryOutcome, Date.now(), candidates); }
+        catch (error) {
+          // Discovery bookkeeping cannot discard work already found this tick.
+          // An unreleased discovery lease remains fenced and expires normally.
+          console.error(`[DarkFactory] Discovery result persistence failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
     }
     for (const candidate of candidates) {

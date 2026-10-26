@@ -32,6 +32,47 @@ afterEach(async()=>{runner?.stopDarkFactoryRunner();await new Promise(r=>setTime
  if(originalPoll===undefined)delete process.env.PRISM_DARK_FACTORY_POLL_MS;else process.env.PRISM_DARK_FACTORY_POLL_MS=originalPoll;
 });
 describe('Factory runner respects local execution authority',()=>{
+ it('advances discovered owned work when publishing the discovery result fails',async()=>{
+  state.backend.factoryPollScope='publish-failure';
+  const job=pipeline('PENDING',folder);state.backend.rows.set(job.id,job);await authority.registerPipelineAuthority(job);
+  const claim=config.claimFactoryPoll;
+  const scan=vi.spyOn(config,'claimFactoryPoll').mockImplementation(async(...args)=>{
+   const lease=await claim(...args);if(!lease)return null;
+   return {...lease,finish:async()=>{runner.stopDarkFactoryRunner();throw new Error('SQLITE_BUSY publishing discovery');}};
+  });
+  const error=vi.spyOn(console,'error').mockImplementation(()=>{});
+  try {
+   await runner.startDarkFactoryRunner();
+   await vi.waitFor(()=>expect(state.backend.rows.get(job.id).current_step).toBe('PLAN'),{timeout:200,interval:5});
+   expect(state.invoke).toHaveBeenCalledTimes(1);
+   expect(state.backend.getPipeline).toHaveBeenCalledWith(job.id,job.user_id);
+   expect(error).toHaveBeenCalledWith(expect.stringContaining('SQLITE_BUSY publishing discovery'));
+  }finally{scan.mockRestore();error.mockRestore();}
+ });
+ it.each(['owned','foreign','terminal'])('uses preserved hints after a failed scan without bypassing %s work validation',async kind=>{
+  state.backend.factoryPollScope='failed-scan-hint';
+  const job=pipeline('PENDING',folder);
+  state.backend.rows.set(job.id,kind==='terminal'?{...job,status:'FAILED'}:job);
+  if(kind!=='foreign')await authority.registerPipelineAuthority(job);
+  const scan=await config.claimFactoryPoll('failed-scan-hint',1);
+  await scan!.finish('busy',Date.now(),[job]);
+  state.backend.listPipelines.mockRejectedValue(new Error('Factory pipelines unavailable'));
+  state.backend.savePipeline.mockImplementation(async(p:PipelineState)=>{state.backend.rows.set(p.id,{...p});if(p.current_step==='PLAN')runner.stopDarkFactoryRunner();});
+  const error=vi.spyOn(console,'error').mockImplementation(()=>{});
+  try {
+   await runner.startDarkFactoryRunner();
+   if(kind==='owned'){
+    await vi.waitFor(()=>expect(state.backend.rows.get(job.id).current_step).toBe('PLAN'),{timeout:200,interval:5});
+    expect(state.invoke).toHaveBeenCalledTimes(1);
+    expect(state.backend.getPipeline).toHaveBeenCalledWith(job.id,job.user_id);
+   }else{
+    await new Promise(r=>setTimeout(r,60));
+    expect(state.invoke).not.toHaveBeenCalled();expect(state.backend.savePipeline).not.toHaveBeenCalled();
+   }
+   expect(state.backend.listPipelines).toHaveBeenCalled();
+   expect(error).toHaveBeenCalledWith(expect.stringContaining('Factory pipelines unavailable'));
+  }finally{error.mockRestore();}
+ });
  it('executes an authorized shared hint even when the discovery clock is not due',async()=>{
   state.backend.factoryPollScope='cached-active';
   const job=pipeline('PENDING',folder);state.backend.rows.set(job.id,job);await authority.registerPipelineAuthority(job);
