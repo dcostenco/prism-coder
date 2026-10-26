@@ -34,6 +34,11 @@ function fixture() {
             reads.push({ gate: new Promise<void>(resolve => { release = resolve; }), data: snapshot(next) }); return release; } };
 }
 describe('independent image selector journey', () => {
+    it('explains per-request capability checks while unset preserves legacy routing', () => {
+        const f = fixture();
+        expect(f.dom.window.document.getElementById('local-image-boundary')?.textContent).toContain('server image-input capability');
+        expect(f.dom.window.document.getElementById('local-image-boundary')?.textContent).toContain('Leave the backend unset');
+    });
     it('starts unset, auto-detects arbitrary IDs, saves both backends and reopens without coding inheritance', async () => {
         const f = fixture(); await f.load();
         expect(f.field('backend').value).toBe('');
@@ -46,7 +51,7 @@ describe('independent image selector journey', () => {
         expect(f.calls.every(path => path.startsWith('/api/local-coding/image-'))).toBe(true);
         expect(f.field('omlx-metadata').textContent).toContain('Image peak RAM unknown');
         expect(f.field('omlx-metadata').textContent).not.toContain('Cold-load');
-        expect(f.field('saved').textContent).toContain('not used for image execution yet');
+        expect(f.field('saved').textContent).toContain('compatibility on each request');
     });
     it('preserves edits on refresh; missing and unobservable choices stay distinct', async () => {
         const f = fixture(); await f.load(); f.field('omlx-model').value = 'new/vlm'; await f.save();

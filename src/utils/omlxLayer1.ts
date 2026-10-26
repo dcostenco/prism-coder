@@ -1,21 +1,14 @@
 /** Adapt classifier requests to the owned local oMLX provider. */
 import type { LocalGeneration, OmlxRequest } from "./omlxProvider.js";
+import { validateOmlxMessages, type OmlxImageMessage } from "./omlxImages.js";
 
 /** Classifier model used by this adapter. */
 export const OMLX_LAYER1_MODEL = "prism-coder-9b-mlx-8bit";
 /** Maximum adapter request duration, further bounded by the caller's budget. */
 export const OMLX_LAYER1_TIMEOUT_MS = 90_000;
 
-function chatMessages(value: unknown): { role: string; content: string }[] | undefined {
-    if (!Array.isArray(value) || value.length === 0) return undefined;
-    const messages: { role: string; content: string }[] = [];
-    for (const message of value) {
-        if (!message || typeof message !== "object" || "images" in message) return undefined;
-        const { role, content } = message as Record<string, unknown>;
-        if (typeof role !== "string" || typeof content !== "string") return undefined;
-        messages.push({ role, content });
-    }
-    return messages;
+function chatMessages(value: unknown): OmlxImageMessage[] | undefined {
+    try { return validateOmlxMessages(value); } catch { return undefined; }
 }
 
 /** Handle chat requests through the supplied local generator with cache storage disabled. */
@@ -33,7 +26,7 @@ export function omlxLayer1Fetch(generate: (request: OmlxRequest) => Promise<Loca
         if (!messages || typeof maxTokens !== "number" || !Number.isInteger(maxTokens) || maxTokens <= 0)
             return new Response(null, { status: 400 });
         const temperature = body.options?.temperature;
-        const result = await generate({ messages, maxTokens, temperature: typeof temperature === "number" ? temperature : 0,
+        const result = await generate({ messages: messages as OmlxRequest["messages"], maxTokens, temperature: typeof temperature === "number" ? temperature : 0,
             timeoutMs, think: body.think === true, cacheStore: false });
         return result.ok
             ? Response.json({ done: true, done_reason: result.doneReason, message: { role: "assistant", content: result.text } })
