@@ -836,15 +836,15 @@ describe('Ethics Enforcement — Sanctions & Embargoed Countries', () => {
         expect(EMBARGOED_COUNTRIES).toContain('BY');
     });
 
-    test('North Korea, Iran, Syria, Cuba are embargoed', () => {
+    test('North Korea, Iran, Cuba are embargoed', () => {
         expect(EMBARGOED_COUNTRIES).toContain('KP');
         expect(EMBARGOED_COUNTRIES).toContain('IR');
-        expect(EMBARGOED_COUNTRIES).toContain('SY');
         expect(EMBARGOED_COUNTRIES).toContain('CU');
     });
 
-    test('at least 5 embargoed countries', () => {
-        expect(EMBARGOED_COUNTRIES.length).toBeGreaterThanOrEqual(5);
+    test('Syria is restricted to civilian use rather than blanket-embargoed', () => {
+        expect(EMBARGOED_COUNTRIES).not.toContain('SY');
+        expect(RESTRICTED_COUNTRIES).toContain('SY');
     });
 
     test('restricted countries include Russia and China', () => {

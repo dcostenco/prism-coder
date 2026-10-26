@@ -99,20 +99,20 @@ export type SanctionsListSource =
     | 'canada_sema'         // Canada SEMA
     | 'australia_dfat';     // Australia DFAT Sanctions
 
-/** Countries under comprehensive US/EU sanctions — hard-blocked at registration */
+/** Countries excluded under Prism policy — registration prohibited. */
 export const EMBARGOED_COUNTRIES: string[] = [
     'CU',  // Cuba
     'IR',  // Iran
     'KP',  // North Korea (DPRK)
-    'SY',  // Syria
     'BY',  // Belarus — facilitating sanctions evasion
 ];
 
-/** Countries under partial/sectoral sanctions — require enhanced due diligence.
- *  Users CAN register but military/defense/government projects are blocked.
- *  Civilian software development is permitted. */
+/** Countries requiring enhanced due diligence and civilian-only restrictions.
+ *  Policy permits civilian registration; military/defense/government security use is prohibited.
+ *  Applicable end-user and export controls still apply. */
 export const RESTRICTED_COUNTRIES: string[] = [
     'RU',  // Russia — civilian use allowed, military/defense blocked
+    'SY',  // Syria — civilian use subject to targeted sanctions and export controls
     'CN',  // China — sector-specific (military end-use)
     'VE',  // Venezuela
     'MM',  // Myanmar
