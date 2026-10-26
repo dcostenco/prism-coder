@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOmlxTarget, OmlxError, omlxModelTarget, type OmlxRequest } from "../../src/utils/omlxProvider.js";
 import { ownedOmlxGenerate, recoverOwnedOmlx, splitThinking } from "../../src/utils/omlxOwned.js";
+import { assertControlRequestSize, registerOperation } from "../../src/utils/omlxControl.js";
 import { completes, endsWithoutTerminal, fakeControl, record, runsUntilCancel, sse, terminal } from "./omlxControlFake.js";
 
 const MODEL = "synthetic-model";
@@ -17,6 +18,16 @@ const markerPath = (directory: string) => join(directory, createHash("sha256").u
 const marker = (directory: string) => JSON.parse(readFileSync(markerPath(directory), "utf8"));
 
 describe("owned oMLX generation through the control routes", () => {
+    it.each([400,413])("reports image registration %s as input failure only after idle proof", async status => {
+        const directory = state();
+        const fake = fakeControl({ register: status, status: () => ({ status:404 }), cancel: () => ({ status:409 }) });
+        const png = Buffer.from([137,80,78,71,13,10,26,10]).toString("base64");
+        const result = await ownedOmlxGenerate(target(), { ...REQUEST, messages:[{role:"user",content:"image",images:[png]}] },
+            new AbortController().signal, { fetchImpl:fake.fetchImpl,stateDirectory:directory,drainBudgetMs:300 });
+        expect(result).toEqual({ ok:false,reason:status===413 ? "omlx_image_too_large" : "omlx_image_invalid" });
+        expect(marker(directory).active).toBe(false);
+        expect(fake.calls.some(call=>call.path.endsWith("/execute"))).toBe(false);
+    });
     it("registers then executes a UUIDv7 operation, streams the text, and clears the marker on a stopped terminal", async () => {
         const directory = state(); const fake = fakeControl({ script: completes("Hello world") });
         const result = await ownedOmlxGenerate(target(), REQUEST, new AbortController().signal, { fetchImpl: fake.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 });
@@ -31,6 +42,84 @@ describe("owned oMLX generation through the control routes", () => {
         expect((fake.calls[1].body as { admission_timeout_ms: number }).admission_timeout_ms).toBeGreaterThanOrEqual(1);
         expect(marker(directory)).toMatchObject({ active: false, provider_started: true, operation_id: operationId });
         expect(fake.cancels()).toBe(0);
+    });
+
+    it("forwards the image capability settings digest to register and execute", async () => {
+        const digest = "e".repeat(64);
+        const on = createOmlxTarget(URL_, MODEL, 65536, "synthetic-provider-key", undefined, digest);
+        const fake = fakeControl({ script: completes("digest") });
+        expect(await ownedOmlxGenerate(on, REQUEST, new AbortController().signal,
+            { fetchImpl: fake.fetchImpl, stateDirectory: state(), drainBudgetMs: 300 })).toMatchObject({ ok: true, text: "digest" });
+        expect((fake.calls[0].body as any).expected_settings_sha256).toBe(digest);
+        expect((fake.calls[1].body as any).expected_settings_sha256).toBe(digest);
+        expect((fake.calls[0].body as any).request).not.toHaveProperty("expected_settings_sha256");
+    });
+
+    it("reports a stale settings refusal from registration only after the marker is inactive", async () => {
+        const digest = "f".repeat(64); const directory = state();
+        const base = fakeControl();
+        const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+            const method = init?.method ?? "GET";
+            if (method === "PUT") return new Response(JSON.stringify({ error: { code: "settings_changed" } }),
+                { status: 409, headers: { "X-Prism-Control-Error": "settings_changed" } });
+            if (method === "POST") return new Response("", { status: 409 });
+            return base.fetchImpl(input, init);
+        }) as typeof fetch;
+        const result = await ownedOmlxGenerate(createOmlxTarget(URL_, MODEL, 65536, "synthetic-provider-key", undefined, digest), REQUEST,
+            new AbortController().signal, { fetchImpl, stateDirectory: directory, drainBudgetMs: 300 });
+        expect(result).toEqual({ ok: false, reason: "omlx_settings_changed" });
+        expect(marker(directory).active).toBe(false);
+        expect(base.calls.some(call => call.path.endsWith("/execute"))).toBe(false);
+    });
+
+    it("reports a stale settings refusal from execute without reading an error body", async () => {
+        const digest = "1".repeat(64); const directory = state();
+        const base = fakeControl();
+        const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+            const path = new URL(String(input)).pathname;
+            if (path.endsWith("/execute")) {
+                const response = new Response("ignored", { status: 409, headers: { "X-Prism-Control-Error": "settings_changed" } });
+                Object.defineProperty(response, "body", { get() { throw Error("error_body_must_not_be_read"); } });
+                response.text = async () => { throw Error("error_body_must_not_be_read"); };
+                return response;
+            }
+            if ((init?.method ?? "GET") === "POST") return new Response("", { status: 409 });
+            return base.fetchImpl(input, init);
+        }) as typeof fetch;
+        const result = await ownedOmlxGenerate(createOmlxTarget(URL_, MODEL, 65536, "synthetic-provider-key", undefined, digest), REQUEST,
+            new AbortController().signal, { fetchImpl, stateDirectory: directory, drainBudgetMs: 300 });
+        expect(result).toEqual({ ok: false, reason: "omlx_settings_changed" });
+        expect(marker(directory).active).toBe(false);
+    });
+
+    it("keeps quarantine precedence when stale settings arrives with an unproved claim", async () => {
+        const base = fakeControl(); const directory = state();
+        const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+            const path = new URL(String(input)).pathname;
+            if (path.endsWith("/execute")) return new Response(null, { status: 409, headers: { "X-Prism-Control-Error": "settings_changed" } });
+            if (path.endsWith("/cancel")) return new Response(null, { status: 409 });
+            if ((init?.method ?? "GET") === "GET") {
+                const parts = path.split("/");
+                return Response.json({ version: 3, claim_state: "claimed", job_id: decodeURIComponent(parts.at(-3)!), operation_id: decodeURIComponent(parts.at(-1)!) });
+            }
+            return base.fetchImpl(input, init);
+        }) as typeof fetch;
+        const result = await ownedOmlxGenerate(createOmlxTarget(URL_, MODEL, 65536, "synthetic-provider-key", undefined, "2".repeat(64)), REQUEST,
+            new AbortController().signal, { fetchImpl, stateDirectory: directory, drainBudgetMs: 300 });
+        expect(result).toEqual({ ok: false, reason: "omlx_stop_unproved" });
+        expect(marker(directory).active).toBe(true);
+    });
+
+    it("counts the settings expectation in the envelope before any registration fetch", () => {
+        const fake = fakeControl();
+        const body = { model: MODEL, input: "", max_output_tokens: 1 };
+        const maximumBodyBytes = 256 * 1024;
+        const overhead = Buffer.byteLength(JSON.stringify({ request: body, admission_timeout_ms: Number.MAX_SAFE_INTEGER }), "utf8");
+        body.input = "x".repeat(maximumBodyBytes - overhead);
+        expect(() => assertControlRequestSize(body)).not.toThrow();
+        expect(() => registerOperation({ base: URL_, apiKey: randomUUID(), fetchImpl: fake.fetchImpl },
+            "job", "operation", body, "a".repeat(64))).toThrow("omlx_control_request_too_large");
+        expect(fake.calls).toEqual([]);
     });
 
     it("leaves unset sampling and thinking out of the request, while an explicit zero is sent", async () => {

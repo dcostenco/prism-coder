@@ -19,6 +19,7 @@ const WATCH_INTERVAL_MS = 1_000;
 const MAX_INSPECTION_BYTES = 256 * 1024;
 const MAX_ADVERTISED_MODELS = 1024;
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
+const SETTINGS_SHA256 = /^[a-f0-9]{64}$/;
 const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const NATIVE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const NATIVE_UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -37,15 +38,21 @@ const DEVICE_PENDING_NAME = /^[a-f0-9]{64}\.[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-
 export class OmlxError extends Error {
     constructor(public readonly reason: string) { super(reason); this.name = "OmlxError"; }
 }
-export interface OmlxTarget { readonly url: string; readonly model: string; readonly contextTokens: number }
+export interface OmlxTarget { readonly url: string; readonly model: string; readonly contextTokens: number;
+    readonly imageLimits?: Readonly<import("./omlxImages.js").OmlxImageLimits>; readonly settingsSha256?: string }
 const credentials = new WeakMap<OmlxTarget, string>();
 type NativeBinding = { jobId: string; operationId: string };
 const nativeIdProtocols = new WeakSet<OmlxTarget>();
 const nativeIdBindings = new WeakMap<OmlxTarget, Map<string, NativeBinding>>();
 const MAX_NATIVE_BINDINGS = 256;
 /** Authentication is deliberately absent from every serializable target. */
-export function createOmlxTarget(url: string, model: string, contextTokens: number, apiKey: string): OmlxTarget {
-    const target = Object.freeze({ url: loopbackUrl(url), model, contextTokens });
+export function createOmlxTarget(url: string, model: string, contextTokens: number, apiKey: string,
+    imageLimits?: import("./omlxImages.js").OmlxImageLimits, settingsSha256?: string): OmlxTarget {
+    if (settingsSha256 !== undefined && (typeof settingsSha256 !== "string" || !SETTINGS_SHA256.test(settingsSha256)))
+        throw new OmlxError("omlx_settings_unavailable");
+    const target = Object.freeze({ url: loopbackUrl(url), model, contextTokens,
+        ...(imageLimits ? { imageLimits: Object.freeze({ ...imageLimits }) } : {}),
+        ...(settingsSha256 ? { settingsSha256 } : {}) });
     credentials.set(target, apiKey);
     return target;
 }
@@ -56,7 +63,7 @@ export function omlxModelTarget(target: OmlxTarget, model: string): OmlxTarget {
     return createOmlxTarget(target.url, model, target.contextTokens, apiKey);
 }
 export interface OmlxRequest {
-    messages: readonly { role: string; content: string }[];
+    messages: readonly { role: string; content: string; images?: readonly string[] }[];
     maxTokens: number; temperature?: number; timeoutMs: number; think?: boolean;
     profile?: Record<string, unknown>;
     /** false: ask the provider not to keep this request's prompt cache (a
@@ -67,6 +74,7 @@ export type LocalGeneration = { ok: true; text: string; thinking?: string; doneR
     | { ok: false; reason: string };
 export interface OmlxRuntime {
     detect: (model?: string) => Promise<OmlxTarget>;
+    detectImage?: (model: string, deadlineMs?: number) => Promise<OmlxTarget>;
     acquire: (port?: number, options?: OmlxLeaseOptions) => Promise<() => Promise<void>>;
     /** Clear this provider's stale owned-job marker on proof, or refuse. */
     recover?: (target: OmlxTarget) => Promise<void>;
@@ -360,6 +368,34 @@ export async function detectOmlx(requestedModel?: string, options: OmlxConnectio
         // Never relay raw server bodies, URLs, headers, or exception messages.
         throw new OmlxError("omlx_detection_unavailable");
     }
+}
+
+/** Server-owned input contract. This does not certify visual accuracy. */
+export async function detectOmlxImage(model: string, options: OmlxConnectionOptions = {}): Promise<OmlxTarget> {
+    const { settings, profiles, apiKey, url, directory, managed } = await connection(options);
+    const selected = selectedModel(model, managed ? { ...(options.env ?? process.env), OMLX_MODEL: undefined } : options.env ?? process.env, settings, profiles);
+    const configured = await configuredContext(selected.model, selected.models, settings, directory);
+    const fetchImpl = options.fetchImpl ?? fetch;
+    const timeout = () => {
+        const remaining = Math.min(PROBE_TIMEOUT_MS, (options.deadlineMs ?? Infinity) - Date.now());
+        if (remaining <= 0 || options.signal?.aborted) throw new OmlxError("omlx_inspection_timeout");
+        return remaining;
+    };
+    const advertised = await inspectionJson(`${url}/models`, apiKey, fetchImpl, timeout(), "GET", options.signal);
+    if (!Array.isArray(advertised.data) || !advertised.data.some(entry => entry?.id === model)) throw new OmlxError("omlx_model_not_advertised");
+    const endpoint = omlxControlEndpoint(createOmlxTarget(url, model, configured, apiKey), fetchImpl)!;
+    const cap = await inspectionJson(`${endpoint.base}/models/${encodeURIComponent(model)}/image-input`,
+        endpoint.apiKey, endpoint.fetchImpl, timeout(), "GET", options.signal);
+    const limits = cap.limits as Record<string, unknown> | undefined;
+    if (cap.schema !== "owned-png-v1" || cap.model_id !== model || cap.enabled !== true
+        || !Number.isSafeInteger(cap.context_tokens) || (cap.context_tokens as number) <= 0
+        || typeof cap.settings_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(cap.settings_sha256)
+        || !limits || typeof limits !== "object" || Array.isArray(limits)
+        || !["images", "image_bytes", "total_image_bytes", "image_side", "image_pixels", "total_image_pixels"]
+            .every(key => Number.isSafeInteger(limits[key]) && (limits[key] as number) > 0))
+        throw new OmlxError("omlx_image_input_unavailable");
+    return createOmlxTarget(url, model, Math.min(configured, cap.context_tokens as number), endpoint.apiKey,
+        limits as unknown as import("./omlxImages.js").OmlxImageLimits, cap.settings_sha256 as string);
 }
 
 export interface OmlxInspection {
@@ -794,13 +830,16 @@ export async function hasOmlxControl(target: OmlxTarget, fetchImpl: typeof fetch
     } catch { return false; }
 }
 
-export function createOmlxRuntime(resources: Pick<OmlxRuntime, "listLoaded" | "unload" | "generate"> & Pick<Partial<OmlxRuntime>, "detect" | "recover">,
+export function createOmlxRuntime(resources: Pick<OmlxRuntime, "listLoaded" | "unload" | "generate"> & Pick<Partial<OmlxRuntime>, "detect" | "detectImage" | "recover">,
     ollamaUrl: string): OmlxRuntime {
     return { ...resources, reclaim: reclaimIdleOmlxMemory, detect: async model => {
         // An explicit local request also keeps its classification/resource
         // probes on loopback, even if ordinary Ollama has a remote base URL.
         loopbackUrl(ollamaUrl, "");
         return (resources.detect ?? detectOmlx)(model);
+    }, detectImage: async (model, deadlineMs) => {
+        loopbackUrl(ollamaUrl, "");
+        return resources.detectImage ? resources.detectImage(model, deadlineMs) : detectOmlxImage(model, { deadlineMs });
     }, acquire: acquireOmlxLease };
 }
 
@@ -849,7 +888,8 @@ export async function guardedOmlxGenerate(runtime: OmlxRuntime, target: OmlxTarg
                 .finally(() => { checking = false; });
         }, watchIntervalMs);
         const result = await runtime.generate(target, request, controller.signal)
-            .catch(() => ({ ok: false as const, reason: controller.signal.aborted ? "timeout" : "omlx_network" }));
+            .catch(error => ({ ok: false as const, reason: controller.signal.aborted ? "timeout"
+                : error instanceof OmlxError ? error.reason : "omlx_network" }));
         if (stopped || controller.signal.aborted || Date.now() >= deadline) return { ok: false, reason: "timeout" };
         if (!result.ok) return result;
         const final = await contention();

@@ -5,6 +5,7 @@ import type { LocalGeneration, OmlxRequest } from "../../src/utils/omlxProvider.
 
 const OLLAMA = "http://127.0.0.1:11434";
 const PROMPT = "write a function that sorts an array of numbers";
+const PNG = Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]).toString("base64");
 
 function recording(answer: (request: OmlxRequest) => Promise<LocalGeneration> | LocalGeneration) {
     const requests: OmlxRequest[] = [];
@@ -91,7 +92,10 @@ describe("Layer 1 on explicit oMLX: callLayer1 through the owned-path adapter", 
         expect((await chat({ messages, options: { num_predict: 1.5 } })).status).toBe(400);
         expect((await chat({ messages, options: { num_predict: 0 } })).status).toBe(400);
         expect((await chat({ messages: [{ role: "user", content: "x", images: ["AA=="] }], options: { num_predict: 16 } })).status).toBe(400);
-        expect((await chat({ messages: [], options: { num_predict: 16 } })).status).toBe(400);
         expect(requests).toHaveLength(0);
+        expect((await chat({ messages: [{ role: "user", content: "x", images: [PNG] }], options: { num_predict: 16 } })).status).toBe(200);
+        expect(requests[0]?.messages).toEqual([{ role: "user", content: "x", images: [PNG] }]);
+        expect((await chat({ messages: [], options: { num_predict: 16 } })).status).toBe(400);
+        expect(requests).toHaveLength(1);
     });
 });
