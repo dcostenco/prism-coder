@@ -19,10 +19,16 @@ function headers(endpoint: ControlEndpoint, body: boolean): Record<string, strin
     return { Authorization: `Bearer ${endpoint.apiKey}`, ...(body ? { "Content-Type": "application/json" } : {}) };
 }
 
+function requestBody(value: unknown): string {
+    const text = JSON.stringify(value);
+    if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) throw new Error("omlx_control_request_too_large");
+    return text;
+}
+
 async function call(endpoint: ControlEndpoint, method: string, url: string, body?: unknown): Promise<ControlReply> {
     const response = await endpoint.fetchImpl(url, {
         method, headers: headers(endpoint, body !== undefined),
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(body === undefined ? {} : { body: requestBody(body) }),
         redirect: "error", signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
     });
     const text = await response.text();
@@ -33,7 +39,13 @@ async function call(endpoint: ControlEndpoint, method: string, url: string, body
 }
 
 export function registerOperation(endpoint: ControlEndpoint, jobId: string, operationId: string, request: unknown): Promise<ControlReply> {
+    // Reserve the larger execute envelope before creating a durable operation.
+    assertControlRequestSize(request);
     return call(endpoint, "PUT", operationUrl(endpoint, jobId, operationId), { request });
+}
+
+export function assertControlRequestSize(request: unknown): void {
+    requestBody({ request, admission_timeout_ms: Number.MAX_SAFE_INTEGER });
 }
 
 export function cancelOperation(endpoint: ControlEndpoint, jobId: string, operationId: string): Promise<ControlReply> {
@@ -50,7 +62,7 @@ export async function* executeOperation(endpoint: ControlEndpoint, jobId: string
     admissionTimeoutMs: number, signal: AbortSignal): AsyncGenerator<ControlEvent> {
     const response = await endpoint.fetchImpl(operationUrl(endpoint, jobId, operationId, "/execute"), {
         method: "POST", headers: headers(endpoint, true),
-        body: JSON.stringify({ request, admission_timeout_ms: admissionTimeoutMs }),
+        body: requestBody({ request, admission_timeout_ms: admissionTimeoutMs }),
         redirect: "error", signal,
     });
     if (!response.ok || !response.body) throw new Error(`omlx_control_http_${response.status}`);

@@ -17,6 +17,16 @@ const markerPath = (directory: string) => join(directory, createHash("sha256").u
 const marker = (directory: string) => JSON.parse(readFileSync(markerPath(directory), "utf8"));
 
 describe("owned oMLX generation through the control routes", () => {
+    it.each([400,413])("reports image registration %s as input failure only after idle proof", async status => {
+        const directory = state();
+        const fake = fakeControl({ register: status, status: () => ({ status:404 }), cancel: () => ({ status:409 }) });
+        const png = Buffer.from([137,80,78,71,13,10,26,10]).toString("base64");
+        const result = await ownedOmlxGenerate(target(), { ...REQUEST, messages:[{role:"user",content:"image",images:[png]}] },
+            new AbortController().signal, { fetchImpl:fake.fetchImpl,stateDirectory:directory,drainBudgetMs:300 });
+        expect(result).toEqual({ ok:false,reason:status===413 ? "omlx_image_too_large" : "omlx_image_invalid" });
+        expect(marker(directory).active).toBe(false);
+        expect(fake.calls.some(call=>call.path.endsWith("/execute"))).toBe(false);
+    });
     it("registers then executes a UUIDv7 operation, streams the text, and clears the marker on a stopped terminal", async () => {
         const directory = state(); const fake = fakeControl({ script: completes("Hello world") });
         const result = await ownedOmlxGenerate(target(), REQUEST, new AbortController().signal, { fetchImpl: fake.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 });

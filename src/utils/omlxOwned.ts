@@ -3,7 +3,8 @@
  * run is treated as stopped only on the provider's durable proof. */
 import { OmlxError, inferenceJobStateDirectory, omlxControlEndpoint, type LocalGeneration, type OmlxRequest, type OmlxTarget } from "./omlxProvider.js";
 import { recoverOwnedJob, runOwnedJob, type OwnedAction, type OwnedObservation, type OwnedProviderRequest } from "./omlxJobControl.js";
-import { cancelOperation, executeOperation, operationStatus, registerOperation, type ControlEndpoint } from "./omlxControl.js";
+import { assertControlRequestSize, cancelOperation, executeOperation, operationStatus, registerOperation, type ControlEndpoint } from "./omlxControl.js";
+import { responsesInput } from "./omlxImages.js";
 
 const OWNED_DRAIN = Object.freeze({ budgetMs: 10_000, pollIntervalMs: 250 });
 const OWNED_MAX_JOB_MS = 900_000;
@@ -57,7 +58,7 @@ function responsesRequest(target: OmlxTarget, request: OmlxRequest): Record<stri
     const kwargs = (request.profile?.chat_template_kwargs ?? undefined) as Record<string, unknown> | undefined;
     return {
         model: target.model,
-        input: request.messages.map(message => ({ role: message.role, content: message.content })),
+        input: responsesInput(request.messages),
         max_output_tokens: request.maxTokens,
         ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
         ...(request.cacheStore === false ? { prompt_cache_retention: "none" } : {}),
@@ -74,7 +75,11 @@ async function ownedAction(endpoint: ControlEndpoint, target: OmlxTarget, reques
     const body = responsesRequest(target, request);
     if (owned.signal.aborted) throw new Error("owned_job_stopped");
     const registered = await registerOperation(endpoint, owned.jobId, owned.operationId, body);
-    if (registered.status !== 200) throw new Error(`omlx_control_register_${registered.status}`);
+    if (registered.status !== 200) {
+        if (request.messages.some(message => message.images?.length) && [400, 413].includes(registered.status))
+            throw new OmlxError(registered.status === 413 ? "omlx_image_too_large" : "omlx_image_invalid");
+        throw new Error(`omlx_control_register_${registered.status}`);
+    }
     if (owned.signal.aborted) throw new Error("owned_job_stopped"); // never execute after a cancel
     const stream = new AbortController();
     let readLimit: ReturnType<typeof setTimeout> | undefined;
@@ -116,6 +121,15 @@ async function ownedAction(endpoint: ControlEndpoint, target: OmlxTarget, reques
         completionTokens: typeof finished?.completion_tokens === "number" ? finished.completion_tokens : undefined }, acknowledgement };
 }
 
+/** Check the complete execute envelope before creating any owned operation. */
+export function validateOmlxRequestEnvelope(target: OmlxTarget, request: OmlxRequest): void {
+    try { assertControlRequestSize(responsesRequest(target, request)); }
+    catch (error) {
+        throw new OmlxError(error instanceof Error && error.message === "omlx_control_request_too_large"
+            ? "omlx_image_too_large" : "omlx_image_invalid");
+    }
+}
+
 /** Owned generation through oMLX's control routes, inside one owned job.
  * Returns only once no marker write can follow; the caller already holds the
  * device lease, so acquiring here is a no-op and the marker is the quarantine. */
@@ -130,18 +144,30 @@ export async function ownedOmlxGenerate(target: OmlxTarget, request: OmlxRequest
     const endpoint = omlxControlEndpoint(target, fetchImpl);
     if (!endpoint) return { ok: false, reason: "omlx_auth_unavailable" };
     if (Object.keys(request.profile ?? {}).some(key => key !== "chat_template_kwargs")) return { ok: false, reason: "omlx_profile_unsupported" };
+    if (request.messages.some(message => message.images?.length)) {
+        try { validateOmlxRequestEnvelope(target, request); }
+        catch (error) { return { ok: false, reason: (error as OmlxError).reason }; }
+    }
     const budgetMs = Math.min(OWNED_MAX_JOB_MS, Math.max(1, Math.floor(request.timeoutMs)));
+    let inputFailure: string | undefined;
     const result = await runOwnedJob({
         providerId: target.url, stateDirectory, budgetMs, signal,
         drain: { ...OWNED_DRAIN, ...(options.drainBudgetMs === undefined ? {} : { budgetMs: options.drainBudgetMs }) },
         acquire: async () => async () => {},
         observe: marker => observeOwned(endpoint, target.url, marker),
-    }, context => context.providerAction(owned => ownedAction(endpoint, target, request, owned, context.remainingMs,
-        options.cancelReadMs ?? OWNED_CANCEL_READ_MS)));
+    }, context => context.providerAction(async owned => {
+        try { return await ownedAction(endpoint, target, request, owned, context.remainingMs,
+            options.cancelReadMs ?? OWNED_CANCEL_READ_MS); }
+        catch (error) {
+            if (error instanceof OmlxError && ["omlx_image_invalid", "omlx_image_too_large"].includes(error.reason)) inputFailure = error.reason;
+            throw error;
+        }
+    }));
     const quarantined = await (result.settled ?? Promise.resolve(result.quarantined));
     if (result.status === "success" && result.value) return result.value;
     if (result.status === "provider_busy") return { ok: false, reason: "omlx_provider_busy" };
     if (quarantined) return { ok: false, reason: "omlx_stop_unproved" };
+    if (inputFailure && result.status !== "deadline" && result.status !== "cancelled") return { ok: false, reason: inputFailure };
     return { ok: false, reason: result.status === "deadline" || result.status === "cancelled" ? "timeout" : "omlx_control_error" };
 }
 

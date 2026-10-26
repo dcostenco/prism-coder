@@ -20,7 +20,8 @@
  * tier gating, and HIPAA audit are enforced in one place.
  */
 
-import { ownedOmlxGenerate, recoverOwnedOmlx } from "../utils/omlxOwned.js";
+import { ownedOmlxGenerate, recoverOwnedOmlx, validateOmlxRequestEnvelope } from "../utils/omlxOwned.js";
+import { validateOmlxImageInput } from "../utils/omlxImages.js";
 import { OmlxError, createOmlxRuntime, guardedOmlxGenerate, omlxModelTarget, withInferenceResourceLease, withOllamaResourceLease, OMLX_MIN_AVAILABLE_BYTES, type OmlxRuntime, type OmlxTarget } from "../utils/omlxProvider.js";
 import { OMLX_LAYER1_MODEL, omlxLayer1Fetch } from "../utils/omlxLayer1.js";
 import { createHash } from "node:crypto";
@@ -56,7 +57,7 @@ import {
     passesCodingQualityGate,
 } from "../utils/codingQualityPolicy.js";
 import { checkInputSafety, checkOutputSafety } from "../utils/safetyGate.js";
-import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, keywordBackstop, windowsOf, reservedCategory, MAX_CLASSIFIER_PROMPT_LENGTH, layer1ClassifierContent, secondReadExclusion, type Layer1Verdict, type SecondReadExclusionPolicy, type ClassifierInputPolicy } from "../utils/layer1.js";
+import { callLayer1 as defaultCallLayer1, classifyDeterministicLayer1, keywordBackstop, windowsOf, reservedCategory, MAX_CLASSIFIER_PROMPT_LENGTH, layer1ClassifierContent, IMAGE_CONTENT_SCREEN, secondReadExclusion, type Layer1Verdict, type SecondReadExclusionPolicy, type ClassifierInputPolicy } from "../utils/layer1.js";
 import { getSecondReadPolicy, getAnswerCheckPolicy, getClassifierInputPolicy } from "../utils/inferencePolicy.js";
 import { pseudonymizeForCheck } from "../utils/pseudonymize.js";
 import { answerGroundingBytes, answerGroundingContent, parseGroundingVerdict, arithmeticSlips, arithmeticCorrection, ANSWER_GROUNDING_OUTPUT_TOKENS, ANSWER_GROUNDING_THINK, ANSWER_GROUNDING_THINK_TOKENS, ANSWER_GROUNDING_TIMEOUT_MS, ANSWER_GROUNDING_RETRY_TIMEOUT_MS, ANSWER_GROUNDING_FOLLOW_UP_TOKENS, type AnswerGroundingVerdict, type AnswerCheckPolicy } from "../utils/answerGrounding.js";
@@ -66,6 +67,8 @@ import { getStorage } from "../storage/index.js";
 import { getSetting } from "../storage/configStorage.js";
 import { localCodingPreference, resolveLocalCodingBackend, type LocalCodingPreference } from "../utils/localCodingPreference.js";
 import { isLocalCodingModelId, resolveLocalCodingModel, type LocalCodingRole } from "../utils/localCodingSettings.js";
+import { readLocalImageSettings } from "../utils/localImageSettings.js";
+import { LOCAL_IMAGE_ERRORS, LOCAL_IMAGE_SELECTION_MS, localImageRequestProblem, resolveLocalImageSelection } from "../utils/localImageSelection.js";
 import { selectedOllamaCodingModel } from "../utils/ollamaCodingModels.js";
 import { LOCAL_CODING_SELECTION_MS, selectUnassignedCodingModel } from "../utils/localCodingModelSelection.js";
 import {
@@ -641,7 +644,7 @@ export const PRISM_INFER_TOOL: Tool = {
     },
     description:
         "Run local inference using the saved coding backend preference. Explicit local_backend overrides it. oMLX uses authenticated " +
-        "loopback oMLX for text-only code/reviewer drafts, without Ollama/cloud substitution or final sign-off. " +
+        "loopback oMLX for coding drafts or selected images, without backend substitution or final sign-off. " +
         "Owns model selection across 27B / 9B / 4B / 2B using an explicit `model_ceiling` or " +
         "the caller's `task_complexity`, then validates loaded memory size, model context, " +
         "entitlements, installed models, and free RAM at call time. " +
@@ -668,8 +671,7 @@ export const PRISM_INFER_TOOL: Tool = {
                 items: { type: "string" },
                 maxItems: MAX_INFER_IMAGES,
                 description:
-                    "Screenshots or frames: absolute file paths or raw base64. Needs a vision-capable " +
-                    "tier; tiers without vision are skipped, never shown the prompt without the image.",
+                    "Absolute image paths/base64; local vision only.",
             },
             prompt: {
                 type: "string",
@@ -678,11 +680,9 @@ export const PRISM_INFER_TOOL: Tool = {
             messages: {
                 type: "array",
                 description:
-                    "Prior accepted text turns of THIS conversation, oldest first; prompt is current. " +
-                    "Brief, not transcript. A paid Synalux plan feature; plan sets turn/character caps. " +
-                    "Unavailable: multi_turn_not_in_plan. Malformed/over-cap: refused with caps named, " +
-                    "never trimmed. Safety-screened, charged to context, forwarded on cloud escalation " +
-                    "(32 KB cap), never stored.",
+                    "Prior accepted user/assistant text turns, oldest first; prompt is current. A paid Synalux plan feature; caps apply. " +
+                    "Unsupported: multi_turn_not_in_plan. Over cap: history_over_plan_cap; never trimmed. " +
+                    "Safety-screened and sent on permitted cloud escalation (32 KB cap), never stored.",
                 items: {
                     type: "object",
                     properties: {
@@ -715,6 +715,8 @@ export const PRISM_INFER_TOOL: Tool = {
                 description: "Installed code model override; unavailable models refuse.",
             },
             local_role: { type: "string", enum: ["coder", "reviewer"], description: "Coding role; default coder." },
+            image_backend: { type: "string", enum: ["omlx", "ollama"], description: "Image backend; oMLX checked, Ollama disabled. Requires images." },
+            image_model: { type: "string", description: "Exact image model override; no fallback." },
             model_ceiling: {
                 type: "string",
                 enum: ["27b", "9b", "4b", "2b"],
@@ -871,6 +873,8 @@ export interface PrismInferArgs {
      *  8: images are the dominant context cost and an unbounded list silently
      *  blows the tier context budget. */
     images?: string[];
+    image_backend?: "omlx" | "ollama";
+    image_model?: string;
     /** Prior turns, oldest first. Structurally validated (≤ ABSOLUTE_MULTI_TURN,
      *  user/assistant only, text only); the plan's caps are enforced in
      *  runInfer from entitlements. Never persisted. */
@@ -971,6 +975,7 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
         if (a.images.some((i: unknown) => typeof i !== "string" || !i.trim())) return false;
     }
     if (a.messages !== undefined && messagesProblem(a.messages) !== null) return false;
+    if (localImageRequestProblem(a) !== null) return false;
     if (a.local_backend !== undefined && a.local_backend !== "ollama" && a.local_backend !== "omlx") return false;
     if (a.local_role !== undefined && (a.mode !== "code" || (a.local_role !== "coder" && a.local_role !== "reviewer") || (Array.isArray(a.images) && a.images.length > 0))) return false;
     if (a.local_model !== undefined && (a.mode !== "code" || !isLocalCodingModelId(a.local_model) || (Array.isArray(a.images) && a.images.length > 0))) return false;
@@ -2079,6 +2084,7 @@ export interface PrismInferResult {
  * Accepts injected dependencies so tests can mock Ollama / synalux.
  */
 export interface InferDeps {
+    imagePreference?: typeof readLocalImageSettings;
     codingPreference?: typeof localCodingPreference;
     codingModel?: typeof selectUnassignedCodingModel;
     omlx?: OmlxRuntime;
@@ -2213,9 +2219,48 @@ const _evictionMutex = (() => {
 
 export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<PrismInferResult> {
     const started = Date.now();
+    let imageSelection: { backend: "omlx" | "ollama"; model: string } | null = null;
+    const imageDeadline = started + (args.timeout_ms ?? 300_000);
+    // The async settings read must not let callers retarget this request.
+    if (args.images?.length) args = { ...args, images: [...args.images] };
     // Backend and model are independent overrides. Resolve before taking a
     // device lease; never infer the reviewer role from prose or system text.
     const intercepted = [...(args.messages ?? []).filter(turn => turn.role === "user").map(turn => turn.content), args.prompt].some(text => Boolean(checkInputSafety(text)));
+    if (!intercepted) {
+        let imageRefusal = localImageRequestProblem(args);
+        if (!imageRefusal && args.images?.length && args.local_backend === undefined) {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+                let settings: unknown = {};
+                if (!(args.image_backend && args.image_model)) {
+                    const remaining = Math.min(LOCAL_IMAGE_SELECTION_MS, (args.timeout_ms ?? Infinity) - (Date.now() - started));
+                    if (!Number.isFinite(remaining) || remaining <= 0) throw new Error(LOCAL_IMAGE_ERRORS.timeout);
+                    const deadline = Date.now() + remaining;
+                    settings = await Promise.race([
+                        Promise.resolve().then(() => deps.imagePreference?.() ?? {}),
+                        new Promise<never>((_resolve, reject) => {
+                            timer = setTimeout(() => reject(new Error(LOCAL_IMAGE_ERRORS.timeout)), remaining);
+                        }),
+                    ]);
+                    if (Date.now() >= deadline) throw new Error(LOCAL_IMAGE_ERRORS.timeout);
+                }
+                imageSelection = resolveLocalImageSelection(args, settings);
+                if (imageSelection?.backend === "ollama") imageRefusal = LOCAL_IMAGE_ERRORS.ollama;
+                if (!imageSelection && args.timeout_ms !== undefined)
+                    args = { ...args, timeout_ms: Math.max(1, imageDeadline - Date.now()) };
+            } catch (error) {
+                imageRefusal = error instanceof Error && Object.values(LOCAL_IMAGE_ERRORS).some(reason => reason === error.message)
+                    ? error.message : LOCAL_IMAGE_ERRORS.preference;
+            } finally { clearTimeout(timer); }
+        }
+        if (imageRefusal) {
+            if (args.escalation === "report") return { output: "", backend: "refused", model_picked: null,
+                ram_free_mb: Math.round(deps.freemem() / 1024 ** 2), latency_ms: Date.now() - started, used_cloud: false,
+                attempts: [{ tier: "image_selection", reason: imageRefusal }],
+                gate_outcome: { status: "refused", reason: imageRefusal, served_anyway: false } };
+            throw new Error(`prism_infer: ${imageRefusal}`);
+        }
+    }
     if (!intercepted && args.mode === "code" && !args.images?.length && deps.codingPreference && !(args.local_backend && args.local_model)) {
         let preference: LocalCodingPreference;
         try { preference = await deps.codingPreference(args.local_role ?? "coder", args.local_backend); }
@@ -2272,19 +2317,24 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         const defaults = CODING_ROLE_DEFAULTS[args.local_backend === "omlx" ? "omlx" : "ollama"];
         args = { ...args, max_tokens: args.max_tokens ?? defaults.maxTokens, timeout_ms: args.timeout_ms ?? defaults.timeoutMs };
     }
-    return withInferenceResourceLease(args.local_backend === "omlx", async () => {
+    const usesOmlx = args.local_backend === "omlx" || imageSelection?.backend === "omlx";
+    return withInferenceResourceLease(usesOmlx, async () => {
         let releaseDevice: (() => Promise<void>) | undefined;
-        const runtime = args.local_backend === "omlx" ? deps.omlx : undefined;
+        const runtime = usesOmlx ? deps.omlx : undefined;
         // Every owned generation, so the device outlives its marker writes.
         const generations = new Set<Promise<unknown>>();
-        const scopedDeps = runtime ? { ...deps, omlx: { ...runtime, detect: async (model?: string) => {
-            const target = await runtime.detect(model);
-            releaseDevice = await runtime.acquire(undefined, { recoveryProviderId: target.url });
+        const acquireTarget = async (targetPromise: Promise<OmlxTarget>) => {
+            const target = await targetPromise;
+            releaseDevice = await runtime!.acquire(undefined, { recoveryProviderId: target.url });
             // Before Layer 1 or anything else: a stale marker of this provider
             // is cleared on proof, or the call is refused.
-            await runtime.recover?.(target);
+            await runtime!.recover?.(target);
             return target;
-        }, ...(runtime.reclaim ? { reclaim: (...args: Parameters<NonNullable<OmlxRuntime["reclaim"]>>) => {
+        };
+        const scopedDeps = runtime ? { ...deps, omlx: { ...runtime,
+            detect: (model?: string) => acquireTarget(runtime.detect(model)),
+            ...(runtime.detectImage ? { detectImage: (model: string, deadlineMs?: number) => acquireTarget(runtime.detectImage!(model, deadlineMs)) } : {}),
+            ...(runtime.reclaim ? { reclaim: (...args: Parameters<NonNullable<OmlxRuntime["reclaim"]>>) => {
             const reclaim = runtime.reclaim!(...args);
             generations.add(reclaim.catch(() => undefined));
             return reclaim;
@@ -2294,7 +2344,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             return generation;
         } } } : deps;
         try {
-            return { ...await runInferWithResources(args, scopedDeps), latency_ms: Date.now() - started };
+            return { ...await runInferWithResources(args, scopedDeps,
+                imageSelection?.backend === "omlx" ? { model: imageSelection.model, deadline: imageDeadline } : undefined), latency_ms: Date.now() - started };
         } finally {
             // guardedOmlxGenerate may answer first; the lease waits for the jobs.
             await Promise.all(generations);
@@ -2303,7 +2354,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     });
 }
 
-async function runInferWithResources(args: PrismInferArgs, deps: InferDeps): Promise<PrismInferResult> {
+async function runInferWithResources(args: PrismInferArgs, deps: InferDeps, image?: { model: string; deadline: number }): Promise<PrismInferResult> {
     const t0 = Date.now();
     const temperature = args.temperature ?? 0;
 
@@ -2332,12 +2383,12 @@ async function runInferWithResources(args: PrismInferArgs, deps: InferDeps): Pro
         };
     }
 
-    return args.local_backend === "omlx"
-        ? runInferAfterInputSafety(args, deps, t0, temperature)
+    return args.local_backend === "omlx" || image
+        ? runInferAfterInputSafety(args, deps, t0, temperature, image)
         : withOllamaResourceLease(() => runInferAfterInputSafety(args, deps, t0, temperature));
 }
 
-async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t0: number, temperature: number): Promise<PrismInferResult> {
+async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t0: number, temperature: number, image?: { model: string; deadline: number }): Promise<PrismInferResult> {
     // ── Entitlement enforcement ──────────────────────────────────
     // Resolved per call (§5.5) — getEntitlements dedupes via a 5-min cache.
     // Free users without auth get 4b ceiling, 50 calls/day, 512 max tokens.
@@ -2569,10 +2620,13 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     // Already-loaded models don't need RAM headroom — they're reusing
     // memory Ollama allocated previously.
     let omlxTarget: OmlxTarget | undefined;
-    const omlxRuntime = args.local_backend === "omlx" ? deps.omlx : undefined;
-    if (args.local_backend === "omlx") {
-        if (mode !== "code" || args.images?.length) throw new Error("prism_infer: oMLX requires text-only code mode");
-        if (!omlxRuntime) throw new Error("prism_infer: omlx_runtime_unavailable");
+    const omlxRuntime = args.local_backend === "omlx" || image ? deps.omlx : undefined;
+    if (args.local_backend === "omlx" || image) {
+        if (!image && (mode !== "code" || args.images?.length)) throw new Error("prism_infer: oMLX requires text-only code mode");
+        if (!omlxRuntime) {
+            if (image && wantReport) return refusedResult("omlx_runtime_unavailable");
+            throw new Error("prism_infer: omlx_runtime_unavailable");
+        }
         // No trusted binding maps an oMLX model to a logical tier, and the
         // configured Flash model outweighs every Ollama tier. Below the top
         // ceiling, from the caller or the plan, refuse before any network,
@@ -2582,14 +2636,17 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         if (clampCeiling(args.model_ceiling ?? "27b", ent.model_ceiling) !== "27b") {
             attempts.push({ tier: "omlx", reason: "omlx_model_ceiling" });
             if (wantReport) return refusedResult("omlx_model_ceiling");
-            throw new Error("prism_infer: omlx_model_ceiling; explicit oMLX needs the top model ceiling from model_ceiling and the plan");
+            throw new Error("prism_infer: omlx_model_ceiling; selected oMLX coding and image models need the top model ceiling until a trusted tier binding is available");
         }
         if (!Number.isInteger(localMaxTokens) || localMaxTokens <= 0
             || !Number.isFinite(temperature) || temperature < 0
             || !validOmlxTimeout(args.timeout_ms)) {
             throw new Error("prism_infer: invalid bounded oMLX generation parameters");
         }
-        try { omlxTarget = await omlxRuntime.detect(args.local_model); }
+        try {
+            if (image && !omlxRuntime.detectImage) throw new OmlxError("omlx_image_input_unavailable");
+            omlxTarget = image ? await omlxRuntime.detectImage!(image.model, image.deadline) : await omlxRuntime.detect(args.local_model);
+        }
         catch (error) {
             const reason = error instanceof OmlxError ? error.reason : "omlx_detection_unavailable";
             attempts.push({ tier: "omlx", reason });
@@ -2622,7 +2679,11 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         }
     }
     // oMLX classification and generation share one bounded deadline.
-    const omlxDeadline = Date.now() + (args.timeout_ms ?? 300_000);
+    const omlxDeadline = image?.deadline ?? Date.now() + (args.timeout_ms ?? 300_000);
+    if (Date.now() >= omlxDeadline) {
+        if (wantReport) return refusedResult("timeout");
+        throw new Error("prism_infer: timeout");
+    }
     // Observe contention without starting Ollama or evicting another job.
     // Guarded reads keep monitoring for newcomers throughout generation.
     if (omlxTarget && omlxRuntime) {
@@ -2659,15 +2720,44 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     // Oversized captures cost 16-28s of the 9b's time and buy no accuracy
     // (see imageDownscale.ts for the measurements); anything already under the
     // cap passes through untouched.
-    let resolvedImages: string[] | undefined =
-        args.images?.length ? await prepareImages(args.images) : undefined;
-    if (resolvedImages?.length) {
+    let resolvedImages: string[] | undefined;
+    try { resolvedImages = args.images?.length ? await prepareImages(args.images) : undefined; }
+    catch (error) {
+        if (!image) throw error;
+        if (wantReport) return refusedResult("omlx_image_invalid");
+        throw new OmlxError("omlx_image_invalid");
+    }
+    // oMLX preserves the supplied PNG bytes and applies its own server limits.
+    // The existing Ollama resizing policy remains specific to that path.
+    if (resolvedImages?.length && !image) {
         try {
             const r = await downscaleImages(resolvedImages, resolveMaxImageEdge(), await productionDownscaleDeps());
             resolvedImages = r.images;
             if (r.notes.length) debugLog(`[prism_infer] downscaled ${r.notes.join(", ")}`);
         } catch {
             // fail open: the original images are still in resolvedImages
+        }
+    }
+    if (image && resolvedImages?.length && omlxTarget) {
+        try {
+            if (!omlxTarget.imageLimits) throw new OmlxError("omlx_image_input_unavailable");
+            validateOmlxImageInput(resolvedImages, omlxTarget.imageLimits);
+            const system = args.system === undefined
+                ? [VISION_SYSTEM_PROMPT, clinicalPlanScaffold(args.prompt)].filter(Boolean).join("\n\n") : args.system;
+            const request = { maxTokens: localMaxTokens, timeoutMs: 1, temperature, think: args.think };
+            validateOmlxRequestEnvelope(omlxTarget, { ...request, messages: [
+                { role: "system", content: system }, ...(args.messages ?? []), { role: "user", content: args.prompt, images: resolvedImages }] });
+            // All history windows are bounded by this full-context envelope.
+            validateOmlxRequestEnvelope(omlxTarget, { ...request, maxTokens: 16, think: false, cacheStore: false, messages: [
+                { role: "system", content: "" }, { role: "user", content: layer1ClassifierContent(screenedText(args)), images: resolvedImages }] });
+            for (const png of resolvedImages) validateOmlxRequestEnvelope(omlxTarget, { ...request, maxTokens: 8, think: false, cacheStore: false,
+                messages: [{ role: "system", content: "" }, { role: "user", content: IMAGE_CONTENT_SCREEN, images: [png] }] });
+        } catch (error) {
+            const reason = error instanceof OmlxError ? error.reason : error instanceof Error && error.message === "omlx_image_too_large"
+                ? "omlx_image_too_large" : "omlx_image_invalid";
+            attempts.push({ tier: "image_input", reason });
+            if (wantReport) return refusedResult(reason);
+            throw new OmlxError(reason);
         }
     }
     if (resolvedImages?.length) {
@@ -2685,6 +2775,8 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         gatedArgs = { ...gatedArgs, route_guard: "local" as const, verify: false };
     }
     let secondReadModel: string | null = null;
+    let imageScreened = false;
+    let imageClassifierFailure: string | undefined;
     if (installed) {
         // Explicit oMLX classifies on its own server: every read (the prompt,
         // history and context windows) goes to the oMLX classifier through the
@@ -2695,15 +2787,18 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         const baseL1 = deps.callLayer1 ?? defaultCallLayer1;
         const generationTarget = omlxTarget, runtime = omlxRuntime;
         const omlxL1Fetch = generationTarget && runtime
-            ? omlxLayer1Fetch(async request =>
-                guardedOmlxGenerate(runtime, omlxModelTarget(generationTarget, OMLX_LAYER1_MODEL), request, deps.freemem),
+            ? omlxLayer1Fetch(async request => {
+                const result = await guardedOmlxGenerate(runtime, image ? generationTarget : omlxModelTarget(generationTarget, OMLX_LAYER1_MODEL), request, deps.freemem);
+                if (image) imageClassifierFailure = result.ok ? undefined : result.reason;
+                return result;
+            },
                 () => omlxDeadline - Date.now())
             : undefined;
         const l1fn = omlxL1Fetch
             ? (...[prompt, url, model, , images, opts]: Parameters<typeof defaultCallLayer1>) =>
                 baseL1(prompt, url, model, omlxL1Fetch, images, opts)
             : baseL1;
-        const l1Model = omlxL1Fetch ? OMLX_LAYER1_MODEL : resolveOllamaName("prism-coder:4b", installed);
+        const l1Model = omlxL1Fetch ? image ? generationTarget!.model : OMLX_LAYER1_MODEL : resolveOllamaName("prism-coder:4b", installed);
         secondReadModel = null;
         // The classifier must be able to SEE what it is classifying. Ollama
         // accepts `images` on a text-only model and silently ignores them
@@ -2713,7 +2808,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         if (resolvedImages?.length) {
             let classifierSees = false;
             try {
-                classifierSees = l1Model ? await (deps.probeVision ?? probeVision)(deps.ollamaUrl, l1Model) : false;
+                classifierSees = image ? Boolean(omlxTarget) : l1Model ? await (deps.probeVision ?? probeVision)(deps.ollamaUrl, l1Model) : false;
             } catch {
                 classifierSees = false;   // unprobeable → treat as blind
             }
@@ -2914,6 +3009,16 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         // Null when the deterministic floor did not fire — the verdict then came
         // from the semantic classifier, which has no per-rule attribution.
         const reservedCat = reservedCategory(screenedText(args));
+        if (image) {
+            imageScreened = l1 === "OBVIOUS_NOT_RESERVED" && imageClassifierFailure === undefined;
+            if (!imageScreened) {
+                const reason = imageClassifierFailure ? ["omlx_image_invalid", "omlx_image_too_large"].includes(imageClassifierFailure)
+                    ? imageClassifierFailure : "layer1_error" : l1 === "ERROR" ? "layer1_error" : "layer1_reserved";
+                attempts.push({ tier: "layer1", reason });
+                if (wantReport) return refusedResult(reason);
+                throw makeReservedRefusal(l1, attempts, reservedCat, false, ledgerMeta());
+            }
+        }
         if ((l1 === "OBVIOUS_RESERVED" || l1 === "UNCERTAIN")
             && (resolvedImages?.length ?? 0) > 0) {
             // Clinical images are PROCESSED, never refused (ruling 2026-08-18:
@@ -3064,6 +3169,11 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         }
     }
     // ── end Layer 1 ─────────────────────────────────────────────────────────
+    if (image && (!imageScreened || Date.now() >= omlxDeadline)) {
+        const reason = imageScreened ? "timeout" : "layer1_image_not_screened";
+        if (wantReport) return refusedResult(reason);
+        throw new Error(`prism_infer: ${reason}`);
+    }
 
     // Explicit oMLX classified on oMLX, so nothing of this call's is in Ollama.
     // Anything resident now belongs to another user: guardedOmlxGenerate
@@ -3071,7 +3181,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     const callLocal: InferDeps["callLocal"] = omlxTarget && omlxRuntime
         ? async (_url, _model, prompt, system, maxTokens, temperature, timeoutMs, think, _images, history) => {
             const messages = [...(system === undefined ? [] : [{ role: "system", content: system }]),
-                ...(history ?? []), { role: "user", content: prompt }];
+                ...(history ?? []), { role: "user", content: prompt, ...(image ? { images: resolvedImages } : {}) }];
             return guardedOmlxGenerate(omlxRuntime, omlxTarget, { messages, maxTokens, temperature: args.temperature, timeoutMs: Math.min(timeoutMs, omlxDeadline - Date.now()), think }, deps.freemem);
         }
         : selectedOllama ? (url, model, prompt, system, maxTokens, temperature, timeoutMs, think, images, history) =>
@@ -3198,7 +3308,8 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         // about an image it never received — so an unprobeable or text-only
         // tier is skipped, not silently used.
         let visionOk: Set<string> | undefined;
-        if (args.images?.length) {
+        if (args.images?.length && omlxTarget) visionOk = new Set([omlxTarget.model]);
+        else if (args.images?.length) {
             const candidates = MODEL_TIERS.slice(ceilStart)
                 .map(t => resolveOllamaName(t.tag, installed))
                 .filter((n): n is string => !!n);
@@ -3751,6 +3862,11 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     }
 
     // ── Local exhausted. Optional synalux fallback. ──
+    if (image) {
+        const reason = attempts.at(-1)?.reason ?? "omlx_generation_failed";
+        if (wantReport) return refusedResult(reason);
+        throw new OmlxError(reason);
+    }
     if (allowCloud) {
         const cloudTimeout = args.timeout_ms ?? 90_000;
         // Images never leave the device: callCloud has no image channel, so a
@@ -3956,6 +4072,7 @@ async function applyVerification(
  */
 export function productionInferDeps(): InferDeps {
     return {
+        imagePreference: readLocalImageSettings,
         codingPreference: localCodingPreference,
         codingModel: selectUnassignedCodingModel,
         omlx: createOmlxRuntime({

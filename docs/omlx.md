@@ -6,13 +6,13 @@ different preference or override it for each task. The model runs locally;
 the host still inspects the output and runs its own checks. Explicit oMLX calls
 never substitute Ollama or cloud inference when admission or generation fails.
 
-## Image model preferences (staged)
+## Image model preferences
 
 The independent image-preferences API stores backend-bound model choices under
 `local_image_config_v1`, separately from coder/reviewer preferences. It starts
 unset and accepts future model IDs without a code change. Its GET and POST path,
 `/api/local-coding/image-preferences`, uses the dashboard's existing access gates.
-Saving returns `selectionApplied: false`: these choices do not yet select an
+Saving returns `selectionApplied: false`: these choices do not enable an
 inference model. In **Settings → Local coding → Image model**, choose an image
 backend and an independently discovered model for each server, then select
 **Save image preference**. The same model may also be assigned to coding roles.
@@ -28,12 +28,35 @@ never establish vision capability. Advertisements show yes, no or unknown with
 their source; they are not controlled-image test results. Reported weights,
 loaded memory and server resident estimates are distinct. Image peak RAM remains
 unknown; available RAM is advisory. Refresh/save never downloads, loads, unloads
-or runs a model, and the image selector does not choose the policy classifier.
+or runs a model, and oMLX image requests use the selected vision model for their local image screen as well as generation.
 
-Existing image routing retains its behavior; controlled oMLX image
-execution still requires its own provider, lifecycle and screening qualification.
-New selected-image execution for Ollama is also deferred. These preferences do
-not enable image execution on either backend.
+Image requests now resolve this independent choice before provider work. An
+explicit `image_backend`/`image_model` pair overrides saved settings; a partial
+override uses only the corresponding saved backend or model. These arguments
+require images and cannot be mixed with `local_backend`, `local_model` or
+`local_role`, even when values match. A missing required selection refuses
+instead of choosing a coding model. Saved-setting reads are bounded to one
+second or a shorter caller timeout; corrupt settings refuse with a sanitized
+reason.
+
+Selected oMLX requests require an authenticated server advertising the
+`owned-png-v1` input contract for that exact model. The server binds image
+admission to captured settings and an exclusive model lease. Changing settings,
+unsupported input, concurrent work or insufficient resources refuses the request.
+Only inline PNG input is supported by this contract: up to four images, 128 KiB
+per image, 192 KiB combined, and a 256 KiB serialized request envelope. The server
+also validates decoding and pixel limits. Image screening and generation receive
+the same prepared bytes; an inconclusive or failed screen refuses. Images and
+content derived from them remain local, including verification and route checks.
+A capability advertisement is not a visual-accuracy certification.
+Until model tiers have a trusted binding, selected oMLX image models require
+the top model ceiling from both the plan and caller, as selected coding models do.
+
+A selected Ollama request refuses with `local_image_backend_not_enabled`.
+With no active image backend or new image arguments, existing image routing
+retains its behavior. An explicit legacy `local_backend: "ollama"` also retains
+that routing and overrides the saved image choice. Text-only coding preferences
+remain independent. Saving a choice does not install, start or load a model.
 
 ## Before installing
 

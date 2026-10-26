@@ -1,6 +1,6 @@
 export function localImagePanelHTML(): string {
     return `<div class="setting-section" style="margin-top:24px">Image model</div>
-      <p class="setting-desc" id="local-image-boundary">Save a separate model for image tasks. This choice is not used for image execution yet; existing image routing stays unchanged. Advertised vision support is not a passed image test.</p>
+      <p class="setting-desc" id="local-image-boundary">Save a separate model for image tasks. oMLX requests check the server image-input capability before inference. Selected Ollama image execution is unavailable. Leave the backend unset to keep existing image routing. Advertised vision support is not a passed image test.</p>
       <form id="local-image-form" onsubmit="saveLocalImages(event)" style="display:grid;gap:12px;margin-top:14px">
         <label class="setting-label" for="local-image-backend">Preferred image backend</label>
         <select class="setting-select" id="local-image-backend" style="width:100%;max-width:100%" disabled><option value="">Not selected</option><option value="omlx">oMLX</option><option value="ollama">Ollama</option></select>
@@ -38,7 +38,7 @@ function renderLocalImageMetadata() {
             (model.weightBytes ? ' · Weights: ' + localCodingGiB(model.weightBytes) : ' · Weight size unknown') +
             (model.loadedBytes ? ' · Loaded memory: ' + localCodingGiB(model.loadedBytes) : model.loaded === true ? ' · Loaded; memory unknown' : model.loaded === false ? ' · Not loaded' : ' · Load status unknown') +
             (model.residentEstimateBytes ? ' · Server resident estimate: ' + localCodingGiB(model.residentEstimateBytes) : '');
-        document.getElementById('local-image-' + backend + '-metadata').textContent = text + ' Image peak RAM unknown; image execution not enabled.' + (localImageErrors[backend] ? ' ' + localImageErrors[backend] : '');
+        document.getElementById('local-image-' + backend + '-metadata').textContent = text + ' Image peak RAM unknown; execution requires a compatible server and current resource checks.' + (localImageErrors[backend] ? ' ' + localImageErrors[backend] : '');
     });
 }
 function imageSelectionChanged(backend) {
@@ -73,7 +73,7 @@ function loadLocalImages(reset) {
         localImageLoaded = true;
         localImageCanManage = data.canManage;
         document.getElementById('local-image-memory').textContent = 'Available RAM: ' + (data.availableMemoryBytes ? localCodingGiB(data.availableMemoryBytes) : 'unknown') + '. Metadata is advisory; image peak RAM is unknown. Refresh never loads, downloads or unloads a model.';
-        document.getElementById('local-image-saved').textContent = 'Saved image backend: ' + (settings.backend || 'not selected') + ' · Choice saved only; not used for image execution yet.';
+        document.getElementById('local-image-saved').textContent = 'Saved image backend: ' + (settings.backend || 'not selected') + ' · oMLX checks compatibility on each request; saving does not load a model.';
         if (!data.canManage) document.getElementById('local-image-error').textContent = 'Open this dashboard on this Mac to change image preferences.';
         renderLocalImageMetadata();
     }).catch(function(error) {
