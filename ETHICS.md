@@ -3,6 +3,8 @@
 > **Effective Date:** April 27, 2026  
 > **Policy Version:** 2.0.0  
 > **Enforcement:** Automated + Human Review
+>
+> **Country classification review:** October 26, 2026
 
 ---
 
@@ -34,7 +36,7 @@ The following uses are **absolutely prohibited** regardless of subscription tier
 
 ## Embargoed Countries
 
-Accounts cannot be created from, billed to, or operated from the following countries under comprehensive US/EU sanctions:
+The following countries are excluded under Prism's country policy:
 
 | Code | Country | Basis |
 |------|---------|-------|
@@ -42,16 +44,22 @@ Accounts cannot be created from, billed to, or operated from the following count
 | 🇨🇺 CU | Cuba | US comprehensive sanctions |
 | 🇮🇷 IR | Iran | US/EU comprehensive sanctions |
 | 🇰🇵 KP | North Korea (DPRK) | UN/US/EU comprehensive sanctions |
-| 🇸🇾 SY | Syria | US/EU comprehensive sanctions |
 
 ### Restricted Countries (Enhanced Due Diligence — Civilian Only)
 
-The following countries **can register** but are subject to **civilian-only restrictions**. Military, defense, intelligence, and government security projects are blocked at the platform level.
+Under this policy, the following countries are eligible for registration subject to **enhanced due diligence and civilian-only restrictions**. Military, defense, intelligence, and government security projects are prohibited.
 
 | Status | Countries |
 |--------|----------|
 | 🇷🇺 Civilian Only | **Russia** — registration allowed, military/defense/intelligence blocked |
+| 🇸🇾 Civilian Only | **Syria** — civilian registration permitted subject to targeted sanctions and applicable export controls |
 | Sector-Restricted | `CN` · `VE` · `MM` · `SD` · `SS` · `LY` · `SO` · `YE` · `ZW` · `CD` · `CF` · `IQ` · `LB` |
+
+Syria is no longer classified here as comprehensively sanctioned. [OFAC confirms that the comprehensive US Syria sanctions ended on July 1, 2025](https://ofac.treasury.gov/faqs/topic/1571); the [EU lifted economic sanctions in May 2025 while retaining security-based and targeted restrictions](https://www.consilium.europa.eu/en/press/press-releases/2026/05/18/syria-council-renews-restrictive-measures-targeting-the-former-al-assad-regime-for-one-year-and-de-lists-certain-entities/).
+
+Civilian use alone does not establish export eligibility. [BIS's Syria guidance](https://www.bis.gov/node/18307) sets out remaining requirements based on item classification, end-user, end-use and eligibility for license exceptions. This policy does not classify Prism as EAR99 or waive those requirements.
+
+These country lists are exported VM policy configuration. Updating them does not by itself verify deployed registration or screening behavior.
 
 **Blocked sectors** for restricted countries:
 - Military · Defense · Intelligence · Law enforcement surveillance
@@ -158,4 +166,4 @@ This policy is designed to comply with:
 
 ---
 
-*Last updated: April 27, 2026 · Policy v2.0.0*
+*Last updated: October 26, 2026 · Policy v2.0.0*
