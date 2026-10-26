@@ -74,8 +74,10 @@ async function ownedAction(endpoint: ControlEndpoint, target: OmlxTarget, reques
     remainingMs: () => number, cancelReadMs: number): Promise<OwnedAction<LocalGeneration>> {
     const body = responsesRequest(target, request);
     if (owned.signal.aborted) throw new Error("owned_job_stopped");
-    const registered = await registerOperation(endpoint, owned.jobId, owned.operationId, body);
+    const registered = await registerOperation(endpoint, owned.jobId, owned.operationId, body, target.settingsSha256);
     if (registered.status !== 200) {
+        if (registered.errorCode === "settings_changed")
+            throw new OmlxError("omlx_settings_changed");
         if (request.messages.some(message => message.images?.length) && [400, 413].includes(registered.status))
             throw new OmlxError(registered.status === 413 ? "omlx_image_too_large" : "omlx_image_invalid");
         throw new Error(`omlx_control_register_${registered.status}`);
@@ -93,7 +95,7 @@ async function ownedAction(endpoint: ControlEndpoint, target: OmlxTarget, reques
     let terminal: unknown;
     try {
         const admission = Math.min(OWNED_MAX_ADMISSION_MS, Math.max(1, Math.floor(remainingMs())));
-        for await (const { event, data } of executeOperation(endpoint, owned.jobId, owned.operationId, body, admission, stream.signal)) {
+        for await (const { event, data } of executeOperation(endpoint, owned.jobId, owned.operationId, body, admission, stream.signal, target.settingsSha256)) {
             const d = data as Record<string, unknown> | undefined;
             if (event === "delta" && typeof d?.text === "string") text += d.text;
             else if (event === "finished") finished = d;
@@ -123,7 +125,7 @@ async function ownedAction(endpoint: ControlEndpoint, target: OmlxTarget, reques
 
 /** Check the complete execute envelope before creating any owned operation. */
 export function validateOmlxRequestEnvelope(target: OmlxTarget, request: OmlxRequest): void {
-    try { assertControlRequestSize(responsesRequest(target, request)); }
+    try { assertControlRequestSize(responsesRequest(target, request), target.settingsSha256); }
     catch (error) {
         throw new OmlxError(error instanceof Error && error.message === "omlx_control_request_too_large"
             ? "omlx_image_too_large" : "omlx_image_invalid");
@@ -159,7 +161,9 @@ export async function ownedOmlxGenerate(target: OmlxTarget, request: OmlxRequest
         try { return await ownedAction(endpoint, target, request, owned, context.remainingMs,
             options.cancelReadMs ?? OWNED_CANCEL_READ_MS); }
         catch (error) {
-            if (error instanceof OmlxError && ["omlx_image_invalid", "omlx_image_too_large"].includes(error.reason)) inputFailure = error.reason;
+            if ((error instanceof OmlxError && ["omlx_image_invalid", "omlx_image_too_large", "omlx_settings_changed"].includes(error.reason))
+                || (error instanceof Error && error.message === "omlx_settings_changed"))
+                inputFailure = error instanceof OmlxError ? error.reason : "omlx_settings_changed";
             throw error;
         }
     }));

@@ -19,6 +19,7 @@ const WATCH_INTERVAL_MS = 1_000;
 const MAX_INSPECTION_BYTES = 256 * 1024;
 const MAX_ADVERTISED_MODELS = 1024;
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
+const SETTINGS_SHA256 = /^[a-f0-9]{64}$/;
 const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const NATIVE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const NATIVE_UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -38,7 +39,7 @@ export class OmlxError extends Error {
     constructor(public readonly reason: string) { super(reason); this.name = "OmlxError"; }
 }
 export interface OmlxTarget { readonly url: string; readonly model: string; readonly contextTokens: number;
-    readonly imageLimits?: Readonly<import("./omlxImages.js").OmlxImageLimits> }
+    readonly imageLimits?: Readonly<import("./omlxImages.js").OmlxImageLimits>; readonly settingsSha256?: string }
 const credentials = new WeakMap<OmlxTarget, string>();
 type NativeBinding = { jobId: string; operationId: string };
 const nativeIdProtocols = new WeakSet<OmlxTarget>();
@@ -46,9 +47,12 @@ const nativeIdBindings = new WeakMap<OmlxTarget, Map<string, NativeBinding>>();
 const MAX_NATIVE_BINDINGS = 256;
 /** Authentication is deliberately absent from every serializable target. */
 export function createOmlxTarget(url: string, model: string, contextTokens: number, apiKey: string,
-    imageLimits?: import("./omlxImages.js").OmlxImageLimits): OmlxTarget {
+    imageLimits?: import("./omlxImages.js").OmlxImageLimits, settingsSha256?: string): OmlxTarget {
+    if (settingsSha256 !== undefined && (typeof settingsSha256 !== "string" || !SETTINGS_SHA256.test(settingsSha256)))
+        throw new OmlxError("omlx_settings_unavailable");
     const target = Object.freeze({ url: loopbackUrl(url), model, contextTokens,
-        ...(imageLimits ? { imageLimits: Object.freeze({ ...imageLimits }) } : {}) });
+        ...(imageLimits ? { imageLimits: Object.freeze({ ...imageLimits }) } : {}),
+        ...(settingsSha256 ? { settingsSha256 } : {}) });
     credentials.set(target, apiKey);
     return target;
 }
@@ -391,7 +395,7 @@ export async function detectOmlxImage(model: string, options: OmlxConnectionOpti
             .every(key => Number.isSafeInteger(limits[key]) && (limits[key] as number) > 0))
         throw new OmlxError("omlx_image_input_unavailable");
     return createOmlxTarget(url, model, Math.min(configured, cap.context_tokens as number), endpoint.apiKey,
-        limits as unknown as import("./omlxImages.js").OmlxImageLimits);
+        limits as unknown as import("./omlxImages.js").OmlxImageLimits, cap.settings_sha256 as string);
 }
 
 export interface OmlxInspection {

@@ -11,11 +11,12 @@ const MODEL = "fixture-vision-model";
 const ENT: PrismEntitlements = { ...FREE_ENTITLEMENTS, plan: "standard", model_ceiling: "27b", features: { ...FREE_ENTITLEMENTS.features, cloud_fallback: false } };
 const args = (extra: Partial<PrismInferArgs> = {}): PrismInferArgs => ({ prompt: "Describe the image", mode: "code", image_backend: "omlx", image_model: MODEL, images: [PNG], cloud_fallback: false, escalation: "report", verify: false, ...extra });
 
-function deps(captured: OmlxRequest[], options: { classifier?: "error" | "uncertain"; noImageCapability?: boolean; slowImageCapability?: boolean; answer?: string } = {}): InferDeps {
-    const target = createOmlxTarget("http://127.0.0.1:8000/v1", MODEL, 65536, randomUUID(), OMLX_IMAGE_LIMITS);
+function deps(captured: OmlxRequest[], options: { classifier?: "error" | "uncertain"; noImageCapability?: boolean; slowImageCapability?: boolean; answer?: string; targets?: ReturnType<typeof createOmlxTarget>[] } = {}): InferDeps {
+    const target = createOmlxTarget("http://127.0.0.1:8000/v1", MODEL, 65536, randomUUID(), OMLX_IMAGE_LIMITS, "a".repeat(64));
     const omlx: OmlxRuntime = {
         detect: vi.fn(async () => target), detectImage: options.noImageCapability ? undefined : vi.fn(async () => { if (options.slowImageCapability) await new Promise(resolve => setTimeout(resolve, 50)); return target; }), acquire: vi.fn(async () => async () => {}), listLoaded: vi.fn(async () => new Set()), unload: vi.fn(async () => {}),
         generate: vi.fn(async (_target, request) => {
+            options.targets?.push(_target);
             expect(_target.model).toBe(MODEL);
             captured.push(request);
             if (request.cacheStore === false) {
@@ -60,13 +61,14 @@ describe("explicit oMLX image request transport", () => {
         expect(d.omlx!.detectImage).not.toHaveBeenCalled(); expect(captured).toHaveLength(0);
     });
     it("forwards exact ordered PNG bytes to the selected model without Ollama/cloud", async () => {
-        const captured: OmlxRequest[] = []; const d = deps(captured);
+        const captured: OmlxRequest[] = []; const targets: ReturnType<typeof createOmlxTarget>[] = []; const d = deps(captured, { targets });
         const result = await runInfer(args({ images: [PNG, PNG] }), d);
         expect(result, JSON.stringify(result)).toMatchObject({ backend: "omlx", model_picked: MODEL, output: "image answer", used_cloud: false });
         const attached = captured.map(r => r.messages.find(m => m.images)?.images);
         expect(attached).toEqual([[PNG], [PNG], [PNG, PNG], [PNG, PNG]]);
         expect(d.listTags).not.toHaveBeenCalled(); expect(d.listLoaded).not.toHaveBeenCalled(); expect(d.probeVision).not.toHaveBeenCalled();
         expect(d.callLocal).not.toHaveBeenCalled(); expect(d.callCloud).not.toHaveBeenCalled();
+        expect(targets).toHaveLength(4); expect(new Set(targets.map(t => t.settingsSha256))).toEqual(new Set(["a".repeat(64)]));
     });
 
     it("uses saved image selection and the real Layer1 path", async () => {

@@ -25,7 +25,7 @@ describe("server-owned image capability", () => {
     it("requires authenticated exact model capability and clamps context to server", async () => {
         const f = await fixture();
         const target = await detectOmlxImage(MODEL, { home: f.home, env: {}, fetchImpl: f.fetchImpl });
-        expect(target).toMatchObject({ model: MODEL, contextTokens: 8192 });
+        expect(target).toMatchObject({ model: MODEL, contextTokens: 8192, settingsSha256: "a".repeat(64) });
         expect(JSON.stringify(target)).not.toContain(f.key);
         expect(vi.mocked(f.fetchImpl).mock.calls[1][0]).toBe("http://127.0.0.1:8000/prism-control/v1/models/vendor%2Ffuture-vision/image-input");
         expect(vi.mocked(f.fetchImpl).mock.calls.every(([, init]) => (init?.headers as Record<string, string>).Authorization === "Bearer " + f.key)).toBe(true);

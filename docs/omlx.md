@@ -160,6 +160,8 @@ based on upstream v0.7.1 and including the idle-unload API. A changed managed
 server pin uses a separate Python runtime and preserves valid downloaded models
 and existing settings. A running server keeps its current runtime until an
 explicit restart after its active jobs finish; setup does not restart it.
+This pin predates `owned-png-v1`; the image path requires a compatible server
+until a separately validated installer update selects the merged image support.
 
 Terminal equivalents after installing Prism:
 

@@ -8,7 +8,7 @@ const MAX_BODY_BYTES = 256 * 1024;
 const EVENTS = new Set(["claimed", "delta", "finished", "terminal", "unresolved"]);
 
 export interface ControlEndpoint { readonly base: string; readonly apiKey: string; readonly fetchImpl: typeof fetch }
-export interface ControlReply { status: number; body: unknown }
+export interface ControlReply { status: number; body: unknown; errorCode?: "settings_changed" }
 export interface ControlEvent { event: string; data: unknown }
 
 function operationUrl(endpoint: ControlEndpoint, jobId: string, operationId: string, suffix = ""): string {
@@ -35,17 +35,21 @@ async function call(endpoint: ControlEndpoint, method: string, url: string, body
     if (text.length > MAX_BODY_BYTES) return { status: response.status, body: undefined };
     let parsed: unknown;
     try { parsed = text ? JSON.parse(text) : undefined; } catch { parsed = undefined; }
-    return { status: response.status, body: parsed };
+    return { status: response.status, body: parsed,
+        ...(response.status === 409 && response.headers.get("X-Prism-Control-Error") === "settings_changed"
+            ? { errorCode: "settings_changed" as const } : {}) };
 }
 
-export function registerOperation(endpoint: ControlEndpoint, jobId: string, operationId: string, request: unknown): Promise<ControlReply> {
+export function registerOperation(endpoint: ControlEndpoint, jobId: string, operationId: string, request: unknown, settingsSha256?: string): Promise<ControlReply> {
     // Reserve the larger execute envelope before creating a durable operation.
-    assertControlRequestSize(request);
-    return call(endpoint, "PUT", operationUrl(endpoint, jobId, operationId), { request });
+    assertControlRequestSize(request, settingsSha256);
+    return call(endpoint, "PUT", operationUrl(endpoint, jobId, operationId), {
+        request, ...(settingsSha256 ? { expected_settings_sha256: settingsSha256 } : {}) });
 }
 
-export function assertControlRequestSize(request: unknown): void {
-    requestBody({ request, admission_timeout_ms: Number.MAX_SAFE_INTEGER });
+export function assertControlRequestSize(request: unknown, settingsSha256?: string): void {
+    requestBody({ request, admission_timeout_ms: Number.MAX_SAFE_INTEGER,
+        ...(settingsSha256 ? { expected_settings_sha256: settingsSha256 } : {}) });
 }
 
 export function cancelOperation(endpoint: ControlEndpoint, jobId: string, operationId: string): Promise<ControlReply> {
@@ -59,13 +63,18 @@ export function operationStatus(endpoint: ControlEndpoint, jobId: string, operat
 /** Execute and yield the stream's events in order. Only the five event names
  * the coordinator sends are accepted; anything else ends the read. */
 export async function* executeOperation(endpoint: ControlEndpoint, jobId: string, operationId: string, request: unknown,
-    admissionTimeoutMs: number, signal: AbortSignal): AsyncGenerator<ControlEvent> {
+    admissionTimeoutMs: number, signal: AbortSignal, settingsSha256?: string): AsyncGenerator<ControlEvent> {
     const response = await endpoint.fetchImpl(operationUrl(endpoint, jobId, operationId, "/execute"), {
         method: "POST", headers: headers(endpoint, true),
-        body: requestBody({ request, admission_timeout_ms: admissionTimeoutMs }),
+        body: requestBody({ request, admission_timeout_ms: admissionTimeoutMs,
+            ...(settingsSha256 ? { expected_settings_sha256: settingsSha256 } : {}) }),
         redirect: "error", signal,
     });
-    if (!response.ok || !response.body) throw new Error(`omlx_control_http_${response.status}`);
+    if (!response.ok || !response.body) {
+        if (response.status === 409 && response.headers.get("X-Prism-Control-Error") === "settings_changed")
+            throw new Error("omlx_settings_changed");
+        throw new Error(`omlx_control_http_${response.status}`);
+    }
     const decoder = new TextDecoder();
     let buffer = "";
     for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
