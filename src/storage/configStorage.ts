@@ -4,6 +4,7 @@ import { homedir } from "os";
 import { existsSync } from "fs";
 import { mkdirUsableSync } from "../utils/usableDirectory.js";
 import { createHash, randomUUID } from "node:crypto";
+import type { PipelineState } from './interface.js';
 
 const PROTO_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
@@ -111,6 +112,11 @@ export async function initConfigStorage() {
     )`);
     await client.execute(`CREATE TABLE IF NOT EXISTS dark_factory_execution_leases (
       pipeline_id TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at INTEGER NOT NULL, reclaimed INTEGER NOT NULL DEFAULT 0
+    )`);
+    await client.execute(`CREATE TABLE IF NOT EXISTS dark_factory_poll_schedule (
+      scope TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at INTEGER NOT NULL,
+      next_poll_at INTEGER NOT NULL, idle_ms INTEGER NOT NULL, wake_version INTEGER NOT NULL,
+      snapshot_json TEXT NOT NULL DEFAULT '[]'
     )`);
 
     // Preload all rows into the cache so subsequent reads are zero-cost.
@@ -450,6 +456,70 @@ export interface FactoryAuthorityPipeline {
 }
 export const DEFAULT_FACTORY_LEASE_MS = 30_000;
 export const FACTORY_LEASE_RENEW_MS = 10_000;
+export const MAX_FACTORY_IDLE_POLL_MS = 5 * 60_000;
+
+/** Discovery scheduling only; this never grants pipeline execution authority. */
+export async function claimFactoryPoll(scope: string, baseMs: number, now = Date.now()) {
+  if (!scope || !Number.isSafeInteger(baseMs) || baseMs < 1) throw new Error('Invalid Factory polling schedule');
+  await initConfigStorage();
+  const token = randomUUID();
+  const result = await getClient().execute({
+    sql: `INSERT INTO dark_factory_poll_schedule (scope,token,expires_at,next_poll_at,idle_ms,wake_version)
+      VALUES (?,?,?,0,0,0) ON CONFLICT(scope) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at
+      WHERE dark_factory_poll_schedule.expires_at<=? AND dark_factory_poll_schedule.next_poll_at<=?
+      RETURNING idle_ms,wake_version`,
+    args: [scope, token, now + DEFAULT_FACTORY_LEASE_MS, now, now],
+  });
+  if (result.rows.length !== 1) return null;
+  const previousIdle = Number(result.rows[0].idle_ms);
+  const wakeVersion = Number(result.rows[0].wake_version);
+  return {
+    renew: async (at = Date.now()) => {
+      const renewed = await getClient().execute({sql: `UPDATE dark_factory_poll_schedule SET expires_at=? WHERE scope=? AND token=? AND expires_at>?`, args: [at + DEFAULT_FACTORY_LEASE_MS, scope, token, at]});
+      return renewed.rowsAffected === 1;
+    },
+    finish: async (outcome: 'idle' | 'busy' | 'failed', at = Date.now(), candidates: PipelineState[] = []) => {
+      // Only a successful, empty scan may lengthen the idle interval.
+      const delay = outcome === 'idle' ? Math.min(Math.max(baseMs, MAX_FACTORY_IDLE_POLL_MS), Math.max(baseMs, previousIdle * 2)) : baseMs;
+      // A job submitted during discovery must survive this scan's completion.
+      await getClient().execute({
+        sql: `UPDATE dark_factory_poll_schedule SET token='',expires_at=0,
+          next_poll_at=CASE WHEN wake_version=? THEN ? ELSE 0 END,
+          idle_ms=CASE WHEN wake_version=? THEN ? ELSE 0 END,
+          snapshot_json=CASE WHEN ?='failed' THEN snapshot_json ELSE ? END
+          WHERE scope=? AND token=? AND expires_at>?`,
+        // A failed scan must retry without idle backoff. Active workers use
+        // the shared snapshot even when the next discovery scan is not due.
+        args: [wakeVersion, outcome === 'failed' ? 0 : now + delay, wakeVersion, outcome === 'idle' ? delay : 0,
+          outcome, JSON.stringify(candidates), scope, token, at],
+      });
+    },
+  };
+}
+
+/** A discovery hint only; callers must still verify receipts and claim an execution lease. */
+export async function readFactoryPollSnapshot(scope: string): Promise<{ candidates: PipelineState[]; scanning: boolean }> {
+  await initConfigStorage();
+  const result = await getClient().execute({sql: `SELECT snapshot_json,expires_at FROM dark_factory_poll_schedule WHERE scope=?`, args: [scope]});
+  if (result.rows.length === 0) return {candidates: [], scanning: false};
+  const candidates: unknown = JSON.parse(String(result.rows[0].snapshot_json));
+  if (!Array.isArray(candidates) || candidates.some(p => !p || typeof p !== 'object'
+    || typeof p.id !== 'string' || typeof p.project !== 'string' || typeof p.user_id !== 'string'
+    || typeof p.spec !== 'string' || !Number.isFinite(Date.parse(p.started_at))
+    || !Number.isFinite(Date.parse(p.updated_at)) || !['PENDING','RUNNING'].includes(p.status))) {
+    throw new Error('Invalid Factory discovery snapshot');
+  }
+  return {candidates: candidates as PipelineState[], scanning: Number(result.rows[0].expires_at) > Date.now()};
+}
+
+export async function wakeFactoryPolling(scope: string): Promise<void> {
+  await initConfigStorage();
+  await getClient().execute({
+    sql: `INSERT INTO dark_factory_poll_schedule (scope,token,expires_at,next_poll_at,idle_ms,wake_version)
+      VALUES (?,'',0,0,0,1) ON CONFLICT(scope) DO UPDATE SET next_poll_at=0,idle_ms=0,wake_version=dark_factory_poll_schedule.wake_version+1`,
+    args: [scope],
+  });
+}
 function authorityFingerprint(p: FactoryAuthorityPipeline): string {
   const parsed = Date.parse(p.started_at);
   if (!Number.isFinite(parsed)) throw new Error("Invalid Factory pipeline start time");

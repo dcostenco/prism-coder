@@ -27,6 +27,7 @@ import {
 } from './pipelineDefinitions.js';
 import { debugLog } from '../utils/logger.js';
 import { registerPipelineAuthority } from '../darkfactory/executionAuthority.js';
+import { wakeFactoryPolling } from '../storage/configStorage.js';
 
 // ─── Start Pipeline Handler ─────────────────────────────────
 
@@ -96,6 +97,15 @@ export async function sessionStartPipelineHandler(args: unknown) {
       throw error;
     }
 
+    let wakeFailed = false;
+    if (storage.factoryPollScope) {
+      try { await wakeFactoryPolling(storage.factoryPollScope); }
+      catch (error) {
+        wakeFailed = true;
+        console.error(`[PipelineHandler] Pipeline ${pipelineId} is queued but discovery wake failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
     debugLog(`[PipelineHandler] Pipeline ${pipelineId} created for project=${project} objective="${objective.slice(0, 80)}"`);
 
     return {
@@ -111,7 +121,7 @@ export async function sessionStartPipelineHandler(args: unknown) {
           `**Max Iterations:** ${spec.maxIterations}`,
           `**Status:** PENDING (queued for runner pickup)`,
           ``,
-          `The pipeline is now executing autonomously in the background.`,
+          wakeFailed ? `The pipeline is queued. Background pickup may be delayed; do not resubmit.` : `The pipeline is now executing autonomously in the background.`,
           `Use \`session_check_pipeline_status\` with the pipeline ID to poll for results.`,
           `Use \`session_abort_pipeline\` to cancel the pipeline.`,
         ].join('\n'),

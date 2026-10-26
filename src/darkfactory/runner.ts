@@ -36,6 +36,7 @@ import { VerificationRunner } from '../verification/runner.js';
 import { computeRubricHash, type ValidationResult, type VerificationConfig, type VerificationHarness } from '../verification/schema.js';
 import { VerificationGateError } from '../errors.js';
 import { registerPipelineAuthority, isPipelineAuthorized, claimPipelineLease, FACTORY_LEASE_RENEW_MS } from './executionAuthority.js';
+import { claimFactoryPoll, readFactoryPollSnapshot, DEFAULT_FACTORY_LEASE_MS } from '../storage/configStorage.js';
 
 type ExecutionLease = NonNullable<Awaited<ReturnType<typeof claimPipelineLease>>>;
 const LEASED_STORAGE_WRITES = new Set(['savePipeline', 'saveVerificationHarness', 'saveVerificationRun']);
@@ -56,6 +57,8 @@ let runnerInterval: ReturnType<typeof setInterval> | null = null;
 
 /** Tracks whether the runner is currently processing a tick (prevents overlap) */
 let tickInProgress = false;
+let startupRecoveryPending = true;
+const DISCOVERY_FOLLOW_INTERVAL_MS = 25;
 
 // ─── Startup Initialization ──────────────────────────────────
 
@@ -64,10 +67,9 @@ let tickInProgress = false;
  * Marks any stale RUNNING pipelines as FAILED — they were orphaned
  * by a previous server crash or OOM event.
  */
-async function recoverStalePipelines(): Promise<void> {
+async function recoverStalePipelines(storage: StorageBackend, runningPipelines?: PipelineState[]): Promise<void> {
   try {
-    const storage = await getStorage();
-    const runningPipelines = await storage.listPipelines(undefined, 'RUNNING', PRISM_USER_ID);
+    runningPipelines ??= await storage.listPipelines(undefined, 'RUNNING', PRISM_USER_ID);
 
     if (runningPipelines.length === 0) {
       debugLog('[DarkFactory] No stale pipelines found on startup.');
@@ -91,6 +93,7 @@ async function recoverStalePipelines(): Promise<void> {
           error: 'Unexpected Server Termination: pipeline was RUNNING when server restarted.',
           current_step: pipeline.current_step,
         });
+        pipeline.status = 'FAILED';
         await lease.acknowledgeRecovery();
         debugLog(`[DarkFactory] Pipeline ${pipeline.id} marked FAILED (was RUNNING on restart).`);
       } catch (err) {
@@ -148,12 +151,10 @@ function startHeartbeatInterval(pipelineId: string, userId: string, lease: Execu
  * This catches pipelines where the LLM call silently hung or the runner
  * crashed mid-execution without updating status.
  */
-async function sweepZombies(): Promise<void> {
+async function sweepZombies(storage: StorageBackend, running: PipelineState[]): Promise<void> {
   try {
-    const storage = await getStorage();
-    const running = await storage.listPipelines(undefined, 'RUNNING', PRISM_USER_ID);
-
     for (const pipeline of running) {
+      if (pipeline.status !== 'RUNNING') continue;
       if (SafetyController.isHeartbeatLapsed(pipeline)) {
         if (!(await locallyAuthorized(pipeline, storage))) continue;
         const lease = await claimPipelineLease(pipeline);
@@ -168,6 +169,7 @@ async function sweepZombies(): Promise<void> {
             status: 'FAILED',
             error: `Zombie pipeline: no heartbeat for ${SafetyController.HEARTBEAT_TIMEOUT_MS / 1000}s.`,
           });
+          pipeline.status = 'FAILED';
           await lease.acknowledgeRecovery();
         } catch {
           // Status guard may fire — pipeline was already terminated
@@ -583,33 +585,71 @@ async function runnerTick(): Promise<void> {
   let renewalInterval: ReturnType<typeof setInterval> | undefined;
 
   try {
-    // Phase 1: Zombie sweep (cheap — just DB reads)
-    await sweepZombies();
-
-    // Phase 2: Promote PENDING → RUNNING, then find a RUNNING pipeline to advance
     const backend = await getStorage();
-    const candidates = [
-      ...await backend.listPipelines(undefined, 'PENDING', PRISM_USER_ID),
-      ...await backend.listPipelines(undefined, 'RUNNING', PRISM_USER_ID),
-    ].sort((a,b) => Date.parse(a.updated_at) - Date.parse(b.updated_at));
+    const poll = backend.factoryPollScope
+      ? await claimFactoryPoll(backend.factoryPollScope, PRISM_DARK_FACTORY_POLL_MS)
+      : null;
+    let candidates: PipelineState[] = [];
     let selected: PipelineState | undefined;
+    if (backend.factoryPollScope && !poll) {
+      // Followers may execute from shared discovery results. Discovery ownership
+      // must never become an execution gate for another authorized host window.
+      const deadline = Date.now() + DEFAULT_FACTORY_LEASE_MS;
+      let snapshot = await readFactoryPollSnapshot(backend.factoryPollScope);
+      while (snapshot.scanning && snapshot.candidates.length === 0 && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, DISCOVERY_FOLLOW_INTERVAL_MS));
+        snapshot = await readFactoryPollSnapshot(backend.factoryPollScope);
+      }
+      candidates = snapshot.candidates;
+    } else {
+      const pollRenewal = poll ? setInterval(() => {
+        void poll.renew().catch(error => console.error(`[DarkFactory] Discovery lease renewal failed: ${error instanceof Error ? error.message : String(error)}`));
+      }, FACTORY_LEASE_RENEW_MS) : undefined;
+      pollRenewal?.unref();
+      let discoveryOutcome: 'idle' | 'busy' | 'failed' = 'failed';
+      try {
+        const running = await backend.listPipelines(undefined, 'RUNNING', PRISM_USER_ID);
+        if (startupRecoveryPending) {
+          await recoverStalePipelines(backend, running);
+          startupRecoveryPending = false;
+        }
+        await sweepZombies(backend, running);
+        const discovered = [
+          ...await backend.listPipelines(undefined, 'PENDING', PRISM_USER_ID), ...running.filter(p => p.status === 'RUNNING'),
+        ].sort((a,b) => Date.parse(a.updated_at) - Date.parse(b.updated_at));
+        // Persist only work already authorized on this machine, never foreign specs.
+        for (const candidate of discovered) {
+          if (await locallyAuthorized(candidate, backend)) candidates.push(candidate);
+        }
+        discoveryOutcome = candidates.length ? 'busy' : 'idle';
+      } finally {
+        if (pollRenewal) clearInterval(pollRenewal);
+        await poll?.finish(discoveryOutcome, Date.now(), candidates);
+      }
+    }
     for (const candidate of candidates) {
       if (!(await locallyAuthorized(candidate, backend))) continue;
       lease = await claimPipelineLease(candidate);
-      if (lease) { selected = candidate; break; }
+      if (!lease) continue;
+      const candidateLease = lease;
+      renewalInterval = setInterval(() => { void candidateLease.renew().catch(error => {
+        console.error(`[DarkFactory] Execution lease renewal failed: ${error instanceof Error ? error.message : String(error)}`);
+      }); }, FACTORY_LEASE_RENEW_MS);
+      renewalInterval.unref();
+      const live = await backend.getPipeline(candidate.id, candidate.user_id);
+      if (live && await isPipelineAuthorized(live) && ['PENDING','RUNNING'].includes(live.status)) {
+        selected = live;
+        break;
+      }
+      if (live && ['FAILED','ABORTED','COMPLETED'].includes(live.status)) await candidateLease.acknowledgeRecovery();
+      clearInterval(renewalInterval);
+      renewalInterval = undefined;
+      await candidateLease.release();
+      lease = null;
     }
     if (!selected || !lease) return;
     const heldLease = lease;
-    renewalInterval = setInterval(() => { void heldLease.renew().catch(error => {
-      console.error(`[DarkFactory] Execution lease renewal failed: ${error instanceof Error ? error.message : String(error)}`);
-    }); }, FACTORY_LEASE_RENEW_MS);
-    renewalInterval.unref();
-    const pipeline = await backend.getPipeline(selected.id, selected.user_id);
-    if (!pipeline || !(await isPipelineAuthorized(pipeline))) return;
-    if (!['PENDING','RUNNING'].includes(pipeline.status)) {
-      if (['FAILED','ABORTED','COMPLETED'].includes(pipeline.status)) await heldLease.acknowledgeRecovery();
-      return;
-    }
+    const pipeline = selected;
     // Every persisted lifecycle/verification write must retain this process's
     // authority. File actions and the test command check the same lease below.
     const storage = new Proxy(backend, { get(target, key) {
@@ -1028,8 +1068,14 @@ async function runnerTick(): Promise<void> {
 export async function startDarkFactoryRunner(): Promise<void> {
   debugLog(`[DarkFactory] Starting background runner (poll interval: ${PRISM_DARK_FACTORY_POLL_MS}ms)`);
 
-  // Phase 1: Recover any stale pipelines from previous crash
-  await recoverStalePipelines();
+  // Remote recovery participates in shared discovery instead of issuing one
+  // startup request per host window. Local queues retain immediate recovery.
+  const backend = await getStorage();
+  startupRecoveryPending = true;
+  if (!backend.factoryPollScope) {
+    await recoverStalePipelines(backend);
+    startupRecoveryPending = false;
+  }
 
   // Phase 2: Start the continuous poll loop
   // setInterval ensures we yield to the event loop between ticks

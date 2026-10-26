@@ -56,6 +56,7 @@
  */
 
 import { SupabaseStorage } from "./supabase.js";
+import { createHash } from "node:crypto";
 import { debugLog } from "../utils/logger.js";
 import { PRISM_SYNALUX_BASE_URL, PRISM_SYNALUX_API_KEY } from "../config.js";
 import { isSynaluxSignedOut } from "../utils/synaluxCredentialState.js";
@@ -197,6 +198,11 @@ export class SynaluxStorage extends SupabaseStorage {
   private readonly closeController = new AbortController();
   private closed = false;
   private factoryReady = false;
+
+  get factoryPollScope(): string {
+    // Scope coordination to the stable credential, never an expiring JWT.
+    return createHash('sha256').update(JSON.stringify([this.baseUrl, this.refreshToken])).digest('hex');
+  }
 
   constructor() {
     super();
