@@ -198,6 +198,34 @@ advertisement or successful setup is not a coding-quality qualification.
 The dashboard workflow is tested with controlled downloads/provider state. A
 fresh-machine full download/install has not yet been qualified.
 
+## Upgrade an existing oMLX server
+
+Prism and oMLX are separate packages. Updating npm or restarting an MCP host
+updates the Prism client; it does not replace a server selected as **Existing
+oMLX server**. The image selector now checks the selected model's authenticated
+input contract during refresh and selection. **Server update required** means
+the advertised model's image-input route returned the server's standard missing
+route response. Authentication, network and malformed-response failures remain
+unknown; a disabled contract requires checking the model family and context.
+These observations are temporary. Inference repeats admission, ownership and
+resource checks, and the observation does not certify visual accuracy or RAM fit.
+
+For a separately installed server, upgrade its runtime through its original
+installation method. Preserve its settings, API key and model directories. Use
+the pinned integration revision below in a parallel Python environment so the
+previous environment remains available for rollback. Preserve compatible
+dependency pins and rebuild native kernels when their ABI changes. Verify the
+replacement on an unused loopback port with isolated settings before switching
+the service. Finish active requests, explicitly restart the service on the new
+runtime, then refresh the image selector and perform a controlled image test.
+No model download or saved model change is required merely to upgrade the server.
+
+**Install oMLX + recommended models** creates a separate managed installation
+and can download the starter pack. It does not upgrade an existing external
+server. A managed source-pin upgrade also requires an explicit restart; setup
+does not interrupt the running server. Use the managed installation workflow
+above only when that separate installation is intended.
+
 ## Install and configure
 
 For a new source installation, use an isolated Python environment:

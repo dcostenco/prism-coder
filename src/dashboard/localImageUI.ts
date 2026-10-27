@@ -1,3 +1,15 @@
+const IMAGE_UPGRADE_GUIDE = "https://github.com/dcostenco/prism-coder/blob/main/docs/omlx.md#upgrade-an-existing-omlx-server";
+const IMAGE_INPUT_TEXT = Object.freeze({
+    not_selected: "Select an oMLX image model to check server compatibility.",
+    checking: "Checking the selected model's server input contract…",
+    available: "Server input contract available. Each request repeats admission checks; this does not certify image accuracy or RAM fit.",
+    update_required: "Server update required for controlled images. Upgrade oMLX separately; restarting Prism alone does not update the server.",
+    not_enabled: "Image input is not enabled for this model. Check the model family and resolved context settings on the server.",
+    unknown: "Image-input compatibility unknown. Check the server connection and refresh; an upgrade requirement has not been established.",
+    authentication: "Image-input compatibility unknown: check oMLX authentication, then refresh.",
+    guide: "Existing-server upgrade guide (preserve models and settings)",
+});
+
 export function localImagePanelHTML(): string {
     return `<div class="setting-section" style="margin-top:24px">Image model</div>
       <p class="setting-desc" id="local-image-boundary">Save a separate model for image tasks. oMLX requests check the server image-input capability before inference. Selected Ollama image execution is unavailable. Leave the backend unset to keep existing image routing. Advertised vision support is not a passed image test.</p>
@@ -7,6 +19,8 @@ export function localImagePanelHTML(): string {
         ${["omlx", "ollama"].map(backend => `<label class="setting-label" for="local-image-${backend}-model">${backend === "omlx" ? "oMLX" : "Ollama"} image model</label>
         <select class="setting-select" id="local-image-${backend}-model" onchange="imageSelectionChanged('${backend}')" style="width:100%;max-width:100%" disabled></select>
         <p class="setting-desc" id="local-image-${backend}-metadata" style="margin:0;overflow-wrap:anywhere" role="status"></p>`).join("")}
+        <p class="setting-desc" id="local-image-omlx-input" role="status" style="margin:0;overflow-wrap:anywhere"></p>
+        <a id="local-image-upgrade-guide" href="${IMAGE_UPGRADE_GUIDE}" target="_blank" rel="noopener noreferrer" style="display:none">${IMAGE_INPUT_TEXT.guide}</a>
         <p class="setting-desc" id="local-image-memory" style="margin:0"></p>
         <div class="skill-actions" style="flex-wrap:wrap"><button class="skill-save-btn" id="local-image-save" type="submit" disabled>Save image preference</button><button class="skill-upload-btn" id="local-image-refresh" type="button" onclick="loadLocalImages(false)">Refresh image models</button></div>
       </form>
@@ -24,6 +38,16 @@ var localImageSequence = 0;
 var localImageCanManage = false;
 var localImageModels = {omlx:[],ollama:[]};
 var localImageErrors = {};
+var localImageOmlxInput = null;
+var localImageInputText = ${JSON.stringify(IMAGE_INPUT_TEXT)};
+function renderLocalImageInput() {
+    var id = document.getElementById('local-image-omlx-model').value;
+    var input = localImageOmlxInput;
+    var state = !id ? 'not_selected' : localImageRefreshing ? 'checking' : input && input.model === id ? input.state : 'unknown';
+    var text = input && input.model === id && input.reason === 'omlx_auth_failed' && state === 'unknown' ? localImageInputText.authentication : localImageInputText[state] || localImageInputText.unknown;
+    document.getElementById('local-image-omlx-input').textContent = text;
+    document.getElementById('local-image-upgrade-guide').style.display = state === 'update_required' ? 'inline' : 'none';
+}
 function imageFieldsDisabled() {
     ['backend','omlx-model','ollama-model'].forEach(function(name) { document.getElementById('local-image-' + name).disabled = !localImageLoaded || !localImageCanManage || localImageBusy; });
     document.getElementById('local-image-save').disabled = !localImageLoaded || !localImageCanManage || localImageBusy || localImageRefreshing;
@@ -43,21 +67,25 @@ function renderLocalImageMetadata() {
 }
 function imageSelectionChanged(backend) {
     renderLocalImageMetadata();
-    if (backend === 'ollama') return loadLocalImages(false);
+    return loadLocalImages(false);
 }
 function loadLocalImages(reset) {
     if (localImageBusy) return Promise.resolve();
     var sequence = ++localImageSequence;
     localImageRefreshing = true;
+    localImageOmlxInput = null;
+    renderLocalImageInput();
     imageFieldsDisabled();
     document.getElementById('local-image-error').textContent = '';
     var id = localImageLoaded ? document.getElementById('local-image-ollama-model').value : '';
-    return localCodingRequest('/image-models' + (localImageLoaded && !reset ? '?ollamaModel=' + encodeURIComponent(id) : '')).then(function(data) {
+    var omlxId = localImageLoaded ? document.getElementById('local-image-omlx-model').value : '';
+    return localCodingRequest('/image-models' + (localImageLoaded && !reset ? '?ollamaModel=' + encodeURIComponent(id) + '&omlxModel=' + encodeURIComponent(omlxId) : '')).then(function(data) {
         if (sequence !== localImageSequence) return;
         var settings = data.settings;
         if (reset || !localImageLoaded) document.getElementById('local-image-backend').value = settings.backend || '';
         localImageModels = data.discovered;
         localImageErrors = data.discoveryErrors;
+        localImageOmlxInput = data.omlxInput || null;
         ['omlx','ollama'].forEach(function(backend) {
             var select = document.getElementById('local-image-' + backend + '-model');
             var saved = settings.models && settings.models[backend] || '';
@@ -79,7 +107,7 @@ function loadLocalImages(reset) {
     }).catch(function(error) {
         if (sequence === localImageSequence) document.getElementById('local-image-error').textContent = error.message;
     }).then(function() {
-        if (sequence === localImageSequence) { localImageRefreshing = false; imageFieldsDisabled(); }
+        if (sequence === localImageSequence) { localImageRefreshing = false; imageFieldsDisabled(); renderLocalImageInput(); }
     });
 }
 function saveLocalImages(event) {

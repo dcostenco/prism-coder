@@ -32,9 +32,10 @@ describe('image preference branches in the existing local-model handler', () => 
     it('discovers separately, preserves missing saved IDs, and never calls coding setup', async () => {
         const settings = { backend: 'ollama' as const, models: { ollama: 'saved:tag', omlx: 'removed/build' } };
         const ollamaImageModels = vi.fn(async () => []);
+        const omlxImageInput = vi.fn(async (model: string) => ({ model, state: 'update_required' as const, reason: 'omlx_image_server_update_required' }));
         const forbidden = vi.fn(async () => { throw Error('coding metadata must stay separate'); });
         const overrides = { imageSettings: async () => settings, omlxImageModels: async () => { throw Error('/private/path credential'); },
-            ollamaImageModels, settings: forbidden, availableMemory: () => 123 };
+            ollamaImageModels, omlxImageInput, settings: forbidden, availableMemory: () => 123 };
         async function get(query = '') {
             let status: number | undefined, body: any;
             await handleLocalCodingRoutes(new URL('http://127.0.0.1/api/local-coding/image-models' + query),
@@ -47,6 +48,15 @@ describe('image preference branches in the existing local-model handler', () => 
         expect(result.body).toMatchObject({ settings, selectionApplied: false, discovered: { omlx: [], ollama: [] }, discoveryErrors: { omlx: 'oMLX image inventory unavailable.', ollama: null } });
         expect(JSON.stringify(result)).not.toMatch(/private|credential/);
         expect(ollamaImageModels).toHaveBeenLastCalledWith('saved:tag');
+        expect(omlxImageInput).toHaveBeenLastCalledWith('removed/build');
+        expect(result.body.omlxInput).toMatchObject({ model: 'removed/build', state: 'update_required' });
+        await get('?omlxModel=unsaved%2Fbuild'); expect(omlxImageInput).toHaveBeenLastCalledWith('unsaved/build');
+        const omlxCalls = omlxImageInput.mock.calls.length;
+        expect((await get('?omlxModel=invalid%0Aid')).status).toBe(400);
+        expect(omlxImageInput.mock.calls).toHaveLength(omlxCalls);
+        const cleared = await get('?omlxModel=');
+        expect(cleared.body.omlxInput).toEqual({ state: 'not_selected' });
+        expect(omlxImageInput.mock.calls).toHaveLength(omlxCalls);
         await get('?ollamaModel=future%3Atag'); expect(ollamaImageModels).toHaveBeenLastCalledWith('future:tag');
         await get('?ollamaModel='); expect(ollamaImageModels).toHaveBeenLastCalledWith(undefined);
         const calls = ollamaImageModels.mock.calls.length;

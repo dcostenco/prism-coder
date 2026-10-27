@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { detectOmlxImage } from "../../src/utils/omlxProvider.js";
+import { detectOmlxImage, inspectOmlxImageInput } from "../../src/utils/omlxProvider.js";
 import { registerOperation } from "../../src/utils/omlxControl.js";
 
 const MODEL = "vendor/future-vision";
@@ -22,6 +22,57 @@ async function fixture() {
 }
 
 describe("server-owned image capability", () => {
+    it("identifies a missing image route without treating inventory or text control as image support", async () => {
+        const f = await fixture();
+        vi.mocked(f.fetchImpl).mockImplementation(async url => String(url).endsWith("/models")
+            ? Response.json({ data: [{ id: MODEL }] }) : Response.json({ detail: "Not Found" }, { status: 404 }));
+        await expect(detectOmlxImage(MODEL, { home: f.home, env: {}, fetchImpl: f.fetchImpl }))
+            .rejects.toThrow("omlx_image_server_update_required");
+        expect(await inspectOmlxImageInput(MODEL, { home: f.home, env: {}, fetchImpl: f.fetchImpl }))
+            .toEqual({ model: MODEL, state: "update_required", reason: "omlx_image_server_update_required" });
+        expect(vi.mocked(f.fetchImpl).mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+    });
+    it("reports a valid contract without returning credentials or an execution target", async () => {
+        const f = await fixture();
+        expect(await inspectOmlxImageInput(MODEL, { home: f.home, env: {}, fetchImpl: f.fetchImpl }))
+            .toEqual({ model: MODEL, state: "available" });
+    });
+    it.each([401, 403, 500])("keeps HTTP %s unknown instead of prescribing a server upgrade", async status => {
+        const f = await fixture();
+        vi.mocked(f.fetchImpl).mockImplementation(async url => String(url).endsWith("/models")
+            ? Response.json({ data: [{ id: MODEL }] }) : Response.json({ detail: f.key }, { status }));
+        const result = await inspectOmlxImageInput(MODEL, { home: f.home, env: {}, fetchImpl: f.fetchImpl });
+        expect(result).toMatchObject({ model: MODEL, state: "unknown" });
+        expect(result.reason).toBe(status === 500 ? "omlx_inspection_http_failed" : "omlx_auth_failed");
+        expect(JSON.stringify(result)).not.toContain(f.key);
+    });
+    it("separates a disabled contract from network and malformed-response failures", async () => {
+        const f = await fixture();
+        f.capability.enabled = false;
+        expect(await inspectOmlxImageInput(MODEL, { home: f.home, env: {}, fetchImpl: f.fetchImpl }))
+            .toMatchObject({ state: "not_enabled" });
+        vi.mocked(f.fetchImpl).mockRejectedValue(new Error(f.key));
+        const result = await inspectOmlxImageInput(MODEL, { home: f.home, env: {}, fetchImpl: f.fetchImpl });
+        expect(result).toMatchObject({ state: "unknown" });
+        expect(JSON.stringify(result)).not.toContain(f.key);
+    });
+    it("does not prescribe upgrading for a model-specific 404 or malformed contract", async () => {
+        const f = await fixture();
+        vi.mocked(f.fetchImpl).mockImplementation(async url => String(url).endsWith("/models")
+            ? Response.json({ data: [{ id: MODEL }] }) : Response.json({ detail: "Model unavailable" }, { status: 404 }));
+        expect(await inspectOmlxImageInput(MODEL, { home: f.home, env: {}, fetchImpl: f.fetchImpl }))
+            .toMatchObject({ state: "unknown" });
+        vi.mocked(f.fetchImpl).mockImplementation(async url => String(url).endsWith("/models")
+            ? Response.json({ data: [{ id: MODEL }] }) : Response.json({ ...f.capability, settings_sha256: "invalid" }));
+        expect(await inspectOmlxImageInput(MODEL, { home: f.home, env: {}, fetchImpl: f.fetchImpl }))
+            .toMatchObject({ state: "unknown" });
+    });
+    it("settles a setup probe when the transport ignores cancellation", async () => {
+        const f = await fixture();
+        vi.mocked(f.fetchImpl).mockImplementation(() => new Promise(() => {}));
+        const result = await inspectOmlxImageInput(MODEL, { home: f.home, env: {}, fetchImpl: f.fetchImpl, deadlineMs: Date.now() + 25 });
+        expect(result).toEqual({ model: MODEL, state: "unknown", reason: "omlx_inspection_timeout" });
+    });
     it("requires authenticated exact model capability and clamps context to server", async () => {
         const f = await fixture();
         const target = await detectOmlxImage(MODEL, { home: f.home, env: {}, fetchImpl: f.fetchImpl });

@@ -385,7 +385,9 @@ export async function detectOmlxImage(model: string, options: OmlxConnectionOpti
     if (!Array.isArray(advertised.data) || !advertised.data.some(entry => entry?.id === model)) throw new OmlxError("omlx_model_not_advertised");
     const endpoint = omlxControlEndpoint(createOmlxTarget(url, model, configured, apiKey), fetchImpl)!;
     const cap = await inspectionJson(`${endpoint.base}/models/${encodeURIComponent(model)}/image-input`,
-        endpoint.apiKey, endpoint.fetchImpl, timeout(), "GET", options.signal);
+        endpoint.apiKey, endpoint.fetchImpl, timeout(), "GET", options.signal, "omlx_image_server_update_required");
+    if (cap.schema === "owned-png-v1" && cap.model_id === model && cap.enabled === false)
+        throw new OmlxImageInputDisabledError("omlx_image_input_unavailable");
     const limits = cap.limits as Record<string, unknown> | undefined;
     if (cap.schema !== "owned-png-v1" || cap.model_id !== model || cap.enabled !== true
         || !Number.isSafeInteger(cap.context_tokens) || (cap.context_tokens as number) <= 0
@@ -396,6 +398,34 @@ export async function detectOmlxImage(model: string, options: OmlxConnectionOpti
         throw new OmlxError("omlx_image_input_unavailable");
     return createOmlxTarget(url, model, Math.min(configured, cap.context_tokens as number), endpoint.apiKey,
         limits as unknown as import("./omlxImages.js").OmlxImageLimits, cap.settings_sha256 as string);
+}
+
+class OmlxImageInputDisabledError extends OmlxError {}
+export interface OmlxImageInputObservation {
+    model?: string;
+    state: "not_selected" | "available" | "update_required" | "not_enabled" | "unknown";
+    reason?: string;
+}
+/** Setup observation only. No target, credentials, model load or admission proof
+ * is returned; inference must repeat its own exact-model contract check. */
+export async function inspectOmlxImageInput(model: string, options: OmlxConnectionOptions = {}): Promise<OmlxImageInputObservation> {
+    const deadlineMs = Math.min(options.deadlineMs ?? Infinity, Date.now() + PROBE_TIMEOUT_MS);
+    const controller = new AbortController();
+    const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        await Promise.race([
+            detectOmlxImage(model, { ...options, deadlineMs, signal }),
+            new Promise<never>((_, reject) => { timer = setTimeout(() => {
+                controller.abort(); reject(new OmlxError("omlx_inspection_timeout"));
+            }, Math.max(0, deadlineMs - Date.now())); }),
+        ]);
+        return { model, state: "available" };
+    } catch (error) {
+        const reason = error instanceof OmlxError ? error.reason : "omlx_inspection_unavailable";
+        return { model, state: error instanceof OmlxImageInputDisabledError ? "not_enabled"
+            : reason === "omlx_image_server_update_required" ? "update_required" : "unknown", reason };
+    } finally { clearTimeout(timer); controller.abort(); }
 }
 
 export interface OmlxInspection {
@@ -450,7 +480,7 @@ export async function inspectOmlxImageModels(options: OmlxConnectionOptions = {}
 }
 
 async function inspectionJson(url: string, apiKey: string, fetchImpl: typeof fetch, timeoutMs: number,
-    method: "GET" | "POST" = "GET", parentSignal?: AbortSignal): Promise<Record<string, unknown>> {
+    method: "GET" | "POST" = "GET", parentSignal?: AbortSignal, missingRouteReason?: string): Promise<Record<string, unknown>> {
     const controller = new AbortController();
     const deadline = performance.now() + timeoutMs;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -462,8 +492,10 @@ async function inspectionJson(url: string, apiKey: string, fetchImpl: typeof fet
         const response = await fetchImpl(url, { method, headers: { Authorization: `Bearer ${apiKey}` },
             redirect: "error", signal: AbortSignal.any([controller.signal, ...(parentSignal ? [parentSignal] : [])]) });
         checkTime();
-        if (!response.ok) throw new OmlxError(method === "POST" && response.status === 409 ? "omlx_idle_model_busy"
-            : response.status === 401 || response.status === 403 ? "omlx_auth_failed" : "omlx_inspection_http_failed");
+        const missingRoute = response.status === 404 && missingRouteReason;
+        if (!response.ok && !missingRoute) throw new OmlxError(method === "POST" && response.status === 409 ? "omlx_idle_model_busy"
+            : response.status === 401 || response.status === 403 ? "omlx_auth_failed"
+            : "omlx_inspection_http_failed");
         if (!response.body) throw new OmlxError("omlx_inspection_invalid");
         const reader = response.body.getReader();
         const chunks: Uint8Array[] = [];
@@ -482,6 +514,8 @@ async function inspectionJson(url: string, apiKey: string, fetchImpl: typeof fet
         const data: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         checkTime();
         if (!data || typeof data !== "object" || Array.isArray(data)) throw new OmlxError("omlx_inspection_invalid");
+        if (missingRoute) throw new OmlxError((data as Record<string, unknown>).detail === "Not Found"
+            ? missingRoute : "omlx_inspection_http_failed");
         return data as Record<string, unknown>;
     };
     try {

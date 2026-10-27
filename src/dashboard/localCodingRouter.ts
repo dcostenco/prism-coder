@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { configuredOmlxModel, detectOmlx, hasOmlxControl, inspectOmlx, inspectOmlxCodingModels, inspectOmlxImageModels, OmlxError } from "../utils/omlxProvider.js";
+import { configuredOmlxModel, detectOmlx, hasOmlxControl, inspectOmlx, inspectOmlxCodingModels, inspectOmlxImageModels, inspectOmlxImageInput, OmlxError } from "../utils/omlxProvider.js";
 import { localCodingPreference } from "../utils/localCodingPreference.js";
 import { readLocalCodingSettings, saveLocalCodingSettings, resolveLocalCodingModel } from "../utils/localCodingSettings.js";
 import { omlxSetup, OmlxSetupError, OMLX_SETUP_MODELS } from "../utils/omlxSetup.js";
@@ -24,13 +24,14 @@ export interface LocalCodingRouterDeps {
     imageSettings: typeof readLocalImageSettings;
     saveImageSettings: typeof saveLocalImageSettings;
     omlxImageModels: typeof inspectOmlxImageModels;
+    omlxImageInput: typeof inspectOmlxImageInput;
     ollamaImageModels: typeof inspectOllamaImageModels;
 }
 const defaults: LocalCodingRouterDeps = { setup: omlxSetup, settings: readLocalCodingSettings, save: saveLocalCodingSettings,
     preference: localCodingPreference, inspect: inspectOmlx, detect: detectOmlx, control: hasOmlxControl, configuredModel: configuredOmlxModel,
     omlxModels: inspectOmlxCodingModels, ollamaModels: inspectOllamaCodingModels, availableMemory: getAvailableMemoryBytes,
     imageSettings: readLocalImageSettings, saveImageSettings: saveLocalImageSettings,
-    omlxImageModels: inspectOmlxImageModels, ollamaImageModels: inspectOllamaImageModels };
+    omlxImageModels: inspectOmlxImageModels, omlxImageInput: inspectOmlxImageInput, ollamaImageModels: inspectOllamaImageModels };
 function json(res: ServerResponse, status: number, value: unknown) {
     res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "private, no-store" });
     res.end(JSON.stringify(value));
@@ -55,10 +56,17 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
     try {
         if (req.method === "GET" && url.pathname === "/api/local-coding/image-models") {
             const selectedId = url.searchParams.get("ollamaModel") || undefined;
-            if (selectedId !== undefined && !isLocalCodingModelId(selectedId)) { json(res, 400, { error: "Invalid image model ID." }); return true; }
+            const selectedOmlx = url.searchParams.get("omlxModel") || undefined;
+            if ([selectedId, selectedOmlx].some(id => id !== undefined && !isLocalCodingModelId(id))) { json(res, 400, { error: "Invalid image model ID." }); return true; }
             const settings = await deps.imageSettings();
-            const inventories = await Promise.allSettled([deps.omlxImageModels(), deps.ollamaImageModels(url.searchParams.has("ollamaModel") ? selectedId : settings.models?.ollama)]);
+            const omlxModel = url.searchParams.has("omlxModel") ? selectedOmlx : settings.models?.omlx;
+            const [inventories, omlxInput] = await Promise.all([
+                Promise.allSettled([deps.omlxImageModels(), deps.ollamaImageModels(url.searchParams.has("ollamaModel") ? selectedId : settings.models?.ollama)]),
+                omlxModel ? deps.omlxImageInput(omlxModel).catch(() => ({ model: omlxModel, state: "unknown" as const }))
+                    : Promise.resolve({ state: "not_selected" as const }),
+            ]);
             json(res, 200, { settings, selectionApplied: false, canManage: loopback(req), availableMemoryBytes: deps.availableMemory(),
+                omlxInput,
                 discovered: { omlx: inventories[0].status === "fulfilled" ? inventories[0].value : [],
                     ollama: inventories[1].status === "fulfilled" ? inventories[1].value : [] },
                 discoveryErrors: { omlx: inventories[0].status === "rejected" ? "oMLX image inventory unavailable." : null,
