@@ -1,9 +1,10 @@
 /**
  * Cross-platform memory estimate, cached for one second.
- * On macOS, vm_stat's printed free count excludes speculative pages.
- * Add inactive pages as an estimate only: they may include anonymous memory
- * that cannot be reclaimed promptly. Purgeable pages can overlap inactive
- * pages and must not be added again. This is not Linux MemAvailable or a
+ * On macOS, estimate free plus pageable file-backed memory. vm_stat's printed
+ * free count excludes speculative pages, which are already in its file-backed
+ * count. Do not add them again or treat all inactive anonymous pages as cache.
+ * File-backed memory can include active/dirty pages: this is advisory, not
+ * a pressure measurement, Linux MemAvailable or a
  * guarantee that a model will fit. Other platforms/errors use os.freemem().
  */
 
@@ -13,7 +14,7 @@ import { execSync } from "child_process";
 let cache: { ts: number; bytes: number } | null = null;
 const TTL_MS = 1000;
 
-const COUNTER_LABELS = ["Pages free", "Pages inactive", "Pages speculative"];
+const COUNTER_LABELS = ["Pages free", "File-backed pages"];
 const HEADER_PATTERN = /^Mach Virtual Memory Statistics: \(page size of ([0-9]+) bytes\)$/;
 
 /** Parse one complete snapshot. A valid zero must not trigger a fallback. */
