@@ -10,6 +10,25 @@ const PREVIOUS_MANAGED_COMMIT = "883fd6d00464d0193146a1cba20a64fb7cd8e116";
 const EXISTING_SERVER_SETTINGS = '{"sampling":{"max_context_window":16384}}';
 const EXISTING_MODEL_SETTINGS = '{"version":1,"models":{}}';
 const PREVIOUS_RUNTIME_CONTENT = "previous runtime preserved";
+const SOURCE_ORIGIN = "https://github.com";
+const SOURCE_PATH = /^\/dcostenco\/omlx\/(?:commit|blob)\/([a-f0-9]{40})(?:\/|$)/;
+const MISLEADING_SOURCE_URLS = [
+    `https://example.invalid/https://github.com/dcostenco/omlx/blob/${OMLX_SETUP_COMMIT}/README.md`,
+    `https://example.invalid/#https://github.com/dcostenco/omlx/blob/${OMLX_SETUP_COMMIT}/README.md`,
+    `https://example.invalid/?next=https://github.com/dcostenco/omlx/blob/${OMLX_SETUP_COMMIT}/README.md`,
+    `https://github.com.example.invalid/dcostenco/omlx/blob/${OMLX_SETUP_COMMIT}/README.md`,
+];
+function sourceRevisions(guide: string): string[] {
+    const revisions: string[] = [];
+    for (const link of guide.split("](").slice(1)) {
+        let url: URL;
+        try { url = new URL(link.split(")")[0]); } catch { continue; }
+        if (url.origin !== SOURCE_ORIGIN) continue;
+        const match = url.pathname.match(SOURCE_PATH);
+        if (match) revisions.push(match[1]);
+    }
+    return revisions;
+}
 const markerFault = vi.hoisted(() => ({ root: "", rename: false }));
 const daemonCalls = vi.hoisted(() => ({ count: 0 }));
 vi.mock("node:child_process", async importOriginal => {
@@ -93,9 +112,12 @@ async function modelBytes(manager: OmlxSetupManager) {
 }
 
 describe("opt-in managed oMLX setup", () => {
+    it.each(MISLEADING_SOURCE_URLS)("ignores a source URL belonging to another origin: %s", url => {
+        expect(sourceRevisions(`[source](${url})`)).toEqual([]);
+    });
     it("keeps manual source installation and image prerequisites aligned with the managed pin", async () => {
         const guide = await readFile(new URL("../../docs/omlx.md", import.meta.url), "utf8");
-        const revisions = [...guide.matchAll(/https:\/\/github\.com\/dcostenco\/omlx\/(?:commit|blob)\/([a-f0-9]{40})/g)].map(match => match[1]);
+        const revisions = sourceRevisions(guide);
         expect(revisions.length).toBeGreaterThan(0);
         expect(revisions.every(revision => revision === OMLX_SETUP_COMMIT)).toBe(true);
         expect(guide).toContain("git checkout " + OMLX_SETUP_COMMIT);
