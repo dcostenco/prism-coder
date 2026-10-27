@@ -291,6 +291,8 @@ export interface HealthStats {
  * direct Supabase REST API calls.
  */
 export interface StorageBackend {
+  /** Opaque remote-account identity for sharing local Factory discovery work. */
+  readonly factoryPollScope?: string;
   getDashboardLedger?(project: string, order: "created_at.asc" | "created_at.desc", limit: number): Promise<unknown[]>;
   updateLastAccessed(ids: string[]): Promise<void>;
   // ─── Lifecycle ─────────────────────────────────────────────

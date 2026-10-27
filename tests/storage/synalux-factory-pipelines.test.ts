@@ -23,6 +23,18 @@ function client(pipelines: unknown, httpStatus = 200) {
 }
 
 describe('Factory reads through authenticated Portal without direct database credentials', () => {
+  it('shares polling identity only for the same Portal and stable credential, without network access', () => {
+    const {storage,fetch} = client([]);
+    const scope = storage.factoryPollScope;
+    expect(scope).toMatch(/^[a-f0-9]{64}$/);
+    expect(new SynaluxStorage().factoryPollScope).toBe(scope);
+    vi.stubEnv('PRISM_SYNALUX_API_KEY', 'synalux_sk_<different-fixture>');
+    expect(new SynaluxStorage().factoryPollScope).not.toBe(scope);
+    vi.stubEnv('PRISM_SYNALUX_API_KEY', 'synalux_sk_<fixture>');
+    vi.stubEnv('PRISM_SYNALUX_BASE_URL', 'https://other-portal.test');
+    expect(new SynaluxStorage().factoryPollScope).not.toBe(scope);
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('preserves exact project/status and the full stored contract; ownership comes from JWT', async () => {
     const { storage, fetch } = client([ROW]);
     expect(await storage.listPipelines(PROJECT, 'PAUSED', 'spoofed-user')).toEqual([ROW]);

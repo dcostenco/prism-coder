@@ -56,6 +56,7 @@
  */
 
 import { SupabaseStorage } from "./supabase.js";
+import { createHmac } from "node:crypto";
 import { debugLog } from "../utils/logger.js";
 import { PRISM_SYNALUX_BASE_URL, PRISM_SYNALUX_API_KEY } from "../config.js";
 import { isSynaluxSignedOut } from "../utils/synaluxCredentialState.js";
@@ -197,6 +198,11 @@ export class SynaluxStorage extends SupabaseStorage {
   private readonly closeController = new AbortController();
   private closed = false;
   private factoryReady = false;
+
+  get factoryPollScope(): string {
+    // Credential-keyed local namespace, never an authentication verifier or expiring JWT.
+    return createHmac('sha256', this.refreshToken).update(this.baseUrl).digest('hex');
+  }
 
   constructor() {
     super();
