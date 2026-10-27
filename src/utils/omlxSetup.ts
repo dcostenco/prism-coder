@@ -2,7 +2,7 @@
 import { execFile, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { appendFile, lstat, open, rename, statfs, writeFile } from "node:fs/promises";
+import { appendFile, lstat, open, rename, statfs, unlink, writeFile } from "node:fs/promises";
 import { createConnection, createServer } from "node:net";
 import { arch, homedir, platform, release, totalmem } from "node:os";
 import { join } from "node:path";
@@ -10,7 +10,7 @@ import { mkdirUsable } from "./usableDirectory.js";
 import { inspectOmlx } from "./omlxProvider.js";
 import { OMLX_SETUP_WORKER_SOURCE } from "./omlxSetupWorker.js";
 
-export const OMLX_SETUP_COMMIT = "883fd6d00464d0193146a1cba20a64fb7cd8e116";
+export const OMLX_SETUP_COMMIT = "620ad94a0aa5f5e315fa20e66ac289ff95a531d0";
 export const OMLX_SETUP_MODELS = Object.freeze([
     { id: "prism-coder-9b-mlx-8bit", repo: "dcostenco/prism-coder-9b-mlx-8bit", revision: "923f646aca17cfce6b96084ab1608e1c142655a1", label: "Prism 9B classifier", approximateGB: 9 },
     { id: "Qwen3.8-27B-oQ4e-mtp", repo: "Jundot/Qwen3.8-27B-oQ4e-mtp", revision: "49c1d60367d976a730a725ea3bbed32a8e94b878", label: "Qwen3.8 27B coder", approximateGB: 16 },
@@ -18,6 +18,7 @@ export const OMLX_SETUP_MODELS = Object.freeze([
 const GIB = 1024 ** 3, MIN_RAM = 32 * GIB;
 const SETUP_LEASE_PORT = 19439, SERVER_PORT = 8001, MAX_LOG_BYTES = 2 * 1024 ** 2;
 const INSTALL_TIMEOUT_MS = 45 * 60_000, DOWNLOAD_TIMEOUT_MS = 2 * 60 * 60_000;
+const RUNTIME_MARKER_ERROR = "Unable to update the managed runtime marker";
 type Job = { id: string; state: "running" | "complete" | "failed" | "interrupted"; stage: string; pid: number; startedAt: string; workerPgid?: number; workerIdentity?: string; error?: string };
 type Runner = (program: string, args: string[], options: { timeoutMs: number; log?: (data: string) => void; onSpawn?: (pgid: number, identity: string) => Promise<void> }) => Promise<string>;
 export interface OmlxSetupOptions {
@@ -233,7 +234,20 @@ export class OmlxSetupManager {
             await stage("Installing pinned oMLX server");
             await command(join(this.runtime, "bin", "python"), ["-m", "pip", "install", "git+https://github.com/dcostenco/omlx.git@" + OMLX_SETUP_COMMIT], { timeoutMs: INSTALL_TIMEOUT_MS, log: this.log });
             await command(join(this.runtime, "bin", "python"), ["-c", "import omlx.api.prism_control_routes; import huggingface_hub"], { timeoutMs: 30_000, log: this.log });
-            await writeFile(join(this.root, "runtime.json"), JSON.stringify({ commit: OMLX_SETUP_COMMIT }), { mode: 0o600 });
+            const temporary = join(this.root, "runtime-" + job.id + ".tmp");
+            let prepared = false;
+            try {
+                await writeFile(temporary, JSON.stringify({ commit: OMLX_SETUP_COMMIT }), { flag: "wx", mode: 0o600 });
+                prepared = true;
+                await rename(temporary, join(this.root, "runtime.json"));
+            } catch (error) {
+                if (prepared || (error as NodeJS.ErrnoException).code !== "EEXIST") {
+                    await unlink(temporary).catch(cleanupError => {
+                        if (cleanupError.code !== "ENOENT") throw new AggregateError([error, cleanupError], RUNTIME_MARKER_ERROR, { cause: error });
+                    });
+                }
+                throw error;
+            }
         }
         await this.privateDirectory(this.basePath);
         for (const model of state.models) {

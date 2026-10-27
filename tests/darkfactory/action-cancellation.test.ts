@@ -11,6 +11,34 @@ const makeSpec = (workingDirectory: string) => ({
   allowedWritePaths: ["created.txt"], testCommand: "node --test probe.test.cjs",
 });
 const exists = async (file: string) => access(file).then(() => true, () => false);
+
+// Fixed programs derive paths at runtime; no path or program is interpolated
+// into executable JavaScript.
+const PROBE_TEST = "require('node:test')('probe', () => { require('node:child_process').execFileSync(process.execPath, [require('node:path').join(__dirname, 'probe.cjs')]); });\n";
+const READY_THEN_LATE_MARKER = [
+  "const fs = require('node:fs'); const path = require('node:path');",
+  "fs.writeFileSync(path.join(__dirname, 'ready'), 'ready');",
+  "setTimeout(() => fs.writeFileSync(path.join(__dirname, 'marker'), 'bad'), 250);",
+].join("\n");
+const child = (ignoreSigterm: boolean) => [
+  "const fs = require('node:fs'); const path = require('node:path');",
+  "fs.writeFileSync(path.join(__dirname, 'child-ready'), 'ready');",
+  ignoreSigterm ? "process.on('SIGTERM', () => {});" : "",
+  "setTimeout(() => fs.writeFileSync(path.join(__dirname, 'marker'), 'bad'), 300);",
+].join("\n");
+const spawnChildThenReady = (explicitlyAttached: boolean) => [
+  "const cp = require('node:child_process'); const fs = require('node:fs'); const path = require('node:path');",
+  explicitlyAttached
+    ? "cp.spawn(process.execPath, [path.join(__dirname, 'child.cjs')], { detached: false, stdio: 'ignore' }).unref();"
+    : "cp.spawn(process.execPath, [path.join(__dirname, 'child.cjs')], { stdio: 'ignore' }).unref();",
+  "const end = Date.now() + 500; while (!fs.existsSync(path.join(__dirname, 'child-ready')) && Date.now() < end) {}",
+  "fs.writeFileSync(path.join(__dirname, 'ready'), 'ready');",
+].join("\n");
+const writeProbe = async (dir: string, probe: string, childSource?: string) => {
+  await writeFile(join(dir, "probe.cjs"), probe);
+  if (childSource !== undefined) await writeFile(join(dir, "child.cjs"), childSource);
+  await writeFile(join(dir, "probe.test.cjs"), PROBE_TEST);
+};
 const waitFor = async (file: string, ms = 1000) => {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) { if (await exists(file)) return true; await new Promise(resolve => setTimeout(resolve, 10)); }
@@ -92,9 +120,8 @@ describe("Dark Factory action cancellation", () => {
   });
 
   it("cancels a ready RUN_TEST before its delayed marker is written", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "factory-cancel-test-")); const ready = join(dir, "ready"); const marker = join(dir, "delayed-marker");
-    const probe = `const fs=require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)},'ready'); setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},'bad'),250);`;
-    await (await import("node:fs/promises")).writeFile(join(dir, "probe.test.cjs"), `require('node:test')('probe',()=>{ require('node:child_process').execFileSync(process.execPath,['-e',${JSON.stringify(probe)}]); });\n`);
+    const dir = await mkdtemp(join(tmpdir(), "factory-cancel-test-")); const ready = join(dir, "ready"); const marker = join(dir, "marker");
+    await writeProbe(dir, READY_THEN_LATE_MARKER);
     try {
       const result = executeActions([{ type: "RUN_TEST", targetPath: ".", command: "node --test probe.test.cjs" }], { ...makeSpec(dir), allowedWritePaths: [] }, async () => !(await exists(ready)));
       await expect(result).rejects.toThrow(/stopped|failed/); expect(await exists(ready)).toBe(true); expect(await waitFor(marker, 500)).toBe(false);
@@ -102,11 +129,9 @@ describe("Dark Factory action cancellation", () => {
   });
 
   it.skipIf(process.platform === "win32")("kills an inherited process-group descendant that ignores SIGTERM", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "factory-cancel-descendant-")); const ready = join(dir, "ready"); const marker = join(dir, "descendant-marker");
+    const dir = await mkdtemp(join(tmpdir(), "factory-cancel-descendant-")); const ready = join(dir, "ready"); const marker = join(dir, "marker");
     const childReady = join(dir, "child-ready");
-    const child = `const fs=require('node:fs'); fs.writeFileSync(${JSON.stringify(childReady)},'ready'); process.on('SIGTERM',()=>{}); setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},'bad'),300);`;
-    const probe = `const cp=require('node:child_process'); const fs=require('node:fs'); const c=cp.spawn(process.execPath,['-e',${JSON.stringify(child)}],{detached:false,stdio:'ignore'}); c.unref(); const end=Date.now()+500; while(!fs.existsSync(${JSON.stringify(childReady)})&&Date.now()<end){} fs.writeFileSync(${JSON.stringify(ready)},'ready');`;
-    await (await import("node:fs/promises")).writeFile(join(dir, "probe.test.cjs"), `require('node:test')('descendant',()=>{ require('node:child_process').execFileSync(process.execPath,['-e',${JSON.stringify(probe)}]); });\n`);
+    await writeProbe(dir, spawnChildThenReady(true), child(true));
     try {
       await expect(executeActions([{ type: "RUN_TEST", targetPath: ".", command: "node --test probe.test.cjs" }], { ...makeSpec(dir), allowedWritePaths: [] }, async () => !(await exists(ready)))).rejects.toThrow(/stopped|failed/);
       expect(await exists(childReady)).toBe(true); expect(await waitFor(marker, 600)).toBe(false);
@@ -114,10 +139,8 @@ describe("Dark Factory action cancellation", () => {
   });
 
   it.skipIf(process.platform === "win32")("kills a descendant after its parent exits normally", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "factory-cancel-orphan-")); const ready = join(dir, "ready"); const marker = join(dir, "orphan-marker"); const childReady = join(dir, "child-ready");
-    const child = `const fs=require('node:fs'); fs.writeFileSync(${JSON.stringify(childReady)},'ready'); setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},'bad'),300);`;
-    const probe = `const cp=require('node:child_process'); const fs=require('node:fs'); cp.spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'ignore'}).unref(); const end=Date.now()+500; while(!fs.existsSync(${JSON.stringify(childReady)})&&Date.now()<end){} fs.writeFileSync(${JSON.stringify(ready)},'ready');`;
-    await (await import("node:fs/promises")).writeFile(join(dir, "probe.test.cjs"), `require('node:test')('orphan',()=>{ require('node:child_process').execFileSync(process.execPath,['-e',${JSON.stringify(probe)}]); });\n`);
+    const dir = await mkdtemp(join(tmpdir(), "factory-cancel-orphan-")); const ready = join(dir, "ready"); const marker = join(dir, "marker"); const childReady = join(dir, "child-ready");
+    await writeProbe(dir, spawnChildThenReady(false), child(false));
     try {
       await expect(executeActions([{ type: "RUN_TEST", targetPath: ".", command: "node --test probe.test.cjs" }], { ...makeSpec(dir), allowedWritePaths: [] }, async () => true)).resolves.toEqual([expect.stringContaining("passed")]);
       expect(await exists(childReady)).toBe(true); expect(await exists(ready)).toBe(true); expect(await waitFor(marker, 600)).toBe(false);
@@ -127,8 +150,8 @@ describe("Dark Factory action cancellation", () => {
   it("fails closed when the liveness callback rejects", async () => {
     const dir = await mkdtemp(join(tmpdir(), "factory-cancel-reject-"));
     try {
-      const ready = join(dir, "ready"); const marker = join(dir, "marker"); const probe = `const fs=require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)},'ready'); setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},'bad'),250);`;
-      await (await import("node:fs/promises")).writeFile(join(dir, "probe.test.cjs"), `require('node:test')('probe',()=>{ require('node:child_process').execFileSync(process.execPath,['-e',${JSON.stringify(probe)}]); });\n`);
+      const ready = join(dir, "ready"); const marker = join(dir, "marker");
+      await writeProbe(dir, READY_THEN_LATE_MARKER);
       await expect(executeActions([{ type: "RUN_TEST", targetPath: ".", command: "node --test probe.test.cjs" }], { ...makeSpec(dir), allowedWritePaths: [] }, async () => { if (await exists(ready)) throw new Error("revocation lookup failed"); return true; })).rejects.toThrow(/revocation lookup failed/);
       expect(await exists(ready)).toBe(true); expect(await waitFor(marker, 500)).toBe(false);
     } finally { await rm(dir, { recursive: true, force: true }); }
