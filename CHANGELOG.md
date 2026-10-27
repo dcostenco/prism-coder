@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## 20.22.5 — 2026-10-27
+
+- Add an independent Image model section with discovered oMLX and Ollama
+  inventory. Image preferences remain separate from coder/reviewer roles;
+  saving a choice does not install or load a model.
+- Enable selected oMLX image requests through the controlled local path on a
+  compatible server. Inline PNG input requires the exact model's advertised
+  capability, current settings and resource checks. Images and derived content
+  stay local. Selected Ollama image execution remains unavailable.
+- Pin managed oMLX setup to the image-capable integration. Existing servers
+  must advertise the required input contract; model recognition accuracy is
+  separate from transport support. See [the oMLX guide](docs/omlx.md).
+- Reclaim eligible idle oMLX models when another model needs memory, preserving
+  active and pinned models and refusing when safe reclamation is unavailable.
+- Correct the macOS available-memory estimate to count free and file-backed
+  pages once. This remains an estimate, not a guarantee that a model will fit.
+- Share idle Factory discovery across host processes to reduce duplicate polls.
+- Fix device-key filesystem races and strengthen cancellation handling.
+  Update vulnerable dependencies and resolve the reported CodeQL findings.
+- Classify Syria under the documented civilian-use restrictions.
+
 ## 20.22.4 — 2026-10-22
 
 - Add Settings → Local Coding and `prism local` for opt-in installation of a
