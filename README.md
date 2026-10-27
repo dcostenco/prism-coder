@@ -2,10 +2,11 @@
 
 **Give your AI agent memory that lasts — and see the cloud tokens it never had to spend.** Persistent sessions, knowledge graphs, offline tool-routing, and an auditable savings meter. Fully local and free.
 
-> **Current release: v20.22.4 — oMLX setup and local model roles**
-> Install a pinned oMLX server/model pack from the dashboard or CLI, or connect
-> an existing server. Discover installed models and choose coder/reviewer roles
-> for oMLX and Ollama. Controlled oMLX coding remains text-only.
+> **Current release: v20.22.5 — local oMLX images and memory accounting**
+> Choose an independent image model from discovered local inventory. Compatible
+> oMLX servers support controlled PNG image requests with local screening and
+> generation. Image accuracy depends on the model; Ollama image execution remains
+> unavailable for the saved image choice. See the [oMLX guide](docs/omlx.md).
 
 [![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm)](https://www.npmjs.com/package/prism-mcp-server)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8)](https://github.com/modelcontextprotocol/servers)
@@ -187,6 +188,21 @@ or by re-enabling after each run.
 
 <details>
 <summary>Release history (optional)</summary>
+
+## What's New in v20.22.5
+
+- **Independent image model:** Settings exposes a separate image choice from
+  discovered oMLX/Ollama inventory, without changing coder/reviewer assignments.
+- **Controlled local images:** compatible oMLX servers accept inline PNGs after
+  model capability, settings and resource checks. Images and derived content
+  stay local. Transport support does not certify recognition accuracy; selected
+  Ollama image execution remains unavailable.
+- **Memory and model switching:** count macOS free and file-backed pages once,
+  and reclaim eligible idle oMLX models without interrupting active or pinned
+  work. Memory estimates do not guarantee fit.
+- **Reliability:** updated oMLX installer pin, device-key race fixes, dependency
+  and CodeQL remediation, shared idle Factory polling, and the civilian-use
+  policy correction for Syria. Full details are in [CHANGELOG.md](CHANGELOG.md).
 
 ## What's New in v20.22.4
 
