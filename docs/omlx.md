@@ -155,13 +155,30 @@ choose **Prism-managed installation** and save. Existing servers remain running;
 an occupied port is an error, not permission to stop its owner.
 
 Managed setup and the source installation below pin
-[`883fd6d0`](https://github.com/dcostenco/omlx/commit/883fd6d00464d0193146a1cba20a64fb7cd8e116),
-based on upstream v0.7.1 and including the idle-unload API. A changed managed
+[`620ad94a`](https://github.com/dcostenco/omlx/commit/620ad94a0aa5f5e315fa20e66ac289ff95a531d0),
+based on upstream v0.7.1 and including the idle-unload API and `owned-png-v1`.
+A changed managed
 server pin uses a separate Python runtime and preserves valid downloaded models
 and existing settings. A running server keeps its current runtime until an
 explicit restart after its active jobs finish; setup does not restart it.
-This pin predates `owned-png-v1`; the image path requires a compatible server
-until a separately validated installer update selects the merged image support.
+The server pin provides the image-input protocol. Choose a compatible installed
+vision model separately under **Image model**; its exact server advertisement
+must enable `owned-png-v1`, with a positive resolved context window. The server
+can resolve that window from model settings, native metadata or a global
+sampling fallback; an unresolved or invalid window disables the advertisement.
+The server also qualifies model families by architecture; an unqualified vision
+model reports not enabled regardless of its context window.
+Managed setup supplies a 32K global fallback. The recommended coding/classifier model pack does
+not establish image compatibility. The default managed model directory is
+`~/.prism-mcp/omlx/server/models/<model-id>`; use the configured directory if
+you have customized it. Vision-model weights need their own disk space. Assess
+RAM separately for the chosen model and current residency; the 32 GiB setup
+floor does not guarantee image-model fit. Discovery reports metadata, not a fit
+or accuracy guarantee.
+
+Refresh discovery after the upgraded server has been explicitly restarted;
+until then, the running server advertises its previous capabilities. Saving an
+image choice does not restart it or qualify model accuracy.
 
 Terminal equivalents after installing Prism:
 
@@ -188,7 +205,7 @@ For a new source installation, use an isolated Python environment:
 ```bash
 git clone https://github.com/dcostenco/omlx.git
 cd omlx
-git checkout 883fd6d00464d0193146a1cba20a64fb7cd8e116
+git checkout 620ad94a0aa5f5e315fa20e66ac289ff95a531d0
 python3.11 -m venv .venv
 source .venv/bin/activate
 make install PYTHON="$VIRTUAL_ENV/bin/python"
@@ -197,7 +214,7 @@ make install PYTHON="$VIRTUAL_ENV/bin/python"
 Without full Xcode, use `make install-no-kernels` instead of `make install`.
 Some model families then use slower generic paths; do not compare that install's
 speed directly with a kernel-enabled result. See the integration's
-[installation notes](https://github.com/dcostenco/omlx/blob/883fd6d00464d0193146a1cba20a64fb7cd8e116/README.md#from-source).
+[installation notes](https://github.com/dcostenco/omlx/blob/620ad94a0aa5f5e315fa20e66ac289ff95a531d0/README.md#from-source).
 
 Download the required classifier and the tested dense drafting model. These
 commands pin model revisions and use directory names matching the examples:
@@ -253,7 +270,7 @@ reconnect its MCP server after changing the environment. At
    context/KV cache and other applications. For Flash-Next on this integration,
    the tested variant uses PLE SSD and expert offload with PLE gather-ahead off.
 
-See the fork's [control-route and memory notes](https://github.com/dcostenco/omlx/blob/883fd6d00464d0193146a1cba20a64fb7cd8e116/PRISM.md).
+See the fork's [control-route and memory notes](https://github.com/dcostenco/omlx/blob/620ad94a0aa5f5e315fa20e66ac289ff95a531d0/PRISM.md).
 The upstream retry/resumed-prefill output-loss condition described there has
 not been qualified as fixed by the stable upgrade.
 
