@@ -5,8 +5,8 @@ vi.mock("os", () => ({ freemem: vi.fn(() => 123) }));
 import { execSync } from "child_process";
 import { freemem } from "os";
 
-const snapshot = (free = "10", inactive = "100", speculative = "20", purgeable = "100") =>
-    `Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: ${free}.\nPages inactive: ${inactive}.\nPages speculative: ${speculative}.\nPages purgeable: ${purgeable}.\n`;
+const snapshot = (free = "10", fileBacked = "80", inactive = "100", speculative = "20", purgeable = "100") =>
+    `Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: ${free}.\nFile-backed pages: ${fileBacked}.\nPages inactive: ${inactive}.\nPages speculative: ${speculative}.\nPages purgeable: ${purgeable}.\n`;
 
 describe("available memory estimate", () => {
     beforeEach(() => {
@@ -18,27 +18,35 @@ describe("available memory estimate", () => {
     });
     afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-    it("does not count purgeable pages again when they overlap inactive pages", async () => {
+    it("uses pageable file cache without adding speculative or purgeable pages again", async () => {
         const memory = await import("../../src/utils/availableMemory.js");
-        expect(memory.getAvailableMemoryBytes()).toBe(130 * 16384);
+        expect(memory.getAvailableMemoryBytes()).toBe(90 * 16384);
     });
 
-    it("counts speculative pages once from printed vm_stat free and accepts zero", async () => {
+    it("includes active file cache and excludes inactive anonymous memory", async () => {
         const { parseDarwinMemoryEstimate: parse } = await import("../../src/utils/availableMemory.js");
-        expect(parse(snapshot("0", "0", "3"))).toBe(3 * 16384);
-        expect(parse(snapshot("0", "0", "0"))).toBe(0);
-        expect(parse(snapshot().replaceAll("\n", "\r\n"))).toBe(130 * 16384);
-        expect(parse(snapshot().replace("16384", "4096"))).toBe(130 * 4096);
+        expect(parse(snapshot("10", "500", "0"))).toBe(510 * 16384);
+        expect(parse(snapshot("10", "20", "1000000"))).toBe(30 * 16384);
+    });
+
+    it("accepts zero, CRLF and both macOS page sizes", async () => {
+        const { parseDarwinMemoryEstimate: parse } = await import("../../src/utils/availableMemory.js");
+        expect(parse(snapshot("0", "3"))).toBe(3 * 16384);
+        expect(parse(snapshot("0", "0"))).toBe(0);
+        expect(parse(snapshot().replaceAll("\n", "\r\n"))).toBe(90 * 16384);
+        expect(parse(snapshot().replace("16384", "4096"))).toBe(90 * 4096);
     });
 
     it.each([
         snapshot().replace(/^.*\n/, ""),
         snapshot().replace("16384", "0"),
         snapshot().replace("16384", "9007199254740992"),
-        snapshot().replace("Pages inactive: 100.\n", ""),
+        snapshot().replace("File-backed pages: 80.\n", ""),
         snapshot() + "Pages free: 999.\n",
+        snapshot() + "File-backed pages: 999.\n",
         snapshot() + snapshot(),
         ...["-1", "1.5", "1e3", "NaN", "1junk", "9007199254740992"].map(value => snapshot(value)),
+        ...["-1", "1.5", "1e3", "NaN", "1junk", "9007199254740992"].map(value => snapshot("0", value)),
         snapshot("9007199254740991", "1", "0"),
         snapshot("9007199254740991", "0", "0"),
     ])("rejects incomplete, duplicate, malformed or unsafe snapshots: %s", async value => {
@@ -54,7 +62,7 @@ describe("available memory estimate", () => {
         expect(read()).toBe(123);
         expect(execSync).toHaveBeenCalledTimes(1);
         vi.mocked(Date.now).mockReturnValue(11000);
-        expect(read()).toBe(130 * 16384);
+        expect(read()).toBe(90 * 16384);
         vi.mocked(Date.now).mockReturnValue(12000);
         vi.mocked(execSync).mockImplementation(() => { throw new Error("unavailable"); });
         expect(read()).toBe(123);
