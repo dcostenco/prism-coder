@@ -66,13 +66,18 @@ describe('shared Factory discovery schedule', () => {
     await idle!.finish('idle', start);
     const failed = await config.claimFactoryPoll('failure', baseMs, start + baseMs);
     await failed!.finish('failed', start + baseMs);
-    expect(await config.claimFactoryPoll('failure', baseMs, start + baseMs * 2 - 1)).not.toBeNull();
+    expect(await config.claimFactoryPoll('failure', baseMs, start + baseMs * 2 - 1)).toBeNull();
+    expect(await config.claimFactoryPoll('failure', baseMs, start + baseMs * 2)).not.toBeNull();
   });
 
-  it('admits an early interval tick after a failed scan', async () => {
+  it('shares a failed-scan retry deadline across out-of-phase host ticks', async () => {
     const lease=await config.claimFactoryPoll('jitter-failed',baseMs,start);
     await lease!.finish('failed',start+1_000);
-    expect(await config.claimFactoryPoll('jitter-failed',baseMs,start+baseMs-1)).not.toBeNull();
+    // Eleven host windows must not each retry a failing Portal between deadlines.
+    for(let host=0;host<11;host++){
+      expect(await config.claimFactoryPoll('jitter-failed',baseMs,start+1_001+host*2_500)).toBeNull();
+    }
+    expect(await config.claimFactoryPoll('jitter-failed',baseMs,start+baseMs)).not.toBeNull();
   });
 
   it('shares discovery snapshots with followers and preserves the last hint on scan failure',async()=>{
@@ -85,8 +90,8 @@ describe('shared Factory discovery schedule', () => {
     const next=await config.claimFactoryPoll('snapshot',baseMs,now+baseMs);
     await next!.finish('failed',now+baseMs+1);
     expect((await config.readFactoryPollSnapshot('snapshot')).candidates).toEqual(candidates);
-    const empty=await config.claimFactoryPoll('snapshot',baseMs,now+baseMs+2);
-    await empty!.finish('idle',now+baseMs+3);
+    const empty=await config.claimFactoryPoll('snapshot',baseMs,now+baseMs*2);
+    await empty!.finish('idle',now+baseMs*2+1);
     expect((await config.readFactoryPollSnapshot('snapshot')).candidates).toEqual([]);
   });
 

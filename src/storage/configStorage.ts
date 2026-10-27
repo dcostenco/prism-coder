@@ -488,9 +488,9 @@ export async function claimFactoryPoll(scope: string, baseMs: number, now = Date
           idle_ms=CASE WHEN wake_version=? THEN ? ELSE 0 END,
           snapshot_json=CASE WHEN ?='failed' THEN snapshot_json ELSE ? END
           WHERE scope=? AND token=? AND expires_at>?`,
-        // A failed scan must retry without idle backoff. Active workers use
+        // Failed scans share the base retry cadence without idle backoff. Active workers use
         // the shared snapshot even when the next discovery scan is not due.
-        args: [wakeVersion, outcome === 'failed' ? 0 : now + delay, wakeVersion, outcome === 'idle' ? delay : 0,
+        args: [wakeVersion, now + delay, wakeVersion, outcome === 'idle' ? delay : 0,
           outcome, JSON.stringify(candidates), scope, token, at],
       });
     },
