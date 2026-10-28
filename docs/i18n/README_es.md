@@ -13,9 +13,11 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](../../LICENSE)
 [![Models on HuggingFace](https://img.shields.io/badge/🤗-prism--coder-yellow)](https://huggingface.co/dcostenco)
 
-<p align="center">
-  <img src="docs/mind-palace-dashboard-v20.8.png" alt="Prism Mind Palace dashboard v20.8.0 — project state with handoff summary, pending TODOs, intent health, neural graph, and time-travel history" width="700" />
-</p>
+![Prism dashboard Local AI connection panel with Preview connection, Use this server, and optional managed-server setup](../screenshots/local-ai-connection.png)
+
+*Local AI dashboard development preview. Screenshots below use an isolated demo
+with illustrative inventory and responses; they do not show a live account or
+prove model accuracy. The npm release may show an earlier interface.*
 
 Prism Coder is an [MCP server](https://modelcontextprotocol.io) that gives Claude, Cursor, and other AI tools long-term memory that survives across sessions. It ships with the open-weight `prism-coder` model fleet (2B–27B) for fast, offline tool-routing — no cloud required. And it keeps score: every call served locally is metered, so `prism savings` shows the token volume that never reached your cloud model — [measured honestly, in tokens](#local_savings--what-local-serving-actually-displaced).
 
@@ -66,17 +68,58 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
   never sent to the cloud), and local/cloud usage is recorded for
   review.
 
-### On-device oMLX coding
+### Local AI in the dashboard
 
-On Apple Silicon, choose **Settings → Local Coding** in `prism dashboard` to
-install oMLX and its model pack or use an existing server. Auto prefers configured
-oMLX for eligible coding; a saved preference or explicit task choice can select
-Ollama instead. This path requires
-Prism's oMLX integration and its separate classifier; stock oMLX is insufficient.
-See [oMLX setup, tested models, results, and failure handling](../omlx.md), or
-start with the [quickstart beside Ollama](#optional-omlx-for-local-coding).
-Explicit oMLX never falls back to Ollama or cloud inference; drafts still need
-host review and tests.
+Run `prism dashboard`, open **Account & Settings → Local AI**, then work through
+**Connection → Models → Test**. These controls configure local inference;
+session memory continues to work without installing a model.
+
+| Step | What you do | What to expect |
+| --- | --- | --- |
+| **1. Connection** | Choose an existing oMLX server or a Prism-managed installation, then **Preview connection**. | Review the effect on coder, reviewer and image assignments before **Use this server** switches the shared oMLX connection. Saved model IDs are preserved. |
+| **2. Models** | Choose coder and reviewer models for each backend and **Save coding preference**. Save the separate **Image model** form independently. | Saving records a choice; it does not download or load weights. Missing saved IDs stay visible instead of being silently replaced. |
+| **3. Test** | Select backend and purpose, then **Test saved model**. | A small request may load the saved model. The result reports execution or a blocking reason, with no cloud inference fallback. |
+
+**Coding and review.** Auto prefers configured oMLX for eligible coding. You can
+choose Ollama instead; explicit task choices take precedence. oMLX coding and
+review need the integration's separate text safety classifier. Local drafts and
+reviews still need host inspection and tests.
+
+![Local AI coding model selectors with separate coder and reviewer assignments](../screenshots/local-ai-coding-models.png)
+
+**Images have their own choice.** Select an oMLX vision model under **Image
+model**, then **Save image preference**. It may be the same model used for
+coding, but the setting is independent. **Refresh image models** reads
+metadata without loading a model. Vision metadata and RAM estimates are
+advisory; each request repeats compatibility and resource checks. The saved
+Ollama image option currently refuses execution; leave the image backend
+**Not selected** to retain existing image routing.
+
+![Independent image-model preference and selected-model server compatibility status](../screenshots/local-ai-image-model.png)
+
+**Read image-test results in two parts.** The built-in diagnostic sends a red
+square. **Reference facts** describe that known PNG; **AI observations** contain
+the model's answer. A wrong answer cannot change the reference. A passing test
+proves execution, not visual accuracy. User images do not receive catalog facts
+from this diagnostic. Starting another test or changing backend or purpose
+clears the previous image result.
+
+![Image diagnostic with execution status, separate Reference facts and AI observations, and an accuracy warning](../screenshots/local-ai-image-results.png)
+
+**Server setup is optional and separate from npm.** On supported Apple Silicon
+Macs, expand **Install or update a Prism-managed server** to install the server
+without downloading the optional coding starter pack. Add models through
+**Open oMLX model manager**. Installing a server update does not restart it or
+switch your connection. **Restart managed server** interrupts local inference
+and is available only when Prism can establish managed ownership and idle
+activity. External servers use their own upgrade and restart procedure.
+
+Updating the Prism npm package or restarting your AI client does **not** upgrade
+an external oMLX server. If image status says **Server update required**, follow
+the [existing-server upgrade guide](../omlx.md#upgrade-an-existing-omlx-server).
+**Tested Prism-compatible source** identifies the compatible revision;
+**Latest upstream releases** is for release notes and may lack Prism's routes.
+See the [oMLX guide](../omlx.md) for requirements and troubleshooting.
 
 ## Get started
 
@@ -1339,8 +1382,9 @@ handed a prompt about a screenshot it never received. The 27b is text only.
 
 ### Optional oMLX for local coding
 
-Use **Settings → Local Coding** in `prism dashboard` for opt-in installation,
-progress, retry, connection checks, and backend/model selection. Or use
+Use **Account & Settings → Local AI** in `prism dashboard` for the
+[Connection → Models → Test workflow](#local-ai-in-the-dashboard), opt-in setup,
+progress, retry, and independent coding/image choices. Or use
 `prism local install` followed by `prism local start`. npm installation never
 downloads models automatically. The managed pack requires Apple Silicon,
 macOS 15+, Python 3.11–3.13, 32 GiB memory and 40 GiB free disk; it keeps existing
@@ -1352,7 +1396,8 @@ For manual setup, install the **Prism integration** of oMLX, its required
 key, enable chunked prefill, disable MTP/DFlash/speculative prefill, and configure
 model context/thinking budgets. Then verify a call with `local_backend: "omlx"`,
 `mode: "code"`, and the exact advertised `local_model`. Ollama need not be
-running; Prism refuses device contention without unloading another job's models.
+running. Prism may reclaim idle, unpinned oMLX models when needed for a request;
+active or protected work and device contention can still block it.
 
 Follow the [step-by-step oMLX guide](../omlx.md) for pinned install/download
 commands, server startup, a first MCP call, and troubleshooting. Its

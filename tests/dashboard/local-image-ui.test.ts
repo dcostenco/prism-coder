@@ -6,6 +6,7 @@ afterEach(() => windows.splice(0).forEach(dom => dom.window.close()));
 function fixture() {
     let settings: any = {};
     let outage = false, present = true, failed = false;
+    let inputState = 'update_required', inputReason = 'omlx_image_server_update_required';
     const calls: string[] = [], posts: any[] = [];
     const dom = new JSDOM(localCodingPanelHTML(), { url: 'http://127.0.0.1', runScripts: 'outside-only' }); windows.push(dom);
     const reads: { gate: Promise<void>; data: unknown }[] = [];
@@ -14,7 +15,8 @@ function fixture() {
         return { settings: JSON.parse(JSON.stringify(settings)), canManage: true, selectionApplied: false, availableMemoryBytes: 10 * 1024 ** 3,
             discovered: { omlx: installed && !unavailable ? [{ id: 'new/vlm', loaded: false, weightBytes: 4 * 1024 ** 3, capability: { vision: 'yes', source: 'omlx.engine_type' } }] : [],
                 ollama: [{ id: 'future:tag', capability: { vision: 'unknown', source: 'metadata_unavailable' } }] },
-            discoveryErrors: { omlx: unavailable ? 'Inventory unavailable' : null, ollama: null } };
+            discoveryErrors: { omlx: unavailable ? 'Inventory unavailable' : null, ollama: null },
+            omlxInput: { model: 'new/vlm', state: inputState, reason: inputReason } };
     }
     dom.window.fetch = async (url: any, init: any) => {
         calls.push(String(url));
@@ -29,11 +31,37 @@ function fixture() {
     const field = (name: string) => dom.window.document.getElementById('local-image-' + name) as HTMLSelectElement;
     return { dom, field, calls, posts, load: (reset = false) => (dom.window as any).loadLocalImages(reset), save: () => (dom.window as any).saveLocalImages({ preventDefault() {} }),
         outage: () => { outage = true; }, remove: () => { present = false; }, fail: () => { failed = true; },
+        input: (state: string, reason = '') => { inputState = state; inputReason = reason; },
         codingLoad: () => (dom.window as any).loadLocalCoding(false),
         defer: (next: { outage?: boolean; present?: boolean }) => { let release!: () => void;
             reads.push({ gate: new Promise<void>(resolve => { release = resolve; }), data: snapshot(next) }); return release; } };
 }
 describe('independent image selector journey', () => {
+    it('checks the unsaved oMLX choice and shows the upgrade action separately from vision metadata', async () => {
+        const f = fixture(); await f.load(); f.field('omlx-model').value = 'new/vlm';
+        await (f.dom.window as any).imageSelectionChanged('omlx');
+        expect(f.calls.at(-1)).toContain('omlxModel=new%2Fvlm');
+        expect(f.field('omlx-input').textContent).toContain('Server update required');
+        expect(f.field('omlx-metadata').textContent).toContain('Advertised vision: yes');
+        const link = f.dom.window.document.getElementById('local-image-upgrade-guide') as HTMLAnchorElement;
+        expect(link.style.display).not.toBe('none');
+        expect(link.hash).toBe('#upgrade-an-existing-omlx-server');
+        expect(f.posts).toHaveLength(0);
+    });
+    it('preserves the chosen model and distinguishes auth failures from unavailable input', async () => {
+        const f = fixture(); await f.load(); f.field('omlx-model').value = 'new/vlm';
+        f.input('unknown', 'omlx_auth_failed'); await f.load();
+        expect(f.field('omlx-input').textContent).toContain('authentication');
+        expect(f.field('omlx-input').textContent).not.toContain('Server update required');
+        f.input('not_enabled'); await f.load();
+        expect(f.field('omlx-input').textContent).toContain('not enabled');
+        f.input('available'); await f.load();
+        expect(f.field('omlx-input').textContent).toContain('Server input contract available');
+        expect(f.field('omlx-input').textContent).toContain('accuracy');
+        f.fail(); await f.load();
+        expect(f.field('omlx-input').textContent).not.toContain('Server input contract available');
+        expect(f.field('omlx-model').value).toBe('new/vlm');
+    });
     it('explains per-request capability checks while unset preserves legacy routing', () => {
         const f = fixture();
         expect(f.dom.window.document.getElementById('local-image-boundary')?.textContent).toContain('server image-input capability');
@@ -66,9 +94,9 @@ describe('independent image selector journey', () => {
     it('supplies only the exact unsaved Ollama ID for lazy metadata inspection', async () => {
         const f = fixture(); await f.load(); f.field('ollama-model').value = 'future:tag';
         await (f.dom.window as any).imageSelectionChanged('ollama');
-        expect(f.calls.at(-1)).toBe('/api/local-coding/image-models?ollamaModel=future%3Atag');
+        expect(f.calls.at(-1)).toBe('/api/local-coding/image-models?ollamaModel=future%3Atag&omlxModel=');
         f.field('ollama-model').value = ''; await f.load();
-        expect(f.calls.at(-1)).toBe('/api/local-coding/image-models?ollamaModel=');
+        expect(f.calls.at(-1)).toBe('/api/local-coding/image-models?ollamaModel=&omlxModel=');
     });
     it('keeps image controls usable independently of a failed coding request', async () => {
         const f = fixture(); await f.load(); await f.codingLoad();

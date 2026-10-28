@@ -434,6 +434,25 @@ export async function setSetting(key: string, value: string): Promise<void> {
   }
 }
 
+/** One conditional statement: stale previews cannot overwrite newer settings. */
+export async function compareAndSetSetting(key: string, value: string, expected: Record<string, string | null>): Promise<boolean> {
+  if (!Object.hasOwn(expected, key)) throw new Error("settings_expected_value_required");
+  await initConfigStorage();
+  const args: (string | null)[] = [key, value];
+  const conditions = Object.entries(expected).map(([name, previous]) => {
+    if (previous === null) { args.push(name); return "NOT EXISTS (SELECT 1 FROM system_settings WHERE key = ?)"; }
+    args.push(name, previous); return "EXISTS (SELECT 1 FROM system_settings WHERE key = ? AND value = ?)";
+  });
+  const result = await getClient().execute({
+    sql: `INSERT INTO system_settings (key, value, updated_at) SELECT ?, ?, CURRENT_TIMESTAMP
+      WHERE ${conditions.join(" AND ")}
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, args,
+  });
+  if (result.rowsAffected !== 1) return false;
+  if (settingsCache && !PROTO_KEYS.has(key)) settingsCache[key] = value;
+  return true;
+}
+
 export async function getAllSettings(): Promise<Record<string, string>> {
   await initConfigStorage();
   // Return a snapshot of the cache (avoids a redundant DB round-trip).
