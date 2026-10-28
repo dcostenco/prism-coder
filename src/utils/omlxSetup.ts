@@ -7,7 +7,8 @@ import { createConnection, createServer } from "node:net";
 import { arch, homedir, platform, release, totalmem } from "node:os";
 import { join } from "node:path";
 import { mkdirUsable } from "./usableDirectory.js";
-import { inspectOmlx } from "./omlxProvider.js";
+import { acquireOmlxLease, inspectOmlx } from "./omlxProvider.js";
+import { beginLocalAiMaintenance, checkLocalAiMaintenance } from "./localAiMaintenance.js";
 import { OMLX_SETUP_WORKER_SOURCE } from "./omlxSetupWorker.js";
 
 export const OMLX_SETUP_COMMIT = "620ad94a0aa5f5e315fa20e66ac289ff95a531d0";
@@ -16,6 +17,8 @@ export const OMLX_SETUP_MODELS = Object.freeze([
     { id: "Qwen3.8-27B-oQ4e-mtp", repo: "Jundot/Qwen3.8-27B-oQ4e-mtp", revision: "49c1d60367d976a730a725ea3bbed32a8e94b878", label: "Qwen3.8 27B coder", approximateGB: 16 },
 ]);
 const GIB = 1024 ** 3, MIN_RAM = 32 * GIB;
+export const OMLX_SETUP_SOURCE_URL = "https://github.com/dcostenco/omlx/commit/" + OMLX_SETUP_COMMIT;
+export const OMLX_UPSTREAM_RELEASES_URL = "https://github.com/jundot/omlx/releases";
 const SETUP_LEASE_PORT = 19439, SERVER_PORT = 8001, MAX_LOG_BYTES = 2 * 1024 ** 2;
 const INSTALL_TIMEOUT_MS = 45 * 60_000, DOWNLOAD_TIMEOUT_MS = 2 * 60 * 60_000;
 const RUNTIME_MARKER_ERROR = "Unable to update the managed runtime marker";
@@ -25,8 +28,29 @@ export interface OmlxSetupOptions {
     home?: string; platform?: string; arch?: string; release?: string; totalmem?: number;
     run?: Runner; leasePort?: number; freeDisk?: () => Promise<number>;
     inspect?: typeof inspectOmlx; serverPort?: number; startTimeoutMs?: number;
+    acquireDevice?: typeof acquireOmlxLease;
 }
 export class OmlxSetupError extends Error {}
+class ManagedStartError extends OmlxSetupError {
+    constructor(readonly retired: boolean, message?: string) { super(message ?? (retired ? "Managed oMLX did not start. Its starting process group retired; check the managed server log and retry." : "Managed startup needs operator recovery. The starting group did not prove retirement; inference remains blocked.")); }
+}
+type ServerRecord = { pid: number; pgid: number; uid: number; startIdentity: string; runtime: string; commit: string; port: number };
+async function processOutput(program: string, args: string[]): Promise<string> {
+    return new Promise((resolve, reject) => execFile(program, args, { timeout: 2000, maxBuffer: 1024 * 1024 },
+        (error, stdout) => error ? reject(error) : resolve(stdout)));
+}
+async function processIdentity(pid: number) {
+    let text: string;
+    try { text = await processOutput("/bin/ps", ["-ww", "-p", String(pid), "-o", "pid=,pgid=,uid=,lstart=,command="]); }
+    catch (error) { if ((error as { code?: number }).code === 1) return undefined; throw error; }
+    const match = text.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d+:\d+:\d+\s+\d{4})\s+(.+)$/);
+    if (!match) throw new Error("managed_process_identity_unavailable");
+    return { pid: Number(match[1]), pgid: Number(match[2]), uid: Number(match[3]), startIdentity: match[4].replace(/\s+/g, " "), command: match[5] };
+}
+async function portListeners(port: number): Promise<string[]> {
+    try { return (await processOutput("/usr/sbin/lsof", ["-nP", "-iTCP:" + port, "-sTCP:LISTEN", "-Fpn"])) .trim().split("\n").filter(Boolean); }
+    catch (error) { if ((error as { code?: number }).code === 1) return []; throw error; }
+}
 
 /** No shell, user arguments or inherited provider credentials. All process
  * termination targets the child process group created by this invocation. */
@@ -103,6 +127,18 @@ async function modelFilesPresent(directory: string): Promise<boolean> {
     }
     return true;
 }
+async function availablePort(preferred: number): Promise<number> {
+    for (const port of [preferred, 0]) {
+        const probe = createServer();
+        try {
+            await new Promise<void>((resolve, reject) => { probe.once("error", reject); probe.listen({ host: "127.0.0.1", port, exclusive: true }, resolve); });
+            const selected = (probe.address() as import("node:net").AddressInfo).port;
+            await new Promise<void>(resolve => probe.close(() => resolve()));
+            return selected;
+        } catch (error) { await new Promise<void>(resolve => probe.close(() => resolve())); if (port === 0) throw error; }
+    }
+    throw new Error("managed_port_unavailable");
+}
 async function workerActive(job: Job | undefined): Promise<boolean> {
     if (!Number.isInteger(job?.workerPgid) || job!.workerPgid! <= 0 || !/^[a-f0-9-]{36}$/.test(job?.workerIdentity ?? "")) return false;
     // A persisted group ID can be reused after a crash/reboot. Match this
@@ -162,14 +198,24 @@ export class OmlxSetupManager {
         if (job?.state === "running" && !await this.setupActive()) job = await workerActive(job)
             ? { ...job, error: "A previous setup worker is still stopping. Wait before retrying." }
             : { ...job, state: "interrupted", error: "Setup was interrupted. Retry to resume the downloads." };
-        let server: { connected: boolean; models: string[] } = { connected: false, models: [] };
+        const savedSettings = await readJson(join(this.basePath, "settings.json"));
+        const configuredPort = savedSettings?.server?.port ?? this.options.serverPort ?? SERVER_PORT;
+        let server: { connected: boolean; owned: boolean; models: string[]; port: number; error?: string } = { connected: false, owned: false, models: [], port: configuredPort };
+        const serverState = await readJson(join(this.root, "server.json"));
         if (await exists(join(this.basePath, "settings.json"))) {
             try {
                 const inspection = await (this.options.inspect ?? inspectOmlx)({ home: this.options.home, basePath: this.basePath, env: {} });
-                server = { connected: true, models: inspection.advertised_models };
-            } catch { /* Availability is separate from installation. */ }
+                const port = configuredPort;
+                server = { connected: true, owned: false, models: inspection.advertised_models, port };
+                if (serverState?.pid && serverState?.runtime && serverState.port === port) {
+                    try {
+                        server.owned = await this.ownsServer(serverState);
+                    } catch { server.error = "Managed server identity unavailable."; }
+                }
+            } catch (error) { server.error = error instanceof Error ? "Managed server unavailable." : "Managed server unavailable."; }
         }
         return { supported, memoryGB: Math.floor(memory / GIB), freeDiskGB: Math.floor(disk / GIB),
+            runtime: { installedCommit: installed ? OMLX_SETUP_COMMIT : undefined, runningCommit: server.owned ? serverState?.commit : undefined, updatePending: Boolean(installed && server.owned && serverState?.commit && serverState.commit !== OMLX_SETUP_COMMIT) },
             requirements: { memoryGB: MIN_RAM / GIB, freeDiskGB: installed && models.every(model => model.downloaded) ? 0 :
                 10 + (installed ? 0 : 5) + models.filter(model => !model.downloaded).reduce((sum, model) => sum + model.approximateGB, 0) }, installed, models, job: job ?? null, server };
     }
@@ -192,16 +238,18 @@ export class OmlxSetupManager {
             socket.setTimeout(1000, () => { socket.destroy(); reject(new Error("setup_lease_state_unavailable")); });
         });
     }
-    async install() {
+    async install(options: { models?: boolean } = {}) {
+        const withModels = options.models !== false;
         if (this.running) throw new OmlxSetupError("oMLX setup is already running.");
         const releaseLease = await this.acquire();
         try {
             const state = await this.status();
             if (await workerActive(state.job ?? undefined)) throw new OmlxSetupError("A previous setup worker is still running. Wait before retrying.");
             if (!state.supported) throw new OmlxSetupError("oMLX setup requires Apple Silicon and macOS 15 or later.");
-            if (state.memoryGB < MIN_RAM / GIB) throw new OmlxSetupError("The recommended model pack requires at least 32 GiB of unified memory.");
-            if (state.freeDiskGB < state.requirements.freeDiskGB)
-                throw new OmlxSetupError("Free at least " + state.requirements.freeDiskGB + " GiB of disk space to install the remaining stages.");
+            if (withModels && state.memoryGB < MIN_RAM / GIB) throw new OmlxSetupError("The recommended model pack requires at least 32 GiB of unified memory.");
+            const minimumDisk = withModels ? state.requirements.freeDiskGB : 10;
+            if (state.freeDiskGB < minimumDisk)
+                throw new OmlxSetupError("Free at least " + minimumDisk + " GiB of disk space to install the remaining stages.");
             let python: string | undefined;
             for (const candidate of ["python3.13", "python3.12", "python3.11", "python3"]) {
                 try {
@@ -215,14 +263,14 @@ export class OmlxSetupManager {
             await this.saveJob(job);
             this.logBytes = 0;
             await writeFile(join(this.root, "setup.log"), "", { mode: 0o600 });
-            this.running = this.performInstall(python, state, job).catch(async () => {
+            this.running = this.performInstall(python, state, job, withModels).catch(async () => {
                 await this.saveJob({ ...job, state: "failed", error: "Setup failed during " + job.stage + ". Retry to resume. Details are in ~/.prism-mcp/omlx/setup.log." });
             }).finally(async () => { await this.logTail; this.running = undefined; await releaseLease(); });
             void this.running.catch(() => console.error("[omlx setup] Unable to persist setup status."));
             return { id: job.id, state: "running" };
         } catch (error) { await releaseLease(); throw error; }
     }
-    private async performInstall(python: string, state: Awaited<ReturnType<OmlxSetupManager["status"]>>, job: Job) {
+    private async performInstall(python: string, state: Awaited<ReturnType<OmlxSetupManager["status"]>>, job: Job, withModels = true) {
         const stage = async (label: string) => { job.stage = label; await this.saveJob(job); };
         const command: Runner = async (program, args, options) => {
             try { return await this.run(program, args, { ...options, onSpawn: async (pgid, identity) => { job.workerPgid = pgid; job.workerIdentity = identity; await this.saveJob(job); } }); }
@@ -250,7 +298,8 @@ export class OmlxSetupManager {
             }
         }
         await this.privateDirectory(this.basePath);
-        for (const model of state.models) {
+        await this.privateDirectory(join(this.basePath, "models"));
+        for (const model of withModels ? state.models : []) {
             if (model.downloaded) continue;
             await stage("Downloading " + model.label);
             const destination = join(this.basePath, "models", model.id);
@@ -259,7 +308,8 @@ export class OmlxSetupManager {
             await writeFile(join(this.root, model.id + ".json"), JSON.stringify({ revision: model.revision }), { mode: 0o600 });
         }
         await stage("Configuring the managed server");
-        const settings = { server: { host: "127.0.0.1", port: SERVER_PORT },
+        const managedPort = await availablePort(this.options.serverPort ?? SERVER_PORT);
+        const settings = { server: { host: "127.0.0.1", port: managedPort },
             model: { model_dirs: [join(this.basePath, "models")] }, scheduler: { chunked_prefill: true },
             huggingface: { hf_cache_enabled: false },
             auth: { api_key: randomBytes(32).toString("hex"), skip_api_key_verification: false },
@@ -267,30 +317,85 @@ export class OmlxSetupManager {
             cache: { ssd_cache_max_size: "10GB", hot_cache_max_size: "0" },
             idle_timeout: { idle_timeout_seconds: 300 },
             memory: { prefill_memory_guard: true, memory_guard_tier: "balanced" } };
-        const profiles = Object.fromEntries(OMLX_SETUP_MODELS.map((model, index) => [model.id, {
+        const profiles = withModels ? Object.fromEntries(OMLX_SETUP_MODELS.map((model, index) => [model.id, {
             max_context_window: 32768, max_tokens: 4096, is_default: index === 1, is_pinned: false,
             enable_thinking: index === 1, thinking_budget_enabled: index === 1, thinking_budget_tokens: 2048,
             mtp_enabled: false, vlm_mtp_enabled: false, dflash_enabled: false, specprefill_enabled: false,
-        }]));
-        for (const [name, document] of [["settings.json", settings], ["model_settings.json", { version: 1, models: profiles }]] as const) {
-            try { await writeFile(join(this.basePath, name), JSON.stringify(document, null, 2), { flag: "wx", mode: 0o600 }); }
-            catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+        }])) : {};
+        try { await writeFile(join(this.basePath, "settings.json"), JSON.stringify(settings, null, 2), { flag: "wx", mode: 0o600 }); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+        const profilesPath = join(this.basePath, "model_settings.json");
+        const previous = await readJson(profilesPath);
+        if (previous && (previous.version !== 1 || !previous.models || typeof previous.models !== "object" || Array.isArray(previous.models))) throw new Error("managed_model_settings_invalid");
+        const merged = { ...(previous?.models ?? {}) };
+        let changed = previous === undefined;
+        const hasDefault = Object.values(merged).some(value => value && typeof value === "object" && (value as { is_default?: boolean }).is_default === true);
+        for (const [id, profile] of Object.entries(profiles)) {
+            if (Object.hasOwn(merged, id)) continue;
+            merged[id] = { ...profile, is_default: profile.is_default && !hasDefault };
+            changed = true;
         }
-        await this.saveJob({ ...job, state: "complete", stage: "Server and recommended models installed" });
+        if (changed) {
+            const temporary = join(this.basePath, "model-settings-" + randomUUID() + ".tmp");
+            await writeFile(temporary, JSON.stringify({ ...(previous ?? {}), version: 1, models: merged }, null, 2), { flag: "wx", mode: 0o600 });
+            await rename(temporary, profilesPath);
+        }
+        await this.saveJob({ ...job, state: "complete", stage: withModels ? "Server and recommended models installed" : "Server installed; add models separately" });
     }
     async waitForInstall() { await this.running; }
+    private async ownsServer(record: ServerRecord): Promise<boolean> {
+        if (!Number.isSafeInteger(record.pid) || record.pid <= 1 || record.pgid !== record.pid || record.uid !== process.getuid?.()
+            || !/^[a-f0-9]{40}$/.test(record.commit) || record.runtime !== join(this.root, "runtime-" + record.commit.slice(0, 12))
+            || !Number.isInteger(record.port) || record.port < 1 || record.port > 65535) return false;
+        const file = await lstat(join(this.root, "server.json"));
+        if (!file.isFile() || file.isSymbolicLink() || file.uid !== record.uid || (file.mode & 0o077) !== 0) return false;
+        const settingsPath = join(this.basePath, "settings.json"), privateSettings = await lstat(settingsPath);
+        if (!privateSettings.isFile() || privateSettings.isSymbolicLink() || privateSettings.uid !== record.uid || (privateSettings.mode & 0o077) !== 0) return false;
+        const settings = await readJson(settingsPath);
+        if (settings?.server?.host !== "127.0.0.1" || settings.server.port !== record.port || settings.auth?.skip_api_key_verification !== false
+            || typeof settings.auth.api_key !== "string" || !settings.auth.api_key.trim()) return false;
+        const identity = await processIdentity(record.pid);
+        const suffix = join(record.runtime, "bin", "omlx") + " serve --base-path " + this.basePath;
+        const interpreter = identity?.command.slice(0, -(suffix.length + 1));
+        const validCommand = identity?.command === suffix || identity?.command.endsWith(" " + suffix)
+            && ["python", "python3", "python3.11", "python3.12", "python3.13"].some(name => interpreter === join(record.runtime, "bin", name));
+        if (!identity || identity.pgid !== record.pgid || identity.uid !== record.uid || identity.startIdentity !== record.startIdentity || !validCommand) return false;
+        const listeners = await portListeners(record.port);
+        return listeners.filter(line => line.startsWith("p")).join() === "p" + record.pid
+            && listeners.filter(line => line.startsWith("n")).every(line => line === "n127.0.0.1:" + record.port)
+            && listeners.includes("n127.0.0.1:" + record.port);
+    }
     async start() {
         const releaseLease = await this.acquire();
+        let releaseDevice: (() => Promise<void>) | undefined, clearMaintenance: (() => Promise<void>) | undefined;
         try {
+            await checkLocalAiMaintenance(this.options.home);
             const state = await this.status();
             if (await workerActive(state.job ?? undefined)) throw new OmlxSetupError("A previous setup worker is still running. Wait before starting the server.");
-            if (state.server.connected) return { running: true, alreadyRunning: true };
-            if (!state.supported || !state.installed || state.models.some(model => !model.downloaded))
-                throw new OmlxSetupError("Install oMLX and both recommended models before starting the managed server.");
+            if (state.server.connected) {
+                if (!state.server.owned) throw new OmlxSetupError("Managed server ownership is not proven. The existing process was left running.");
+                return { running: true, alreadyRunning: true };
+            }
+            if (!state.supported || !state.installed)
+                throw new OmlxSetupError("Install oMLX before starting the managed server.");
+            releaseDevice = await (this.options.acquireDevice ?? acquireOmlxLease)();
+            clearMaintenance = await beginLocalAiMaintenance(this.options.home, randomUUID());
+            try {
+                const result = await this.startRuntime(this.runtime, OMLX_SETUP_COMMIT, state.server.port);
+                await clearMaintenance(); clearMaintenance = undefined;
+                return result;
+            } catch (error) {
+                if (error instanceof ManagedStartError && error.retired) { await clearMaintenance?.(); clearMaintenance = undefined; }
+                throw error;
+            }
+        } finally { try { await releaseDevice?.(); } finally { await releaseLease(); } }
+    }
+    private async startRuntime(runtime: string, commit: string, port: number) {
+            if (!Number.isInteger(port) || port < 1 || port > 65535) throw new OmlxSetupError("Managed server port is invalid.");
             const probe = createServer();
             await new Promise<void>((resolve, reject) => {
-                probe.once("error", () => reject(new OmlxSetupError("Port 8001 is already in use. The existing process was left running.")));
-                probe.listen({ host: "127.0.0.1", port: this.options.serverPort ?? SERVER_PORT, exclusive: true }, resolve);
+                probe.once("error", () => reject(new ManagedStartError(true, "Managed port " + port + " is already in use. The existing process was left running.")));
+                probe.listen({ host: "127.0.0.1", port, exclusive: true }, resolve);
             });
             await new Promise<void>(resolve => probe.close(() => resolve()));
             const log = await open(join(this.root, "server.log"), "a", 0o600);
@@ -301,10 +406,9 @@ export class OmlxSetupManager {
             env.OMLX_CLUSTER_SHIM_DIRECTORY = join(this.basePath, "bin");
             let child;
             try {
-                child = spawn(join(this.runtime, "bin", "omlx"), ["serve", "--base-path", this.basePath],
+                child = spawn(join(runtime, "bin", "omlx"), ["serve", "--base-path", this.basePath],
                     { env, detached: true, stdio: ["ignore", log.fd, log.fd] });
                 await new Promise<void>((resolve, reject) => { child!.once("spawn", resolve); child!.once("error", () => reject(new Error("Unable to start the managed oMLX server."))); });
-                child.unref();
             } finally { await log.close(); }
             // Keep the setup lease through startup. A second dashboard or CLI
             // cannot spawn a duplicate while this process has not yet bound.
@@ -315,29 +419,92 @@ export class OmlxSetupManager {
             const onExit = () => { try { process.kill(-child.pid!, "SIGTERM"); } catch { /* stopped */ } };
             process.once("exit", onExit);
             try {
+                const birth = await processIdentity(child.pid!);
+                if (!birth || birth.pgid !== child.pid || birth.uid !== process.getuid?.()) throw new Error("managed_child_identity_unavailable");
+                const record: ServerRecord = { pid: child.pid!, pgid: birth.pgid, uid: birth.uid, startIdentity: birth.startIdentity, runtime, commit, port };
+                const temporary = join(this.root, "server-" + randomUUID() + ".tmp");
+                await writeFile(temporary, JSON.stringify(record), { flag: "wx", mode: 0o600 });
+                await rename(temporary, join(this.root, "server.json"));
                 while (Date.now() < deadline) {
                     if (interrupted) throw new Error("server_start_interrupted");
                     if (child.exitCode !== null || child.signalCode !== null) throw new Error("server_exited");
                     const state = await this.status();
-                    if (state.server.connected) return { running: true, alreadyRunning: false, pid: child.pid };
+                    if (state.server.connected && state.server.owned) { child.unref(); return { running: true, alreadyRunning: false, pid: child.pid }; }
                     await new Promise(resolve => setTimeout(resolve, 500));
                 }
                 throw new Error("server_start_timeout");
             } catch {
                 // Only this invocation's still-starting child is terminated.
-                if (child.exitCode === null && child.signalCode === null) {
-                    const closed = new Promise<void>(resolve => child.once("close", () => resolve()));
-                    try { process.kill(-child.pid!, "SIGTERM"); } catch { /* exited */ }
-                    const killTimer = setTimeout(() => { try { process.kill(-child.pid!, "SIGKILL"); } catch { /* exited */ } }, 2_000);
-                    await closed; clearTimeout(killTimer);
-                }
-                throw new OmlxSetupError("Managed oMLX did not start. Check ~/.prism-mcp/omlx/server.log, then retry. Existing servers were left running.");
+                // Persisted server.json can still describe the OLD runtime if
+                // birth inspection failed. Proof must use this actual child.
+                let retired = false;
+                try {
+                    try { process.kill(-child.pid!, "SIGTERM"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+                    const stoppingSince = Date.now(); let escalated = false;
+                    while (Date.now() - stoppingSince < 6_000) {
+                        const groups = await processOutput("/bin/ps", ["-axo", "pgid="]);
+                        if (!groups.split(/\s+/).includes(String(child.pid)) && !await processIdentity(child.pid!)) { retired = true; break; }
+                        if (!escalated && Date.now() - stoppingSince >= 2_000) {
+                            escalated = true;
+                            try { process.kill(-child.pid!, "SIGKILL"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                } catch { /* Unavailable process proof retains the durable block. */ }
+                throw new ManagedStartError(retired);
             } finally {
                 process.removeListener("exit", onExit);
                 signals.forEach((signal, index) => process.removeListener(signal, handlers[index]));
                 if (interrupted) setImmediate(() => process.kill(process.pid, interrupted!));
             }
-        } finally { await releaseLease(); }
+    }
+    async restart() {
+        const releaseLease = await this.acquire();
+        let releaseDevice: (() => Promise<void>) | undefined, clearMaintenance: (() => Promise<void>) | undefined;
+        let retirementStarted = false;
+        try {
+            const state = await this.status();
+            if (!state.server.owned) throw new OmlxSetupError("Managed oMLX server ownership is not proven; refusing restart.");
+            if (!state.installed) throw new OmlxSetupError("Install the tested server update before restarting.");
+            const record: ServerRecord = await readJson(join(this.root, "server.json"));
+            releaseDevice = await (this.options.acquireDevice ?? acquireOmlxLease)();
+            clearMaintenance = await beginLocalAiMaintenance(this.options.home, randomUUID());
+            let inspection: any;
+            try { inspection = await (this.options.inspect ?? inspectOmlx)({ home: this.options.home, basePath: this.basePath, env: {} }); }
+            catch { throw new OmlxSetupError("Managed oMLX activity could not be inspected; refusing restart."); }
+            const counters = inspection?.status;
+            if (!counters || ["active_requests", "waiting_requests", "models_loading"].some(key => counters[key] !== 0))
+                throw new OmlxSetupError("Managed oMLX has active or unknown work; refusing restart.");
+            if (!await this.ownsServer(record))
+                throw new OmlxSetupError("Managed oMLX identity or listener changed; refusing restart.");
+            retirementStarted = true;
+            try { process.kill(record.pid, "SIGTERM"); } catch { throw new OmlxSetupError("Managed oMLX server could not be retired safely."); }
+            const deadline = Date.now() + (this.options.startTimeoutMs ?? 90_000);
+            while (Date.now() < deadline) {
+                const alive = await processIdentity(record.pid);
+                const groups = await processOutput("/bin/ps", ["-axo", "pgid="]);
+                if (!alive && !groups.split(/\s+/).includes(String(record.pgid)) && !(await portListeners(record.port)).length) {
+                    try {
+                        const result = await this.startRuntime(this.runtime, OMLX_SETUP_COMMIT, record.port);
+                        await clearMaintenance(); clearMaintenance = undefined;
+                        return result;
+                    } catch (error) {
+                        // Recovery is attempted only after the replacement's entire group and listener have retired.
+                        if (error instanceof ManagedStartError && error.retired && !(await portListeners(record.port)).length) {
+                            await this.startRuntime(record.runtime, record.commit, record.port);
+                            await clearMaintenance?.(); clearMaintenance = undefined;
+                            throw new OmlxSetupError("The update did not start. The previous managed runtime was restored.");
+                        }
+                        throw new OmlxSetupError("Restart needs operator recovery. Inference remains blocked; inspect the managed log and maintenance.json.");
+                    }
+                }
+                await new Promise(resolve => setTimeout(resolve, 250));
+            }
+            throw new OmlxSetupError("Managed oMLX server did not retire safely.");
+        } finally {
+            try { if (!retirementStarted) await clearMaintenance?.(); }
+            finally { try { await releaseDevice?.(); } finally { await releaseLease(); } }
+        }
     }
 }
 

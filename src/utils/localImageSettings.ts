@@ -7,7 +7,8 @@ export interface LocalImageSettings {
     backend?: LocalImageBackend;
     models?: Partial<Record<LocalImageBackend, string>>;
 }
-const KEY = "local_image_config_v1";
+export const LOCAL_IMAGE_SETTING_KEY = "local_image_config_v1";
+const KEY = LOCAL_IMAGE_SETTING_KEY;
 const FIELDS = new Set(["backend", "models"]);
 const INVALID = "local_image_preference_invalid";
 function record(value: unknown): Record<string, unknown> {

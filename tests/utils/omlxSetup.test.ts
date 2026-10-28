@@ -8,7 +8,10 @@ import { OmlxSetupManager, OMLX_SETUP_COMMIT, OMLX_SETUP_MODELS, runSetupCommand
 
 const PREVIOUS_MANAGED_COMMIT = "883fd6d00464d0193146a1cba20a64fb7cd8e116";
 const EXISTING_SERVER_SETTINGS = '{"sampling":{"max_context_window":16384}}';
-const EXISTING_MODEL_SETTINGS = '{"version":1,"models":{}}';
+// A prior configured installation has operator-edited profiles. Upgrading
+// runtime must preserve these exact bytes, while the new empty-profile tests
+// above verify that opting into the pack adds only missing entries.
+const EXISTING_MODEL_SETTINGS = JSON.stringify({ version: 1, models: Object.fromEntries(OMLX_SETUP_MODELS.map(model => [model.id, { max_context_window: 8192, thinking_budget_tokens: 512 }])) });
 const PREVIOUS_RUNTIME_CONTENT = "previous runtime preserved";
 const SOURCE_ORIGIN = "https://github.com";
 const SOURCE_PATH = /^\/dcostenco\/omlx\/(?:commit|blob)\/([a-f0-9]{40})(?:\/|$)/;
@@ -81,7 +84,7 @@ async function fixture(overrides: Record<string, unknown> = {}) {
         return "";
     });
     const manager = new OmlxSetupManager({ home, platform: "darwin", arch: "arm64", release: "24.0.0", totalmem: 48 * 1024 ** 3,
-        freeDisk: async () => 60 * 1024 ** 3, leasePort: 0, run, inspect: async () => { throw new Error("not serving"); }, ...overrides });
+        freeDisk: async () => 60 * 1024 ** 3, leasePort: 0, run, acquireDevice: async () => async () => {}, inspect: async () => { throw new Error("not serving"); }, ...overrides });
     return { home, manager, commands, run };
 }
 
@@ -112,6 +115,42 @@ async function modelBytes(manager: OmlxSetupManager) {
 }
 
 describe("opt-in managed oMLX setup", () => {
+    it("adds missing starter profiles after server-only setup while preserving operator choices", async () => {
+        const f = await fixture();
+        await f.manager.install({ models: false }); await f.manager.waitForInstall();
+        const profilePath = join(f.manager.basePath, "model_settings.json");
+        expect(JSON.parse(await readFile(profilePath, "utf8")).models).toEqual({});
+        const operatorProfile = { is_default: true, max_context_window: 8192, custom: "operator" };
+        await writeFile(profilePath, JSON.stringify({ version: 1, models: { "operator/model": operatorProfile } }));
+        await f.manager.install(); await f.manager.waitForInstall();
+        const profiles = JSON.parse(await readFile(profilePath, "utf8")).models;
+        expect(profiles['operator/model']).toEqual(operatorProfile);
+        expect(profiles[OMLX_SETUP_MODELS[0].id]).toMatchObject({ is_default: false, max_context_window: 32768 });
+        expect(profiles[OMLX_SETUP_MODELS[1].id]).toMatchObject({ is_default: false, enable_thinking: true, thinking_budget_tokens: 2048 });
+        expect((await f.manager.status()).job?.state).toBe('complete');
+    });
+    it("configures the starter writer default when the server-only profile is empty", async () => {
+        const f = await fixture();
+        await f.manager.install({ models: false }); await f.manager.waitForInstall();
+        await f.manager.install(); await f.manager.waitForInstall();
+        const profiles = JSON.parse(await readFile(join(f.manager.basePath, 'model_settings.json'), 'utf8')).models;
+        expect(profiles[OMLX_SETUP_MODELS[1].id]).toMatchObject({ is_default: true, thinking_budget_tokens: 2048 });
+    });
+    it("installs runtime and configuration without downloading models when requested", async () => {
+        const f = await fixture({ totalmem: 8 * 1024 ** 3, freeDisk: async () => 20 * 1024 ** 3 });
+        await f.manager.install({ models: false }); await f.manager.waitForInstall();
+        expect(f.commands.some(command => command.args[0] === "download")).toBe(false);
+        const settings = JSON.parse(await readFile(join(f.manager.basePath, "settings.json"), "utf8"));
+        expect(settings.server.port).toBeGreaterThan(0);
+        expect(settings.model.model_dirs).toEqual([join(f.manager.basePath, "models")]);
+    });
+
+    it("refuses restart when a connected server is not proven managed-owned", async () => {
+        const f = await fixture({ inspect: async () => ({ url: "http://127.0.0.1:8001", advertised_models: [] }) });
+        await mkdir(f.manager.basePath, { recursive: true });
+        await writeFile(join(f.manager.basePath, "settings.json"), "{}", { mode: 0o600 });
+        await expect(f.manager.restart()).rejects.toThrow("ownership is not proven");
+    });
     it.each(MISLEADING_SOURCE_URLS)("ignores a source URL belonging to another origin: %s", url => {
         expect(sourceRevisions(`[source](${url})`)).toEqual([]);
     });

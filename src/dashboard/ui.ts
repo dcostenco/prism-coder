@@ -488,6 +488,7 @@ export function renderDashboardHTML(version: string): string {
     #spanel-local .setting-desc { font-size: 0.8rem; line-height: 1.55; }
     #spanel-local a { color: var(--accent-purple); text-underline-offset: 3px; }
     #spanel-local button, #spanel-local select, #spanel-local input { min-height: 40px; }
+    #spanel-local select { height: 44px; font-size: 0.85rem; }
     #spanel-local button:disabled { opacity: 0.5; cursor: default; }
     .skill-upload-btn { background: none; border: 1px solid var(--border-glass); color: var(--text-secondary);
       border-radius: var(--radius-sm); padding: 0.45rem 0.85rem; font-size: 0.82rem; cursor: pointer; transition: all 0.2s; }
@@ -1247,7 +1248,7 @@ export function renderDashboardHTML(version: string): string {
         <div class="settings-tabs">
           <button class="s-tab active" id="stab-account" onclick="switchSettingsTab('account')">👤 Account</button>
           <button class="s-tab" id="stab-settings" onclick="switchSettingsTab('settings')">⚙️ Preferences</button>
-          <button class="s-tab" id="stab-local" onclick="switchSettingsTab('local')">Local Coding</button>
+          <button class="s-tab" id="stab-local" onclick="switchSettingsTab('local')">Local AI</button>
           <button class="s-tab" id="stab-skills" onclick="switchSettingsTab('skills')">📜 Skills</button>
           <button class="s-tab" id="stab-providers" onclick="switchSettingsTab('providers')">🤖 AI Providers</button>
           <button class="s-tab" id="stab-observability" onclick="switchSettingsTab('observability')">🔭 Observability</button>

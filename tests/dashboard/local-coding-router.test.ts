@@ -3,6 +3,8 @@ import { createServer, type Server } from "node:http";
 import { handleLocalCodingRoutes } from "../../src/dashboard/localCodingRouter.js";
 import { parseLocalCodingSettings, type LocalCodingSettings } from "../../src/utils/localCodingSettings.js";
 import { OmlxError } from "../../src/utils/omlxProvider.js";
+import { createHash } from "node:crypto";
+import { inflateSync } from "node:zlib";
 
 const servers: Server[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))); });
@@ -32,6 +34,103 @@ async function fixture(overrides = {}) {
 }
 
 describe("dashboard local coding actions", () => {
+    it("keeps server reference facts separate even when the model describes the wrong image", async () => {
+        const infer = vi.fn(async () => ({ structuredContent: { backend: "omlx", model_picked: "future/vision", used_cloud: false,
+            output: "A blue circle", reference: { description: "forged by model" }, gate_outcome: { status: "success" } } }));
+        const f = await fixture({ infer, imageSettings: async () => ({ backend: "omlx", models: { omlx: "future/vision" } }) });
+        const data = await (await f.post("/api/local-coding/test", { backend: "omlx", purpose: "image" })).json();
+        const bytes = Buffer.from((infer.mock.calls[0] as unknown as [any])[0].images[0], "base64");
+        expect(data).toMatchObject({ status: "passed", output: "A blue circle", reference: {
+            source: "builtin-diagnostic", description: "Solid red square", width: 32, height: 32, format: "PNG",
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+        } });
+        expect(bytes.readUInt32BE(16)).toBe(32); expect(bytes.readUInt32BE(20)).toBe(32);
+        expect(bytes[24]).toBe(8); expect(bytes[25]).toBe(2); // RGB8, no interlace.
+        const chunks: Buffer[] = [];
+        for (let i = 8; i < bytes.length;) { const size = bytes.readUInt32BE(i); if (bytes.toString("ascii", i + 4, i + 8) === "IDAT") chunks.push(bytes.subarray(i + 8, i + 8 + size)); i += 12 + size; }
+        const raw = inflateSync(Buffer.concat(chunks)), stride = 96, pixels = Buffer.alloc(32 * stride);
+        for (let y = 0; y < 32; y++) for (let x = 0; x < stride; x++) {
+            const filter = raw[y * (stride + 1)], left = x >= 3 ? pixels[y * stride + x - 3] : 0, up = y ? pixels[(y - 1) * stride + x] : 0;
+            expect([0, 1, 2]).toContain(filter); // These are the filters in this fixed diagnostic.
+            pixels[y * stride + x] = (raw[y * (stride + 1) + x + 1] + (filter === 1 ? left : filter === 2 ? up : 0)) & 255;
+        }
+        for (let i = 0; i < pixels.length; i += 3) expect([...pixels.subarray(i, i + 3)]).toEqual([255, 0, 0]);
+    });
+    it("withholds reference and output on a blocked image diagnostic", async () => {
+        const f = await fixture({ imageSettings: async () => ({ models: { omlx: "future/vision" } }),
+            infer: async () => ({ structuredContent: { backend: "omlx", model_picked: "future/vision", output: "stale text", used_cloud: false,
+                gate_outcome: { status: "refused", reason: "omlx_memory_pressure" } } }) });
+        const data = await (await f.post("/api/local-coding/test", { backend: "omlx", purpose: "image" })).json();
+        expect(data.status).toBe("blocked"); expect(data.reference).toBeUndefined(); expect(data.output).toBeUndefined();
+    });
+    it.each([
+        { role: "coder", model: "prism-coder:4b", reportedBackend: "ollama-4b" },
+        { role: "reviewer", model: "prism-coder:4b", reportedBackend: "ollama-4b" },
+        { role: "coder", model: "vendor/future:tag", reportedBackend: "ollama-vendor/future:tag" },
+        { role: "reviewer", model: "vendor/future:tag", reportedBackend: "ollama-vendor/future:tag" },
+    ])("recognizes production Ollama diagnostic results: $role / $model", async ({ role, model, reportedBackend }) => {
+        const infer = vi.fn(async () => ({ structuredContent: { backend: reportedBackend, model_picked: model, used_cloud: false,
+            output: "LOCAL_READY", gate_outcome: { status: "success", served_anyway: false } } }));
+        const f = await fixture({ infer, settings: async () => ({ backend: "ollama", source: "existing", models: { ollama: { [role]: model } } }) });
+        expect(await (await f.post("/api/local-coding/test", { backend: "ollama", purpose: role })).json()).toMatchObject({ status: "passed", model });
+        expect(infer).toHaveBeenCalledWith(expect.objectContaining({ local_backend: "ollama", local_model: model, local_role: role, cloud_fallback: false }));
+    });
+    it.each([
+        { backend: "omlx" }, { backend: "openrouter-local" }, { backend: "ollama-" },
+        { model_picked: "different/model" }, { used_cloud: true }, { output: "" },
+        { gate_outcome: { status: "degraded", served_anyway: true } },
+        { gate_outcome: { status: "refused", served_anyway: false } },
+    ])("keeps diagnostic backend/model/cloud/quality boundaries: %j", async change => {
+        const model = "vendor/future:tag";
+        const f = await fixture({ settings: async () => ({ backend: "ollama", source: "existing", models: { ollama: { coder: model } } }),
+            infer: async () => ({ structuredContent: { backend: "ollama-vendor/future:tag", model_picked: model, used_cloud: false,
+                output: "LOCAL_READY", gate_outcome: { status: "success", served_anyway: false }, ...change } }) });
+        expect(await (await f.post("/api/local-coding/test", { backend: "ollama", purpose: "coder" })).json()).toMatchObject({ status: "blocked" });
+    });
+    it("reports the control connection independently of a coding model on an empty server", async () => {
+        const f = await fixture({ inspect: async () => ({ url: "http://127.0.0.1:8127/v1", advertised_models: [] }), connectionControl: async () => true });
+        expect(await (await fetch(f.base + "/api/local-coding")).json()).toMatchObject({ connection: { connected: true, control: true, models: [] } });
+    });
+    it("installs server-only without requesting pack downloads", async () => {
+        const f = await fixture();
+        expect((await f.post("/api/local-coding/install-server")).status).toBe(202);
+        expect(f.install).toHaveBeenCalledExactlyOnceWith({ models: false });
+    });
+    it("previews all roles without changing preferences or inferring", async () => {
+        const infer = vi.fn(), activateSource = vi.fn();
+        const snapshot = { revision: "a".repeat(64), settings: { backend: "auto", source: "existing", models: { omlx: { coder: "same/build", reviewer: "same/build" } } }, image: { models: { omlx: "other/vision" } } };
+        const f = await fixture({ infer, activateSource, snapshot: async () => snapshot,
+            inspectSource: async () => ({ control: true, connected: true, models: ["same/build"] }) });
+        const result = await (await fetch(f.base + "/api/local-coding/connection-preview?source=existing")).json();
+        expect(result.canActivate).toBe(true);
+        expect(result.assignments).toEqual([{ purpose: "coder", model: "same/build", available: true }, { purpose: "reviewer", model: "same/build", available: true }, { purpose: "image", model: "other/vision", available: false }]);
+        expect(infer).not.toHaveBeenCalled(); expect(activateSource).not.toHaveBeenCalled();
+        expect((await f.post("/api/local-coding/activate-connection", { source: "existing", revision: snapshot.revision })).status).toBe(200);
+        expect(activateSource).toHaveBeenCalledWith("existing", snapshot.revision);
+    });
+    it("refuses unowned managed activation before a settings write", async () => {
+        const activateSource = vi.fn();
+        const f = await fixture({ activateSource, inspectSource: async () => ({ connected: true, control: true, models: [] }) });
+        expect((await f.post("/api/local-coding/activate-connection", { source: "managed", revision: "a".repeat(64) })).status).toBe(409);
+        expect(activateSource).not.toHaveBeenCalled();
+    });
+    it("runs only an explicit bounded saved-model image diagnostic without coding classifier", async () => {
+        const infer = vi.fn(async (args: any) => ({ structuredContent: { backend: "omlx", model_picked: args.image_model, used_cloud: false, output: "red square", gate_outcome: { status: "success" } } }));
+        const f = await fixture({ infer, imageSettings: async () => ({ backend: "omlx", models: { omlx: "future/vision" } }) });
+        expect((await (await f.post("/api/local-coding/test", { backend: "omlx", purpose: "image" })).json()).status).toBe("passed");
+        expect(infer).toHaveBeenCalledWith(expect.objectContaining({ image_backend: "omlx", image_model: "future/vision", cloud_fallback: false, strict_entitlements: true, images: [expect.stringMatching(/^iVBOR/)] }));
+        expect((await f.post("/api/local-coding/test", { backend: "omlx", purpose: "image", prompt: "custom" })).status).toBe(400);
+        expect((await f.post("/api/local-coding/test", { backend: "omlx", purpose: "image" }, "https://untrusted.invalid")).status).toBe(403);
+        expect(infer).toHaveBeenCalledOnce();
+    });
+    it("distinguishes missing coding safety dependency and unsupported Ollama images", async () => {
+        const infer = vi.fn();
+        const f = await fixture({ infer, settings: async () => ({ backend: "omlx", source: "existing", models: { omlx: { coder: "future/coder" } } }),
+            inspect: async () => ({ advertised_models: [] }), imageSettings: async () => ({ models: { ollama: "future:vision" } }) });
+        expect(await (await f.post("/api/local-coding/test", { backend: "omlx", purpose: "coder" })).json()).toMatchObject({ status: "blocked", reason: "classifier_missing" });
+        expect(await (await f.post("/api/local-coding/test", { backend: "ollama", purpose: "image" })).json()).toMatchObject({ status: "blocked", reason: "local_image_backend_not_enabled" });
+        expect(infer).not.toHaveBeenCalled();
+    });
     it("discovers both backends and persists the same model for both roles", async () => {
         const models = { omlx: { coder: "new/build", reviewer: "new/build" }, ollama: { coder: "future:tag", reviewer: "future:tag" } };
         const f = await fixture({ ollamaModels: async () => [{ id: "future:tag", loaded: false, weightBytes: 12345678 }] });

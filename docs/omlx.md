@@ -1,5 +1,57 @@
 # Local coding with oMLX
 
+## Quick setup
+
+Open `prism dashboard` → **Account & Settings → Local AI**:
+
+1. **Connection:** preview your existing server, or expand **Install or update a
+   Prism-managed server** and install the server only. Start it, preview the
+   connection, then choose **Use this server**. An empty model inventory is valid.
+   The preview covers coder, reviewer and image assignments. Switching preserves
+   saved IDs and overrides; an unavailable model is never silently substituted.
+2. **Models:** open the oMLX model manager to add models, then refresh inventory.
+   Assign discovered models independently for coder, reviewer and images. The same
+   model may serve multiple purposes. Save each form. The full coding starter pack
+   remains optional; oMLX coding and review require its text safety classifier,
+   while image requests screen with their selected vision model.
+3. **Test:** choose a backend and purpose, then **Test saved model**. This runs a
+   small local request with current account and resource checks, without cloud
+   fallback. The image diagnostic uses a built-in red square. A pass establishes
+   execution, not accuracy. Ollama image execution remains unavailable.
+
+![Local AI connection controls and optional managed-server setup](screenshots/local-ai-connection.png)
+
+*Development-build screenshots use isolated demo inventory and responses. They
+illustrate the controls; they are not live model-fit or accuracy results. An
+installed npm release may show an earlier interface.*
+
+For the full illustrated walkthrough, see
+[Local AI in the dashboard](../README.md#local-ai-in-the-dashboard).
+
+Image-test results separate **Reference facts** about the built-in diagnostic PNG
+from **AI observations** returned by the selected model. The reference includes
+the image dimensions and is bound to its bytes by a SHA-256 digest in the API
+response. A wrong model description does not change these facts. Starting another
+test or changing its backend or purpose clears the previous image result. This
+reference applies to the built-in diagnostic; user images are not assigned
+catalog facts by this feature.
+
+![Built-in image diagnostic with separate reference facts and model observations](screenshots/local-ai-image-results.png)
+
+The server status distinguishes **installed** and **running** revisions. Installing
+an update does not restart a server or switch connections. A managed restart
+requires matching process identity, private settings, loopback listener ownership,
+idle counters and an available device lease. If retirement or recovery cannot be
+proved, a durable maintenance marker blocks further local inference until operator
+recovery. Inspect `~/.prism-mcp/omlx/server.log` and the recorded process before
+resolving `maintenance.json`; do not remove it merely to bypass the block.
+
+[Latest upstream oMLX releases](https://github.com/jundot/omlx/releases) are linked
+for release notes. Setup installs the tested Prism-compatible revision below,
+which includes Prism's required control and image routes. Updating the Prism npm
+package does **not** update an external oMLX installation. For an external server,
+use the manual installation section below and restart it through its own launcher.
+
 Prism's **Auto** coding preference chooses configured oMLX for eligible text-only
 coding drafts on Apple Silicon; otherwise it chooses Ollama. You can save a
 different preference or override it for each task. The model runs locally;
@@ -13,7 +65,7 @@ The independent image-preferences API stores backend-bound model choices under
 unset and accepts future model IDs without a code change. Its GET and POST path,
 `/api/local-coding/image-preferences`, uses the dashboard's existing access gates.
 Saving returns `selectionApplied: false`: these choices do not enable an
-inference model. In **Settings → Local coding → Image model**, choose an image
+inference model. In **Settings → Local AI → Models → Image model**, choose an image
 backend and an independently discovered model for each server, then select
 **Save image preference**. The same model may also be assigned to coding roles.
 Missing saved choices stay visible; an unreachable server is shown as unknown
@@ -78,7 +130,7 @@ remain independent. Saving a choice does not install, start or load a model.
 
 ## Dashboard setup and backend preference
 
-Open `prism dashboard`, then **Settings → Local Coding**. The panel provides:
+Open `prism dashboard`, then **Settings → Local AI**. The panel provides:
 
 - **Preferred coding backend:** Auto, oMLX, or Ollama. Auto prefers configured
   oMLX for text-only code calls with the top model ceiling. Explicit smaller
@@ -136,7 +188,7 @@ for generation and auxiliary calls. Unknown required metadata refuses admission
 rather than falling back to a named tier. The ordinary unassigned tier walk
 retains its existing behavior.
 
-For a new installation, choose **Install oMLX + recommended models**. It requires
+To install the optional full starter pack, choose **Install oMLX + recommended models**. It requires
 Apple Silicon, macOS 15+, Python 3.11–3.13, 32 GiB unified memory, and 40 GiB free
 disk. This optional starter pack downloads about 25 GB and does not restrict
 the installed models you can assign above. Review the linked model licenses
@@ -148,10 +200,10 @@ initial 40 GiB.
 
 The managed runtime and models live under `~/.prism-mcp/omlx/`, separate from
 `~/.omlx/`. It pins the source/model revisions below, uses generic kernels,
-loopback port 8001, a private API key, 32K context, 4K output, a 2K writer thinking
+an available loopback port (preferring 8001), a private API key, 32K context, 4K output, a 2K writer thinking
 budget, chunked prefill, idle eviction, and a 10 GB SSD cache cap. Speculative
-features stay disabled. After installation, select **Start managed oMLX**, then
-choose **Prism-managed installation** and save. Existing servers remain running;
+features stay disabled. After installation, select **Start managed server**, then
+preview **Prism-managed installation** and select **Use this server**. Existing servers remain running;
 an occupied port is an error, not permission to stop its owner.
 
 Managed setup and the source installation below pin

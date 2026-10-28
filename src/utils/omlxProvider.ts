@@ -1,6 +1,7 @@
 /** Explicit, authenticated on-device oMLX transport and resource coordination.
  * Application safety/quality/entitlement policy remains in prismInferHandler. */
 import { AsyncLocalStorage } from "node:async_hooks";
+import { checkLocalAiMaintenance } from "./localAiMaintenance.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, readdirSync, type BigIntStats } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -171,7 +172,7 @@ export async function acquireOmlxLease(port = OMLX_LEASE_PORT, options: OmlxLeas
         released = true;
         await new Promise<void>(resolve => server.close(() => resolve()));
     };
-    try { checkInferenceDeviceQuarantine(options.stateDirectory, options.recoveryProviderId); }
+    try { await checkLocalAiMaintenance(); checkInferenceDeviceQuarantine(options.stateDirectory, options.recoveryProviderId); }
     catch (error) { await release(); throw error; }
     return release;
 }
@@ -344,6 +345,12 @@ export async function configuredOmlxModel(requestedModel?: string, options: Omlx
         if (error instanceof OmlxError && error.reason === "omlx_model_not_configured") return undefined;
         throw error;
     }
+}
+
+/** Authentication/control health is independent of any installed model. */
+export async function inspectOmlxControl(options: OmlxConnectionOptions = {}): Promise<boolean> {
+    const { url, apiKey } = await connection(options);
+    return hasOmlxControl(createOmlxTarget(url, "connection-check", 1, apiKey), options.fetchImpl ?? fetch);
 }
 
 export async function detectOmlx(requestedModel?: string, options: OmlxConnectionOptions = {}): Promise<OmlxTarget> {

@@ -9,8 +9,9 @@ export type LocalCodingModels = Partial<Record<"omlx" | "ollama", Partial<Record
 export interface LocalCodingSettings { backend: LocalCodingBackend; source: OmlxSource; model?: string; models?: LocalCodingModels }
 // Older Prism versions reject unknown keys. A single versioned record keeps
 // new saves atomic without corrupting their legacy config or rollback state.
-const KEY = "local_coding_config_v2";
-const LEGACY_KEY = "local_coding_config";
+export const LOCAL_CODING_SETTING_KEY = "local_coding_config_v2";
+export const LEGACY_LOCAL_CODING_SETTING_KEY = "local_coding_config";
+const KEY = LOCAL_CODING_SETTING_KEY, LEGACY_KEY = LEGACY_LOCAL_CODING_SETTING_KEY;
 export function isLocalCodingModelId(value: unknown): value is string {
     return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(value);
 }
