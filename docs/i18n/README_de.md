@@ -2185,7 +2185,7 @@ AI chat, voice input, SOAP note generator, team collaboration, and video calls â
 
 Communication app for non-speaking users, powered by the on-device prism-coder fleet for phrase prediction. macOS / iOS / web.
 
-See [github.com/dcostenco/prism-aac](https://github.com/dcostenco/prism-aac)
+See the [Prism AAC user guide](https://synalux.ai/docs/telehealth/prism-aac).
 
 ---
 
