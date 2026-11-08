@@ -34,6 +34,13 @@ async function fixture(overrides = {}) {
 }
 
 describe("dashboard local coding actions", () => {
+    it("reports required host review separately from model or memory failures", async () => {
+        const f = await fixture({ imageSettings: async () => ({ models: { omlx: "future/vision" } }),
+            infer: async () => ({ structuredContent: { status: "host_authorization_required", host_task: { private: "not for dashboard output" } } }) });
+        const data = await (await f.post("/api/local-coding/test", { backend: "omlx", purpose: "image" })).json();
+        expect(data).toMatchObject({ status: "blocked", reason: "host_authorization_required" });
+        expect(data.message).toContain("prism local run"); expect(data.host_task).toBeUndefined(); expect(data.output).toBeUndefined();
+    });
     it("keeps server reference facts separate even when the model describes the wrong image", async () => {
         const infer = vi.fn(async () => ({ structuredContent: { backend: "omlx", model_picked: "future/vision", used_cloud: false,
             output: "A blue circle", reference: { description: "forged by model" }, gate_outcome: { status: "success" } } }));

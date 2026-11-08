@@ -142,5 +142,5 @@ export function ddWarn(message: string, context?: Record<string, unknown>) {
 }
 
 if (!TELEMETRY_WRITE_TOKEN && process.env.PRISM_DEBUG_LOGGING) {
-    console.info("[prism-mcp] Portal telemetry not configured (no TELEMETRY_WRITE_TOKEN). Session metrics work locally — this is normal for offline/free-tier use.");
+    process.stderr.write("[prism-mcp] Portal telemetry not configured (no TELEMETRY_WRITE_TOKEN). Session metrics work locally — this is normal for offline/free-tier use.\n");
 }

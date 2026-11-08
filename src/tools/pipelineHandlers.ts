@@ -11,6 +11,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import { hostTasksRequired } from '../utils/hostTasks.js';
 import { resolve } from 'node:path';
 import { getStorage } from '../storage/index.js';
 import { PRISM_USER_ID } from '../config.js';
@@ -32,6 +33,8 @@ import { wakeFactoryPolling } from '../storage/configStorage.js';
 // ─── Start Pipeline Handler ─────────────────────────────────
 
 export async function sessionStartPipelineHandler(args: unknown) {
+  if (hostTasksRequired()) return { content: [{ type: "text" as const,
+    text: "host_authorization_required: autonomous Factory execution is unavailable in host-authorized mode. Prepare prism_infer tasks and have the host review and execute each packet through the CLI." }], isError: true };
   if (!isStartPipelineArgs(args)) {
     return {
       content: [{ type: "text" as const, text: "❌ Invalid arguments. Required: project (string), objective (string). Optional: working_directory, max_iterations (1-10), context_files, model_override." }],

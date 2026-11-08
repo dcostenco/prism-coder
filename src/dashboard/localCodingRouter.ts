@@ -182,6 +182,10 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
                 ...(purpose === "image" ? { prompt: "Describe the shape and color shown.", images: [LOCAL_AI_TEST_PNG], image_backend: backend, image_model: model }
                     : { prompt: "Reply exactly LOCAL_READY for this local connection diagnostic.", local_backend: backend, local_role: purpose, local_model: model }) };
             const result = await deps.infer(args), data = result.structuredContent;
+            if (data?.status === "host_authorization_required") {
+                json(res, 200, { status: "blocked", purpose, backend, model, reason: "host_authorization_required",
+                    message: "This host requires review before local execution. Prepare the diagnostic through prism_infer, review its task packet, and execute it with prism local run --host-task <file> --approve." }); return true;
+            }
             const reportedBackend = data?.backend;
             // The normal inference result labels Ollama with its served tier
             // or exact selected ID (for example ollama-4b).

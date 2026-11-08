@@ -14,10 +14,21 @@ describe("local coding backend choice", () => {
     it("Auto prefers configured oMLX without changing image, chat or tool routing", () => {
         expect(resolveLocalCodingBackend({ mode: "code" }, preference("auto"))).toBe("omlx");
         expect(resolveLocalCodingBackend({ mode: "code" }, preference("auto", false))).toBe("ollama");
-        for (const effective of ["auto", "omlx"] as const) {
+        for (const effective of ["auto"] as const) {
             for (const args of [{ mode: "chat" }, { mode: "route" }, { mode: "code", images: ["image"] }]) {
                 expect(resolveLocalCodingBackend(args, preference(effective))).toBe("ollama");
             }
+        }
+    });
+    it("keeps an explicit oMLX preference for every text mode, including the default route", () => {
+        for (const mode of [undefined, "route", "chat", "code"]) {
+            expect(resolveLocalCodingBackend({ mode }, preference("omlx"))).toBe("omlx");
+        }
+        expect(resolveLocalCodingBackend({ mode: "code", images: ["image"] }, preference("omlx"))).toBe("ollama");
+    });
+    it("keeps an explicit Ollama preference even when oMLX is configured", () => {
+        for (const mode of [undefined, "route", "chat", "code"]) {
+            expect(resolveLocalCodingBackend({ mode }, preference("ollama", true))).toBe("ollama");
         }
     });
     it("keeps explicitly bounded small code calls eligible for Ollama in Auto", () => {

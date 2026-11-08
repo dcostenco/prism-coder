@@ -2007,6 +2007,10 @@ export const QUERY_MEMORY_NATURAL_TOOL: Tool = {
     "automatically run one quick Synalux web search, preserve the raw sources, " +
     "and synthesize a grounded answer through prism_infer. Reserved or uncertain " +
     "content is cloud-or-refuse and never sent through the local web-grounded path.\n\n" +
+    "With PRISM_HOST_TASKS=required, synthesis or web work first returns a host-review packet. " +
+    "Retrieved evidence requires its own frozen drafting approval; query approval does not authorize drafting.\n\n" +
+    "cloud_fallback, verify and route_guard apply to the separately approved inference task. " +
+    "For local-only processing, also disable web_fallback and explicitly use cloud_fallback:false, verify:false, route_guard:'local'.\n\n" +
     "**Examples:**\n" +
     "- \"What did we decide about authentication?\"\n" +
     "- \"What's still open on the billing project?\"\n" +
@@ -2035,6 +2039,22 @@ export const QUERY_MEMORY_NATURAL_TOOL: Tool = {
         description: "If true, use one paid Synalux web search when Prism memory has no useful evidence. Default: true.",
         default: true,
       },
+      cloud_fallback: {
+        type: "boolean",
+        description: "Allow cloud answer fallback in the inference task. Default: true; separate from web retrieval and grounding verification.",
+        default: true,
+      },
+      verify: {
+        type: "boolean",
+        description: "Request optional Portal grounding verification of the draft and evidence. Default: true. False retains input/output safety checks and host approval.",
+        default: true,
+      },
+      route_guard: {
+        type: "string",
+        enum: ["auto", "local"],
+        description: "Inference route correction: auto retains configured correction; local skips only the optional Portal correction.",
+        default: "auto",
+      },
       conversation_id: {
         type: "string",
         description: "Optional session_bootstrap conversation id for inference telemetry and continuity.",
@@ -2049,6 +2069,9 @@ export interface QueryMemoryNaturalArgs {
   project?: string;
   synthesize?: boolean;
   web_fallback?: boolean;
+  cloud_fallback?: boolean;
+  verify?: boolean;
+  route_guard?: "auto" | "local";
   conversation_id?: string;
 }
 
@@ -2062,6 +2085,9 @@ export function isQueryMemoryNaturalArgs(
       (typeof a.project !== "string" || !a.project.trim())) return false;
   if (a.synthesize !== undefined && typeof a.synthesize !== "boolean") return false;
   if (a.web_fallback !== undefined && typeof a.web_fallback !== "boolean") return false;
+  if (a.cloud_fallback !== undefined && typeof a.cloud_fallback !== "boolean") return false;
+  if (a.verify !== undefined && typeof a.verify !== "boolean") return false;
+  if (a.route_guard !== undefined && a.route_guard !== "auto" && a.route_guard !== "local") return false;
   if (a.conversation_id !== undefined &&
       (typeof a.conversation_id !== "string" || !a.conversation_id.trim())) return false;
   return true;

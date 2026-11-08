@@ -8,7 +8,7 @@ const TARGET = createOmlxTarget("http://127.0.0.1:8000/v1", "vendor/future-model
 const REQUEST = { messages: [{ role: "user", content: "draft" }], maxTokens: 64, timeoutMs: 200 };
 const model = (id: string, overrides = {}) => ({ id, loaded: false, is_loading: false, pinned: false,
     resident_estimated_size: 6 * GIB, last_access: 0, ...overrides });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 function fixture(rows = [model(TARGET.model), model("vendor/previous", { loaded: true })]) {
     let available = GIB;
@@ -64,13 +64,104 @@ describe("idle-only oMLX capacity reclamation", () => {
         expect(f.calls[1].path).toBe("/v1/models/older/unload-idle");
         expect(f.calls).toHaveLength(2);
     });
-    it.each([401, 403, 404, 409, 500])("refuses HTTP %s without the ordinary unload fallback", async status => {
+    it.each([401, 403, 404, 500])("refuses HTTP %s without the ordinary unload fallback", async status => {
         const f = fixture();
         vi.mocked(f.fetchImpl).mockImplementationOnce(async () => new Response(JSON.stringify({ models: [model(TARGET.model), model("old", { loaded: true })] })))
             .mockImplementationOnce(async () => new Response("unavailable", { status }));
         await expect(f.run()).rejects.toThrow();
         expect(vi.mocked(f.fetchImpl).mock.calls).toHaveLength(2);
         expect(String(vi.mocked(f.fetchImpl).mock.calls[1][0])).toContain("/unload-idle");
+    });
+    it("waits for finished-request cleanup rather than abandoning the only reclaimable model", async () => {
+        vi.useFakeTimers();
+        const f = fixture();
+        vi.mocked(f.fetchImpl)
+            .mockImplementationOnce(async () => new Response(JSON.stringify({ models: [model(TARGET.model), model("old", { loaded: true })] })))
+            .mockImplementationOnce(async () => new Response("cleanup pending", { status: 409 }));
+        const result = f.run().then(() => null, error => error);
+        await vi.advanceTimersByTimeAsync(200);
+        expect(await result).toBeNull();
+        expect(vi.mocked(f.fetchImpl).mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+            "/v1/models/status", "/v1/models/old/unload-idle", "/v1/models/old/unload-idle"]);
+        expect(f.read()).toBe(10 * GIB);
+    });
+    it("keeps genuinely busy work protected and stops retrying within a bounded drain window", async () => {
+        vi.useFakeTimers();
+        const f = fixture();
+        vi.mocked(f.fetchImpl).mockImplementation(async (_url, init) => init?.method === "POST"
+            ? new Response("busy", { status: 409 })
+            : new Response(JSON.stringify({ models: [model(TARGET.model), model("active", { loaded: true })] })));
+        const result = f.run(new AbortController().signal, Date.now() + 5000).then(() => null, error => error);
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(await result).toMatchObject({ reason: "omlx_memory_pressure" });
+        const posts = vi.mocked(f.fetchImpl).mock.calls.filter(([, init]) => init?.method === "POST");
+        expect(posts.length).toBeGreaterThan(1);
+        expect(posts.length).toBeLessThanOrEqual(16);
+        expect(posts.every(([url]) => String(url).endsWith("/models/active/unload-idle"))).toBe(true);
+        expect(f.read()).toBe(GIB);
+    });
+    it("gives a temporarily busy model its retry window after another model's memory drain", async () => {
+        vi.useFakeTimers();
+        const f = fixture();
+        const posts: string[] = [];
+        vi.mocked(f.fetchImpl).mockImplementation(async (url, init) => {
+            if (init?.method !== "POST") return new Response(JSON.stringify({ models: [model(TARGET.model),
+                model("small", { loaded: true, last_access: 1 }), model("draining", { loaded: true, last_access: 2 })] }));
+            const id = new URL(String(url)).pathname.split("/").at(-2)!;
+            posts.push(id);
+            if (id === "small") f.setAvailable(4 * GIB);
+            else if (posts.filter(value => value === "draining").length === 1) return new Response("busy", { status: 409 });
+            else f.setAvailable(10 * GIB);
+            return new Response(JSON.stringify({ status: "ok", model_id: id }));
+        });
+        const result = f.run(new AbortController().signal, Date.now() + 5000).then(() => null, error => error);
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(await result).toBeNull();
+        expect(posts).toEqual(["small", "draining", "draining"]);
+    });
+    it("does not start another busy candidate's retry after a slow response exhausts the retry window", async () => {
+        vi.useFakeTimers();
+        const f = fixture();
+        const posts: string[] = [];
+        vi.mocked(f.fetchImpl).mockImplementation(async (url, init) => {
+            if (init?.method !== "POST") return new Response(JSON.stringify({ models: [model(TARGET.model),
+                model("first", { loaded: true, last_access: 1 }), model("second", { loaded: true, last_access: 2 })] }));
+            const id = new URL(String(url)).pathname.split("/").at(-2)!;
+            posts.push(id);
+            if (id === "first" && posts.length > 2) await new Promise(resolve => setTimeout(resolve, 1500));
+            return new Response("busy", { status: 409 });
+        });
+        const result = f.run(new AbortController().signal, Date.now() + 5000).then(() => null, error => error);
+        await vi.advanceTimersByTimeAsync(2500);
+        expect(await result).toMatchObject({ reason: "omlx_memory_pressure" });
+        expect(posts).toEqual(["first", "second", "first"]);
+    });
+    it.each(["cancel", "deadline"])("never retries a busy unload after %s", async stop => {
+        vi.useFakeTimers();
+        const controller = new AbortController();
+        const f = fixture();
+        vi.mocked(f.fetchImpl).mockImplementation(async (_url, init) => init?.method === "POST"
+            ? new Response("busy", { status: 409 })
+            : new Response(JSON.stringify({ models: [model(TARGET.model), model("active", { loaded: true })] })));
+        const result = f.run(controller.signal, Date.now() + (stop === "deadline" ? 50 : 5000)).then(() => null, error => error);
+        await vi.advanceTimersByTimeAsync(0);
+        if (stop === "cancel") controller.abort();
+        await vi.advanceTimersByTimeAsync(200);
+        expect(await result).toMatchObject({ reason: "timeout" });
+        expect(vi.mocked(f.fetchImpl).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    });
+    it("stops retrying if independently observed RAM becomes sufficient", async () => {
+        vi.useFakeTimers();
+        const f = fixture();
+        vi.mocked(f.fetchImpl).mockImplementation(async (_url, init) => init?.method === "POST"
+            ? new Response("busy", { status: 409 })
+            : new Response(JSON.stringify({ models: [model(TARGET.model), model("active", { loaded: true })] })));
+        const result = f.run().then(() => null, error => error);
+        await vi.advanceTimersByTimeAsync(0);
+        f.setAvailable(10 * GIB);
+        await vi.advanceTimersByTimeAsync(200);
+        expect(await result).toBeNull();
+        expect(vi.mocked(f.fetchImpl).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     });
     it("does not invent freed bytes from the unloaded model's metadata", async () => {
         const f = fixture();

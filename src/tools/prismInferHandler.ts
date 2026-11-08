@@ -21,9 +21,10 @@
  */
 
 import { ownedOmlxGenerate, recoverOwnedOmlx, validateOmlxRequestEnvelope } from "../utils/omlxOwned.js";
+import { approvedHostTask, consumeHostExecution, HostAuthorizationError, hostTaskResponse, hostTasksRequired, prepareHostTask, snapshotHostTask } from "../utils/hostTasks.js";
 import { validateOmlxImageInput } from "../utils/omlxImages.js";
 import { OmlxError, createOmlxRuntime, guardedOmlxGenerate, omlxModelTarget, withInferenceResourceLease, withOllamaResourceLease, OMLX_MIN_AVAILABLE_BYTES, type OmlxRuntime, type OmlxTarget } from "../utils/omlxProvider.js";
-import { OMLX_LAYER1_MODEL, omlxLayer1Fetch } from "../utils/omlxLayer1.js";
+import { omlxLayer1Model, omlxLayer1Fetch, omlxLayer1Options } from "../utils/omlxLayer1.js";
 import { createHash } from "node:crypto";
 import { type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { pickLocalModel, fmtGb, MODEL_TIERS, resolveOllamaName } from "../utils/modelPicker.js";
@@ -574,6 +575,61 @@ export function estimateImageTokens(count: number): number {
     return Math.max(0, count) * IMAGE_TOKEN_ESTIMATE;
 }
 
+const PRISM_INFER_RESULT_OUTPUT_SCHEMA: NonNullable<Tool["outputSchema"]> = {
+    type: "object",
+    properties: {
+        output: { type: "string" },
+        backend: { type: "string" },
+        model_picked: { type: ["string", "null"] },
+        used_cloud: { type: "boolean" },
+        ram_free_mb: { type: "number" },
+        latency_ms: { type: "number" },
+        attempts: {
+            type: "array", items: {
+                type: "object", properties: { tier: { type: "string" }, reason: { type: "string" } },
+                required: ["tier", "reason"], additionalProperties: false,
+            },
+        },
+        gate_outcome: {
+            type: "object", properties: {
+                status: { type: "string", enum: ["success", "degraded", "refused"] },
+                reason: { type: "string" }, served_anyway: { type: "boolean" },
+            },
+            required: ["status", "served_anyway"], additionalProperties: false,
+        },
+        next_step: { type: "string" },
+    },
+    required: ["output", "backend", "model_picked", "used_cloud", "ram_free_mb", "latency_ms", "attempts"],
+};
+
+const HOST_TASK_PENDING_OUTPUT_SCHEMA: NonNullable<Tool["outputSchema"]> = {
+    type: "object",
+    properties: {
+        status: { const: "host_authorization_required" },
+        message: { type: "string" },
+        next_step: { type: "string" },
+        host_task: {
+            type: "object", properties: {
+                record: {
+                    type: "object", properties: {
+                        version: { const: 1 }, id: { type: "string", pattern: "^[a-f0-9]{48}$" },
+                        kind: { const: "prism_infer" },
+                        request_sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                        task_sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                        environment_sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                        created_at: { type: "integer", minimum: 0 }, expires_at: { type: "integer", minimum: 0 },
+                    },
+                    required: ["version", "id", "kind", "request_sha256", "task_sha256", "environment_sha256", "created_at", "expires_at"],
+                    additionalProperties: false,
+                },
+                request: { type: "object" }, execution: { type: "object" }, metadata: { type: "object" },
+            },
+            required: ["record", "request", "execution", "metadata"], additionalProperties: false,
+        },
+    },
+    required: ["status", "host_task", "message", "next_step"], additionalProperties: false,
+};
+
 export const PRISM_INFER_TOOL: Tool = {
     name: "prism_infer",
     // MCP annotations — required for non-interactive hosts, not decoration.
@@ -643,6 +699,7 @@ export const PRISM_INFER_TOOL: Tool = {
         openWorldHint: true,
     },
     description:
+        "When PRISM_HOST_TASKS=required, this tool prepares a frozen host-review packet; execution uses the privileged host CLI. " +
         "Run local inference using the saved coding backend preference. Explicit local_backend overrides it. oMLX uses authenticated " +
         "loopback oMLX for coding drafts or selected images, without backend substitution or final sign-off. " +
         "Owns model selection across 27B / 9B / 4B / 2B using an explicit `model_ceiling` or " +
@@ -708,11 +765,11 @@ export const PRISM_INFER_TOOL: Tool = {
             },
             local_backend: {
                 type: "string", enum: ["ollama", "omlx"],
-                description: "Override coding backend; oMLX is text-only. No substitution.",
+                description: "Text backend override: route/chat/code. No substitution.",
             },
             local_model: {
                 type: "string",
-                description: "Installed code model override; unavailable models refuse.",
+                description: "Exact code/oMLX text model; unavailable models refuse.",
             },
             local_role: { type: "string", enum: ["coder", "reviewer"], description: "Coding role; default coder." },
             image_backend: { type: "string", enum: ["omlx", "ollama"], description: "Image backend; oMLX checked, Ollama disabled. Requires images." },
@@ -835,32 +892,13 @@ export const PRISM_INFER_TOOL: Tool = {
         },
         required: ["prompt"],
     },
-    outputSchema: {
+    outputSchema: hostTasksRequired() ? {
         type: "object",
-        properties: {
-            output: { type: "string" },
-            backend: { type: "string" },
-            model_picked: { type: ["string", "null"] },
-            used_cloud: { type: "boolean" },
-            ram_free_mb: { type: "number" },
-            latency_ms: { type: "number" },
-            attempts: {
-                type: "array", items: {
-                    type: "object", properties: { tier: { type: "string" }, reason: { type: "string" } },
-                    required: ["tier", "reason"], additionalProperties: false,
-                },
-            },
-            gate_outcome: {
-                type: "object", properties: {
-                    status: { type: "string", enum: ["success", "degraded", "refused"] },
-                    reason: { type: "string" }, served_anyway: { type: "boolean" },
-                },
-                required: ["status", "served_anyway"], additionalProperties: false,
-            },
-            next_step: { type: "string" },
-        },
-        required: ["output", "backend", "model_picked", "used_cloud", "ram_free_mb", "latency_ms", "attempts"],
-    },
+        oneOf: [
+            { ...PRISM_INFER_RESULT_OUTPUT_SCHEMA, not: { required: ["status"] } },
+            HOST_TASK_PENDING_OUTPUT_SCHEMA,
+        ],
+    } : PRISM_INFER_RESULT_OUTPUT_SCHEMA,
 };
 
 // ─── Arg validation ────────────────────────────────────────────
@@ -978,8 +1016,8 @@ export function isPrismInferArgs(args: unknown): args is PrismInferArgs {
     if (localImageRequestProblem(a) !== null) return false;
     if (a.local_backend !== undefined && a.local_backend !== "ollama" && a.local_backend !== "omlx") return false;
     if (a.local_role !== undefined && (a.mode !== "code" || (a.local_role !== "coder" && a.local_role !== "reviewer") || (Array.isArray(a.images) && a.images.length > 0))) return false;
-    if (a.local_model !== undefined && (a.mode !== "code" || !isLocalCodingModelId(a.local_model) || (Array.isArray(a.images) && a.images.length > 0))) return false;
-    if (a.local_backend === "omlx" && (a.mode !== "code" || (Array.isArray(a.images) && a.images.length > 0))) return false;
+    if (a.local_model !== undefined && ((a.mode !== "code" && a.local_backend !== "omlx") || !isLocalCodingModelId(a.local_model) || (Array.isArray(a.images) && a.images.length > 0))) return false;
+    if (a.local_backend === "omlx" && Array.isArray(a.images) && a.images.length > 0) return false;
     if (a.max_tokens !== undefined && typeof a.max_tokens !== "number") return false;
     if (a.temperature !== undefined && typeof a.temperature !== "number") return false;
     if (a.cloud_fallback !== undefined && typeof a.cloud_fallback !== "boolean") return false;
@@ -1026,6 +1064,23 @@ type MemoryRecord = Record<string, unknown>;
 export interface PreparedInferArgs {
     args: PrismInferArgs;
     memory?: { project: string; depth: InferContextDepth };
+}
+
+/** An approved task names its provider/model; later settings changes cannot retarget it. */
+async function pinHostTaskSelection(args: PrismInferArgs): Promise<PrismInferArgs> {
+    if (args.images?.length) {
+        const settings = await readLocalImageSettings();
+        const backend = args.image_backend ?? settings.backend;
+        const model = args.image_model ?? (backend ? settings.models?.[backend] : undefined);
+        if (!backend || !isLocalCodingModelId(model)) throw new Error("host_task_explicit_image_selection_required");
+        return { ...args, image_backend: backend, image_model: model };
+    }
+    const settings = await localCodingPreference(args.local_role ?? "coder", args.local_backend, false);
+    const backend = settings.effective;
+    if (backend !== "omlx" && backend !== "ollama") throw new Error("host_task_explicit_backend_required");
+    const model = resolveLocalCodingModel(settings, backend, args.local_role ?? "coder", args.local_model);
+    if (!isLocalCodingModelId(model)) throw new Error("host_task_explicit_model_required");
+    return { ...args, local_backend: backend, local_model: model };
 }
 
 export type ProjectMemoryLoader = (
@@ -2227,6 +2282,18 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     // device lease; never infer the reviewer role from prose or system text.
     const intercepted = [...(args.messages ?? []).filter(turn => turn.role === "user").map(turn => turn.content), args.prompt].some(text => Boolean(checkInputSafety(text)));
     if (!intercepted) {
+        try { consumeHostExecution("prism_infer", args); }
+        catch (error) {
+            const reason = error instanceof HostAuthorizationError ? error.code : error instanceof Error ? error.message : "host_authorization_required";
+            if (args.escalation !== "report") throw error;
+            return { output: "", backend: "refused", model_picked: null, used_cloud: false,
+                latency_ms: Date.now() - started, ram_free_mb: Math.round(deps.freemem() / 1024 ** 2),
+                attempts: [{ tier: "host_authorization", reason }],
+                gate_outcome: { status: "refused", reason, served_anyway: false },
+                next_step: "Prepare the task through prism_infer and have the host review and execute its packet through the CLI." };
+        }
+    }
+    if (!intercepted) {
         let imageRefusal = localImageRequestProblem(args);
         if (!imageRefusal && args.images?.length && args.local_backend === undefined) {
             let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2261,9 +2328,14 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             throw new Error(`prism_infer: ${imageRefusal}`);
         }
     }
-    if (!intercepted && args.mode === "code" && !args.images?.length && deps.codingPreference && !(args.local_backend && args.local_model)) {
+    if (!intercepted && !args.images?.length && deps.codingPreference && !(args.local_backend && args.local_model)) {
+        // Auto cannot consider oMLX below the effective plan/caller ceiling.
+        // Do not inspect an ineligible provider's configuration in that case.
+        if (args.mode === "code") deps = { ...deps, entitlements: deps.entitlements ?? await getEntitlements() };
+        const autoOmlxEligible = args.mode === "code"
+            && clampCeiling(args.model_ceiling ?? "27b", deps.entitlements!.model_ceiling) === "27b";
         let preference: LocalCodingPreference;
-        try { preference = await deps.codingPreference(args.local_role ?? "coder", args.local_backend); }
+        try { preference = await deps.codingPreference!(args.local_role ?? "coder", args.local_backend, autoOmlxEligible); }
         catch {
             const reason = "local_coding_preference_invalid";
             if (args.escalation === "report") return { output: "", backend: "refused", model_picked: null,
@@ -2273,13 +2345,16 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         }
         // Auto eligibility uses the same plan snapshot as the later gate,
         // before choosing a device lease. Explicit selections remain strict.
-        if (preference.effective === "auto") deps = { ...deps, entitlements: deps.entitlements ?? await getEntitlements() };
-        const selectionArgs = preference.effective === "auto"
+        const selectionArgs = preference.effective === "auto" && args.mode === "code"
             ? { ...args, model_ceiling: clampCeiling(args.model_ceiling ?? "27b", deps.entitlements!.model_ceiling) } : args;
         const backend = resolveLocalCodingBackend(selectionArgs, preference);
-        let model = resolveLocalCodingModel(preference, backend, args.local_role ?? "coder", args.local_model);
+        // Legacy Auto/Ollama chat and routing retain their tier picker. An
+        // explicit oMLX preference applies to every text mode and uses the
+        // saved coder model unless the caller supplies an exact model.
+        const selectModel = args.mode === "code" || backend === "omlx";
+        let model = selectModel ? resolveLocalCodingModel(preference, backend, args.local_role ?? "coder", args.local_model) : undefined;
         const codingModel = deps.codingModel;
-        if (!model && codingModel) {
+        if (selectModel && !model && codingModel) {
             deps = { ...deps, entitlements: deps.entitlements ?? await getEntitlements() };
             const ceiling = clampCeiling(args.model_ceiling ?? "27b", deps.entitlements!.model_ceiling);
             // Preserve the existing oMLX ceiling refusal before any provider probe.
@@ -2622,7 +2697,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     let omlxTarget: OmlxTarget | undefined;
     const omlxRuntime = args.local_backend === "omlx" || image ? deps.omlx : undefined;
     if (args.local_backend === "omlx" || image) {
-        if (!image && (mode !== "code" || args.images?.length)) throw new Error("prism_infer: oMLX requires text-only code mode");
+        if (!image && args.images?.length) throw new Error("prism_infer: oMLX requires text-only input or the selected image path");
         if (!omlxRuntime) {
             if (image && wantReport) return refusedResult("omlx_runtime_unavailable");
             throw new Error("prism_infer: omlx_runtime_unavailable");
@@ -2786,9 +2861,20 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         // explicit oMLX refuses ERROR; it never falls back to Ollama.
         const baseL1 = deps.callLayer1 ?? defaultCallLayer1;
         const generationTarget = omlxTarget, runtime = omlxRuntime;
+        let textClassifierModel: string | undefined;
+        if (generationTarget && runtime && !image) {
+            try { textClassifierModel = omlxLayer1Model(); }
+            catch {
+                const reason = "omlx_classifier_model_invalid";
+                attempts.push({ tier: "layer1", reason });
+                if (wantReport) return refusedResult(reason);
+                throw new OmlxError(reason);
+            }
+        }
+        let omlxL1Opts: ReturnType<typeof omlxLayer1Options> | undefined;
         const omlxL1Fetch = generationTarget && runtime
             ? omlxLayer1Fetch(async request => {
-                const result = await guardedOmlxGenerate(runtime, image ? generationTarget : omlxModelTarget(generationTarget, OMLX_LAYER1_MODEL), request, deps.freemem);
+                const result = await guardedOmlxGenerate(runtime, image ? generationTarget : omlxModelTarget(generationTarget, textClassifierModel!), request, deps.freemem);
                 if (image) imageClassifierFailure = result.ok ? undefined : result.reason;
                 return result;
             },
@@ -2796,9 +2882,9 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             : undefined;
         const l1fn = omlxL1Fetch
             ? (...[prompt, url, model, , images, opts]: Parameters<typeof defaultCallLayer1>) =>
-                baseL1(prompt, url, model, omlxL1Fetch, images, opts)
+                baseL1(prompt, url, model, omlxL1Fetch, images, { ...opts, ...omlxL1Opts })
             : baseL1;
-        const l1Model = omlxL1Fetch ? image ? generationTarget!.model : OMLX_LAYER1_MODEL : resolveOllamaName("prism-coder:4b", installed);
+        const l1Model = omlxL1Fetch ? image ? generationTarget!.model : textClassifierModel! : resolveOllamaName("prism-coder:4b", installed);
         secondReadModel = null;
         // The classifier must be able to SEE what it is classifying. Ollama
         // accepts `images` on a text-only model and silently ignores them
@@ -2826,7 +2912,17 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         }
         // Explicit oMLX: errors are never served (strictErrors), and the rules
         // only refuse; the classifier reads everything they would clear.
-        const omlxL1Opts = omlxTarget ? { strictErrors: true, readOversizeWhole: true } as const : undefined;
+        if (omlxTarget) {
+            try {
+                omlxL1Opts = omlxLayer1Options(Boolean(resolvedImages?.length));
+            } catch {
+                const reason = "omlx_classifier_policy_invalid";
+                attempts.push({ tier: "layer1", reason });
+                if (wantReport) return refusedResult(reason);
+                throw new OmlxError(reason);
+            }
+        }
+        const authoritativePolicy = omlxL1Opts?.authoritativePolicy === true;
         // 4th arg is fetchImpl (default), 5th is the images the classifier must see.
         // Single turn: one call, unchanged. With history, three layers: the
         // deterministic floor per turn, every turn read alone (every verdict
@@ -2835,18 +2931,19 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         // context (raise only) — see below.
         // The account's classifier-input policy; without one the classifier
         // reads the prompt as written.
-        const classifierInput = await (deps.classifierInputPolicy ?? (() => getClassifierInputPolicy({ deadlineMs: CLASSIFIER_INPUT_LOAD_MS })))().catch(() => null);
+        const classifierInput = authoritativePolicy ? null
+            : await (deps.classifierInputPolicy ?? (() => getClassifierInputPolicy({ deadlineMs: CLASSIFIER_INPUT_LOAD_MS })))().catch(() => null);
         let l1: Layer1Verdict;
         if (!args.messages?.length) {
             // Single turn: one call; the classifier-input policy is passed when there is one.
-            l1 = classifierInput
+            l1 = classifierInput && !authoritativePolicy
                 ? await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { classifierInput, ...omlxL1Opts })
                 : await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, ...(omlxL1Opts ? [omlxL1Opts] : []));
             if (l1 !== "OBVIOUS_NOT_RESERVED") l1Layer = "prompt";
         } else {
             l1 = "OBVIOUS_NOT_RESERVED";
             // 1. Deterministic floor, per TURN and role-aware, regex only.
-            for (const turn of args.messages) {
+            if (!authoritativePolicy) for (const turn of args.messages) {
                 // Role matters for the deterministic OPERATIONAL rules (write
                 // auth code, auth bypass, ship/deploy, PHI exposure): they
                 // classify a request, and by description they match ordinary
@@ -2907,15 +3004,17 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             // slices as a turn; then it is read alone with its images and that
             // verdict is kept like a turn's. The floor only refuses, so there is
             // no fast path: a prompt a rule does not refuse is always read.
-            for (const slice of windowsOf(args.prompt, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
-                const promptDet = classifyDeterministicLayer1(slice);
-                if (promptDet) l1 = raise(l1, promptDet, "rules");
+            if (!authoritativePolicy) {
+                for (const slice of windowsOf(args.prompt, DETERMINISTIC_FLOOR_WINDOW_CHARS, DETERMINISTIC_FLOOR_WINDOW_OVERLAP)) {
+                    const promptDet = classifyDeterministicLayer1(slice);
+                    if (promptDet) l1 = raise(l1, promptDet, "rules");
+                }
             }
             // The classifier entry point's own whole-prompt deterministic pass
             // is switched off here — it would undo the slicing above (words
             // 14k chars apart firing one rule; review round 18).
             if (l1 !== "OBVIOUS_RESERVED") {
-                l1 = raise(l1, await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false, ...(classifierInput ? { classifierInput } : {}), ...omlxL1Opts }), "prompt");
+                l1 = raise(l1, await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { deterministic: false, ...(classifierInput && !authoritativePolicy ? { classifierInput } : {}), ...omlxL1Opts }), "prompt");
             }
             // 3. Context, raise only: one window per turn and one for the
             // prompt (see contextWindows), cached like any window. Skipped
@@ -3008,7 +3107,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         }
         // Null when the deterministic floor did not fire — the verdict then came
         // from the semantic classifier, which has no per-rule attribution.
-        const reservedCat = reservedCategory(screenedText(args));
+        const reservedCat = authoritativePolicy ? null : reservedCategory(screenedText(args));
         if (image) {
             imageScreened = l1 === "OBVIOUS_NOT_RESERVED" && imageClassifierFailure === undefined;
             if (!imageScreened) {
@@ -3954,6 +4053,7 @@ async function applyVerification(
         const contractOptions = { allowParallel: args.allow_parallel_calls === true };
         const parsed = parseRouteOutput(draft);
         const shouldUsePortal =
+            args.local_backend !== "omlx" &&
             args.route_guard !== "local" &&
             partial.plan !== "free" &&
             deps.callRouteGuard !== undefined &&
@@ -4125,8 +4225,8 @@ export async function inferText(
         // exists to prevent. Fail closed: rethrow so a refusal propagates, and
         // return null only for genuine unavailability.
         const message = (err as Error).message ?? "";
-        if (err instanceof ReservedRefusalError) {
-            debugLog("[inferText] reserved-content refusal — propagating, not falling back");
+        if (err instanceof ReservedRefusalError || err instanceof HostAuthorizationError) {
+            debugLog("[inferText] authorization/scope refusal — propagating");
             throw err;
         }
         debugLog(`[inferText] no backend produced output: ${message.slice(0, 160)}`);
@@ -4238,7 +4338,22 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps): Promis
                 : "Invalid arguments for prism_infer (need {prompt: string})");
     }
     try {
-        const prepared = await prepareMemoryAwareInferArgs(args);
+        const required = hostTasksRequired();
+        const request = required ? snapshotHostTask(args) : args;
+        const approved = required ? approvedHostTask("prism_infer", request) : undefined;
+        let prepared: PreparedInferArgs = approved
+            ? { args: approved.execution as unknown as PrismInferArgs,
+                ...(approved.metadata.memory ? { memory: approved.metadata.memory as PreparedInferArgs["memory"] } : {}) }
+            : await prepareMemoryAwareInferArgs(request);
+        if (!isPrismInferArgs(prepared.args)) throw new Error("host_task_invalid_execution");
+        const intercepted = [...(prepared.args.messages ?? []).filter(turn => turn.role === "user").map(turn => turn.content), prepared.args.prompt]
+            .some(text => Boolean(checkInputSafety(text)));
+        if (required && !approved && !intercepted) {
+            prepared = { ...prepared, args: await pinHostTaskSelection(prepared.args) };
+            if (!isPrismInferArgs(prepared.args)) throw new Error("host_task_invalid_execution_selection");
+            return hostTaskResponse(await prepareHostTask("prism_infer", request as unknown as Record<string, unknown>,
+                prepared.args as unknown as Record<string, unknown>, prepared.memory ? { memory: prepared.memory } : {}));
+        }
         const result = await runInfer(prepared.args, deps ?? productionInferDeps());
 
         debugLog(`[prism_infer] backend=${result.backend} model=${result.model_picked} latency=${result.latency_ms}ms free=${result.ram_free_mb}MB`);
@@ -4248,11 +4363,11 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps): Promis
         // estimateTokens() — critical for cloud path where prompt_tokens is unset.
         // mode lives on args, not the result — pass it explicitly or the
         // ledger's mode column is silently NULL forever.
-        recordInference({ ...result, prompt_text: args.prompt, mode: prepared.args.mode ?? "route" });
+        recordInference({ ...result, prompt_text: request.prompt, mode: prepared.args.mode ?? "route" });
 
         // Best-effort session telemetry — records that inference ran for this
         // conversation. Never affects routing or safety decisions.
-        const _convId = args.conversation_id;
+        const _convId = request.conversation_id;
         if (_convId && result.backend !== "safety_gate") {
             import("../session/sessionContext.js").then(({ noteInferenceForSession }) => {
                 noteInferenceForSession(_convId, {

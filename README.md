@@ -34,6 +34,10 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
   selection based on installed models, available RAM, context fit, and
   subscription entitlements. Eligible text-only coding can prefer configured
   oMLX; explicit task choices override the saved backend preference.
+- **Optional host-authorized tasks** — a host can require review of the exact
+  request, context and evidence before local execution. Expiring task packets
+  run through the host CLI; ordinary tool arguments cannot approve them.
+  See the [host-authorized workflow](docs/omlx.md#host-authorized-tasks).
 - **A savings meter you can audit** — `prism savings` (or the `local_savings`
   tool from any host) reports the token volume local serving kept off your
   cloud model: headline, local share, per-model breakdown. It reports tokens,

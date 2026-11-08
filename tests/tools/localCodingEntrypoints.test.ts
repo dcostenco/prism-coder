@@ -41,4 +41,10 @@ describe("default production coding entrypoints", () => {
         expect(response.structuredContent).toMatchObject({ backend: "refused", gate_outcome: { reason: "local_coding_model_unavailable" } });
         expect(selectUnassignedCodingModel).toHaveBeenCalledWith(expect.objectContaining({ backend: "omlx", role: local_role }));
     });
+    it.each([undefined, "route", "chat"] as const)("MCP production dependencies honor saved oMLX for mode %s", async mode => {
+        const response = await prismInferHandler({ prompt: "Look up my saved project notes.", mode,
+            cloud_fallback: false, escalation: "report" });
+        expect(response.structuredContent).toMatchObject({ backend: "refused", gate_outcome: { reason: "local_coding_model_unavailable" } });
+        expect(selectUnassignedCodingModel).toHaveBeenCalledWith(expect.objectContaining({ backend: "omlx", role: "coder" }));
+    });
 });

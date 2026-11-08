@@ -32,6 +32,10 @@ describe('local coding model assignments', () => {
         expect(parseLocalCodingSettings({ ...base, models: { omlx: Object.create({ coder: 'phantom' }) } }).models?.omlx?.coder).toBeUndefined();
         expect(() => parseLocalCodingSettings(Object.create(base))).toThrow();
     });
+    it.each(['model\n', 'model\r\n', ' model', 'model '])('rejects whitespace rather than changing the requested model: %j', model => {
+        expect(() => parseLocalCodingSettings({ ...base, model })).toThrow('local_coding_preference_invalid');
+        expect(() => parseLocalCodingSettings({ ...base, models: { omlx: { coder: model } } })).toThrow('local_coding_preference_invalid');
+    });
     it('reads fresh persisted changes and rejects bad saves before storage mutation', async () => {
         vi.mocked(getSetting).mockResolvedValueOnce(JSON.stringify({ ...base, models: assignments })).mockResolvedValueOnce(JSON.stringify(base));
         expect((await readLocalCodingSettings()).models).toEqual(assignments);

@@ -5,7 +5,7 @@ import { PRISM_INFER_TOOL, runInfer, prismInferHandler, productionInferDeps, isP
 import { selectUnassignedCodingModel } from "../../src/utils/localCodingModelSelection.js";
 import { FREE_ENTITLEMENTS, type PrismEntitlements } from "../../src/utils/entitlements.js";
 import { parseAnswerCheckPolicy, parseSecondReadPolicy } from "../../src/utils/inferencePolicy.js";
-import { callLayer1 } from "../../src/utils/layer1.js";
+import { callLayer1, LAYER1_PROMPT } from "../../src/utils/layer1.js";
 import { ANSWER_GROUNDING_THINK } from "../../src/utils/answerGrounding.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,6 +52,89 @@ function fixture() {
 }
 
 describe("explicit oMLX through the centralized prism_infer pipeline", () => {
+    it.each([undefined, "route", "chat", "code"] as const)("keeps saved Ollama for mode %s despite a healthy oMLX provider", async mode => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "ollama", effective: "ollama", configured: true, envOverride: null });
+        const result = await runInfer(ask({ mode, local_backend: undefined }), f.deps);
+        expect(result.backend).toMatch(/^ollama-/);
+        expect(f.deps.callLocal).toHaveBeenCalled();
+        expect(f.omlx.detect).not.toHaveBeenCalled();
+        expect(f.omlx.acquire).not.toHaveBeenCalled();
+        expect(f.omlx.generate).not.toHaveBeenCalled();
+    });
+    it.each([undefined, "route", "chat", "code"] as const)("does not substitute oMLX when Ollama fails in mode %s", async mode => {
+        for (const failure of ["inventory", "missing_model", "generation"] as const) {
+            const f = fixture();
+            f.deps.codingPreference = async () => ({ saved: "ollama", effective: "ollama", configured: true, envOverride: null });
+            if (failure === "inventory") f.deps.listTags = vi.fn(async () => null);
+            if (failure === "missing_model") f.deps.listTags = vi.fn(async () => new Set<string>());
+            if (failure === "generation") f.deps.callLocal = vi.fn(async () => ({ ok: false, reason: "provider_unavailable" }));
+            const result = await runInfer(ask({ mode, local_backend: undefined }), f.deps)
+                .catch(error => ({ backend: "exception", error }));
+            expect(["refused", "exception"]).toContain(result.backend);
+            expect(f.omlx.detect, failure).not.toHaveBeenCalled();
+            expect(f.omlx.acquire, failure).not.toHaveBeenCalled();
+            expect(f.omlx.generate, failure).not.toHaveBeenCalled();
+            expect(f.deps.callCloud, failure).not.toHaveBeenCalled();
+        }
+    });
+    it.each([undefined, "route", "chat"] as const)("honors saved oMLX for text mode %s without Ollama inference", async mode => {
+        const f = fixture();
+        const output = mode === "chat" ? "The saved local notes describe the project." : '<tool_call>{"name":"knowledge_search","arguments":{"query":"project"}}</tool_call>';
+        f.deps.codingPreference = vi.fn(async () => ({ saved: "omlx" as const, effective: "omlx" as const, configured: true, envOverride: null,
+            models: { omlx: { coder: MODEL } } }));
+        f.deps.callRouteGuard = vi.fn(async () => { throw new Error("must stay local"); });
+        f.omlx.generate = vi.fn(async () => ({ ok: true as const, text: output, doneReason: "stop" }));
+        const result = await runInfer(ask({ mode, local_backend: undefined, prompt: "Look up my saved project notes." }), f.deps);
+        expect(result).toMatchObject({ backend: "omlx", model_picked: MODEL, used_cloud: false, output });
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+        expect(f.deps.listTags).not.toHaveBeenCalled();
+        expect(f.deps.listLoaded).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+        expect(f.deps.callRouteGuard).not.toHaveBeenCalled();
+    });
+    it.each(["route", "chat"] as const)("never substitutes Ollama when the saved oMLX %s model is unavailable", async mode => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
+            models: { omlx: { coder: MODEL } } });
+        f.omlx.detect = vi.fn(async () => { throw new OmlxError("omlx_model_not_advertised"); });
+        expect(await runInfer(ask({ mode, local_backend: undefined, cloud_fallback: true }), f.deps))
+            .toMatchObject({ backend: "refused", gate_outcome: { reason: "omlx_model_not_advertised" } });
+        expect(f.deps.listTags).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it("retains the advertised-tool boundary for oMLX routing without a portal call", async () => {
+        const f = fixture();
+        const draft = '<tool_call>{"name":"brave_web_search","arguments":{"query":"project"}}</tool_call>';
+        f.omlx.generate = vi.fn(async () => ({ ok: true as const, text: draft, doneReason: "stop" }));
+        f.deps.callRouteGuard = vi.fn(async () => { throw new Error("must stay local"); });
+        const result = await runInfer(ask({ mode: "route", allowed_tools: ["knowledge_search"] }), f.deps);
+        expect(result.route_guard).toMatchObject({ action: "suppressed", source: "local" });
+        expect(result.output).not.toBe(draft);
+        expect(f.deps.callRouteGuard).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+    });
+    it.each([undefined, "route", "chat"] as const)("retains the plan ceiling without switching provider for mode %s", async mode => {
+        const f = fixture();
+        f.deps.entitlements = { ...ENT, model_ceiling: "9b" };
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
+            models: { omlx: { coder: MODEL } } });
+        expect(await runInfer(ask({ mode, local_backend: undefined }), f.deps))
+            .toMatchObject({ backend: "refused", gate_outcome: { reason: "omlx_model_ceiling" } });
+        expect(f.omlx.detect).not.toHaveBeenCalled();
+        expect(f.deps.listTags).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it.each(["route", "chat"] as const)("accepts explicit oMLX %s through the MCP envelope", async mode => {
+        const f = fixture();
+        const response = await prismInferHandler(ask({ mode, local_model: MODEL, route_guard: "local" }), f.deps);
+        expect(response.isError).not.toBe(true);
+        expect(response.structuredContent).toMatchObject({ backend: "omlx", model_picked: MODEL });
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+    });
     it("binds automatic coding selection in production dependencies", () => {
         expect(productionInferDeps().codingModel).toBe(selectUnassignedCodingModel);
     });
@@ -623,7 +706,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
     it("validates the explicit selector and bounded text-only scope", () => {
         expect(isPrismInferArgs(ask({ local_model: MODEL }))).toBe(true);
         for (const args of [{ prompt: "task", local_backend: "other" }, { prompt: "task", local_model: MODEL },
-            ask({ mode: "chat" }), ask({ images: ["abc"] }), ask({ local_model: " " })]) expect(isPrismInferArgs(args)).toBe(false);
+            ask({ images: ["abc"] }), ask({ local_model: " " })]) expect(isPrismInferArgs(args)).toBe(false);
     });
 });
 
@@ -645,6 +728,21 @@ describe("explicit oMLX classification through the real callLayer1 and the owned
     const ollamaChat = (spy: { mock: { calls: unknown[][] } }) =>
         spy.mock.calls.filter(([input]) => /\/api\/(chat|show)\b/.test(String(input instanceof Request ? input.url : input)));
 
+    it.each([undefined, "route", "chat"] as const)("keeps the real classifier on oMLX for text mode %s", async mode => {
+        const f = owned(() => ({ ok: true, text: "OBVIOUS_NOT_RESERVED", doneReason: "stop" }));
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
+            models: { omlx: { coder: MODEL } } });
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        try {
+            expect(await runInfer(ask({ mode, local_backend: undefined }), f.deps)).toMatchObject({ backend: "omlx" });
+            expect(ollamaChat(fetchSpy)).toEqual([]);
+        } finally { fetchSpy.mockRestore(); }
+        expect(f.classifierRequests.length).toBeGreaterThan(0);
+        expect(vi.mocked(f.omlx.generate).mock.calls.map(call => call[0].model)).toContain(OMLX_LAYER1_MODEL);
+        expect(f.deps.listTags).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+    });
+
     it("sends the read to the oMLX classifier on the same server, asks for no cache store, and never asks Ollama", async () => {
         const f = owned(() => ({ ok: true, text: "OBVIOUS_NOT_RESERVED", doneReason: "stop" }));
         const fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -655,7 +753,10 @@ describe("explicit oMLX classification through the real callLayer1 and the owned
         expect(f.events).toEqual(["detect", "classify", "generate"]);
         expect(vi.mocked(f.omlx.generate).mock.calls[0][0]).toEqual({ url: TARGET.url, model: OMLX_LAYER1_MODEL, contextTokens: TARGET.contextTokens });
         expect(f.classifierRequests[0]).toMatchObject({ maxTokens: 16, temperature: 0, think: false, cacheStore: false });
-        expect(f.classifierRequests[0].messages[0]).toEqual({ role: "system", content: "" });
+        expect(f.classifierRequests[0].messages[0]).toEqual({
+            role: "system", content: LAYER1_PROMPT.slice(0, LAYER1_PROMPT.indexOf('\n\nRequest:')),
+        });
+        expect(JSON.parse(f.classifierRequests[0].messages[1].content.split('\n')[0])).toEqual({ request: ask().prompt });
     });
 
     it("sends the history and context windows of a multi-turn call through the adapter too", async () => {
