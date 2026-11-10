@@ -9,6 +9,7 @@ import { PRISM_LOCAL_LLM_URL, PRISM_USER_ID } from "../config.js";
 import { getSetting } from "../storage/configStorage.js";
 import { readLocalCodingSettings } from "./localCodingSettings.js";
 import { readLocalImageSettings } from "./localImageSettings.js";
+import { configuredHostProfiles, readExecutionAssignments } from "./executionRoles.js";
 import { createHostTaskRecord, consumeHostTaskRecord, type HostTaskKind, type HostTaskRecord } from "./hostTaskRecords.js";
 
 export const MAX_HOST_TASK_BYTES = 64 * 1024 * 1024;
@@ -81,7 +82,8 @@ async function environmentDigest(): Promise<string> {
     const account = { stored, effectiveKey: process.env.PRISM_SYNALUX_API_KEY?.trim() || stored.apiKey,
         effectiveUrl: process.env.PRISM_SYNALUX_BASE_URL?.trim() || process.env.SYNALUX_BASE_URL?.trim() || stored.baseUrl || stored.legacyUrl };
     return hostTaskDigest({ codeBinding: codeDigest, configPath, directory, user: PRISM_USER_ID, ollamaUrl: PRISM_LOCAL_LLM_URL,
-        account, boot: bootBinding, coding: await readLocalCodingSettings(), images: await readLocalImageSettings() });
+        account, boot: bootBinding, coding: await readLocalCodingSettings(), images: await readLocalImageSettings(),
+        executionRoles: await readExecutionAssignments(), hostProfiles: await configuredHostProfiles() });
 }
 function payload(packet: HostTaskPacket) {
     return { request: packet.request, execution: packet.execution, metadata: packet.metadata };

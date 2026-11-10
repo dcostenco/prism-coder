@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeConfigStorage, compareAndSetSetting, getSetting, setSetting } from "../../src/storage/configStorage.js";
-import { activateLocalAiSource, localAiSnapshot, saveLocalAiModels } from "../../src/dashboard/localAiActions.js";
+import { activateLocalAiSource, localAiSnapshot, saveLocalAiModels, saveExecutionRoles } from "../../src/dashboard/localAiActions.js";
 import { LOCAL_CODING_SETTING_KEY, LEGACY_LOCAL_CODING_SETTING_KEY } from "../../src/utils/localCodingSettings.js";
 import { LOCAL_IMAGE_SETTING_KEY } from "../../src/utils/localImageSettings.js";
 
@@ -15,8 +15,20 @@ afterEach(() => { closeConfigStorage(); vi.unstubAllEnvs(); });
 describe("connection activation preserves concurrent preferences", () => {
     it("an older model form cannot undo a newer connection activation", async () => {
         await setSetting(LOCAL_CODING_SETTING_KEY, JSON.stringify({ backend: "auto", source: "managed" }));
-        await saveLocalAiModels({ backend: "omlx", source: "existing", models: { omlx: { coder: "new/build" } } });
+        const snapshot = await localAiSnapshot();
+        await saveLocalAiModels({ backend: "omlx", source: "existing", models: { omlx: { coder: "new/build" } } }, snapshot.revision);
         expect((await localAiSnapshot()).settings).toEqual({ backend: "omlx", source: "managed", models: { omlx: { coder: "new/build" } } });
+    });
+    it("rejects an older whole form and role form after another tab saves", async () => {
+        const stale = await localAiSnapshot();
+        await saveLocalAiModels({ backend: "ollama", source: "existing" }, stale.revision);
+        await expect(saveLocalAiModels({ backend: "omlx", source: "existing" }, stale.revision)).rejects.toThrow("Preferences changed");
+        await expect(saveExecutionRoles({ reviewer: { runtime: "synalux" } }, stale.revision)).rejects.toThrow("Preferences changed");
+        const fresh = await localAiSnapshot();
+        await saveExecutionRoles({ reviewer: { runtime: "synalux" } }, fresh.revision);
+        expect((await localAiSnapshot()).assignments).toEqual({ reviewer: { runtime: "synalux" } });
+        expect((await localAiSnapshot()).settings.backend).toBe("ollama");
+        await expect(activateLocalAiSource("managed", fresh.revision)).rejects.toThrow("Preferences changed");
     });
     it("atomically creates an absent key and refuses a stale expectation without a cache write", async () => {
         expect(await compareAndSetSetting("choice", "one", { choice: null })).toBe(true);

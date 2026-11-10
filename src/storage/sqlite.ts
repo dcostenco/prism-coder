@@ -2026,16 +2026,19 @@ export class SqliteStorage implements StorageBackend {
   async getHandoffAtVersion(
     project: string,
     version: number,
-    userId: string = "default"
+    userId: string = "default",
+    role: string = "global"
   ): Promise<Record<string, unknown> | null> {
     const result = await this.db.execute({
       sql: `SELECT snapshot FROM session_handoffs_history
             WHERE project = ? AND user_id = ? AND version = ?
-            LIMIT 1`,
-      args: [project, userId, version],
+              AND COALESCE(json_extract(snapshot, '$.role'), 'global') = ?
+            LIMIT 2`,
+      args: [project, userId, version, role],
     });
 
     if (result.rows.length === 0 || !result.rows[0].snapshot) return null;
+    if (result.rows.length !== 1) throw new Error("Ambiguous handoff history identity");
 
     try {
       const snapshot = result.rows[0].snapshot;

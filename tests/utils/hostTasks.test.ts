@@ -3,6 +3,11 @@ import { mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 const settings = vi.hoisted(() => ({ backend: "omlx", model: "fixture-coder", account: "" }));
+const execution = vi.hoisted(() => ({ roles: {} as Record<string, unknown>, profiles: [] as unknown[] }));
+vi.mock("../../src/utils/executionRoles.js", () => ({
+    readExecutionAssignments: async () => execution.roles,
+    configuredHostProfiles: async () => execution.profiles,
+}));
 vi.mock("../../src/storage/configStorage.js", async importOriginal => ({ ...await importOriginal<any>(),
     getSetting: async (key: string, fallback: unknown) => key === "PRISM_SYNALUX_API_KEY" ? settings.account : fallback }));
 vi.mock("../../src/utils/localCodingSettings.js", () => ({ readLocalCodingSettings: async () => ({ backend: settings.backend, source: "existing", model: settings.model }) }));
@@ -12,6 +17,7 @@ beforeEach(() => {
     vi.resetModules(); temp = mkdtempSync(join(tmpdir(), "prism-host-task-"));
     vi.stubEnv("PRISM_HOST_TASKS", "required"); vi.stubEnv("PRISM_DATA_DIR", temp); vi.stubEnv("PRISM_CONFIG_PATH", join(temp, "config.db"));
     settings.backend = "omlx"; settings.model = "fixture-coder"; settings.account = "";
+    execution.roles = {}; execution.profiles = [];
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); rmSync(temp, { recursive: true, force: true }); });
 const request = () => ({ prompt: "Explain the supplied routine data.", system: "Use supplied evidence.",
@@ -60,6 +66,16 @@ describe("host-mediated task execution", () => {
         const packet = await h.prepareHostTask("prism_infer", ask, ask);
         settings.model = "another-model";
         await expect(h.executeApprovedHostTask(packet, async () => "bad")).rejects.toThrow("binding_changed");
+        expect(readdirSync(join(temp, "host-tasks"))).not.toContain(packet.record.id + ".used");
+    });
+    it.each(["roles", "profiles"] as const)("refuses changed %s without spending a prepared approval", async field => {
+        const h = await import("../../src/utils/hostTasks.js"), ask = request();
+        const packet = await h.prepareHostTask("prism_infer", ask, ask);
+        if (field === "roles") execution.roles = { reviewer: { runtime: "omlx", model: "different-model" } };
+        else execution.profiles = [{ id: "different-profile", model: "different-model" }];
+        const execute = vi.fn();
+        await expect(h.executeApprovedHostTask(packet, execute)).rejects.toThrow("binding_changed");
+        expect(execute).not.toHaveBeenCalled();
         expect(readdirSync(join(temp, "host-tasks"))).not.toContain(packet.record.id + ".used");
     });
     it("a query approval cannot authorize a later evidence-bearing draft", async () => {

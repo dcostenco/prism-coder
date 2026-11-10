@@ -39,6 +39,7 @@ import { resolveProject } from "../utils/projectResolver.js";
 import { getUpdateNotice } from "../updateNotice.js";
 import type { StorageBackend } from "../storage/interface.js";
 import { findRunningDashboardAccessState } from "../dashboard/dashboardAccess.js";
+import { isDashboardSettingValueAllowed } from "../dashboard/settingsPolicy.js";
 import { isDarkFactoryEnabled } from "../darkfactory/enablement.js";
 import { routeFactoryPrompt, formatFactoryPromptRoute } from "../darkfactory/promptRouting.js";
 import { factoryBackendReadiness } from "../darkfactory/backendReadiness.js";
@@ -1201,8 +1202,11 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
 
     // Step 1: Fetch the base state (what the incoming agent originally read)
     const baseDbState = expected_version
-      ? await storage.getHandoffAtVersion(project, expected_version, PRISM_USER_ID)
+      ? await storage.getHandoffAtVersion(project, expected_version, PRISM_USER_ID, effectiveRole)
       : null;
+    if (expected_version && !baseDbState) {
+      return { content: [{ type: "text", text: "The expected handoff version is unavailable in this role/workspace. Reload context before saving; no merge was attempted." }], isError: true };
+    }
     const baseState = dbToHandoffSchema(baseDbState);
 
     // Step 2: Fetch current DB state (what beat us to the save)
@@ -1511,6 +1515,40 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     }],
     isError: false,
   };
+}
+
+/** Publish one explicitly selected project decision/handoff note. Personal
+ * handoff state remains private and is never copied by this operation. */
+export async function sessionShareProjectMemoryHandler(args: unknown) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Invalid explicit project sharing fields');
+  const input = args as Record<string, unknown>;
+  const allowed = ['project', 'summary', 'decisions', 'keywords', 'files_changed', 'conversation_id', 'role', 'event_type'];
+  if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('Invalid explicit project sharing fields');
+  const project = typeof input.project === 'string' ? input.project.trim() : '';
+  const summary = typeof input.summary === 'string' ? input.summary.trim() : '';
+  if (!project || project.length > 100 || !summary || summary.length > 12000) throw new Error('project and summary are required within their size limits');
+  for (const [key, cap, size] of [['decisions',100,2000],['keywords',50,200],['files_changed',200,500]] as const) {
+    const value = input[key];
+    if (value !== undefined && (!Array.isArray(value) || value.length > cap
+      || value.some(item => typeof item !== 'string' || !item.trim() || item.length > size))) throw new Error(`Invalid selected ${key}`);
+  }
+  if (input.event_type !== undefined && input.event_type !== 'project_decision' && input.event_type !== 'project_handoff') throw new Error('Invalid project memory kind');
+  const role = input.role ?? (await getSetting('default_role', 'global') || 'global');
+  if (typeof role !== 'string' || !isDashboardSettingValueAllowed('default_role', role)
+    || input.conversation_id !== undefined && (typeof input.conversation_id !== 'string' || input.conversation_id.length > 200)) throw new Error('Invalid sharing identity');
+  const storage = await getStorage() as StorageBackend & { shareProjectMemory?: (value: any) => Promise<any> };
+  if (typeof storage.shareProjectMemory !== 'function') {
+    throw new Error('Project sharing is available only on the Synalux workspace backend');
+  }
+  const result = await storage.shareProjectMemory({
+    project, summary,
+    decisions: Array.isArray(input.decisions) ? input.decisions : undefined,
+    keywords: Array.isArray(input.keywords) ? input.keywords : undefined,
+    files_changed: Array.isArray(input.files_changed) ? input.files_changed : undefined,
+    conversation_id: typeof input.conversation_id === 'string' ? input.conversation_id : undefined,
+    role, event_type: input.event_type as 'project_decision' | 'project_handoff' | undefined,
+  });
+  return { content: [{ type: 'text', text: `Shared one project memory entry (${result.id}) with the current workspace.` }] };
 }
 
 interface SessionLoadContextOptions {

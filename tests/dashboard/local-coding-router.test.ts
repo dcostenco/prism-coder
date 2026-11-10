@@ -5,11 +5,13 @@ import { parseLocalCodingSettings, type LocalCodingSettings } from "../../src/ut
 import { OmlxError } from "../../src/utils/omlxProvider.js";
 import { createHash } from "node:crypto";
 import { inflateSync } from "node:zlib";
+import { LocalAiConflict } from "../../src/dashboard/localAiActions.js";
 
 const servers: Server[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))); });
 async function fixture(overrides = {}) {
     let saved: LocalCodingSettings = { backend: "auto", source: "existing" };
+    let revision = "a".repeat(64);
     const install = vi.fn(async () => ({ id: "fixture", state: "running" }));
     const start = vi.fn(async () => ({ starting: true, running: false }));
     const server = createServer(async (req, res) => {
@@ -17,6 +19,12 @@ async function fixture(overrides = {}) {
             setup: { install, start, status: async () => ({ supported: true, installed: false, memoryGB: 48, freeDiskGB: 100,
                 requirements: { memoryGB: 32, freeDiskGB: 40 }, models: [], job: null, server: { connected: false, models: [] } }) },
             settings: async () => saved,
+            snapshot: async () => ({ settings: saved, assignments: {}, image: {}, expected: {}, revision }),
+            hostProfiles: async () => [], cloudStatus: async () => "unknown",
+            saveModels: async (value, expected) => {
+                if (expected !== revision) throw new LocalAiConflict("Preferences changed");
+                saved = { ...parseLocalCodingSettings(value), source: saved.source }; revision = "b".repeat(64);
+            },
             save: async value => { saved = parseLocalCodingSettings(value); },
             preference: async () => ({ saved: saved.backend, effective: saved.backend, envOverride: null, model: saved.model, configured: false }),
             inspect: async () => { throw new OmlxError("omlx_auth_unavailable"); },
@@ -141,7 +149,7 @@ describe("dashboard local coding actions", () => {
     it("discovers both backends and persists the same model for both roles", async () => {
         const models = { omlx: { coder: "new/build", reviewer: "new/build" }, ollama: { coder: "future:tag", reviewer: "future:tag" } };
         const f = await fixture({ ollamaModels: async () => [{ id: "future:tag", loaded: false, weightBytes: 12345678 }] });
-        expect((await f.post("/api/local-coding/preferences", { backend: "auto", source: "existing", models })).status).toBe(200);
+        expect((await f.post("/api/local-coding/preferences", { settings: { backend: "auto", source: "existing", models }, revision: "a".repeat(64) })).status).toBe(200);
         expect(await (await fetch(f.base + "/api/local-coding")).json()).toMatchObject({ settings: { models },
             discovered: { ollama: [{ id: "future:tag", weightBytes: 12345678 }] }, availableMemoryBytes: 20 * 1024 ** 3 });
         expect(f.install).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled();
@@ -151,12 +159,12 @@ describe("dashboard local coding actions", () => {
         const result = await fetch(f.base + "/api/local-coding");
         expect(result.status).toBe(200);
         expect(await result.json()).toMatchObject({ canManage: true, settings: { backend: "auto" }, preferenceError: expect.any(String) });
-        expect((await f.post("/api/local-coding/preferences", { backend: "ollama", source: "managed" })).status).toBe(200);
+        expect((await f.post("/api/local-coding/preferences", { settings: { backend: "ollama", source: "existing" }, revision: "a".repeat(64) })).status).toBe(200);
     });
-    it("persists all backend/model/source fields together and reads them after reopening", async () => {
+    it("persists backend/models after reopening while source changes use activation", async () => {
         const f = await fixture();
-        const settings = { backend: "omlx", source: "managed", model: "Qwen3.8-27B-oQ4e-mtp" };
-        expect((await f.post("/api/local-coding/preferences", settings)).status).toBe(200);
+        const settings = { backend: "omlx", source: "existing", model: "Qwen3.8-27B-oQ4e-mtp" };
+        expect((await f.post("/api/local-coding/preferences", { settings, revision: "a".repeat(64) })).status).toBe(200);
         const reopened = await (await fetch(f.base + "/api/local-coding")).json();
         expect(reopened.settings).toEqual(settings);
         expect(reopened.preference.effective).toBe("omlx");
@@ -199,7 +207,7 @@ describe("dashboard local coding actions", () => {
         { backend: "omlx", source: "existing", model: "bad\nmodel" },
     ])("rejects invalid saved preference records", async settings => {
         const f = await fixture();
-        expect((await f.post("/api/local-coding/preferences", settings)).status).toBe(400);
+        expect((await f.post("/api/local-coding/preferences", { settings, revision: "a".repeat(64) })).status).toBe(400);
         expect((await (await fetch(f.base + "/api/local-coding")).json()).settings).toEqual({ backend: "auto", source: "existing" });
     });
 });

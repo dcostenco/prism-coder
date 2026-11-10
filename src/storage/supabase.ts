@@ -517,7 +517,8 @@ export class SupabaseStorage implements StorageBackend {
   async getHandoffAtVersion(
     project: string,
     version: number,
-    userId: string = "default"
+    userId: string = "default",
+    role: string = "global"
   ): Promise<Record<string, unknown> | null> {
     try {
       const data = await supabaseGet("session_handoffs_history", {
@@ -525,14 +526,17 @@ export class SupabaseStorage implements StorageBackend {
         project: `eq.${project}`,
         user_id: `eq.${userId}`,
         version: `eq.${version}`,
-        limit: "1",
+        "snapshot->>role": `eq.${role}`,
+        workspace_id: "is.null",
+        limit: "2",
       });
       const rows = Array.isArray(data) ? data : [];
       if (rows.length === 0) return null;
+      if (rows.length !== 1) throw new Error("Ambiguous handoff history identity");
       return rows[0].snapshot as Record<string, unknown> || null;
     } catch (err) {
       console.error(`[SupabaseStorage] Failed to get handoff at version ${version}: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
+      throw err;
     }
   }
 

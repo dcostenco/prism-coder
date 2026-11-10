@@ -5,17 +5,19 @@ import { getSetting, compareAndSetSetting } from "../storage/configStorage.js";
 import { LOCAL_CODING_SETTING_KEY, LEGACY_LOCAL_CODING_SETTING_KEY, parseLocalCodingSettings, resolveLocalCodingModel, type OmlxSource } from "../utils/localCodingSettings.js";
 import { LOCAL_IMAGE_SETTING_KEY, parseLocalImageSettings } from "../utils/localImageSettings.js";
 import { inspectOmlx, inspectOmlxControl } from "../utils/omlxProvider.js";
+import { EXECUTION_ROLES_KEY, parseExecutionAssignments, configuredHostProfiles } from "../utils/executionRoles.js";
 
 const ABSENT = "local_ai_setting_absent";
 export class LocalAiConflict extends Error {}
 export async function localAiSnapshot() {
-    const keys = [LOCAL_CODING_SETTING_KEY, LEGACY_LOCAL_CODING_SETTING_KEY, LOCAL_IMAGE_SETTING_KEY];
+    const keys = [LOCAL_CODING_SETTING_KEY, LEGACY_LOCAL_CODING_SETTING_KEY, LOCAL_IMAGE_SETTING_KEY, EXECUTION_ROLES_KEY];
     const raw = await Promise.all(keys.map(key => getSetting(key, ABSENT, { fresh: true })));
     const expected = Object.fromEntries(keys.map((key, index) => [key, raw[index] === ABSENT ? null : raw[index]]));
     const current = raw[0] !== ABSENT && raw[0] ? raw[0] : raw[1] !== ABSENT ? raw[1] : "";
     const settings = current ? parseLocalCodingSettings(JSON.parse(current)) : parseLocalCodingSettings({ backend: "auto", source: "existing" });
     const image = raw[2] !== ABSENT && raw[2] ? parseLocalImageSettings(JSON.parse(raw[2])) : {};
-    return { settings, image, expected, revision: createHash("sha256").update(JSON.stringify(expected)).digest("hex") };
+    const assignments = raw[3] !== ABSENT && raw[3] ? parseExecutionAssignments(JSON.parse(raw[3])) : {};
+    return { settings, image, assignments, expected, revision: createHash("sha256").update(JSON.stringify(expected)).digest("hex") };
 }
 export async function inspectLocalAiSource(source: OmlxSource) {
     const options = { basePath: source === "managed" ? join(homedir(), ".prism-mcp", "omlx", "server") : join(homedir(), ".omlx") };
@@ -29,11 +31,20 @@ export async function activateLocalAiSource(source: OmlxSource, revision: string
         JSON.stringify({ ...snapshot.settings, source }), snapshot.expected)) throw new LocalAiConflict("Preferences changed. Refresh the connection preview and retry.");
 }
 /** A model-form save must never undo another window's connection activation. */
-export async function saveLocalAiModels(value: unknown) {
+export async function saveLocalAiModels(value: unknown, revision?: string) {
     const input = parseLocalCodingSettings(value), snapshot = await localAiSnapshot();
+    if (!revision || revision !== snapshot.revision) throw new LocalAiConflict("Preferences changed. Refresh the saved models and retry.");
     if (!await compareAndSetSetting(LOCAL_CODING_SETTING_KEY, JSON.stringify({ ...input, source: snapshot.settings.source }), snapshot.expected)) {
         throw new LocalAiConflict("Preferences changed. Refresh the saved models and retry.");
     }
+}
+export async function saveExecutionRoles(value: unknown, revision: unknown) {
+    const input = parseExecutionAssignments(value), snapshot = await localAiSnapshot();
+    if (typeof revision !== "string" || revision !== snapshot.revision) throw new LocalAiConflict("Preferences changed. Refresh the saved models and retry.");
+    const hosts = Object.values(input).some(v => v.runtime === "host") ? await configuredHostProfiles() : [];
+    if (Object.values(input).some(v => v.runtime === "host" && !hosts.some(p => p.id === v.profile))) throw new Error("execution_host_unavailable");
+    if (!await compareAndSetSetting(EXECUTION_ROLES_KEY, JSON.stringify(input), snapshot.expected))
+        throw new LocalAiConflict("Preferences changed. Refresh the saved models and retry.");
 }
 export function localAiAssignments(settings: Awaited<ReturnType<typeof localAiSnapshot>>["settings"], image: Awaited<ReturnType<typeof localAiSnapshot>>["image"]) {
     return [

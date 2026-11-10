@@ -186,6 +186,7 @@ import {
 import { isGreetingOnlyMemoryEntry } from "../../../src/utils/memoryQuality.js";
 import {
   sessionSaveLedgerHandler,
+  sessionShareProjectMemoryHandler,
   sessionSaveHandoffHandler,
   sessionSaveExperienceHandler,
   sessionLoadContextHandler,
@@ -258,6 +259,39 @@ describe("ledgerHandlers", () => {
     mockGetStorage.mockResolvedValue(storage as any);
     mockGetSetting.mockResolvedValue("");
     mockGetAllSettings.mockResolvedValue({});
+  });
+
+  describe("explicit project sharing", () => {
+    it("sends only selected content and never loads personal handoff state", async () => {
+      const share=vi.fn(async () => ({id:"shared-entry",visibility:"workspace"}));
+      mockGetStorage.mockResolvedValue({...storage,shareProjectMemory:share} as any);
+      await sessionShareProjectMemoryHandler({project:"test-project",summary:"Selected decision",decisions:["Use reviewed contract"],role:"dev",event_type:"project_decision"});
+      expect(share).toHaveBeenCalledWith(expect.objectContaining({project:"test-project",summary:"Selected decision",role:"dev"}));
+      expect(storage.loadContext).not.toHaveBeenCalled(); expect(storage.saveHandoff).not.toHaveBeenCalled();
+      expect(storage.saveLedger).not.toHaveBeenCalled();
+    });
+    it("refuses the local/private backend without attempting an alternate service", async () => {
+      await expect(sessionShareProjectMemoryHandler({project:"p",summary:"Selected",role:"dev"})).rejects.toThrow("Synalux workspace backend");
+      expect(storage.saveLedger).not.toHaveBeenCalled();
+    });
+    it.each([undefined, "QA.Reviewer:1"])("preserves configured memory-role identity for explicit project sharing: %s", async role => {
+      mockGetSetting.mockResolvedValue("QA.Reviewer:1");
+      const share = vi.fn(async () => ({ id: "shared-entry", visibility: "workspace" }));
+      mockGetStorage.mockResolvedValue({ ...storage, shareProjectMemory: share } as any);
+      await sessionShareProjectMemoryHandler({ project: "p", summary: "Selected decision", ...(role === undefined ? {} : { role }) });
+      expect(share).toHaveBeenCalledWith(expect.objectContaining({ role: "QA.Reviewer:1" }));
+      expect(storage.loadContext).not.toHaveBeenCalled();
+    });
+    it("uses the global memory partition when the configured default role is empty", async () => {
+      const share = vi.fn(async () => ({ id: "shared-entry", visibility: "workspace" }));
+      mockGetStorage.mockResolvedValue({ ...storage, shareProjectMemory: share } as any);
+      await sessionShareProjectMemoryHandler({ project: "p", summary: "Selected decision" });
+      expect(share).toHaveBeenCalledWith(expect.objectContaining({ role: "global" }));
+    });
+    it.each([null,{project:"p",summary:"Selected",user_id:"other"},{project:"p",summary:"Selected",decisions:"not-an-array"}])("rejects malformed selected-content packets: %j",async input => {
+      await expect(sessionShareProjectMemoryHandler(input)).rejects.toThrow();
+      expect(mockGetStorage).not.toHaveBeenCalled();
+    });
   });
 
   // ====================================================================
@@ -1005,7 +1039,7 @@ describe("ledgerHandlers", () => {
         .mockResolvedValueOnce({ status: "conflict", current_version: 10 })
         .mockResolvedValueOnce({ status: "updated", version: 11 });
 
-      storage.getHandoffAtVersion.mockResolvedValue(null);
+      storage.getHandoffAtVersion.mockResolvedValue({ last_summary: "Original state", version: 8 } as any);
       storage.loadContext.mockResolvedValue({
         last_summary: "Current state",
         version: 10,
@@ -1023,7 +1057,7 @@ describe("ledgerHandlers", () => {
     it("gives up after MAX_MERGE_ATTEMPTS (3) retries", async () => {
       // All attempts return conflict
       storage.saveHandoff.mockResolvedValue({ status: "conflict", current_version: 10 });
-      storage.getHandoffAtVersion.mockResolvedValue(null);
+      storage.getHandoffAtVersion.mockResolvedValue({ last_summary: "Original state", version: 5 } as any);
       storage.loadContext.mockResolvedValue({
         last_summary: "Current state",
         version: 10,
@@ -1037,6 +1071,14 @@ describe("ledgerHandlers", () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("CRDT auto-merge failed");
       expect(result.content[0].text).toContain("3 attempts");
+    });
+    it("refuses an unavailable role-bound base without a second save", async () => {
+      storage.saveHandoff.mockResolvedValue({status:"conflict",current_version:10});
+      storage.getHandoffAtVersion.mockResolvedValue(null);
+      const result=await sessionSaveHandoffHandler({...validArgs,role:"dev",expected_version:8});
+      expect(result.isError).toBe(true); expect(result.content[0].text).toContain("no merge was attempted");
+      expect(storage.getHandoffAtVersion).toHaveBeenCalledWith("test-project",8,expect.any(String),"dev");
+      expect(storage.saveHandoff).toHaveBeenCalledTimes(1);
     });
 
     // --- Minimal args ---

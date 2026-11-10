@@ -8,7 +8,9 @@ import { inspectOllamaCodingModels, inspectOllamaImageModels } from "../utils/ol
 import { isLocalCodingModelId } from "../utils/localCodingSettings.js";
 import { getAvailableMemoryBytes } from "../utils/availableMemory.js";
 import { readLocalImageSettings, saveLocalImageSettings } from "../utils/localImageSettings.js";
-import { activateLocalAiSource, inspectLocalAiSource, localAiAssignments, localAiSnapshot, saveLocalAiModels, LocalAiConflict } from "./localAiActions.js";
+import { activateLocalAiSource, inspectLocalAiSource, localAiAssignments, localAiSnapshot, saveLocalAiModels, saveExecutionRoles, LocalAiConflict } from "./localAiActions.js";
+import { configuredHostProfiles } from "../utils/executionRoles.js";
+import { getEntitlements } from "../utils/entitlements.js";
 
 const MAX_BODY_BYTES = 4096;
 // Public synthetic 32x32 red square. Contains no user image or metadata.
@@ -21,6 +23,9 @@ export interface LocalCodingRouterDeps {
     inspectSource: typeof inspectLocalAiSource;
     activateSource: typeof activateLocalAiSource;
     saveModels: typeof saveLocalAiModels;
+    saveRoles: typeof saveExecutionRoles;
+    hostProfiles: typeof configuredHostProfiles;
+    cloudStatus: () => Promise<"entitled" | "not_in_plan" | "unknown">;
     infer: (args: unknown) => Promise<{ structuredContent?: Record<string, unknown>; isError?: boolean }>;
     settings: typeof readLocalCodingSettings;
     save: typeof saveLocalCodingSettings;
@@ -43,6 +48,8 @@ const defaults: LocalCodingRouterDeps = { setup: omlxSetup, settings: readLocalC
     preference: localCodingPreference, inspect: inspectOmlx, detect: detectOmlx, control: hasOmlxControl, connectionControl: inspectOmlxControl, configuredModel: configuredOmlxModel,
     omlxModels: inspectOmlxCodingModels, ollamaModels: inspectOllamaCodingModels, availableMemory: getAvailableMemoryBytes,
     snapshot: localAiSnapshot, inspectSource: inspectLocalAiSource, activateSource: activateLocalAiSource, saveModels: saveLocalAiModels,
+    saveRoles: saveExecutionRoles, hostProfiles: configuredHostProfiles,
+    cloudStatus: async () => { const e = await getEntitlements(); return e.source === "fallback_free" ? "unknown" : e.features.cloud_fallback ? "entitled" : "not_in_plan"; },
     infer: async args => (await import("../tools/prismInferHandler.js")).prismInferHandler(args),
     imageSettings: readLocalImageSettings, saveImageSettings: saveLocalImageSettings,
     omlxImageModels: inspectOmlxImageModels, omlxImageInput: inspectOmlxImageInput, ollamaImageModels: inspectOllamaImageModels };
@@ -107,6 +114,9 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
         }
         if (req.method === "GET" && url.pathname === "/api/local-coding") {
             const settings = await deps.settings();
+            const snapshot = await deps.snapshot();
+            const hosts = loopback(req) ? await deps.hostProfiles().catch(() => null) : [];
+            const cloud = await deps.cloudStatus().catch(() => "unknown");
             let preference, preferenceError: string | undefined;
             try { preference = await deps.preference(); }
             catch {
@@ -129,6 +139,9 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
                 if (model) connection.model = model;
             } catch (error) { connection.error = error instanceof OmlxError ? error.reason : "Connection check unavailable."; }
             json(res, 200, { settings, preference, preferenceError, managed, connection, discovered, discoveryErrors,
+                revision: snapshot.revision, assignments: snapshot.assignments,
+                executionCatalog: { schema: 1, hosts, cloud: { runtime: "synalux", status: cloud, model: null, effort: null,
+                    billing: "Synalux plan; developer subscriptions do not provide API credits" } },
                 availableMemoryBytes: deps.availableMemory(), canManage: loopback(req),
                 requiredClassifier: OMLX_SETUP_MODELS[0].id }); return true;
         }
@@ -146,10 +159,17 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
             await deps.saveImageSettings(body); json(res, 200, { saved: true, selectionApplied: false }); return true;
         }
         if (url.pathname === "/api/local-coding/preferences") {
-            await deps.save(body); json(res, 200, { saved: true }); return true;
+            const value = body as { settings?: unknown; revision?: string };
+            await deps.saveModels(value?.settings, value?.revision); json(res, 200, { saved: true }); return true;
         }
         if (url.pathname === "/api/local-coding/model-preferences") {
-            await deps.saveModels(body); json(res, 200, { saved: true }); return true;
+            const value = body as { settings?: unknown; revision?: string };
+            await deps.saveModels(value?.settings, value?.revision); json(res, 200, { saved: true }); return true;
+        }
+        if (url.pathname === "/api/local-coding/role-preferences") {
+            const value = body as Record<string, unknown>;
+            if (!value || Object.keys(value).some(k => !["assignments", "revision"].includes(k))) throw new Error("execution_assignment_invalid");
+            await deps.saveRoles(value.assignments, value.revision); json(res, 200, { saved: true }); return true;
         }
         if (url.pathname === "/api/local-coding/activate-connection") {
             const value = body as Record<string, unknown>;

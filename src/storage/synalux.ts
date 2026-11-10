@@ -132,6 +132,30 @@ function buildContextLoadKey(project: string, level: string, userId: string, rol
 }
 
 export class SynaluxStorage extends SupabaseStorage {
+  /** Explicitly publish one project decision/handoff note to the current workspace. */
+  async shareProjectMemory(input: {
+    project: string;
+    summary: string;
+    decisions?: string[];
+    keywords?: string[];
+    files_changed?: string[];
+    conversation_id?: string;
+    role?: string;
+    event_type?: "project_decision" | "project_handoff";
+  }): Promise<{ id: string; visibility: "workspace" }> {
+    const result = await this.portalPost("/api/v1/prism/memory", {
+      action: "share_project_memory",
+      project: input.project, summary: input.summary, decisions: input.decisions,
+      keywords: input.keywords, files_changed: input.files_changed,
+      conversation_id: input.conversation_id, role: input.role, event_type: input.event_type,
+    }) as { entry?: { id?: unknown }; visibility?: unknown };
+    const id = result.entry?.id;
+    if (typeof id !== "string" || result.visibility !== "workspace") {
+      throw new Error("[SynaluxStorage] Invalid project memory share response");
+    }
+    return { id, visibility: "workspace" };
+  }
+
   logAccess(entryId: string, contextHash?: string): void {
     void this.recordAccesses([entryId], contextHash).catch(() => console.error(ACCESS_MESSAGES.failed));
   }
@@ -505,6 +529,8 @@ export class SynaluxStorage extends SupabaseStorage {
       last_summary: handoff.last_summary,
       key_context: handoff.key_context,
       open_todos: handoff.pending_todo,
+      active_decisions: handoff.active_decisions,
+      keywords: handoff.keywords,
       active_branch: handoff.active_branch,
       role: handoff.role,
       expected_version: expectedVersion ?? undefined,
@@ -1032,6 +1058,38 @@ export class SynaluxStorage extends SupabaseStorage {
       branch: v.branch ?? "main",
       created_at: v.created_at ?? new Date().toISOString(),
     })) as HistorySnapshot[];
+  }
+
+  /**
+   * Paid-tier CRDT base reads must use the portal-scoped history endpoint.
+   * The inherited direct-Supabase implementation has no workspace/role
+   * principal and can return null on a direct-DB error, which makes a
+   * completed handoff look like an empty base during conflict recovery.
+   */
+  async getHandoffAtVersion(
+    project: string,
+    version: number,
+    _userId: string = "default",
+    role: string = "global",
+  ): Promise<Record<string, unknown> | null> {
+    if (!Number.isSafeInteger(version) || version < 1) return null;
+    const result = await this.portalPost("/api/v1/prism/memory", {
+      action: "memory_history",
+      project,
+      target_version: version,
+      role,
+    });
+    if (!Array.isArray(result.versions) || result.versions.length > 1) throw new Error("Invalid scoped handoff history response");
+    const match = result.versions[0] as { version?: unknown; snapshot?: Record<string, unknown> } | undefined;
+    if (!match) return null;
+    const snapshot = match.snapshot;
+    if (match.version !== version || !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)
+        || snapshot.project !== project || snapshot.role !== role || snapshot.version !== version) {
+      throw new Error("Handoff history identity mismatch");
+    }
+    // The server's authenticated principal is authoritative; a caller's local
+    // compatibility user ID must not relabel a remote author's snapshot.
+    return snapshot;
   }
 
   // ─── Factory read path ────────────────────────────────────────

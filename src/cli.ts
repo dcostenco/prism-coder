@@ -59,6 +59,11 @@ local.command('run').description('Execute one fully reviewed host-task packet th
       const { closeConfigStorage } = await import('./storage/configStorage.js'); closeConfigStorage();
     }
   });
+local.command('bridge').description('Machine JSON bridge for dashboard-managed oMLX clients').action(async () => {
+  const { runLocalBridgeCommand } = await import('./localBridge.js');
+  try { await runLocalBridgeCommand(); }
+  finally { await closeStorage().catch(() => {}); }
+});
 local.command('status').description('Show oMLX installation and saved coding preference').action(async () => {
   const { omlxSetup } = await import('./utils/omlxSetup.js');
   const { readLocalCodingSettings } = await import('./utils/localCodingSettings.js');

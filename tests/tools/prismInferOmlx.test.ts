@@ -51,6 +51,86 @@ function fixture() {
     return { deps, omlx, events, loaded };
 }
 
+describe("trusted bridge execution context", () => {
+    it("refuses a changed dashboard backend before any generation", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "ollama", effective: "ollama", configured: false, envOverride: null });
+        expect(await runInfer(ask({ local_backend: undefined }), f.deps, { requiredLocalBackend: "omlx" }))
+            .toMatchObject({ backend: "refused", gate_outcome: { reason: "bridge_requires_omlx" } });
+        expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it("does not start detection for a cancelled request", async () => {
+        const f = fixture(), controller = new AbortController(); controller.abort();
+        await expect(runInfer(ask(), f.deps, { signal: controller.signal })).rejects.toThrow("caller_cancelled");
+        expect(f.omlx.detect).not.toHaveBeenCalled(); expect(f.omlx.generate).not.toHaveBeenCalled();
+    });
+    it("passes cancellation to the owner and waits for its stop before releasing the device", async () => {
+        const f = fixture(), controller = new AbortController();
+        let began!: () => void, stop!: () => void, settled = false;
+        const started = new Promise<void>(resolve => { began = resolve; });
+        const stopped = new Promise<void>(resolve => { stop = resolve; });
+        f.omlx.acquire = vi.fn(async () => async () => { f.events.push("release"); });
+        f.omlx.generate = vi.fn(async (_target, _request, signal) => {
+            began(); await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+            f.events.push("abort"); await stopped; f.events.push("stop-proved");
+            return { ok: false as const, reason: "caller_cancelled" };
+        });
+        const pending = runInfer(ask({ local_model: MODEL }), f.deps, { signal: controller.signal })
+            .catch(error => error).finally(() => { settled = true; });
+        await started; controller.abort(); await new Promise(resolve => setTimeout(resolve, 10));
+        expect(settled).toBe(false); expect(f.events).not.toContain("release");
+        stop(); await pending;
+        expect(f.events.indexOf("stop-proved")).toBeLessThan(f.events.indexOf("release"));
+        expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.deps.callLocal).not.toHaveBeenCalled();
+    });
+});
+
+describe("saved execution roles", () => {
+    it("an exact local pin cannot exhaust RAM and silently spend cloud credits", async () => {
+        const f = fixture(); f.deps.freemem = () => 0;
+        f.deps.listTags = async () => new Set(["exact:model"]);
+        f.deps.selectedOllamaModel = async () => ({ tag: "exact:model", ctxTokens: 4096, weightsGb: 9, minFreeGb: 11 });
+        await runInfer(ask({ local_backend: "ollama", local_model: "exact:model", cloud_fallback: true }), f.deps).catch(() => undefined);
+        expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.deps.callLocal).not.toHaveBeenCalled();
+    });
+    it("uses a saved reviewer model with requested/actual provenance", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "omlx", configured: true, envOverride: null,
+            assignment: { runtime: "omlx", model: MODEL } });
+        const result = await runInfer(ask({ local_backend: undefined, local_role: "reviewer" }), f.deps);
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+        expect(result.selection).toMatchObject({ source: "role_assignment", requested_model: MODEL, actual_model: MODEL, actual_runtime: "omlx", actual_effort: null });
+    });
+    it("uses entitled Synalux cloud directly, leaving device providers unused", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", configured: false, envOverride: null, assignment: { runtime: "synalux" } });
+        const result = await runInfer(ask({ local_backend: undefined, cloud_fallback: undefined }), f.deps);
+        expect(result).toMatchObject({ used_cloud: true, selection: { source: "role_assignment", requested_runtime: "synalux", requested_model: null, actual_model: null } });
+        expect(f.deps.callCloud).toHaveBeenCalledOnce(); expect(f.deps.listTags).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it("does not reinterpret a local-only caller or a free plan as cloud consent", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", configured: false, envOverride: null, assignment: { runtime: "synalux" } });
+        await expect(runInfer(ask({ local_backend: undefined }), f.deps)).rejects.toThrow("cloud_explicitly_forbidden");
+        f.deps.entitlements = FREE_ENTITLEMENTS;
+        expect(await runInfer(ask({ local_backend: undefined, cloud_fallback: undefined }), f.deps)).toMatchObject({ backend: "refused", gate_outcome: { reason: "cloud_not_in_plan" } });
+        expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.deps.listTags).not.toHaveBeenCalled();
+    });
+    it("creates a request-bound host handoff without claiming execution", async () => {
+        const f = fixture(), profile = { id: "a".repeat(64), provider: "claude", model: "example-model", effort: "high", status: "configured" as const };
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", configured: false, envOverride: null, assignment: { runtime: "host", profile: profile.id } });
+        f.deps.hostProfiles = async () => [profile];
+        const result = await runInfer(ask({ local_backend: undefined, local_role: "reviewer" }), f.deps);
+        expect(result).toMatchObject({ backend: "host_handoff_required", output: "", used_cloud: false,
+            host_handoff: { executed: false, request: { role: "reviewer", model: "example-model", effort: "high" } },
+            selection: { actual_model: null, actual_runtime: null } });
+        expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+        f.deps.hostProfiles = async () => [];
+        await expect(runInfer(ask({ local_backend: undefined }), f.deps)).rejects.toThrow("execution_host_unavailable");
+    });
+});
+
 describe("explicit oMLX through the centralized prism_infer pipeline", () => {
     it.each([undefined, "route", "chat", "code"] as const)("keeps saved Ollama for mode %s despite a healthy oMLX provider", async mode => {
         const f = fixture();

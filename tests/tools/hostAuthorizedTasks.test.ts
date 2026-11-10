@@ -5,7 +5,11 @@ import { join } from "node:path";
 import type { InferDeps, PrismInferArgs } from "../../src/tools/prismInferHandler.js";
 import { FREE_ENTITLEMENTS } from "../../src/utils/entitlements.js";
 
-const state = vi.hoisted(() => ({ memoryReads: 0 }));
+const state = vi.hoisted(() => ({ memoryReads: 0, roles: {} as Record<string, unknown> }));
+vi.mock("../../src/utils/executionRoles.js", () => ({
+    readExecutionAssignments: async () => state.roles,
+    configuredHostProfiles: async () => [],
+}));
 vi.mock("../../src/utils/localCodingSettings.js", async importOriginal => ({ ...await importOriginal<any>(),
     readLocalCodingSettings: async () => ({ backend: "omlx", source: "existing", models: { omlx: { coder: "fixture-coder", reviewer: "fixture-reviewer" } } }) }));
 vi.mock("../../src/utils/localImageSettings.js", async importOriginal => ({ ...await importOriginal<any>(), readLocalImageSettings: async () => ({}) }));
@@ -18,7 +22,7 @@ vi.mock("../../src/utils/omlxProvider.js", async importOriginal => ({ ...await i
     withOllamaResourceLease: async (work: () => Promise<unknown>) => work() }));
 let temp: string;
 beforeEach(() => {
-    vi.resetModules(); temp = mkdtempSync(join(tmpdir(), "prism-host-entrypoint-")); state.memoryReads = 0;
+    vi.resetModules(); temp = mkdtempSync(join(tmpdir(), "prism-host-entrypoint-")); state.memoryReads = 0; state.roles = {};
     vi.stubEnv("PRISM_HOST_TASKS", "required"); vi.stubEnv("PRISM_DATA_DIR", temp); vi.stubEnv("PRISM_CONFIG_PATH", join(temp, "config.db"));
 });
 afterEach(async () => {
@@ -52,6 +56,13 @@ describe("host-authorized inference entrypoints", () => {
         expect(direct.gate_outcome?.reason).toBe("host_authorization_required");
         expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.deps.listTags).not.toHaveBeenCalled();
     });
+    it("trusted bridge backend context cannot authorize a model operation", async () => {
+        const f = await fixture(), { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
+        const response = await prismInferHandler(ask(), f.deps, { requiredLocalBackend: "omlx" });
+        expect(response.structuredContent?.status).toBe("host_authorization_required");
+        expect(f.generate).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+        expect(f.deps.callLayer1).not.toHaveBeenCalled();
+    });
     it("the host executes the frozen prepared memory without reading it again", async () => {
         const f = await fixture(), { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
         const h = await import("../../src/utils/hostTasks.js");
@@ -67,6 +78,37 @@ describe("host-authorized inference entrypoints", () => {
         const response = body(await prismInferHandler({ ...ask(), local_model: undefined, local_role: "reviewer" }, f.deps));
         expect(response.host_task.execution.local_backend).toBe("omlx");
         expect(response.host_task.execution.local_model).toBe("fixture-reviewer"); expect(f.generate).not.toHaveBeenCalled();
+    });
+    it("pins the new execution-role model instead of the legacy saved model", async () => {
+        state.roles = { reviewer: { runtime: "omlx", model: "role-reviewer" } };
+        const f = await fixture(), { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
+        const response = body(await prismInferHandler({ ...ask(), local_backend: undefined, local_model: undefined, local_role: "reviewer" }, f.deps));
+        expect(response.host_task.execution).toMatchObject({ local_backend: "omlx", local_model: "role-reviewer" });
+        expect(f.generate).not.toHaveBeenCalled();
+    });
+    it.each(["host", "synalux"] as const)("never substitutes a legacy local worker for a %s role", async runtime => {
+        state.roles = { coder: runtime === "host" ? { runtime, profile: "a".repeat(64) } : { runtime } };
+        const f = await fixture(), { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
+        const response = await prismInferHandler({ ...ask(), local_backend: undefined, local_model: undefined, cloud_fallback: undefined }, f.deps);
+        expect(response.isError).toBe(true);
+        expect(response.content[0]?.text).toContain("host_task_nonlocal_assignment_requires_host");
+        expect(response.structuredContent?.host_task).toBeUndefined();
+        expect(f.generate).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it.each(["host", "synalux"] as const)("keeps an explicit local override of a %s role bound to local execution", async runtime => {
+        state.roles = { coder: runtime === "host" ? { runtime, profile: "a".repeat(64) } : { runtime } };
+        const f = await fixture(), { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
+        const response = body(await prismInferHandler(ask(), f.deps));
+        expect(response.host_task.execution).toMatchObject({ local_backend: "omlx", local_model: "fixture-coder" });
+        expect(f.generate).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it("matches the approval before adding a restrictive runtime cloud default", async () => {
+        const f = await fixture(), { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
+        const h = await import("../../src/utils/hostTasks.js");
+        const packet = body(await prismInferHandler({ ...ask(), cloud_fallback: undefined }, f.deps));
+        const result = await h.executeApprovedHostTask(packet, async (_kind, input) => prismInferHandler(input, f.deps));
+        expect(result.structuredContent?.backend).toBe("omlx");
+        expect(f.generate).toHaveBeenCalledTimes(1); expect(f.deps.callCloud).not.toHaveBeenCalled();
     });
     it("honors the configured backend override before freezing the worker choice", async () => {
         vi.stubEnv("PRISM_LOCAL_CODING_BACKEND", "ollama");

@@ -123,6 +123,26 @@ export const SESSION_SAVE_HANDOFF_TOOL: Tool = {
   },
 };
 
+export const SESSION_SHARE_PROJECT_MEMORY_TOOL: Tool = {
+  name: "session_share_project_memory",
+  description: "Explicitly share one project decision or handoff note with the current workspace. Existing session memory remains private; this never copies a personal handoff.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project: { type: "string", description: "Project identifier." },
+      summary: { type: "string", description: "The single decision or handoff note to share." },
+      decisions: { type: "array", items: { type: "string" } },
+      keywords: { type: "array", items: { type: "string" } },
+      files_changed: { type: "array", items: { type: "string" } },
+      conversation_id: { type: "string" },
+      role: { type: "string" },
+      event_type: { type: "string", enum: ["project_decision", "project_handoff"], description: "Share a selected decision or handoff note; personal state is never copied." },
+    },
+    required: ["project", "summary"],
+    additionalProperties: false,
+  },
+};
+
 // ─── Session Load Context ─────────────────────────────────────
 
 export const SESSION_LOAD_CONTEXT_TOOL: Tool = {

@@ -139,6 +139,7 @@ import {
 import {
   SESSION_SAVE_LEDGER_TOOL,
   SESSION_SAVE_HANDOFF_TOOL,
+  SESSION_SHARE_PROJECT_MEMORY_TOOL,
   SESSION_LOAD_CONTEXT_TOOL,
   SESSION_BOOTSTRAP_TOOL,
   SESSION_ROUTE_PROMPT_TOOL,
@@ -195,6 +196,7 @@ import {
 
   sessionSaveLedgerHandler,
   sessionSaveHandoffHandler,
+  sessionShareProjectMemoryHandler,
   sessionLoadContextHandler,
   sessionBootstrapHandler,
   sessionRoutePromptHandler,
@@ -305,6 +307,7 @@ function buildSessionMemoryTools(): Tool[] {
     SKILL_MANAGE_TOOL,           // skill_manage — list/delete scoped skills, release/restore platform skills
     SESSION_SAVE_LEDGER_TOOL,    // session_save_ledger — append immutable session log
     SESSION_SAVE_HANDOFF_TOOL,   // session_save_handoff — upsert latest project state (now with OCC)
+    SESSION_SHARE_PROJECT_MEMORY_TOOL,
     SESSION_LOAD_CONTEXT_TOOL,   // session_load_context — explicit project reload / legacy fallback
     KNOWLEDGE_SEARCH_TOOL,       // knowledge_search — search accumulated knowledge
     KNOWLEDGE_FORGET_TOOL,       // knowledge_forget — prune bad/old memories
@@ -955,6 +958,11 @@ export function createServer() {
             result = await sessionSaveHandoffHandler(args, server); // Handoff sync (paid, opt-in, fail-soft): seal to the account's
             // devices and relay ciphertext. Gated entirely inside the module.
             void import("./sync/handoffSync.js").then(m => m.pushHandoffFromArgs(args)).catch(() => {});
+            break;
+
+          case "session_share_project_memory":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
+            result = await sessionShareProjectMemoryHandler(args);
             break;
 
           case "session_load_context":

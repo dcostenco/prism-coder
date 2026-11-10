@@ -72,6 +72,7 @@ import { readLocalImageSettings } from "../utils/localImageSettings.js";
 import { LOCAL_IMAGE_ERRORS, LOCAL_IMAGE_SELECTION_MS, localImageRequestProblem, resolveLocalImageSelection } from "../utils/localImageSelection.js";
 import { selectedOllamaCodingModel } from "../utils/ollamaCodingModels.js";
 import { LOCAL_CODING_SELECTION_MS, selectUnassignedCodingModel } from "../utils/localCodingModelSelection.js";
+import { configuredHostProfiles, type HostProfile } from "../utils/executionRoles.js";
 import {
     DEFAULT_PRISM_ROUTE_TOOLS,
     applyLocalRouteContract,
@@ -1075,10 +1076,15 @@ async function pinHostTaskSelection(args: PrismInferArgs): Promise<PrismInferArg
         if (!backend || !isLocalCodingModelId(model)) throw new Error("host_task_explicit_image_selection_required");
         return { ...args, image_backend: backend, image_model: model };
     }
-    const settings = await localCodingPreference(args.local_role ?? "coder", args.local_backend, false);
+    const settings = await localCodingPreference(args.local_role ?? "coder", args.local_backend, false, args.local_model);
+    if (settings.assignment?.runtime === "host" || settings.assignment?.runtime === "synalux") {
+        throw new Error("host_task_nonlocal_assignment_requires_host: the selected role uses a host/cloud executor; have the host handle this task or explicitly choose a local worker");
+    }
     const backend = settings.effective;
     if (backend !== "omlx" && backend !== "ollama") throw new Error("host_task_explicit_backend_required");
-    const model = resolveLocalCodingModel(settings, backend, args.local_role ?? "coder", args.local_model);
+    const assigned = settings.assignment;
+    const model = !args.local_model && (assigned?.runtime === "omlx" || assigned?.runtime === "ollama")
+        ? assigned.model : resolveLocalCodingModel(settings, backend, args.local_role ?? "coder", args.local_model);
     if (!isLocalCodingModelId(model)) throw new Error("host_task_explicit_model_required");
     return { ...args, local_backend: backend, local_model: model };
 }
@@ -2074,6 +2080,9 @@ export async function callSynaluxRouteGuard(opts: {
 // ─── Main handler ──────────────────────────────────────────────
 
 export interface PrismInferResult {
+    selection?: { source: "explicit" | "role_assignment" | "auto"; requested_runtime: string; requested_model: string | null;
+        requested_effort: string | null; actual_runtime: string | null; actual_model: string | null; actual_effort: null };
+    host_handoff?: { profile: HostProfile; request: Record<string, unknown>; request_sha256: string; executed: false };
     output: string;
     /** On a refusal the caller can act on: what unlocks the request (a free
      *  sign-in, or the plan page), for the host to show the user. */
@@ -2139,6 +2148,7 @@ export interface PrismInferResult {
  * Accepts injected dependencies so tests can mock Ollama / synalux.
  */
 export interface InferDeps {
+    hostProfiles?: typeof configuredHostProfiles;
     imagePreference?: typeof readLocalImageSettings;
     codingPreference?: typeof localCodingPreference;
     codingModel?: typeof selectUnassignedCodingModel;
@@ -2272,8 +2282,31 @@ const _evictionMutex = (() => {
     };
 })();
 
-export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<PrismInferResult> {
+/** Trusted host transport controls. Never accepted from model/tool arguments. */
+export interface InferExecutionContext { signal?: AbortSignal; requiredLocalBackend?: "omlx" }
+function requireActive(context?: InferExecutionContext): void {
+    if (context?.signal?.aborted) throw new Error("prism_infer: caller_cancelled");
+}
+async function withCallerSignal<T>(signal: AbortSignal, context: InferExecutionContext | undefined,
+    action: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    requireActive(context);
+    if (!context?.signal) return action(signal);
+    const linked = new AbortController();
+    const abort = () => linked.abort();
+    signal.addEventListener("abort", abort, { once: true });
+    context.signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted || context.signal.aborted) abort();
+    try { return await action(linked.signal); }
+    finally {
+        signal.removeEventListener("abort", abort);
+        context.signal.removeEventListener("abort", abort);
+    }
+}
+
+export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: InferExecutionContext): Promise<PrismInferResult> {
+    requireActive(context);
     const started = Date.now();
+    let selection: PrismInferResult["selection"];
     let imageSelection: { backend: "omlx" | "ollama"; model: string } | null = null;
     const imageDeadline = started + (args.timeout_ms ?? 300_000);
     // The async settings read must not let callers retarget this request.
@@ -2293,6 +2326,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
                 next_step: "Prepare the task through prism_infer and have the host review and execute its packet through the CLI." };
         }
     }
+    if (args.local_model || context?.requiredLocalBackend) args = { ...args, cloud_fallback: false };
     if (!intercepted) {
         let imageRefusal = localImageRequestProblem(args);
         if (!imageRefusal && args.images?.length && args.local_backend === undefined) {
@@ -2335,13 +2369,33 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         const autoOmlxEligible = args.mode === "code"
             && clampCeiling(args.model_ceiling ?? "27b", deps.entitlements!.model_ceiling) === "27b";
         let preference: LocalCodingPreference;
-        try { preference = await deps.codingPreference!(args.local_role ?? "coder", args.local_backend, autoOmlxEligible); }
+        try { preference = await deps.codingPreference!(args.local_role ?? "coder", args.local_backend, autoOmlxEligible, args.local_model); }
         catch {
             const reason = "local_coding_preference_invalid";
             if (args.escalation === "report") return { output: "", backend: "refused", model_picked: null,
                 ram_free_mb: Math.round(deps.freemem() / 1024 ** 2), latency_ms: Date.now() - started, used_cloud: false,
                 attempts: [{ tier: "preference", reason }], gate_outcome: { status: "refused", reason, served_anyway: false } };
             throw new Error(`prism_infer: ${reason}`);
+        }
+        const assignment = args.local_model ? undefined : preference.assignment;
+        if (assignment?.runtime === "host") {
+            const profile = (await (deps.hostProfiles ?? configuredHostProfiles)()).find(p => p.id === assignment.profile);
+            if (!profile) throw new Error("prism_infer: execution_host_unavailable");
+            const request = { prompt: args.prompt, system: args.system ?? null, messages: args.messages ?? [], role: args.local_role ?? "coder",
+                provider: profile.provider, model: profile.model, effort: profile.effort };
+            return { output: "", backend: "host_handoff_required", model_picked: null, used_cloud: false,
+                ram_free_mb: Math.round(deps.freemem() / 1024 ** 2), latency_ms: Date.now() - started,
+                attempts: [{ tier: "host", reason: "host_handoff_required" }],
+                gate_outcome: { status: "refused", reason: "host_handoff_required", served_anyway: false },
+                host_handoff: { profile, request, request_sha256: createHash("sha256").update(JSON.stringify({ profile, request })).digest("hex"), executed: false },
+                selection: { source: "role_assignment", requested_runtime: "host", requested_model: profile.model, requested_effort: profile.effort,
+                    actual_runtime: null, actual_model: null, actual_effort: null } };
+        }
+        if (assignment?.runtime === "synalux") {
+            if (args.cloud_fallback === false) throw new Error("prism_infer: cloud_explicitly_forbidden");
+            const result = await runInferWithResources(args, deps, undefined, true);
+            return { ...result, selection: { source: "role_assignment", requested_runtime: "synalux", requested_model: null,
+                requested_effort: null, actual_runtime: result.used_cloud ? result.backend : null, actual_model: result.model_picked, actual_effort: null } };
         }
         // Auto eligibility uses the same plan snapshot as the later gate,
         // before choosing a device lease. Explicit selections remain strict.
@@ -2352,7 +2406,11 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
         // explicit oMLX preference applies to every text mode and uses the
         // saved coder model unless the caller supplies an exact model.
         const selectModel = args.mode === "code" || backend === "omlx";
-        let model = selectModel ? resolveLocalCodingModel(preference, backend, args.local_role ?? "coder", args.local_model) : undefined;
+        let model = assignment?.runtime === "omlx" || assignment?.runtime === "ollama" ? assignment.model
+            : selectModel ? resolveLocalCodingModel(preference, backend, args.local_role ?? "coder", args.local_model) : undefined;
+        const exact = Boolean(model);
+        selection = { source: args.local_backend || args.local_model ? "explicit" : exact ? "role_assignment" : "auto",
+            requested_runtime: backend, requested_model: model ?? null, requested_effort: null, actual_runtime: null, actual_model: null, actual_effort: null };
         const codingModel = deps.codingModel;
         if (selectModel && !model && codingModel) {
             deps = { ...deps, entitlements: deps.entitlements ?? await getEntitlements() };
@@ -2386,7 +2444,15 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
             }
         }
         args = { ...args, local_backend: backend,
+            ...(exact ? { cloud_fallback: false } : {}),
             ...(model ? { local_model: model } : {}) };
+    }
+    requireActive(context);
+    if (!intercepted && context?.requiredLocalBackend === "omlx" && args.local_backend !== "omlx") {
+        const reason = "bridge_requires_omlx";
+        return { output: "", backend: "refused", model_picked: null, used_cloud: false,
+            ram_free_mb: Math.round(deps.freemem() / 1024 ** 2), latency_ms: Date.now() - started,
+            attempts: [{ tier: "transport", reason }], gate_outcome: { status: "refused", reason, served_anyway: false } };
     }
     if (args.local_role) {
         const defaults = CODING_ROLE_DEFAULTS[args.local_backend === "omlx" ? "omlx" : "ollama"];
@@ -2394,33 +2460,41 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     }
     const usesOmlx = args.local_backend === "omlx" || imageSelection?.backend === "omlx";
     return withInferenceResourceLease(usesOmlx, async () => {
+        requireActive(context);
         let releaseDevice: (() => Promise<void>) | undefined;
         const runtime = usesOmlx ? deps.omlx : undefined;
         // Every owned generation, so the device outlives its marker writes.
         const generations = new Set<Promise<unknown>>();
         const acquireTarget = async (targetPromise: Promise<OmlxTarget>) => {
             const target = await targetPromise;
+            requireActive(context);
             releaseDevice = await runtime!.acquire(undefined, { recoveryProviderId: target.url });
             // Before Layer 1 or anything else: a stale marker of this provider
             // is cleared on proof, or the call is refused.
             await runtime!.recover?.(target);
+            requireActive(context);
             return target;
         };
         const scopedDeps = runtime ? { ...deps, omlx: { ...runtime,
             detect: (model?: string) => acquireTarget(runtime.detect(model)),
             ...(runtime.detectImage ? { detectImage: (model: string, deadlineMs?: number) => acquireTarget(runtime.detectImage!(model, deadlineMs)) } : {}),
             ...(runtime.reclaim ? { reclaim: (...args: Parameters<NonNullable<OmlxRuntime["reclaim"]>>) => {
-            const reclaim = runtime.reclaim!(...args);
+            const reclaim = withCallerSignal(args[2], context, signal => runtime.reclaim!(args[0], args[1], signal, args[3]));
             generations.add(reclaim.catch(() => undefined));
             return reclaim;
         } } : {}), generate: (target: OmlxTarget, request: Parameters<OmlxRuntime["generate"]>[1], signal: AbortSignal) => {
-            const generation = runtime.generate(target, request, signal);
+            const generation = withCallerSignal(signal, context, active => runtime.generate(target, request, active));
             generations.add(generation.catch(() => undefined));
             return generation;
         } } } : deps;
         try {
-            return { ...await runInferWithResources(args, scopedDeps,
-                imageSelection?.backend === "omlx" ? { model: imageSelection.model, deadline: imageDeadline } : undefined), latency_ms: Date.now() - started };
+            const result = await runInferWithResources(args, scopedDeps,
+                imageSelection?.backend === "omlx" ? { model: imageSelection.model, deadline: imageDeadline } : undefined);
+            requireActive(context);
+            const requested = selection ?? (args.local_model ? { source: "explicit" as const, requested_runtime: args.local_backend ?? "ollama",
+                requested_model: args.local_model, requested_effort: null, actual_runtime: null, actual_model: null, actual_effort: null } : undefined);
+            return { ...result, ...(requested ? { selection: { ...requested, actual_runtime: result.output ? result.backend : null,
+                actual_model: result.model_picked } } : {}), latency_ms: Date.now() - started };
         } finally {
             // guardedOmlxGenerate may answer first; the lease waits for the jobs.
             await Promise.all(generations);
@@ -2429,7 +2503,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps): Promise<P
     });
 }
 
-async function runInferWithResources(args: PrismInferArgs, deps: InferDeps, image?: { model: string; deadline: number }): Promise<PrismInferResult> {
+async function runInferWithResources(args: PrismInferArgs, deps: InferDeps, image?: { model: string; deadline: number }, cloudOnly = false): Promise<PrismInferResult> {
     const t0 = Date.now();
     const temperature = args.temperature ?? 0;
 
@@ -2458,12 +2532,12 @@ async function runInferWithResources(args: PrismInferArgs, deps: InferDeps, imag
         };
     }
 
-    return args.local_backend === "omlx" || image
-        ? runInferAfterInputSafety(args, deps, t0, temperature, image)
+    return args.local_backend === "omlx" || image || cloudOnly
+        ? runInferAfterInputSafety(args, deps, t0, temperature, image, cloudOnly)
         : withOllamaResourceLease(() => runInferAfterInputSafety(args, deps, t0, temperature));
 }
 
-async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t0: number, temperature: number, image?: { model: string; deadline: number }): Promise<PrismInferResult> {
+async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t0: number, temperature: number, image?: { model: string; deadline: number }, cloudOnly = false): Promise<PrismInferResult> {
     // ── Entitlement enforcement ──────────────────────────────────
     // Resolved per call (§5.5) — getEntitlements dedupes via a 5-min cache.
     // Free users without auth get 4b ceiling, 50 calls/day, 512 max tokens.
@@ -2689,6 +2763,20 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             verify_allowed: canVerify,
             verify_blocked: verifierBlocked,
         });
+    }
+
+    if (cloudOnly) {
+        if (!allowCloud) return refusedResult("cloud_not_in_plan");
+        const cloudArgs = args.system ? { ...args, prompt: args.system + "\n\n" + args.prompt } : args;
+        const cloud = await deps.callCloud(cloudArgs.prompt, maxTokens, args.timeout_ms ?? 90_000,
+            { ...cloudHistory(cloudArgs), ...(reservedCategory(screenedText(args)) ? { reserved: true } : {}) });
+        if (!cloud.ok || !cloud.output) {
+            attempts.push({ tier: "synalux", reason: cloud.reason ?? "cloud_unavailable" });
+            return refusedResult("cloud_unavailable");
+        }
+        return applyVerification(cloud.output, gatedArgs, deps, { backend: cloud.backend ?? "synalux", model_picked: null,
+            ram_free_mb: ramFreeMb, latency_ms: Date.now() - t0, used_cloud: true, attempts, ...entMeta,
+            gate_outcome: { status: "success", served_anyway: false } });
     }
 
     // Discover which tags Ollama actually has + which are already warm.
@@ -4290,6 +4378,7 @@ export function inferResponseHeader(
 }
 
 const STRUCTURED_INFER_FIELDS = [
+    "selection", "host_handoff",
     "output", "backend", "model_picked", "ram_free_mb", "latency_ms", "used_cloud",
     "next_step", "plan", "history_turns", "layer1_second_read", "refusal_layer",
     "prompt_tokens", "completion_tokens", "quality_gate_failed", "entitlements_source",
@@ -4322,7 +4411,7 @@ export function inferStructuredResult(result: PrismInferResult): Record<string, 
     return structured;
 }
 
-export async function prismInferHandler(args: unknown, deps?: InferDeps): Promise<{
+export async function prismInferHandler(args: unknown, deps?: InferDeps, context?: InferExecutionContext): Promise<{
     content: Array<{ type: "text"; text: string }>;
     structuredContent?: Record<string, unknown>;
     isError?: boolean;
@@ -4338,6 +4427,7 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps): Promis
                 : "Invalid arguments for prism_infer (need {prompt: string})");
     }
     try {
+        requireActive(context);
         const required = hostTasksRequired();
         const request = required ? snapshotHostTask(args) : args;
         const approved = required ? approvedHostTask("prism_infer", request) : undefined;
@@ -4351,10 +4441,14 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps): Promis
         if (required && !approved && !intercepted) {
             prepared = { ...prepared, args: await pinHostTaskSelection(prepared.args) };
             if (!isPrismInferArgs(prepared.args)) throw new Error("host_task_invalid_execution_selection");
-            return hostTaskResponse(await prepareHostTask("prism_infer", request as unknown as Record<string, unknown>,
-                prepared.args as unknown as Record<string, unknown>, prepared.memory ? { memory: prepared.memory } : {}));
+            requireActive(context);
+            const packet = await prepareHostTask("prism_infer", request as unknown as Record<string, unknown>,
+                prepared.args as unknown as Record<string, unknown>, prepared.memory ? { memory: prepared.memory } : {});
+            requireActive(context);
+            return hostTaskResponse(packet);
         }
-        const result = await runInfer(prepared.args, deps ?? productionInferDeps());
+        requireActive(context);
+        const result = await runInfer(prepared.args, deps ?? productionInferDeps(), context);
 
         debugLog(`[prism_infer] backend=${result.backend} model=${result.model_picked} latency=${result.latency_ms}ms free=${result.ram_free_mb}MB`);
 
@@ -4363,12 +4457,13 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps): Promis
         // estimateTokens() — critical for cloud path where prompt_tokens is unset.
         // mode lives on args, not the result — pass it explicitly or the
         // ledger's mode column is silently NULL forever.
-        recordInference({ ...result, prompt_text: request.prompt, mode: prepared.args.mode ?? "route" });
+        if (result.backend !== "host_handoff_required")
+            recordInference({ ...result, prompt_text: request.prompt, mode: prepared.args.mode ?? "route" });
 
         // Best-effort session telemetry — records that inference ran for this
         // conversation. Never affects routing or safety decisions.
         const _convId = request.conversation_id;
-        if (_convId && result.backend !== "safety_gate") {
+        if (_convId && result.backend !== "safety_gate" && result.backend !== "host_handoff_required") {
             import("../session/sessionContext.js").then(({ noteInferenceForSession }) => {
                 noteInferenceForSession(_convId, {
                     backend: result.backend,
@@ -4379,7 +4474,7 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps): Promis
 
         // Best-effort portal forwarding (independent analytics stream).
         // safety_gate excluded — logging crisis filter triggers is a HIPAA concern.
-        if (result.backend !== "safety_gate") {
+        if (result.backend !== "safety_gate" && result.backend !== "host_handoff_required") {
             ddLog("info", "prism_infer.usage", {
                 backend: result.backend,
                 model: result.model_picked ?? result.backend,

@@ -2528,7 +2528,7 @@ describe("ledgerHandlers", () => {
         .mockResolvedValueOnce({ status: "conflict", current_version: 10 })
         .mockResolvedValueOnce({ status: "updated", version: 11 });
 
-      storage.getHandoffAtVersion.mockResolvedValue(null);
+      storage.getHandoffAtVersion.mockResolvedValue({ last_summary: "Original state", version: 8 });
       storage.loadContext.mockResolvedValue({
         last_summary: "Current state",
         version: 10,
@@ -2546,7 +2546,7 @@ describe("ledgerHandlers", () => {
     it("gives up after MAX_MERGE_ATTEMPTS (3) retries", async () => {
       // All attempts return conflict
       storage.saveHandoff.mockResolvedValue({ status: "conflict", current_version: 10 });
-      storage.getHandoffAtVersion.mockResolvedValue(null);
+      storage.getHandoffAtVersion.mockResolvedValue({ last_summary: "Original state", version: 5 });
       storage.loadContext.mockResolvedValue({
         last_summary: "Current state",
         version: 10,

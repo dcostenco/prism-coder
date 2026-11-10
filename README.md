@@ -81,13 +81,18 @@ session memory continues to work without installing a model.
 | Step | What you do | What to expect |
 | --- | --- | --- |
 | **1. Connection** | Choose an existing oMLX server or a Prism-managed installation, then **Preview connection**. | Review the effect on coder, reviewer and image assignments before **Use this server** switches the shared oMLX connection. Saved model IDs are preserved. |
-| **2. Models** | Choose coder and reviewer models for each backend and **Save coding preference**. Save the separate **Image model** form independently. | Saving records a choice; it does not download or load weights. Missing saved IDs stay visible instead of being silently replaced. |
+| **2. Models** | Choose **Coder execution** and **Reviewer execution**, then **Save execution roles**. Auto uses the local backend preferences below. Save the separate **Image model** form independently. | Detected local models, Synalux-managed cloud and trusted configured host profiles stay distinct. Saving loads no weights and executes no host. Missing exact choices refuse rather than substitute. |
 | **3. Test** | Select backend and purpose, then **Test saved model**. | A small request may load the saved model. The result reports execution or a blocking reason, with no cloud inference fallback. |
 
 **Coding and review.** Auto prefers configured oMLX for eligible coding. You can
 choose Ollama instead; explicit task choices take precedence. oMLX coding and
 review need the integration's separate text safety classifier. Local drafts and
 reviews still need host inspection and tests.
+
+In host-authorized mode (`PRISM_HOST_TASKS=required`), `prism local run`
+executes reviewed local tasks. A host or Synalux cloud role must be handled by
+its host/cloud executor; Prism refuses to replace it with a local worker.
+An explicit local task choice can override the saved role.
 
 ![Local AI coding model selectors with separate coder and reviewer assignments](docs/screenshots/local-ai-coding-models.png)
 
