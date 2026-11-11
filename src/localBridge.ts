@@ -44,17 +44,19 @@ export async function handleLocalBridge(value: unknown, signal: AbortSignal, dep
             .some(key => snapshot.expected[key] !== null), settings: snapshot.settings, assignments: snapshot.assignments,
             ...(resolved ? { resolved } : {}) };
     }
+    const backend = input.backend === undefined ? "omlx" : input.backend;
     if (input.action !== "infer" || typeof input.follow_dashboard !== "boolean"
-        || Object.keys(input).some(key => !["action", "follow_dashboard", "request"].includes(key))) throw new Error("bridge_invalid_request");
+        || (backend !== "omlx" && backend !== "ollama")
+        || Object.keys(input).some(key => !["action", "follow_dashboard", "request", "backend"].includes(key))) throw new Error("bridge_invalid_request");
     const request = object(input.request);
     if (Object.keys(request).some(key => !REQUEST_FIELDS.includes(key))
         || (input.follow_dashboard && request.local_model !== undefined)) throw new Error("bridge_invalid_request");
     const args = { ...request, local_role: request.local_role ?? "coder", timeout_ms: request.timeout_ms ?? DEFAULT_TIMEOUT_MS,
         mode: "code", cloud_fallback: false, escalation: "report",
-        ...(!input.follow_dashboard ? { local_backend: "omlx" } : {}) };
+        ...(!input.follow_dashboard ? { local_backend: backend } : {}) };
     if (!isPrismInferArgs(args) || !Number.isInteger(args.timeout_ms) || (args.timeout_ms as number) < 1
         || (args.timeout_ms as number) > MAX_TIMEOUT_MS) throw new Error("bridge_invalid_request");
-    return deps.infer(args, { signal, requiredLocalBackend: "omlx" });
+    return deps.infer(args, { signal, requiredLocalBackend: backend });
 }
 
 /** One bounded UTF-8 JSON document, completed by closing stdin. */

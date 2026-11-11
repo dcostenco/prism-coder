@@ -1081,6 +1081,22 @@ describe("ledgerHandlers", () => {
       expect(storage.saveHandoff).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+      "Ambiguous handoff history identity",
+      "Invalid scoped handoff history response",
+      "Handoff history identity mismatch",
+    ])("returns reload guidance for an unverifiable base: %s", async reason => {
+      storage.saveHandoff.mockResolvedValue({ status: "conflict", current_version: 10 });
+      storage.getHandoffAtVersion.mockRejectedValue(new Error(reason));
+      const result = await sessionSaveHandoffHandler({ ...validArgs, role: "dev", expected_version: 8 });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Reload context");
+      expect(result.content[0].text).toContain("no merge was attempted");
+      expect(storage.getHandoffAtVersion).toHaveBeenCalledWith("test-project", 8, expect.any(String), "dev");
+      expect(storage.saveHandoff).toHaveBeenCalledTimes(1);
+      expect(storage.loadContext).not.toHaveBeenCalled();
+    });
+
     // --- Minimal args ---
 
     it("accepts minimal args (project only)", async () => {

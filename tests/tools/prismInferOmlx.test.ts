@@ -88,6 +88,55 @@ describe("trusted bridge execution context", () => {
 });
 
 describe("saved execution roles", () => {
+    it("trusted Ollama bridge refuses an oMLX role before acquiring a device", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
+            assignment: { runtime: "omlx", model: MODEL } });
+        const result = await runInfer(ask({ local_backend: undefined }), f.deps, { requiredLocalBackend: "ollama" });
+        expect(result).toMatchObject({ backend: "refused", output: "", used_cloud: false,
+            gate_outcome: { reason: "bridge_requires_ollama" } });
+        expect(f.omlx.acquire).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it("Ollama bridge cancellation during metadata starts no generation", async () => {
+        const f = fixture(), controller = new AbortController(), id = "vendor/worker:exact";
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => {
+            controller.abort();
+            return { tag: id, ctxTokens: 4096, weightsGb: 1, minFreeGb: 3 };
+        };
+        await expect(runInfer(ask({ local_backend: "ollama", local_model: id }), f.deps,
+            { signal: controller.signal, requiredLocalBackend: "ollama" })).rejects.toThrow("caller_cancelled");
+        expect(f.deps.callLayer1).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it("Ollama bridge cancellation during classification dispatches no worker or second read", async () => {
+        const f = fixture(), controller = new AbortController(), id = "vendor/worker:exact";
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => ({ tag: id, ctxTokens: 4096, weightsGb: 1, minFreeGb: 3 });
+        f.deps.callLayer1 = vi.fn(async () => { controller.abort(); return "OBVIOUS_NOT_RESERVED" as const; });
+        await expect(runInfer(ask({ local_backend: "ollama", local_model: id }), f.deps,
+            { signal: controller.signal, requiredLocalBackend: "ollama" })).rejects.toThrow("caller_cancelled");
+        expect(f.deps.callLayer1).toHaveBeenCalledOnce();
+        expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it("Ollama bridge cancellation waits for its in-flight call and withholds output", async () => {
+        const f = fixture(), controller = new AbortController(), id = "vendor/worker:exact";
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => ({ tag: id, ctxTokens: 4096, weightsGb: 1, minFreeGb: 3 });
+        let started!: () => void, complete!: () => void, settled = false;
+        const began = new Promise<void>(resolve => { started = resolve; });
+        f.deps.callLocal = vi.fn(async () => {
+            started(); await new Promise<void>(resolve => { complete = resolve; });
+            return { ok: true as const, text: OUTPUT };
+        });
+        const result = runInfer(ask({ local_backend: "ollama", local_model: id }), f.deps,
+            { signal: controller.signal, requiredLocalBackend: "ollama" }).catch(error => error).finally(() => { settled = true; });
+        await began; controller.abort(); await new Promise(resolve => setTimeout(resolve, 10));
+        expect(settled).toBe(false); complete();
+        expect((await result).message).toContain("caller_cancelled");
+        expect(f.deps.callLocal).toHaveBeenCalledOnce(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
     it.each([undefined,'route','chat'] as const)('coding assignments do not retarget non-code mode %s', async mode => {
         for (const runtime of ['host','synalux','omlx','ollama'] as const) {
             const f = fixture();

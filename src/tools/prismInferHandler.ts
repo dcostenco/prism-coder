@@ -2283,7 +2283,7 @@ const _evictionMutex = (() => {
 })();
 
 /** Trusted host transport controls. Never accepted from model/tool arguments. */
-export interface InferExecutionContext { signal?: AbortSignal; requiredLocalBackend?: "omlx" }
+export interface InferExecutionContext { signal?: AbortSignal; requiredLocalBackend?: "omlx" | "ollama" }
 function requireActive(context?: InferExecutionContext): void {
     if (context?.signal?.aborted) throw new Error("prism_infer: caller_cancelled");
 }
@@ -2450,8 +2450,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
             ...(model ? { local_model: model } : {}) };
     }
     requireActive(context);
-    if (!intercepted && context?.requiredLocalBackend === "omlx" && args.local_backend !== "omlx") {
-        const reason = "bridge_requires_omlx";
+    if (!intercepted && context?.requiredLocalBackend && args.local_backend !== context.requiredLocalBackend) {
+        const reason = `bridge_requires_${context.requiredLocalBackend}`;
         return { output: "", backend: "refused", model_picked: null, used_cloud: false,
             ram_free_mb: Math.round(deps.freemem() / 1024 ** 2), latency_ms: Date.now() - started,
             attempts: [{ tier: "transport", reason }], gate_outcome: { status: "refused", reason, served_anyway: false } };
@@ -2488,9 +2488,25 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
             const generation = withCallerSignal(signal, context, active => runtime.generate(target, request, active));
             generations.add(generation.catch(() => undefined));
             return generation;
-        } } } : deps;
+        } } } : context?.signal ? { ...deps, callLocal: async (...callArgs: Parameters<InferDeps["callLocal"]>) => {
+            // A cancelled metadata/classifier wait cannot start generation.
+            // An in-flight ordinary Ollama call retains its lease until it
+            // settles; aborting the caller is not backend stop evidence.
+            requireActive(context);
+            const generation = deps.callLocal(...callArgs);
+            generations.add(generation.catch(() => undefined));
+            const result = await generation;
+            requireActive(context);
+            return result;
+        } } : deps;
         try {
-            const result = await runInferWithResources(args, scopedDeps,
+            const boundDeps = context?.signal ? { ...scopedDeps, callLayer1: async (...classifierArgs: Parameters<NonNullable<InferDeps["callLayer1"]>>) => {
+                requireActive(context);
+                const verdict = await (deps.callLayer1 ?? defaultCallLayer1)(...classifierArgs);
+                requireActive(context);
+                return verdict;
+            } } : scopedDeps;
+            const result = await runInferWithResources(args, boundDeps,
                 imageSelection?.backend === "omlx" ? { model: imageSelection.model, deadline: imageDeadline } : undefined);
             requireActive(context);
             const requested = selection ?? (args.local_model ? { source: "explicit" as const, requested_runtime: args.local_backend ?? "ollama",

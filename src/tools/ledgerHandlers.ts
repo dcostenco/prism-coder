@@ -1201,9 +1201,14 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     );
 
     // Step 1: Fetch the base state (what the incoming agent originally read)
-    const baseDbState = expected_version
-      ? await storage.getHandoffAtVersion(project, expected_version, PRISM_USER_ID, effectiveRole)
-      : null;
+    let baseDbState: Awaited<ReturnType<typeof storage.getHandoffAtVersion>> = null;
+    try {
+      baseDbState = expected_version
+        ? await storage.getHandoffAtVersion(project, expected_version, PRISM_USER_ID, effectiveRole)
+        : null;
+    } catch {
+      return { content: [{ type: "text", text: "The expected handoff history could not be verified in this role/workspace. Reload context before saving; no merge was attempted." }], isError: true };
+    }
     if (expected_version && !baseDbState) {
       return { content: [{ type: "text", text: "The expected handoff version is unavailable in this role/workspace. Reload context before saving; no merge was attempted." }], isError: true };
     }

@@ -39,8 +39,17 @@ describe("local bridge transport", () => {
         await handleLocalBridge({ action: "infer", follow_dashboard: false, request: { prompt: "Follow up", messages: history, local_model: "future-worker", timeout_ms: 12000 } }, signal(), { snapshot: localAiSnapshot, infer });
         expect(infer.mock.calls[0][0]).toMatchObject({ local_backend: "omlx", local_model: "future-worker", messages: history, timeout_ms: 12000 });
     });
+    it("binds dashboard Ollama to the canonical local-only execution context", async () => {
+        const infer = vi.fn(async () => ({ content: [] })), active = signal();
+        await handleLocalBridge({ action: "infer", backend: "ollama", follow_dashboard: true,
+            request: { prompt: "Draft a helper" } }, active, { snapshot: localAiSnapshot, infer });
+        expect(infer).toHaveBeenCalledExactlyOnceWith({ prompt: "Draft a helper", local_role: "coder", mode: "code",
+            cloud_fallback: false, escalation: "report", timeout_ms: 180000 }, { signal: active, requiredLocalBackend: "ollama" });
+    });
     it.each([
         { action: "infer", follow_dashboard: true, request: { prompt: "x", cloud_fallback: true } },
+        { action: "infer", backend: "cloud", follow_dashboard: true, request: { prompt: "x" } },
+        { action: "infer", backend: null, follow_dashboard: true, request: { prompt: "x" } },
         { action: "infer", follow_dashboard: true, request: { prompt: "x", local_model: "stale" } },
         { action: "infer", follow_dashboard: false, request: { prompt: "x", project: "other" } },
         { action: "infer", follow_dashboard: false, request: { prompt: "x", timeout_ms: 900001 } },
