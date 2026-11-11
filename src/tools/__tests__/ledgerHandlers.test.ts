@@ -1097,6 +1097,72 @@ describe("ledgerHandlers", () => {
       expect(storage.loadContext).not.toHaveBeenCalled();
     });
 
+    it("rethrows unrelated history transport errors without rewriting them", async () => {
+      storage.saveHandoff.mockResolvedValue({ status: "conflict", current_version: 10 });
+      const transport = new Error("portal transport unavailable");
+      storage.getHandoffAtVersion.mockRejectedValue(transport);
+      await expect(sessionSaveHandoffHandler({ ...validArgs, expected_version: 8 }))
+        .rejects.toBe(transport);
+      expect(storage.saveHandoff).toHaveBeenCalledTimes(1);
+      expect(storage.loadContext).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["identity error", new Error("Handoff history identity mismatch")],
+      ["missing scoped base", null],
+    ])("reports no further merge after a later %s without a third save", async (_label, laterBase) => {
+      storage.saveHandoff
+        .mockResolvedValueOnce({ status: "conflict", current_version: 10 })
+        .mockResolvedValueOnce({ status: "conflict", current_version: 11 });
+      storage.getHandoffAtVersion
+        .mockResolvedValueOnce({ last_summary: "base", version: 8 } as any)
+        [laterBase instanceof Error ? "mockRejectedValueOnce" : "mockResolvedValueOnce"](laterBase as any);
+      storage.loadContext.mockResolvedValue({ last_summary: "current", version: 10 });
+      const result = await sessionSaveHandoffHandler({ ...validArgs, role: "dev", expected_version: 8 });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("no further merge was attempted");
+      expect(result.content[0].text).not.toContain("no merge was attempted");
+      expect(storage.saveHandoff).toHaveBeenCalledTimes(2);
+      expect(storage.getHandoffAtVersion).toHaveBeenCalledTimes(2);
+      expect(storage.getHandoffAtVersion).toHaveBeenNthCalledWith(1, "test-project", 8, expect.any(String), "dev");
+      expect(storage.getHandoffAtVersion).toHaveBeenNthCalledWith(2, "test-project", 8, expect.any(String), "dev");
+      expect(storage.loadContext).toHaveBeenCalledTimes(1);
+    });
+
+    it("snapshots and embeds the merged payload that was actually persisted", async () => {
+      storage.saveHandoff
+        .mockResolvedValueOnce({ status: "conflict", current_version: 10 })
+        .mockResolvedValueOnce({ status: "updated", version: 11 });
+      storage.getHandoffAtVersion.mockResolvedValue({
+        last_summary: "base", pending_todo: ["base todo"], active_decisions: ["base decision"],
+        keywords: ["base"], key_context: "base context", active_branch: "main", version: 8,
+      } as any);
+      storage.loadContext.mockResolvedValue({
+        last_summary: "current", pending_todo: ["current todo"], active_decisions: ["current decision"],
+        keywords: ["current"], key_context: "current context", active_branch: "main", version: 10,
+      });
+      const embedding = { generateEmbedding: vi.fn(() => Promise.resolve([0.1])) };
+      mockGetEmbeddingProvider.mockReturnValueOnce(embedding as any);
+      const result = await sessionSaveHandoffHandler({ ...validArgs, expected_version: 8, role: "dev" });
+      expect(result.isError).toBe(false);
+      const persisted = storage.saveHandoff.mock.calls[1]![0] as Record<string, any>;
+      const snapshot = storage.saveHistorySnapshot.mock.calls[0]![0] as Record<string, any>;
+      expect(snapshot).toMatchObject({
+        last_summary: persisted.last_summary,
+        pending_todo: persisted.pending_todo,
+        active_decisions: persisted.active_decisions,
+        keywords: persisted.keywords,
+        key_context: persisted.key_context,
+        active_branch: persisted.active_branch,
+        role: "dev",
+        version: 11,
+      });
+      await vi.waitFor(() => expect(embedding.generateEmbedding).toHaveBeenCalled());
+      expect(embedding.generateEmbedding).toHaveBeenCalledWith(
+        [persisted.last_summary, persisted.key_context, ...(persisted.pending_todo ?? [])].filter(Boolean).join("\n"),
+      );
+    });
+
     // --- Minimal args ---
 
     it("accepts minimal args (project only)", async () => {

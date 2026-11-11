@@ -1175,6 +1175,17 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   let mergeAttempts = 0;
   let isMerged = false;
   let mergeStrategy: Record<string, string> | null = null;
+  let persistedHandoff: {
+    last_summary: string | null; pending_todo: string[] | null; active_decisions: string[] | null;
+    keywords: string[] | null; key_context: string | null; active_branch: string | null;
+    role: string;
+  } | null = null;
+  const historyIdentityErrors = new Set([
+    "Ambiguous handoff history identity",
+    "Invalid scoped handoff history response",
+    "Handoff history identity mismatch",
+  ]);
+  const historyFailure = (attempted: boolean) => `The expected handoff history could not be verified in this role/workspace. Reload context before saving; ${attempted ? "no further merge was attempted" : "no merge was attempted"}.`;
 
   while (data.status === "conflict" && mergeAttempts < MAX_MERGE_ATTEMPTS) {
     // If the user explicitly disabled CRDT merging, return old OCC error
@@ -1206,11 +1217,12 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
       baseDbState = expected_version
         ? await storage.getHandoffAtVersion(project, expected_version, PRISM_USER_ID, effectiveRole)
         : null;
-    } catch {
-      return { content: [{ type: "text", text: "The expected handoff history could not be verified in this role/workspace. Reload context before saving; no merge was attempted." }], isError: true };
+    } catch (error) {
+      if (!(error instanceof Error) || !historyIdentityErrors.has(error.message)) throw error;
+      return { content: [{ type: "text", text: historyFailure(mergeAttempts > 0) }], isError: true };
     }
     if (expected_version && !baseDbState) {
-      return { content: [{ type: "text", text: "The expected handoff version is unavailable in this role/workspace. Reload context before saving; no merge was attempted." }], isError: true };
+      return { content: [{ type: "text", text: `The expected handoff version is unavailable in this role/workspace. Reload context before saving; ${mergeAttempts > 0 ? "no further merge was attempted" : "no merge was attempted"}.` }], isError: true };
     }
     const baseState = dbToHandoffSchema(baseDbState);
 
@@ -1245,8 +1257,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
 
     // Step 5: Build merged handoff and retry save
     const mergedExpectedVersion = (currentDbState as Record<string, unknown>).version as number;
-    data = await storage.saveHandoff(
-      {
+    const mergedHandoff = {
         project,
         user_id: PRISM_USER_ID,
         last_summary: crdt.merged.summary ?? null,
@@ -1261,14 +1272,22 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
           last_merge_strategy: crdt.strategy,
         },
         role: effectiveRole,
-      },
+      };
+    data = await storage.saveHandoff(mergedHandoff,
       mergedExpectedVersion ?? null
     );
 
     // Update these for the snapshot/notification blocks below
     if (data.status !== "conflict") {
-      // Merge succeeded — update local vars for the success path
-      keywords = crdt.merged.keywords ?? keywords;
+      persistedHandoff = {
+        last_summary: mergedHandoff.last_summary,
+        pending_todo: mergedHandoff.pending_todo,
+        active_decisions: mergedHandoff.active_decisions,
+        keywords: mergedHandoff.keywords,
+        key_context: mergedHandoff.key_context,
+        active_branch: mergedHandoff.active_branch,
+        role: effectiveRole,
+      };
     }
 
     mergeAttempts++;
@@ -1292,6 +1311,15 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
 
   // ─── Success: handoff created or updated ───
   const newVersion = data.version;
+  const saved = persistedHandoff ?? {
+    last_summary: last_summary ?? null,
+    pending_todo: open_todos ?? null,
+    active_decisions: null,
+    keywords: keywords ?? null,
+    key_context: key_context ?? null,
+    active_branch: active_branch ?? null,
+    role: effectiveRole,
+  };
 
   // ─── TIME MACHINE: Auto-snapshot for time travel ───
   // Every successful save creates a snapshot so the user can revert later.
@@ -1303,17 +1331,17 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     const snapshotEntry = {
       project,
       user_id: PRISM_USER_ID,
-      last_summary: last_summary ?? null,
-      pending_todo: open_todos ?? null,
-      active_decisions: null,
-      keywords: keywords ?? null,
-      key_context: key_context ?? null,
-      active_branch: active_branch ?? null,
-      role: effectiveRole,
+      last_summary: saved.last_summary,
+      pending_todo: saved.pending_todo,
+      active_decisions: saved.active_decisions,
+      keywords: saved.keywords,
+      key_context: saved.key_context,
+      active_branch: saved.active_branch,
+      role: saved.role,
       version: newVersion,
     };
     try {
-      await storage.saveHistorySnapshot(snapshotEntry, active_branch ?? "main");
+      await storage.saveHistorySnapshot(snapshotEntry, saved.active_branch ?? "main");
       historySnapshotSaved = true;
     } catch (err) {
       console.error(`[session_save_handoff] History snapshot failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
@@ -1324,9 +1352,9 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   let embeddingQueued = false;
   if (data.status === "created" || data.status === "updated") {
     const embeddingText = [
-      last_summary || "",
-      key_context || "",
-      ...(open_todos || []),
+      saved.last_summary || "",
+      saved.key_context || "",
+      ...(saved.pending_todo || []),
     ].filter(Boolean).join("\n");
 
     if (embeddingText.trim()) {
@@ -1390,7 +1418,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     captureLocalEnvironment(project, PRISM_CAPTURE_PORTS).then(async (captureMeta) => {
       if (captureMeta) {
         try {
-          const latestCtx = await storage.loadContext(project, "quick", PRISM_USER_ID);
+          const latestCtx = await storage.loadContext(project, "quick", PRISM_USER_ID, effectiveRole);
           if (latestCtx) {
             const ctx = latestCtx as any;
             const updatedMeta = { ...(ctx.metadata || {}) };
@@ -1407,6 +1435,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
               keywords: ctx.keywords ?? null,
               key_context: ctx.key_context ?? null,
               active_branch: ctx.active_branch ?? null,
+              role: effectiveRole,
             }, newVersion);
             debugLog(`[AutoCapture] HTML snapshot indexed in visual memory for "${project}"`);
           }
@@ -1429,12 +1458,12 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   //   If the user saves another handoff while the merger runs,
   //   the merger's save will fail with a version conflict. This is
   //   intentional — active user input always wins over background merging.
-  if (data.status === "updated" && key_context) {
+  if (data.status === "updated" && saved.key_context) {
     // Use dynamic import to avoid loading Gemini SDK if not needed
     import("../utils/factMerger.js").then(async ({ consolidateFacts }) => {
       try {
         // Step 1: Load the old context from the database
-        const oldState = await storage.loadContext(project, "quick", PRISM_USER_ID);
+        const oldState = await storage.loadContext(project, "quick", PRISM_USER_ID, effectiveRole);
         const oldKeyContext = (oldState as any)?.key_context || "";  // extract old key_context
 
         // Step 2: Skip merge if old context is empty (nothing to merge with)
@@ -1444,10 +1473,10 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
         }
 
         // Step 3: Call Gemini to intelligently merge old + new context
-        const mergedContext = await consolidateFacts(oldKeyContext, key_context);
+        const mergedContext = await consolidateFacts(oldKeyContext, saved.key_context!);
 
         // Step 4: Skip patch if merged result is same as current key_context
-        if (mergedContext === key_context) {
+        if (mergedContext === saved.key_context) {
           debugLog("[FactMerger] No changes after merge — skipping patch");
           return;  // Gemini determined no contradictions existed
         }
@@ -1459,11 +1488,12 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
           project,                                // same project
           user_id: PRISM_USER_ID,                 // same user
           key_context: mergedContext,              // merged context (cleaned by Gemini)
-          last_summary: last_summary ?? null,      // preserve existing summary
-          pending_todo: open_todos ?? null,        // preserve existing TODOs
-          active_decisions: null,                  // preserve existing decisions
-          keywords: keywords ?? null,              // preserve existing keywords
-          active_branch: active_branch ?? null,    // preserve existing branch
+          last_summary: saved.last_summary,
+          pending_todo: saved.pending_todo,
+          active_decisions: saved.active_decisions,
+          keywords: saved.keywords,
+          active_branch: saved.active_branch,
+          role: effectiveRole,
           metadata: {},                            // no metadata changes
         }, newVersion);                            // use current version for OCC
 
@@ -1495,7 +1525,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     (isMerged
     ? `🔄 Auto-merged conflict for "${project}" (v${expected_version} → v${newVersion})\n` +
       `Strategy: ${JSON.stringify(mergeStrategy)}\n` +
-      (last_summary ? `Summary: ${last_summary}\n` : "") +
+      (saved.last_summary ? `Summary: ${saved.last_summary}\n` : "") +
       historySnapshotLine +
       metricsBlock +
       `\n🔑 Remember: pass expected_version: ${newVersion} on your next save ` +
