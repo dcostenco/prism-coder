@@ -6,6 +6,9 @@ vi.mock("../../src/utils/localCodingSettings.js", async original => ({
 vi.mock("../../src/utils/omlxProvider.js", async original => ({
     ...await original<typeof import("../../src/utils/omlxProvider.js")>(), configuredOmlxModel: vi.fn(),
 }));
+vi.mock("../../src/utils/executionRoles.js", async original => ({
+    ...await original<typeof import("../../src/utils/executionRoles.js")>(), readExecutionAssignments: vi.fn(),
+}));
 vi.mock("../../src/tools/prismInferHandler.js", async original => ({
     ...await original<typeof import("../../src/tools/prismInferHandler.js")>(),
     listOllamaTags: vi.fn(async () => new Set(["prism-coder:4b"])), productionInferDeps: vi.fn(),
@@ -20,10 +23,12 @@ import { localCodingPreference } from "../../src/utils/localCodingPreference.js"
 import { runInfer, listOllamaTags, productionInferDeps, type InferDeps } from "../../src/tools/prismInferHandler.js";
 import { classifyQueryBoundary } from "../../src/tools/queryMemoryNaturalHandler.js";
 import { FREE_ENTITLEMENTS } from "../../src/utils/entitlements.js";
+import { readExecutionAssignments } from "../../src/utils/executionRoles.js";
 
 describe("Auto does not read an ineligible provider configuration", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(readExecutionAssignments).mockResolvedValue({});
         vi.mocked(readLocalCodingSettings).mockResolvedValue({ backend: "auto", source: "existing" });
         vi.mocked(configuredOmlxModel).mockRejectedValue(new OmlxError("omlx_config_unavailable"));
     });
@@ -50,6 +55,15 @@ describe("Auto does not read an ineligible provider configuration", () => {
             .toMatchObject({ backend: "refused", gate_outcome: { reason: "local_coding_preference_invalid" } });
         expect(configuredOmlxModel).toHaveBeenCalled();
         expect(f.callLocal).not.toHaveBeenCalled();
+    });
+    it.each(["synalux", "host"] as const)("does not probe oMLX for an explicit %s role assignment", async runtime => {
+        const assignment = runtime === "host"
+            ? { runtime, profile: "a".repeat(64) }
+            : { runtime };
+        vi.mocked(readExecutionAssignments).mockResolvedValue({ coder: assignment });
+        const preference = await localCodingPreference("coder");
+        expect(preference.assignment).toEqual(assignment);
+        expect(configuredOmlxModel).not.toHaveBeenCalled();
     });
     it.each([
         { ceiling: "4b", planCeiling: "27b" },

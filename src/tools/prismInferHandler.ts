@@ -1076,7 +1076,7 @@ async function pinHostTaskSelection(args: PrismInferArgs): Promise<PrismInferArg
         if (!backend || !isLocalCodingModelId(model)) throw new Error("host_task_explicit_image_selection_required");
         return { ...args, image_backend: backend, image_model: model };
     }
-    const settings = await localCodingPreference(args.local_role ?? "coder", args.local_backend, false, args.local_model);
+    const settings = await localCodingPreference(args.local_role ?? "coder", args.local_backend, false, args.local_model, args.mode === "code");
     if (settings.assignment?.runtime === "host" || settings.assignment?.runtime === "synalux") {
         throw new Error("host_task_nonlocal_assignment_requires_host: the selected role uses a host/cloud executor; have the host handle this task or explicitly choose a local worker");
     }
@@ -2369,15 +2369,17 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
         const autoOmlxEligible = args.mode === "code"
             && clampCeiling(args.model_ceiling ?? "27b", deps.entitlements!.model_ceiling) === "27b";
         let preference: LocalCodingPreference;
-        try { preference = await deps.codingPreference!(args.local_role ?? "coder", args.local_backend, autoOmlxEligible, args.local_model); }
-        catch {
-            const reason = "local_coding_preference_invalid";
+        try { preference = await deps.codingPreference!(args.local_role ?? "coder", args.local_backend, autoOmlxEligible, args.local_model, args.mode === "code"); }
+        catch (error) {
+            const safePreferenceReasons = new Set(["execution_assignment_override_conflict", "local_coding_override_invalid"]);
+            const reason = error instanceof Error && safePreferenceReasons.has(error.message)
+                ? error.message : "local_coding_preference_invalid";
             if (args.escalation === "report") return { output: "", backend: "refused", model_picked: null,
                 ram_free_mb: Math.round(deps.freemem() / 1024 ** 2), latency_ms: Date.now() - started, used_cloud: false,
                 attempts: [{ tier: "preference", reason }], gate_outcome: { status: "refused", reason, served_anyway: false } };
             throw new Error(`prism_infer: ${reason}`);
         }
-        const assignment = args.local_model ? undefined : preference.assignment;
+        const assignment = args.local_model || args.mode !== "code" ? undefined : preference.assignment;
         if (assignment?.runtime === "host") {
             const profile = (await (deps.hostProfiles ?? configuredHostProfiles)()).find(p => p.id === assignment.profile);
             if (!profile) throw new Error("prism_infer: execution_host_unavailable");
@@ -4442,6 +4444,9 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps, context
             prepared = { ...prepared, args: await pinHostTaskSelection(prepared.args) };
             if (!isPrismInferArgs(prepared.args)) throw new Error("host_task_invalid_execution_selection");
             requireActive(context);
+            if (context?.requiredLocalBackend === "omlx" && prepared.args.local_backend !== "omlx") {
+                throw new Error("bridge_requires_omlx");
+            }
             const packet = await prepareHostTask("prism_infer", request as unknown as Record<string, unknown>,
                 prepared.args as unknown as Record<string, unknown>, prepared.memory ? { memory: prepared.memory } : {});
             requireActive(context);

@@ -45,7 +45,7 @@ export function localCodingPanelHTML(): string {
           <p class="setting-desc" id="local-coding-${backend}-discovery" style="margin:0;overflow-wrap:anywhere" role="status"></p>
         </fieldset>`).join("")}
         <p class="setting-desc" id="local-coding-memory" style="margin:0"></p>
-        <div class="skill-actions" style="flex-wrap:wrap"><button class="skill-save-btn" id="local-coding-save" type="submit" disabled>Save coding preference</button><button class="skill-upload-btn" type="button" onclick="loadLocalCoding(false)">Check saved connection</button></div>
+        <div class="skill-actions" style="flex-wrap:wrap"><button class="skill-save-btn" id="local-coding-save" type="submit" disabled>Save coding preference</button><button class="skill-upload-btn" type="button" onclick="loadLocalCoding(false)">Check saved connection</button><button class="skill-upload-btn" id="local-coding-reload" type="button" title="Replace unsaved coding and role edits with the saved choices" onclick="loadLocalCoding(true)">Reload saved choices</button></div>
       </form>
       <p id="local-coding-saved" class="setting-desc" aria-live="polite"></p>
       ${localImagePanelHTML()}

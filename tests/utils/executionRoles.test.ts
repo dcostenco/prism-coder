@@ -37,7 +37,7 @@ describe("execution role contract", () => {
         await setSetting(EXECUTION_ROLES_KEY, JSON.stringify({reviewer:{runtime:"ollama",model:"exact:tag"}}));
         vi.stubEnv("PRISM_LOCAL_CODING_BACKEND", "omlx");
         await expect(localCodingPreference("reviewer")).rejects.toThrow("execution_assignment_override_conflict");
-        expect(await localCodingPreference("reviewer", "ollama", "caller:tag")).toMatchObject({effective:"ollama",assignment:undefined});
+        expect(await localCodingPreference("reviewer", "ollama", true, "caller:tag")).toMatchObject({effective:"ollama",assignment:undefined});
         await setSetting(EXECUTION_ROLES_KEY, "{}");
         await expect(localCodingPreference("reviewer")).rejects.toThrow("execution_assignment_override_conflict");
     });

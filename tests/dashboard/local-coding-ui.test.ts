@@ -5,16 +5,22 @@ const windows: JSDOM[] = [];
 afterEach(() => { windows.splice(0).forEach(dom => dom.window.close()); });
 function fixture() {
     let settings: any = { backend: "auto", source: "existing" };
-    let assignments: any = {}, revision = 'a'.repeat(64);
+    let assignments: any = {}, revision = 'a'.repeat(64), imageSettings: any = {}, changeBeforeImageSave = false;
     const posts: any[] = [];
     let discoveryErrors: any = {};
     let inventory = [{ id: "new/build", loaded: false, weightBytes: 12 * 1024 ** 3 }];
     const dom = new JSDOM(localCodingPanelHTML(), { url: "http://127.0.0.1", runScripts: "outside-only" }); windows.push(dom);
     dom.window.fetch = async (_url: any, init: any) => {
         if (init?.method === "POST") { const body = JSON.parse(init.body); posts.push(body);
+            if (String(_url).endsWith('/image-preferences')) {
+                if (changeBeforeImageSave) { revision = 'c'.repeat(64); changeBeforeImageSave = false; }
+                const previousRevision = revision; imageSettings = body; revision = 'b'.repeat(64);
+                return { ok: true, json: async () => ({saved:true,previousRevision,revision}) } as Response;
+            }
             if (body.revision !== revision) return { ok: false, json: async () => ({error:'Preferences changed. Refresh and retry.'}) } as Response;
             if (body.settings) settings = body.settings; if (body.assignments) assignments = body.assignments;
             return { ok: true, json: async () => ({ saved: true }) } as Response; }
+        if (String(_url).startsWith('/api/local-coding/image-models')) return { ok:true,json:async()=>({settings:imageSettings,discovered:{omlx:[{id:'new/vision',capability:{vision:true,source:'omlx.engine_type'}}],ollama:[]},discoveryErrors:{},availableMemoryBytes:20*1024**3,canManage:true}) } as Response;
         return { ok: true, json: async () => ({ settings, assignments, revision, executionCatalog: { cloud: {status:'entitled'}, hosts: [{id:'b'.repeat(64),provider:'fixture',model:'host-model',effort:'high',status:'configured'}] }, preference: { envOverride: null }, canManage: true,
             connection: { connected: true, control: true, model: "new/build", models: inventory.map(m => m.id) },
             discovered: { omlx: inventory, ollama: [{ id: "next:tag", loaded: true }] }, discoveryErrors, availableMemoryBytes: 20 * 1024 ** 3,
@@ -24,9 +30,38 @@ function fixture() {
     const field = (name: string) => dom.window.document.getElementById('local-coding-' + name) as HTMLSelectElement;
     return { dom, posts, field, load: () => (dom.window as any).loadLocalCoding(false), save: () => (dom.window as any).saveLocalCoding({ preventDefault() {} }),
         externalChange: () => { revision = 'c'.repeat(64); },
+        changeBeforeImageSave: () => { changeBeforeImageSave = true; },
+        loadImages: () => (dom.window as any).loadLocalImages(true),
+        saveImage: () => (dom.window as any).saveLocalImages({preventDefault(){}}),
         removeModel: () => { inventory = []; }, failInventory: () => { inventory = []; discoveryErrors = { omlx: 'Inventory unavailable' }; } };
 }
 describe("local model assignment controls", () => {
+    it.each(['coding','roles'])('an image save advances only the same-tab revision for the next %s save', async kind => {
+        const f = fixture(); await f.load(); await f.loadImages(); const w = f.dom.window as any;
+        f.field('omlx-coder').value = 'new/build';
+        const coder = f.dom.window.document.getElementById('execution-role-coder') as HTMLSelectElement;
+        coder.value = JSON.stringify({runtime:'synalux'});
+        await f.saveImage();
+        expect(f.field('omlx-coder').value).toBe('new/build');
+        expect(coder.value).toBe(JSON.stringify({runtime:'synalux'}));
+        if (kind === 'coding') await f.save(); else await w.saveExecutionRoles({preventDefault(){}});
+        expect(f.posts[1].revision).toBe('b'.repeat(64));
+        expect(f.dom.window.document.getElementById(kind === 'coding' ? 'local-coding-error' : 'execution-role-status')!.textContent).not.toContain('Preferences changed');
+    });
+    it('an image save cannot lend a stale coding form another tab\'s revision', async () => {
+        const f = fixture(); await f.load(); await f.loadImages(); f.changeBeforeImageSave();
+        await f.saveImage(); await f.save();
+        expect(f.posts[1].revision).toBe('a'.repeat(64));
+        expect(f.dom.window.document.getElementById('local-coding-error')!.textContent).toContain('Preferences changed');
+    });
+    it('reload saved choices provides an explicit recovery after a stale-save refusal', async () => {
+        const f = fixture(); await f.load(); f.externalChange(); await f.save();
+        const button = f.dom.window.document.getElementById('local-coding-reload'); expect(button).not.toBeNull();
+        await (f.dom.window as any).eval(button!.getAttribute('onclick')!);
+        await f.save();
+        expect(f.posts[1].revision).toBe('c'.repeat(64));
+        expect(f.dom.window.document.getElementById('local-coding-error')!.textContent).not.toContain('Preferences changed');
+    });
     it('discovers local/cloud/configured host role choices, saves and reloads without execution', async () => {
         const f = fixture(); await f.load(); const w = f.dom.window as any;
         const coder = f.dom.window.document.getElementById('execution-role-coder') as HTMLSelectElement;

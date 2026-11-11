@@ -7,8 +7,8 @@ import { omlxSetup, OmlxSetupError, OMLX_SETUP_MODELS } from "../utils/omlxSetup
 import { inspectOllamaCodingModels, inspectOllamaImageModels } from "../utils/ollamaCodingModels.js";
 import { isLocalCodingModelId } from "../utils/localCodingSettings.js";
 import { getAvailableMemoryBytes } from "../utils/availableMemory.js";
-import { readLocalImageSettings, saveLocalImageSettings } from "../utils/localImageSettings.js";
-import { activateLocalAiSource, inspectLocalAiSource, localAiAssignments, localAiSnapshot, saveLocalAiModels, saveExecutionRoles, LocalAiConflict } from "./localAiActions.js";
+import { readLocalImageSettings } from "../utils/localImageSettings.js";
+import { activateLocalAiSource, inspectLocalAiSource, localAiAssignments, localAiSnapshot, saveLocalAiModels, saveLocalAiImages, saveExecutionRoles, LocalAiConflict, type LocalAiSaveRevision } from "./localAiActions.js";
 import { configuredHostProfiles } from "../utils/executionRoles.js";
 import { getEntitlements } from "../utils/entitlements.js";
 
@@ -39,7 +39,7 @@ export interface LocalCodingRouterDeps {
     ollamaModels: typeof inspectOllamaCodingModels;
     availableMemory: () => number;
     imageSettings: typeof readLocalImageSettings;
-    saveImageSettings: typeof saveLocalImageSettings;
+    saveImageSettings: (value: unknown) => Promise<LocalAiSaveRevision | void>;
     omlxImageModels: typeof inspectOmlxImageModels;
     omlxImageInput: typeof inspectOmlxImageInput;
     ollamaImageModels: typeof inspectOllamaImageModels;
@@ -51,7 +51,7 @@ const defaults: LocalCodingRouterDeps = { setup: omlxSetup, settings: readLocalC
     saveRoles: saveExecutionRoles, hostProfiles: configuredHostProfiles,
     cloudStatus: async () => { const e = await getEntitlements(); return e.source === "fallback_free" ? "unknown" : e.features.cloud_fallback ? "entitled" : "not_in_plan"; },
     infer: async args => (await import("../tools/prismInferHandler.js")).prismInferHandler(args),
-    imageSettings: readLocalImageSettings, saveImageSettings: saveLocalImageSettings,
+    imageSettings: readLocalImageSettings, saveImageSettings: saveLocalAiImages,
     omlxImageModels: inspectOmlxImageModels, omlxImageInput: inspectOmlxImageInput, ollamaImageModels: inspectOllamaImageModels };
 function json(res: ServerResponse, status: number, value: unknown) {
     res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "private, no-store" });
@@ -156,7 +156,8 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
         }
         const body = await readBody(req, url.pathname === "/api/local-coding/image-preferences");
         if (url.pathname === "/api/local-coding/image-preferences") {
-            await deps.saveImageSettings(body); json(res, 200, { saved: true, selectionApplied: false }); return true;
+            const revision = await deps.saveImageSettings(body);
+            json(res, 200, { saved: true, selectionApplied: false, ...(revision ?? {}) }); return true;
         }
         if (url.pathname === "/api/local-coding/preferences") {
             const value = body as { settings?: unknown; revision?: string };

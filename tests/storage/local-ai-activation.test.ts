@@ -2,17 +2,47 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { closeConfigStorage, compareAndSetSetting, getSetting, setSetting } from "../../src/storage/configStorage.js";
-import { activateLocalAiSource, localAiSnapshot, saveLocalAiModels, saveExecutionRoles } from "../../src/dashboard/localAiActions.js";
+let { closeConfigStorage, compareAndSetSetting, getSetting, setSetting } = await import("../../src/storage/configStorage.js");
+let { activateLocalAiSource, localAiSnapshot, saveLocalAiModels, saveLocalAiImages, saveExecutionRoles } = await import("../../src/dashboard/localAiActions.js");
 import { LOCAL_CODING_SETTING_KEY, LEGACY_LOCAL_CODING_SETTING_KEY } from "../../src/utils/localCodingSettings.js";
 import { LOCAL_IMAGE_SETTING_KEY } from "../../src/utils/localImageSettings.js";
+let { localCodingPreference } = await import("../../src/utils/localCodingPreference.js");
 
 beforeEach(async () => {
     closeConfigStorage();
+    vi.resetModules();
     vi.stubEnv("PRISM_CONFIG_PATH", join(await mkdtemp(join(tmpdir(), "local-ai-cas-")), "config.db"));
+    ({ closeConfigStorage, compareAndSetSetting, getSetting, setSetting } = await import("../../src/storage/configStorage.js"));
+    ({ activateLocalAiSource, localAiSnapshot, saveLocalAiModels, saveLocalAiImages, saveExecutionRoles } = await import("../../src/dashboard/localAiActions.js"));
+    ({ localCodingPreference } = await import("../../src/utils/localCodingPreference.js"));
 });
 afterEach(() => { closeConfigStorage(); vi.unstubAllEnvs(); });
 describe("connection activation preserves concurrent preferences", () => {
+    it('non-code preference reads exclude saved execution roles without changing the saved backend', async () => {
+        vi.stubEnv('PRISM_LOCAL_CODING_BACKEND',undefined);
+        const start = await localAiSnapshot();
+        await saveExecutionRoles({coder:{runtime:'omlx',model:'fixture/code'}},start.revision);
+        expect((await localCodingPreference('coder',undefined,false)).effective).toBe('omlx');
+        const plain = await localCodingPreference('coder',undefined,false,undefined,false);
+        expect(plain).toMatchObject({saved:'auto',effective:'auto'});
+        expect(plain.assignment).toBeUndefined();
+    });
+    it('an image save returns only its own revision transition and preserves role/model choices', async () => {
+        const before = await localAiSnapshot();
+        const update = await saveLocalAiImages({backend:'omlx',models:{omlx:'fixture/vision'}});
+        expect(update.previousRevision).toBe(before.revision);
+        expect(update.revision).toBe((await localAiSnapshot()).revision);
+        await saveExecutionRoles({coder:{runtime:'synalux'}}, update.revision);
+        const after = await localAiSnapshot();
+        expect(after.image).toEqual({backend:'omlx',models:{omlx:'fixture/vision'}});
+        expect(after.assignments).toEqual({coder:{runtime:'synalux'}});
+    });
+    it('an image-save revision does not authorize a model save over a later role change', async () => {
+        const update = await saveLocalAiImages({backend:'omlx'});
+        await saveExecutionRoles({reviewer:{runtime:'synalux'}},update.revision);
+        await expect(saveLocalAiModels({backend:'ollama',source:'existing'},update.revision)).rejects.toThrow('Preferences changed');
+        expect((await localAiSnapshot()).assignments.reviewer).toEqual({runtime:'synalux'});
+    });
     it("an older model form cannot undo a newer connection activation", async () => {
         await setSetting(LOCAL_CODING_SETTING_KEY, JSON.stringify({ backend: "auto", source: "managed" }));
         const snapshot = await localAiSnapshot();

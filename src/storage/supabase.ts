@@ -51,6 +51,21 @@ import { getSetting as cfgGet, setSetting as cfgSet, getAllSettings as cfgGetAll
 import { runAutoMigrations } from "./supabaseMigrations.js";
 import { SafetyController } from "../darkfactory/safetyController.js";
 
+function historyRoleFilter(role: string): Record<string, string> {
+  return role === "global"
+    ? { or: "(snapshot->>role.eq.global,snapshot->>role.is.null)" }
+    : { "snapshot->>role": `eq.${role}` };
+}
+
+function missingLegacyHistoryWorkspaceColumn(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { status?: unknown; code?: unknown; body?: unknown };
+  return candidate.status === 400
+    && candidate.code === "42703"
+    && typeof candidate.body === "string"
+    && /column\s+(?:(?:\"?session_handoffs_history\"?)\.)?\"?workspace_id\"?\s+does not exist/i.test(candidate.body);
+}
+
 export class SupabaseStorage implements StorageBackend {
   // ─── Lifecycle ─────────────────────────────────────────────
 
@@ -521,15 +536,28 @@ export class SupabaseStorage implements StorageBackend {
     role: string = "global"
   ): Promise<Record<string, unknown> | null> {
     try {
-      const data = await supabaseGet("session_handoffs_history", {
+      const base = {
         select: "snapshot",
         project: `eq.${project}`,
         user_id: `eq.${userId}`,
         version: `eq.${version}`,
-        "snapshot->>role": `eq.${role}`,
-        workspace_id: "is.null",
-        limit: "2",
-      });
+        ...historyRoleFilter(role),
+      };
+      let data: unknown;
+      try {
+        data = await supabaseGet("session_handoffs_history", {
+          ...base,
+          workspace_id: "is.null",
+          limit: "2",
+        });
+      } catch (error) {
+        if (!missingLegacyHistoryWorkspaceColumn(error)) throw error;
+        data = await supabaseGet("session_handoffs_history", {
+          ...base,
+          "snapshot->>workspace_id": "is.null",
+          limit: "2",
+        });
+      }
       const rows = Array.isArray(data) ? data : [];
       if (rows.length === 0) return null;
       if (rows.length !== 1) throw new Error("Ambiguous handoff history identity");

@@ -96,6 +96,9 @@ An explicit local task choice can override the saved role.
 
 ![Local AI coding model selectors with separate coder and reviewer assignments](docs/screenshots/local-ai-coding-models.png)
 
+*The screenshot shows the model-selector detail. The current dashboard also
+includes the execution-role controls described in the table above.*
+
 **Images have their own choice.** Select an oMLX vision model under **Image
 model**, then **Save image preference**. It may be the same model used for
 coding, but the setting is independent. **Refresh image models** reads

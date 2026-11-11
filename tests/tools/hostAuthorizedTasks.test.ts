@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InferDeps, PrismInferArgs } from "../../src/tools/prismInferHandler.js";
@@ -85,6 +85,20 @@ describe("host-authorized inference entrypoints", () => {
         const response = body(await prismInferHandler({ ...ask(), local_backend: undefined, local_model: undefined, local_role: "reviewer" }, f.deps));
         expect(response.host_task.execution).toMatchObject({ local_backend: "omlx", local_model: "role-reviewer" });
         expect(f.generate).not.toHaveBeenCalled();
+    });
+    it("does not prepare an Ollama packet for an oMLX-required bridge", async () => {
+        state.roles = { coder: { runtime: "ollama", model: "fixture-ollama" } };
+        const f = await fixture(), { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
+        const response = await prismInferHandler({ ...ask(), local_backend: undefined, local_model: undefined }, f.deps,
+            { requiredLocalBackend: "omlx" });
+        expect(response.isError).toBe(true);
+        expect(response.content[0]?.text).toBe("bridge_requires_omlx");
+        expect(response.structuredContent).toBeUndefined();
+        const records = join(temp, "host-tasks");
+        expect(existsSync(records) ? readdirSync(records) : []).toEqual([]);
+        expect(f.generate).not.toHaveBeenCalled();
+        expect(f.deps.callLayer1).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
     });
     it.each(["host", "synalux"] as const)("never substitutes a legacy local worker for a %s role", async runtime => {
         state.roles = { coder: runtime === "host" ? { runtime, profile: "a".repeat(64) } : { runtime } };

@@ -14,6 +14,7 @@ import { OmlxError, createOmlxTarget, type OmlxRequest, type OmlxRuntime, type O
 import { ownedOmlxGenerate } from "../../src/utils/omlxOwned.js";
 import { OMLX_LAYER1_MODEL } from "../../src/utils/omlxLayer1.js";
 import { completes, endsWithoutTerminal, fakeControl, record } from "./omlxControlFake.js";
+import { CRISIS_RESPONSE } from "../../src/utils/safetyGate.js";
 
 const MODEL = "Qwen3.8-Flash-Next-oQ8e-mtp";
 // As detection returns it: carrying the provider credential.
@@ -87,6 +88,25 @@ describe("trusted bridge execution context", () => {
 });
 
 describe("saved execution roles", () => {
+    it.each([undefined,'route','chat'] as const)('coding assignments do not retarget non-code mode %s', async mode => {
+        for (const runtime of ['host','synalux','omlx','ollama'] as const) {
+            const f = fixture();
+            const profile = {id:'a'.repeat(64),provider:'fixture',model:'fixture-host',effort:'high',status:'configured' as const};
+            f.deps.hostProfiles = vi.fn(async () => [profile]);
+            f.deps.codingPreference = vi.fn(async (...args: any[]) => {
+                const plain = {saved:'auto',effective:'auto',configured:false,envOverride:null};
+                if (args[4] === false) return plain as any;
+                return {...plain,effective:runtime === 'omlx' || runtime === 'ollama' ? runtime : 'auto',
+                    assignment:runtime === 'host' ? {runtime,profile:profile.id} : runtime === 'synalux' ? {runtime} : {runtime,model:'saved:code'}} as any;
+            });
+            await runInfer(ask({mode,local_backend:undefined}),f.deps).catch(() => undefined);
+            expect(f.deps.callLocal, runtime).toHaveBeenCalled();
+            expect(f.deps.callCloud, runtime).not.toHaveBeenCalled();
+            expect(f.deps.hostProfiles, runtime).not.toHaveBeenCalled();
+            expect(f.omlx.generate, runtime).not.toHaveBeenCalled();
+            expect((f.deps.callLocal as any).mock.calls.every((call: any[]) => call[0].model !== 'saved:code')).toBe(true);
+        }
+    });
     it("an exact local pin cannot exhaust RAM and silently spend cloud credits", async () => {
         const f = fixture(); f.deps.freemem = () => 0;
         f.deps.listTags = async () => new Set(["exact:model"]);
@@ -108,6 +128,20 @@ describe("saved execution roles", () => {
         const result = await runInfer(ask({ local_backend: undefined, cloud_fallback: undefined }), f.deps);
         expect(result).toMatchObject({ used_cloud: true, selection: { source: "role_assignment", requested_runtime: "synalux", requested_model: null, actual_model: null } });
         expect(f.deps.callCloud).toHaveBeenCalledOnce(); expect(f.deps.listTags).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it("keeps reserved signaling and output safety on a direct Synalux role", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", configured: false, envOverride: null,
+            assignment: { runtime: "synalux" } });
+        f.deps.callCloud = vi.fn(async () => ({ ok: true, output: "Here is how to overdose on pills", backend: "synalux" }));
+        const result = await runInfer(ask({ prompt: "Draft a physical restraint protocol for a client.", local_backend: undefined,
+            cloud_fallback: undefined }), f.deps);
+        expect(f.deps.callCloud).toHaveBeenCalledWith(expect.any(String), expect.any(Number), expect.any(Number),
+            expect.objectContaining({ reserved: true }));
+        expect(result.output).toBe(CRISIS_RESPONSE);
+        expect(f.deps.callLayer1).not.toHaveBeenCalled();
+        expect(f.deps.listTags).not.toHaveBeenCalled();
+        expect(f.omlx.detect).not.toHaveBeenCalled();
     });
     it("does not reinterpret a local-only caller or a free plan as cloud consent", async () => {
         const f = fixture();
@@ -384,6 +418,18 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         const f = fixture(); f.deps.codingPreference = async () => { throw new Error('synthetic-secret'); };
         expect(await runInfer(ask({ local_backend: 'ollama' }), f.deps)).toMatchObject({ backend: 'refused', output: '', gate_outcome: { reason: 'local_coding_preference_invalid' } });
         expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it('reports a safe exact assignment conflict without exposing unknown preference errors', async () => {
+        const conflict = fixture();
+        conflict.deps.codingPreference = async () => { throw new Error('execution_assignment_override_conflict'); };
+        expect(await runInfer(ask({ local_backend: 'ollama' }), conflict.deps)).toMatchObject({
+            backend: 'refused', output: '', gate_outcome: { reason: 'execution_assignment_override_conflict' },
+        });
+        const unknown = fixture();
+        unknown.deps.codingPreference = async () => { throw new Error('private-path-or-secret'); };
+        expect(await runInfer(ask({ local_backend: 'ollama' }), unknown.deps)).toMatchObject({
+            backend: 'refused', output: '', gate_outcome: { reason: 'local_coding_preference_invalid' },
+        });
     });
     it('does not call an unreachable inventory proof that a model is missing', async () => {
         const f = fixture(); f.deps.listTags = async () => null;
