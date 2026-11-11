@@ -2776,6 +2776,13 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             attempts.push({ tier: "synalux", reason: cloud.reason ?? "cloud_unavailable" });
             return refusedResult("cloud_unavailable");
         }
+        // An older portal may ignore the reserved flag. Match the Layer 1
+        // guard before using its output in verification or returning it.
+        if (reservedCategory(screenedText(args)) && /^(ollama-|openrouter-)/.test(cloud.backend ?? "")) {
+            attempts.push({ tier: "synalux", reason: `reserved_weak_backend:${cloud.backend}` });
+            if (wantReport) return refusedResult("layer1_reserved");
+            throw new Error("prism_infer: layer1_reserved");
+        }
         return applyVerification(cloud.output, gatedArgs, deps, { backend: cloud.backend ?? "synalux", model_picked: null,
             ram_free_mb: ramFreeMb, latency_ms: Date.now() - t0, used_cloud: true, attempts, ...entMeta,
             gate_outcome: { status: "success", served_anyway: false } });

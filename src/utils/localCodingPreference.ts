@@ -22,7 +22,7 @@ export async function localCodingPreference(role: LocalCodingRole = "coder", exp
     const model = resolveLocalCodingModel(settings, "omlx", "coder");
     if (assignment && assignment.runtime !== "auto" && override !== undefined && override !== "auto" && override !== assignment.runtime)
         throw new Error("execution_assignment_override_conflict");
-    if (!explicitBackend && !explicitModel && stored !== "auto" && override && override !== "auto" && override !== stored
+    if (useRoleAssignment && !explicitBackend && !explicitModel && stored !== "auto" && override && override !== "auto" && override !== stored
         && resolveLocalCodingModel(settings, stored, role)) throw new Error("execution_assignment_override_conflict");
     const effective = explicitBackend ?? (assignment?.runtime === "omlx" || assignment?.runtime === "ollama" ? assignment.runtime : override ?? stored);
     // A broken configured server is an error, not permission to change backend.

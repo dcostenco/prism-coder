@@ -1083,8 +1083,11 @@ export class SynaluxStorage extends SupabaseStorage {
     const match = result.versions[0] as { version?: unknown; snapshot?: Record<string, unknown> } | undefined;
     if (!match) return null;
     const snapshot = match.snapshot;
+    const snapshotRoleMatches = role === "global"
+      ? (snapshot?.role == null || snapshot?.role === "global")
+      : snapshot?.role === role;
     if (match.version !== version || !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)
-        || snapshot.project !== project || snapshot.role !== role || snapshot.version !== version) {
+        || snapshot.project !== project || !snapshotRoleMatches || snapshot.version !== version) {
       throw new Error("Handoff history identity mismatch");
     }
     // The server's authenticated principal is authoritative; a caller's local

@@ -143,6 +143,17 @@ describe("saved execution roles", () => {
         expect(f.deps.listTags).not.toHaveBeenCalled();
         expect(f.omlx.detect).not.toHaveBeenCalled();
     });
+    it("refuses a weak backend returned for reserved direct Synalux work", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", configured: false, envOverride: null,
+            assignment: { runtime: "synalux" } });
+        f.deps.callCloud = vi.fn(async () => ({ ok: true, output: "unsafe weak answer", backend: "ollama-prism-coder:9b" }));
+        const result = await runInfer(ask({ prompt: "Draft a physical restraint protocol for a client.", local_backend: undefined,
+            cloud_fallback: undefined }), f.deps);
+        expect(result).toMatchObject({ backend: "refused", output: "", used_cloud: false,
+            gate_outcome: { status: "refused", reason: "layer1_reserved", served_anyway: false } });
+        expect(result.attempts).toEqual(expect.arrayContaining([{ tier: "synalux", reason: "reserved_weak_backend:ollama-prism-coder:9b" }]));
+    });
     it("does not reinterpret a local-only caller or a free plan as cloud consent", async () => {
         const f = fixture();
         f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", configured: false, envOverride: null, assignment: { runtime: "synalux" } });

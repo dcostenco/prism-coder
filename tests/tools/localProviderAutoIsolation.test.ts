@@ -65,6 +65,23 @@ describe("Auto does not read an ineligible provider configuration", () => {
         expect(preference.assignment).toEqual(assignment);
         expect(configuredOmlxModel).not.toHaveBeenCalled();
     });
+    it.each([undefined, "route", "chat"] as const)("preserves saved-model override behavior for non-code mode %s", async mode => {
+        vi.mocked(readLocalCodingSettings).mockResolvedValue({ backend: "omlx", source: "existing", models: { omlx: { coder: "saved-exact" } } });
+        vi.stubEnv("PRISM_LOCAL_CODING_BACKEND", "ollama");
+        try {
+            const f = deps();
+            const result = await runInfer({ prompt: "Look up my project notes.", mode, cloud_fallback: false, verify: false,
+                route_guard: "local", escalation: "report" }, f);
+            expect(result.backend).toMatch(/^ollama-/);
+            expect(f.callLocal).toHaveBeenCalled();
+        } finally { vi.unstubAllEnvs(); }
+    });
+    it("keeps exact saved-model conflicts fail-closed for code-mode assignments", async () => {
+        vi.mocked(readLocalCodingSettings).mockResolvedValue({ backend: "omlx", source: "existing", models: { omlx: { coder: "saved-exact" } } });
+        vi.stubEnv("PRISM_LOCAL_CODING_BACKEND", "ollama");
+        try { await expect(localCodingPreference("coder", undefined, false, undefined, true)).rejects.toThrow("execution_assignment_override_conflict"); }
+        finally { vi.unstubAllEnvs(); }
+    });
     it.each([
         { ceiling: "4b", planCeiling: "27b" },
         { ceiling: undefined, planCeiling: "9b" },
