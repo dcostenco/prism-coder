@@ -262,6 +262,8 @@ import {
   // v15.4: prism_infer — local-first inference (RAM-gated cascade)
   PRISM_INFER_TOOL,
   prismInferHandler,
+  FILE_METADATA_TOOL,
+  fileMetadataHandler,
 } from "./tools/index.js";
 
 // ─── Security: Boundary Tags for Context Output ──────────────
@@ -286,6 +288,7 @@ const BASE_TOOLS: Tool[] = [
   BRAVE_ANSWERS_TOOL,                 // brave_answers — AI-grounded answers
   RESEARCH_PAPER_ANALYSIS_TOOL,       // gemini_research_paper_analysis — paper analysis
   PRISM_INFER_TOOL,                   // prism_infer — local-first inference (token-saving cascade)
+  FILE_METADATA_TOOL,
   // youcom_web_search — optional You.com web search, gated on YDC_API_KEY
   ...(YDC_API_KEY ? [YOUCOM_WEB_SEARCH_TOOL] : []),
 ];
@@ -862,6 +865,15 @@ export function createServer() {
   // When otel_enabled=false, getTracer() returns a no-op tracer — zero overhead.
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+
+    // Local metadata is a separate deterministic operation. Keep names/paths out
+    // of inference, provider routing, and generic invocation/telemetry handling.
+    if (name === FILE_METADATA_TOOL.name) {
+      return fileMetadataHandler(args, async () => {
+        if (!server.getClientCapabilities()?.roots) return [];
+        return (await server.listRoots({}, { timeout: 3000, maxTotalTimeout: 3000 })).roots;
+      });
+    }
 
     // Start the root span for this MCP tool invocation.
     // All child spans (llm.generate_text, worker.vlm_caption, etc.) are
