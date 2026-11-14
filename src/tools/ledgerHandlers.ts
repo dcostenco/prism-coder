@@ -30,6 +30,8 @@ import { FREE_ENTITLEMENTS, peekEntitlements, multiTurnPolicy } from "../utils/e
 import { getStorage, activeStorageBackend } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getEmbeddingProvider } from "../utils/llm/factory.js";
+import { embeddingSupportOf } from "../storage/interface.js";
+import { embeddingFailureNotice, recordEmbeddingFailure } from "../utils/embeddingHealth.js";
 import { getCurrentGitState, getGitDrift } from "../utils/git.js";
 import { getSetting, setSetting, getAllSettings, refreshConfigStorageCache } from "../storage/configStorage.js";
 import { MATERIALIZED_GENERATION_KEY, type SkillSyncResult } from "../skillManifestSync.js";
@@ -987,6 +989,8 @@ export async function sessionSaveLedgerHandler(args: unknown) {
           })
           .catch((err) => {
             console.error(`[session_save_ledger] Embedding generation failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+            // Cloud memory: shown in the health check, the dashboard and the next save.
+            if (embeddingSupportOf(storage).serverMetered) recordEmbeddingFailure(err);
           });
       } catch (err) {
         console.error(`[session_save_ledger] Embedding provider initialization failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
@@ -1081,6 +1085,7 @@ export async function sessionSaveLedgerHandler(args: unknown) {
         (embeddingQueued
           ? `📊 Embedding generation queued for semantic search.`
           : `📊 Primary history saved; optional semantic indexing was not queued.`) +
+        (embeddingSupportOf(storage).serverMetered ? prefixNewline(embeddingFailureNotice()) : "") +
         // The ledger logs what happened; the next session starts from the
         // handoff. Only a written entry asks, never the skip or a refusal.
         `\n💾 If this checkpoint ends a unit of work, also save the handoff with session_save_handoff.` +
@@ -1089,6 +1094,11 @@ export async function sessionSaveLedgerHandler(args: unknown) {
     }],
     isError: false,
   };
+}
+
+/** A notice on its own line after the text before it, or "". */
+function prefixNewline(notice: string): string {
+  return notice ? `\n${notice.replace(/\n$/, "")}` : "";
 }
 
 export async function sessionSaveHandoffHandler(args: unknown, server?: Server) {
@@ -1320,7 +1330,10 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
       ...(open_todos || []),
     ].filter(Boolean).join("\n");
 
-    if (embeddingText.trim()) {
+    // Cloud memory does not keep handoff vectors (patchHandoff writes nowhere), so the
+    // call would be paid for and the vector lost. The reply then says
+    // "optional semantic indexing was not queued".
+    if (embeddingText.trim() && embeddingSupportOf(storage).handoffVectors) {
       try {
         const embeddingPromise = getEmbeddingProvider().generateEmbedding(embeddingText);
         embeddingQueued = true;
@@ -1500,6 +1513,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
       (embeddingQueued
         ? `📊 Embedding generation queued for semantic search.\n`
         : `📊 Primary history saved; optional semantic indexing was not queued.\n`) +
+      (embeddingSupportOf(storage).serverMetered ? embeddingFailureNotice() : "") +
       metricsBlock +
       `\n🔑 Remember: pass expected_version: ${newVersion} on your next save ` +
       `to maintain concurrency control.`);
@@ -2188,7 +2202,8 @@ export async function sessionLoadContextHandler(
   // Relabeled from "Intuitive Recall" to "Associative Recall" in R16.
   // Not a verified-fact source — label says "similarity-matched, not verified facts."
   let sdmRecallBlock = "";
-  if (level !== "quick") {
+  // The local SDM index never sees cloud memory's vectors: no embedding there.
+  if (level !== "quick" && embeddingSupportOf(storage).localSdm) {
     try {
       const activeText = [d.last_summary, d.key_context, ...(d.keywords || [])].filter(Boolean).join(" ");
       if (activeText.length > 10) {

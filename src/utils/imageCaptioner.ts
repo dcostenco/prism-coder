@@ -31,6 +31,7 @@ import * as fs from "fs";
 import * as nodePath from "path";
 import { getEmbeddingProvider, getLLMProvider } from "./llm/factory.js";
 import { getStorage } from "../storage/index.js";
+import { embeddingSupportOf } from "../storage/interface.js";
 import { debugLog, sanitizeForLog } from "./logger.js";
 import { PRISM_USER_ID } from "../config.js";
 import { getTracer } from "./telemetry.js";
@@ -232,7 +233,7 @@ async function captionImageAsync(
     summaryParts.push(`OCR Text:\n${ocrText}`);
     keywords.push("image_ocr");
   }
-  await storage.saveLedger({
+  const saved = await storage.saveLedger({
     project,
     conversation_id: "vlm-captioner",
     user_id: PRISM_USER_ID,
@@ -250,22 +251,36 @@ async function captionImageAsync(
     const embedText = ocrText
       ? `[Visual Memory: ${imageId}] Description: ${userContext}. Caption: ${caption}. OCR: ${ocrText}`
       : `[Visual Memory: ${imageId}] Description: ${userContext}. Caption: ${caption}`;
-    const embedding = await getEmbeddingProvider().generateEmbedding(embedText);
+    // Cloud memory returns the saved entry; its id is the one to patch. The lookup below reads
+    // the ledger directly, which cloud memory cannot do. Without an id, no call is made.
+    const metered = embeddingSupportOf(storage).serverMetered;
+    const savedId = (saved as { id?: unknown } | null | undefined)?.id;
+    if (metered) {
+      if (typeof savedId === "string") {
+        const embedding = await getEmbeddingProvider().generateEmbedding(embedText);
+        await storage.patchLedger(savedId, { embedding: JSON.stringify(embedding) });
+        debugLog(`[ImageCaptioner] Caption embedded for ledger entry [${savedId}].`);
+      } else {
+        debugLog("[ImageCaptioner] Cloud memory returned no entry id; caption stays text-searchable.");
+      }
+    } else {
+      const embedding = await getEmbeddingProvider().generateEmbedding(embedText);
 
-    // Find the ledger entry we just saved and patch its embedding
-    const allEntries = await storage.getLedgerEntries({
-      project,
-      conversation_id: "vlm-captioner",
-    }) as Array<{ id?: string; created_at?: string }>;
+      // Find the ledger entry we just saved and patch its embedding
+      const allEntries = await storage.getLedgerEntries({
+        project,
+        conversation_id: "vlm-captioner",
+      }) as Array<{ id?: string; created_at?: string }>;
 
-    // Sort descending and take the most recent (the one we just inserted)
-    const latest = allEntries.sort((a, b) =>
-      new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()
-    )[0];
+      // Sort descending and take the most recent (the one we just inserted)
+      const latest = allEntries.sort((a, b) =>
+        new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()
+      )[0];
 
-    if (latest?.id) {
-      await storage.patchLedger(latest.id, { embedding: JSON.stringify(embedding) });
-      debugLog(`[ImageCaptioner] Caption embedded for ledger entry [${latest.id}].`);
+      if (latest?.id) {
+        await storage.patchLedger(latest.id, { embedding: JSON.stringify(embedding) });
+        debugLog(`[ImageCaptioner] Caption embedded for ledger entry [${latest.id}].`);
+      }
     }
   } catch (embedErr) {
     // Non-fatal: caption still persists in the ledger as plain text and

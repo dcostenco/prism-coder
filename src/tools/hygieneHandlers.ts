@@ -24,6 +24,9 @@ const BACKFILL_SCOPE_MESSAGES = {
 import { activeStorageBackend, getStorage } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getEmbeddingProvider } from "../utils/llm/factory.js";
+import { SynaluxEmbeddingRefusedError } from "../utils/llm/adapters/synalux.js";
+import { embeddingSupportOf } from "../storage/interface.js";
+import { clearEmbeddingFailures, embeddingFailures } from "../utils/embeddingHealth.js";
 import { getCurrentGitState, getGitDrift } from "../utils/git.js";
 import { getSetting, getAllSettings } from "../storage/configStorage.js";
 import { mergeHandoff, dbToHandoffSchema, sanitizeForMerge } from "../utils/crdtMerge.js";
@@ -90,6 +93,24 @@ import { notifyResourceUpdate } from "../server.js";
  *
  * After saving, generates an embedding vector for the entry via fire-and-forget.
  */
+/**
+ * When an embedding repair loop stops.
+ * On cloud memory: when the Portal refuses (the day's allowance is used, or the
+ * plan has none), or when a batch repairs nothing twice in a row. Other stores
+ * keep their loops as they were.
+ */
+export function embeddingRepairLimit(serverMetered: boolean): { stop(stats: { repaired?: number; refused?: string } | undefined): boolean } {
+  let emptyBatches = 0;
+  return {
+    stop(stats) {
+      if (!serverMetered || !stats) return false;
+      if (stats.refused) return true;
+      emptyBatches = (stats.repaired ?? 0) > 0 ? 0 : emptyBatches + 1;
+      return emptyBatches >= 2;
+    },
+  };
+}
+
 export async function backfillEmbeddingsHandler(args: unknown) {
   if (!isBackfillEmbeddingsArgs(args)) {
     throw new Error("Invalid arguments for session_backfill_embeddings");
@@ -150,7 +171,11 @@ export async function backfillEmbeddingsHandler(args: unknown) {
     entries = await storage.getLedgerEntries(params);
   }
 
+  // Cloud memory meters embeddings: a refusal ends the run, and a run over every
+  // project that leaves nothing failed clears the recorded failures.
+  const metered = embeddingSupportOf(storage).serverMetered;
   if (entries.length === 0) {
+    if (metered && !project) clearEmbeddingFailures();
     return {
       content: [{
         type: "text",
@@ -177,8 +202,10 @@ export async function backfillEmbeddingsHandler(args: unknown) {
   // Generate embeddings for each entry
   let repaired = 0;
   let failed = 0;
+  let refused: string | null = null;
 
   for (const entry of entries) {
+    if (refused) break;
     try {
       const e = entry as any;
       const textToEmbed = [
@@ -220,9 +247,11 @@ export async function backfillEmbeddingsHandler(args: unknown) {
       debugLog(`[backfill] ✅ Repaired ${e.id} (${e.project})`);
     } catch (err) {
       failed++;
+      if (metered && err instanceof SynaluxEmbeddingRefusedError) refused = err.message;
       console.error(`[backfill] ❌ Failed ${(entry as any).id}: ${err instanceof Error ? err.message : err}`);
     }
   }
+  if (metered && !project && !refused && failed === 0 && entries.length < safeLimit) clearEmbeddingFailures();
 
   return {
     content: [{
@@ -231,12 +260,14 @@ export async function backfillEmbeddingsHandler(args: unknown) {
         `• Repaired: ${repaired}\n` +
         `• Failed: ${failed}\n` +
         `• Total scanned: ${entries.length}\n\n` +
-        (failed > 0
+        (refused
+          ? `⏸️ Stopped: ${refused}. The rest are repaired by a later run.`
+          : failed > 0
           ? `⚠️ ${failed} entries could not be repaired. Check server logs for details.`
           : BACKFILL_SCOPE_MESSAGES.complete),
     }],
     isError: false,
-    _stats: { repaired, failed, last_id: (entries[entries.length - 1] as any)?.id },
+    _stats: { repaired, failed, last_id: (entries[entries.length - 1] as any)?.id, ...(refused ? { refused } : {}) },
   } as any;
 }
 
@@ -313,10 +344,12 @@ export async function sessionHealthCheckHandler(args: unknown) {
         try {
           let hasMore = true;
           let cursorId: string | undefined = undefined;
+          const repairLimit = embeddingRepairLimit(embeddingSupportOf(await getStorage()).serverMetered);
           
           while (hasMore) {
             const result: any = await backfillEmbeddingsHandler({ dry_run: false, limit: 50, _cursor_id: cursorId });
             const stats = result._stats;
+            if (repairLimit.stop(stats)) break;
             
             if (stats) {
               fixedCount += stats.repaired;
@@ -399,6 +432,13 @@ export async function sessionHealthCheckHandler(args: unknown) {
     if (autoFix && fixedCount > 0) {
       text += `\n### Auto-Fix Results\n`;
       text += `🔧 Repaired ${fixedCount} issues automatically.\n`;
+    }
+
+    // Cloud memory: saves whose embedding failed in this session, and why.
+    const failures = embeddingFailures();
+    if (failures.pending > 0 && embeddingSupportOf(await getStorage()).serverMetered) {
+      text += `\n### Semantic Index\n`;
+      text += `⚠️ ${failures.pending} ${failures.pending === 1 ? "save" : "saves"} pending semantic index: ${failures.lastReason}\n`;
     }
 
     text += `\n---\n`;

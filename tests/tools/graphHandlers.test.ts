@@ -110,6 +110,57 @@ describe("semantic-search initialization order", () => {
   });
 });
 
+// Cloud memory answers a failed query embedding
+// with labelled keyword matches, and skips intuitive recall, whose local index never holds its vectors.
+describe("cloud memory embedding failures", () => {
+  const METERED = { handoffVectors: false, localSdm: false, serverMetered: true };
+  const keywordResult = { count: 1, results: [{ id: "k1", project: "prism", summary: "keyword hit", created_at: "2026-11-14T00:00:00Z" }] };
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("a query that cannot be embedded on cloud memory gets keyword matches, labelled with the reason", async () => {
+    const { getEmbeddingProvider } = await import("../../src/utils/llm/factory.js");
+    const storage = { embeddingSupport: METERED, searchKnowledge: vi.fn(async () => keywordResult), searchMemory: vi.fn() };
+    vi.mocked(getStorage).mockResolvedValue(storage as any);
+    vi.mocked(getEmbeddingProvider).mockReturnValueOnce({
+      generateEmbedding: vi.fn().mockRejectedValue(new Error("Synalux embedding allowance used for today")),
+    } as any);
+    const out = await graphHandlers.sessionSearchMemoryHandler({ query: "pos", project: "prism" });
+    expect(out.isError).toBeFalsy();
+    expect(out.content[0].text).toMatch(/^🔤 Keyword matches; semantic search unavailable: Synalux embedding allowance used for today/);
+    expect(storage.searchKnowledge).toHaveBeenCalledOnce();
+    expect(storage.searchMemory).not.toHaveBeenCalled();
+  });
+
+  it("other stores keep the error and its hint, with no keyword search", async () => {
+    const { getEmbeddingProvider } = await import("../../src/utils/llm/factory.js");
+    const storage = { searchKnowledge: vi.fn(async () => keywordResult), searchMemory: vi.fn() };
+    vi.mocked(getStorage).mockResolvedValue(storage as any);
+    vi.mocked(getEmbeddingProvider).mockReturnValueOnce({ generateEmbedding: vi.fn().mockRejectedValue(new Error("no key")) } as any);
+    const out = await graphHandlers.sessionSearchMemoryHandler({ query: "pos" });
+    expect(out.isError).toBe(true);
+    expect(out.content[0].text).toMatch(/Failed to generate embedding for query: no key/);
+    expect(storage.searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it("when the keyword search fails too, the original error comes back", async () => {
+    const { getEmbeddingProvider } = await import("../../src/utils/llm/factory.js");
+    const storage = { embeddingSupport: METERED, searchKnowledge: vi.fn().mockRejectedValue(new Error("portal down")), searchMemory: vi.fn() };
+    vi.mocked(getStorage).mockResolvedValue(storage as any);
+    vi.mocked(getEmbeddingProvider).mockReturnValueOnce({ generateEmbedding: vi.fn().mockRejectedValue(new Error("refused")) } as any);
+    const out = await graphHandlers.sessionSearchMemoryHandler({ query: "pos" });
+    expect(out.isError).toBe(true);
+    expect(out.content[0].text).toMatch(/Failed to generate embedding for query: refused/);
+  });
+
+  it("intuitive recall on cloud memory says it is not available and pays for no embedding", async () => {
+    const { getEmbeddingProvider } = await import("../../src/utils/llm/factory.js");
+    vi.mocked(getStorage).mockResolvedValue({ embeddingSupport: METERED } as any);
+    const out = await graphHandlers.sessionIntuitiveRecallHandler({ project: "prism", query: "pos" });
+    expect(out).toEqual({ content: [{ type: "text", text: "Intuitive recall is not available on Synalux cloud memory yet." }], isError: false });
+    expect(getEmbeddingProvider).not.toHaveBeenCalled();
+  });
+});
+
 describe("synthesizeEdgesCore", () => {
   beforeEach(() => {
     vi.clearAllMocks();

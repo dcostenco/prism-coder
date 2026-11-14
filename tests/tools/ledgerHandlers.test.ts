@@ -210,6 +210,7 @@ import {
   refreshConfigStorageCache,
 } from "../../src/storage/configStorage.js";
 import { getLLMProvider } from "../../src/utils/llm/factory.js";
+import { clearEmbeddingFailures, embeddingFailures, recordEmbeddingFailure } from "../../src/utils/embeddingHealth.js";
 import { awaitSkillManifestSync, readNativeSkillBody } from "../../src/skillManifestSync.js";
 import { SKILL_DIGEST_UNAVAILABLE } from "../../src/utils/skillDigest.js";
 import {
@@ -2367,6 +2368,57 @@ describe("ledgerHandlers", () => {
   // ====================================================================
   // 4. sessionSaveHandoffHandler
   // ====================================================================
+
+  // Cloud memory pays for no handoff vector it
+  // cannot keep, and a save's failed embedding shows on the next save instead of vanishing.
+  describe("cloud memory embeddings", () => {
+    const METERED = { handoffVectors: false, localSdm: false, serverMetered: true };
+    beforeEach(() => { clearEmbeddingFailures(); });
+
+    it("a handoff on cloud memory asks for no embedding and says it was not queued", async () => {
+      (storage as any).embeddingSupport = METERED;
+      storage.saveHandoff.mockResolvedValue({ status: "created", version: 1 });
+      mockGetLLMProvider.mockClear();
+      const result = await sessionSaveHandoffHandler({ project: "test-project", last_summary: "Completed the migration" });
+      expect(result.isError).toBe(false);
+      expect(mockGetLLMProvider).not.toHaveBeenCalled();
+      expect(result.content[0].text).toContain("optional semantic indexing was not queued");
+    });
+
+    it("a failed embedding on cloud memory is recorded and shown on the next save", async () => {
+      (storage as any).embeddingSupport = METERED;
+      mockGetLLMProvider.mockImplementationOnce(() => ({
+        generateEmbedding: vi.fn().mockRejectedValue(new Error("Synalux embedding allowance used for today")),
+      }) as any);
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const first = await sessionSaveLedgerHandler({ project: "test-project", conversation_id: "conv-001", summary: "first" });
+      await new Promise((r) => setTimeout(r, 0));
+      error.mockRestore();
+      expect(first.isError).toBe(false);   // the save itself never waits for or fails on its embedding
+      expect(embeddingFailures()).toEqual({ pending: 1, lastReason: "Synalux embedding allowance used for today" });
+      const second = await sessionSaveLedgerHandler({ project: "test-project", conversation_id: "conv-001", summary: "second" });
+      expect(second.content[0].text).toContain("⚠️ 1 save pending semantic index: Synalux embedding allowance used for today");
+    });
+
+    it("failures recorded on cloud memory are not shown on another store's save (storage fell back)", async () => {
+      recordEmbeddingFailure(new Error("Synalux embedding allowance used for today"));
+      const result = await sessionSaveLedgerHandler({ project: "test-project", conversation_id: "conv-001", summary: "local" });
+      expect(result.content[0].text).not.toContain("pending semantic index");
+    });
+
+    it("other stores record nothing and show nothing", async () => {
+      mockGetLLMProvider.mockImplementationOnce(() => ({
+        generateEmbedding: vi.fn().mockRejectedValue(new Error("no key")),
+      }) as any);
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      await sessionSaveLedgerHandler({ project: "test-project", conversation_id: "conv-001", summary: "first" });
+      await new Promise((r) => setTimeout(r, 0));
+      error.mockRestore();
+      expect(embeddingFailures().pending).toBe(0);
+      const second = await sessionSaveLedgerHandler({ project: "test-project", conversation_id: "conv-001", summary: "second" });
+      expect(second.content[0].text).not.toContain("pending semantic index");
+    });
+  });
 
   describe("sessionSaveHandoffHandler", () => {
     const validArgs = {

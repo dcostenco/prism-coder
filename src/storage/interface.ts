@@ -290,7 +290,36 @@ export interface HealthStats {
  * The session memory handlers call these methods instead of making
  * direct Supabase REST API calls.
  */
+/**
+ * Which embedding work a store keeps. A store that declares nothing keeps all of it, as SQLite and direct
+ * Supabase do, and their code paths are unchanged.
+ */
+export interface EmbeddingSupport {
+  /** A handoff's vector is persisted (patchHandoff stores `embedding`). */
+  handoffVectors: boolean;
+  /** The local SDM index behind associative and intuitive recall holds this store's vectors. */
+  localSdm: boolean;
+  /**
+   * The server meters embeddings and reports refusals (Synalux cloud memory).
+   * Repair loops stop on a refusal, failures are recorded and shown, and memory
+   * search falls back to keywords when the query cannot be embedded.
+   */
+  serverMetered: boolean;
+}
+
+export const FULL_EMBEDDING_SUPPORT: Readonly<EmbeddingSupport> = Object.freeze({
+  handoffVectors: true,
+  localSdm: true,
+  serverMetered: false,
+});
+
+export function embeddingSupportOf(storage: { embeddingSupport?: EmbeddingSupport } | null | undefined): EmbeddingSupport {
+  return storage?.embeddingSupport ?? FULL_EMBEDDING_SUPPORT;
+}
+
 export interface StorageBackend {
+  /** Which embedding work this store keeps; absent means all of it. */
+  readonly embeddingSupport?: EmbeddingSupport;
   /** Opaque remote-account identity for sharing local Factory discovery work. */
   readonly factoryPollScope?: string;
   getDashboardLedger?(project: string, order: "created_at.asc" | "created_at.desc", limit: number): Promise<unknown[]>;

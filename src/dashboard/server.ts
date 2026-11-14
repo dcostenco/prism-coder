@@ -627,8 +627,13 @@ return false;}
           const stats = await s.getHealthStats(PRISM_USER_ID);
           const report = runHealthCheck(stats);
           res.writeHead(stats.missingEmbeddings < 0 ? 503 : 200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          // Cloud memory: saves whose embedding failed in this process. Data only; the
+          // dashboard view of it waits for a design review.
+          const { embeddingSupportOf } = await import("../storage/interface.js");
+          const { embeddingFailures } = await import("../utils/embeddingHealth.js");
           return res.end(JSON.stringify({ ...report, scope: 'account', backend: activeStorageBackend,
-            coverage: stats.missingEmbeddings < 0 ? 'unavailable' : activeStorageBackend === 'synalux' ? 'embedding_inventory' : 'backend_scan' }));
+            coverage: stats.missingEmbeddings < 0 ? 'unavailable' : activeStorageBackend === 'synalux' ? 'embedding_inventory' : 'backend_scan',
+            ...(embeddingSupportOf(s).serverMetered ? { embeddingFailures: embeddingFailures() } : {}) }));
         } catch (err) {
           console.error("[Dashboard] Health check error:", err);
           res.writeHead(503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -670,11 +675,19 @@ return false;}
               let cursorId: string | undefined = undefined;
               let iterations = 0;
               const MAX_ITERATIONS = 100; // safety cap: 100 × 50 = 5000 entries max
+              const { embeddingRepairLimit } = await import("../tools/hygieneHandlers.js");
+              const { embeddingSupportOf } = await import("../storage/interface.js");
+              const repairLimit = embeddingRepairLimit(embeddingSupportOf(await getStorageSafe()).serverMetered);
 
               while (hasMore && iterations < MAX_ITERATIONS) {
                 iterations++;
                 const result: any = await backfillEmbeddingsHandler({ dry_run: false, limit: 50, _cursor_id: cursorId });
                 const bStats = result._stats;
+                if (bStats?.refused) cleanupMessages.push(`Embedding repair stopped: ${bStats.refused}`);
+                if (repairLimit.stop(bStats)) {
+                  if (bStats) { repairedCount += bStats.repaired; failedCount += bStats.failed; }
+                  break;
+                }
                 if (bStats) {
                   repairedCount += bStats.repaired;
                   failedCount += bStats.failed;

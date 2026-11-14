@@ -38,6 +38,32 @@ function truncateAtWordBoundary(text: string): string {
   return boundary > 0 ? bounded.slice(0, boundary) : bounded;
 }
 
+/** The Portal's 403 codes for embeddings. */
+export type EmbeddingRefusalCode = "embedding_daily_allowance" | "plan_not_eligible";
+
+/**
+ * The Portal refused the embedding: the day's allowance is used, or the plan has
+ * no cloud memory. Not retried; repair loops stop on it.
+ */
+export class SynaluxEmbeddingRefusedError extends Error {
+  constructor(readonly code: EmbeddingRefusalCode | null, readonly resetAt: string | null) {
+    super(code === "embedding_daily_allowance"
+      ? `Synalux embedding allowance used for today${resetAt ? ` (resets ${resetAt})` : ""}`
+      : code === "plan_not_eligible"
+        ? "Embeddings are not included in this Synalux plan"
+        : "Synalux embedding request refused (HTTP 403)");
+    this.name = "SynaluxEmbeddingRefusedError";
+  }
+}
+
+async function refusal(response: Response): Promise<SynaluxEmbeddingRefusedError> {
+  type RefusalBody = { code?: unknown; reset_at?: unknown };
+  const body: RefusalBody = await response.json().then((b: unknown) => (b && typeof b === "object" ? b as RefusalBody : {}), () => ({}));
+  const code: EmbeddingRefusalCode | null = body.code === "embedding_daily_allowance" || body.code === "plan_not_eligible" ? body.code : null;
+  const resetAt = typeof body.reset_at === "string" && Number.isFinite(Date.parse(body.reset_at)) ? body.reset_at : null;
+  return new SynaluxEmbeddingRefusedError(code, code === "embedding_daily_allowance" ? resetAt : null);
+}
+
 export class SynaluxEmbeddingAdapter implements LLMProvider {
   constructor(private readonly sleep: Sleep = defaultSleep) {}
 
@@ -80,6 +106,7 @@ export class SynaluxEmbeddingAdapter implements LLMProvider {
         await this.sleep(retryDelayMs(response.headers.get("Retry-After")));
         continue;
       }
+      if (response.status === 403) throw await refusal(response);
       if (!response.ok) {
         if (response.status === 404) {
           throw new Error("Synalux embedding endpoint is not deployed yet");

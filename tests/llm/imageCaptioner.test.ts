@@ -154,6 +154,39 @@ describe("ImageCaptioner — fireCaptionAsync pipeline", () => {
     );
   });
 
+  // Cloud memory cannot read the ledger back to find
+  // the entry, so the vector goes to the id saveLedger returned, and without one no call is paid for.
+  it("on cloud memory the caption's vector goes to the id saveLedger returned", async () => {
+    const storage = { ...makeStorageMock(), embeddingSupport: { handoffVectors: false, localSdm: false, serverMetered: true } };
+    storage.saveLedger = vi.fn().mockResolvedValue({ id: "cloud-entry-7" });
+    storage.getLedgerEntries = vi.fn();
+    const provider = makeVLMProvider();
+    mockGetLLMProvider.mockReturnValue(provider as any);
+    mockGetStorage.mockResolvedValue(storage as any);
+
+    fireCaptionAsync("prism", "abc12345", tmpFile, "Login page");
+    await new Promise(r => setTimeout(r, 100));
+
+    expect(storage.getLedgerEntries).not.toHaveBeenCalled();
+    expect(provider.generateEmbedding).toHaveBeenCalledTimes(1);
+    expect(storage.patchLedger).toHaveBeenCalledWith("cloud-entry-7", expect.objectContaining({ embedding: expect.any(String) }));
+  });
+
+  it("on cloud memory with no returned id, no embedding is paid for", async () => {
+    const storage = { ...makeStorageMock(), embeddingSupport: { handoffVectors: false, localSdm: false, serverMetered: true } };
+    storage.saveLedger = vi.fn().mockResolvedValue({ status: "success" });
+    const provider = makeVLMProvider();
+    mockGetLLMProvider.mockReturnValue(provider as any);
+    mockGetStorage.mockResolvedValue(storage as any);
+
+    fireCaptionAsync("prism", "abc12345", tmpFile, "Login page");
+    await new Promise(r => setTimeout(r, 100));
+
+    expect(storage.saveLedger).toHaveBeenCalledTimes(1);
+    expect(provider.generateEmbedding).not.toHaveBeenCalled();
+    expect(storage.patchLedger).not.toHaveBeenCalled();
+  });
+
   it("skips captioning gracefully when provider has no VLM method", async () => {
     const storage = makeStorageMock();
     const provider = makeTextOnlyProvider();
