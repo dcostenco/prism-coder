@@ -2324,7 +2324,7 @@ received under the original license.
 | **prism-mcp-server** (this repo) | [Apache-2.0](../../LICENSE) |
 | **VS Code extension** (synalux-ai.synalux) | BSL-1.1 |
 | **Web IDE** (synalux.ai/coder) | Synalux Terms of Service |
-| **Prism AAC** | Apache-2.0 |
+| **Prism AAC** | Proprietary (© Synalux LLC, all rights reserved) |
 
 This repository is licensed under Apache-2.0. Cloud features (hosted inference, cross-device memory, team features) are provided by the Synalux cloud service under separate terms.
 
