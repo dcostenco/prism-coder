@@ -21,6 +21,7 @@ import { formatRulesBlock, applySentinelBlock, SENTINEL_START, SENTINEL_END, RED
 import { debugLog } from "../utils/logger.js";
 import { recordCognitiveRoute } from "../observability/graphMetrics.js";
 import { getStorage } from "../storage/index.js";
+import { embeddingSupportOf } from "../storage/interface.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getEmbeddingProvider, getLLMProvider } from "../utils/llm/factory.js";
 import { getCurrentGitState, getGitDrift } from "../utils/git.js";
@@ -528,10 +529,33 @@ export async function sessionSearchMemoryHandler(args: unknown) {
     storage = await getStorage();
     queryEmbedding = await getEmbeddingProvider().generateEmbedding(effectiveQuery);
   } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    // Cloud memory: answer with keyword matches, labelled, instead of an error.
+    if (embeddingSupportOf(storage!).serverMetered) {
+      try {
+        const keyword = await knowledgeSearchHandler({
+          query, limit, enable_trace, ...(project ? { project } : {}), ...(activation !== undefined ? { activation } : {}),
+        }) as {
+          content: Array<{ type: string; text: string }>; isError?: boolean;
+        };
+        if (!keyword.isError) {
+          const [first, ...rest] = keyword.content;
+          return {
+            ...keyword,
+            content: [
+              { type: "text", text: `🔤 Keyword search used; semantic search unavailable: ${reason}\n\n${first?.text ?? ""}` },
+              ...rest,
+            ],
+          };
+        }
+      } catch (keywordErr) {
+        debugLog(`[session_search_memory] Keyword fallback failed: ${keywordErr instanceof Error ? keywordErr.message : String(keywordErr)}`);
+      }
+    }
     return {
       content: [{
         type: "text",
-        text: `❌ Failed to generate embedding for query: ${err instanceof Error ? err.message : String(err)}\n\n` +
+        text: `❌ Failed to generate embedding for query: ${reason}\n\n` +
           `💡 Try knowledge_search (keyword-based) as a fallback.`,
       }],
       isError: true,
@@ -1083,7 +1107,14 @@ export async function sessionIntuitiveRecallHandler(
   try {
     const { decodeSdmVector } = await import("../sdm/sdmDecoder.js");
 
-    await getStorage();
+    // The local SDM index never holds cloud memory's vectors: the embedding would be
+    // paid for and match nothing.
+    if (!embeddingSupportOf(await getStorage()).localSdm) {
+      return {
+        content: [{ type: "text", text: "Intuitive recall is not available on Synalux cloud memory yet." }],
+        isError: false,
+      };
+    }
     const queryVector = await getEmbeddingProvider().generateEmbedding(args.query);
     const sdmEngine = getSdmEngine(args.project);
     const targetVector = sdmEngine.read(new Float32Array(queryVector));

@@ -62,6 +62,7 @@ import { PRISM_SYNALUX_BASE_URL, PRISM_SYNALUX_API_KEY } from "../config.js";
 import { isSynaluxSignedOut } from "../utils/synaluxCredentialState.js";
 import { KnowledgeSearchRequestSchema, KnowledgeSearchResponseSchema, ProjectAnalyticsResponseSchema, FactoryPipelinesResponseSchema, FactoryPipelineResponseSchema, FactoryHarnessResponseSchema, FactoryRunResponseSchema, FactoryRunsResponseSchema } from "./portalContracts.js";
 import type { VerificationHarness, ValidationResult } from '../verification/schema.js';
+import type { EmbeddingSupport } from "./interface.js";
 import type {
   LedgerEntry,
   HandoffEntry,
@@ -132,6 +133,13 @@ function buildContextLoadKey(project: string, level: string, userId: string, rol
 }
 
 export class SynaluxStorage extends SupabaseStorage {
+  /**
+   * Cloud memory keeps ledger vectors (save_embedding) but not handoff vectors
+   * (patchHandoff is inherited and writes nowhere), and the local SDM index never
+   * sees its vectors. Embeddings are metered by the Portal.
+   */
+  readonly embeddingSupport: EmbeddingSupport = { handoffVectors: false, localSdm: false, serverMetered: true };
+
   logAccess(entryId: string, contextHash?: string): void {
     void this.recordAccesses([entryId], contextHash).catch(() => console.error(ACCESS_MESSAGES.failed));
   }
