@@ -527,3 +527,18 @@ describe("getStorage — synalux dashboard-config fallback", () => {
     expect((storage as { tag?: string }).tag).toBe("sqlite");
   });
 });
+
+describe("closeStorage — embedding failures", () => {
+  it("forgets embedding failures recorded for the closed store, so they never carry over to another account", async () => {
+    process.env.PRISM_STORAGE = "synalux";
+    process.env.PRISM_SYNALUX_BASE_URL = "https://portal.example";
+    process.env.PRISM_SYNALUX_API_KEY = testSynaluxKey("embedding-health");
+    const mod = await import("../src/storage/index.js");
+    const health = await import("../src/utils/embeddingHealth.js");
+    await mod.getStorage();
+    health.recordEmbeddingFailure(new Error("Synalux embedding request failed (HTTP 502)"));
+    expect(health.embeddingFailures().pending).toBe(1);
+    await mod.closeStorage();
+    expect(health.embeddingFailures()).toEqual({ pending: 0, lastReason: null, planRefusal: null });
+  });
+});

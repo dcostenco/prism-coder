@@ -289,6 +289,9 @@ export async function closeStorage(): Promise<void> {
   } finally {
     storageInstance = null;
     storageInitialization = null;
+    // A cloud account's recorded embedding failures never carry over to the next store.
+    const { resetEmbeddingHealth } = await import("../utils/embeddingHealth.js");
+    resetEmbeddingHealth();
   }
 }
 

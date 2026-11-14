@@ -31,7 +31,7 @@ import { getStorage, activeStorageBackend } from "../storage/index.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getEmbeddingProvider } from "../utils/llm/factory.js";
 import { embeddingSupportOf } from "../storage/interface.js";
-import { embeddingFailureNotice, recordEmbeddingFailure } from "../utils/embeddingHealth.js";
+import { embeddingFailureNotice, embeddingsRefusedForPlan, recordEmbeddingFailure } from "../utils/embeddingHealth.js";
 import { getCurrentGitState, getGitDrift } from "../utils/git.js";
 import { getSetting, setSetting, getAllSettings, refreshConfigStorageCache } from "../storage/configStorage.js";
 import { MATERIALIZED_GENERATION_KEY, type SkillSyncResult } from "../skillManifestSync.js";
@@ -957,7 +957,8 @@ export async function sessionSaveLedgerHandler(args: unknown) {
     const savedEntry = Array.isArray(result) ? result[0] : result;
     const entryId = (savedEntry as any)?.id;
 
-    if (entryId) {
+    // Cloud memory whose plan has no embeddings: no request that can only be refused.
+    if (entryId && !(embeddingSupportOf(storage).serverMetered && embeddingsRefusedForPlan())) {
       try {
         const embeddingPromise = getEmbeddingProvider().generateEmbedding(embeddingText);
         embeddingQueued = true;

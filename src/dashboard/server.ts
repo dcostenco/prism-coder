@@ -626,11 +626,13 @@ return false;}
           if (!s) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: "Storage initializing..." })); }
           const stats = await s.getHealthStats(PRISM_USER_ID);
           const report = runHealthCheck(stats);
-          res.writeHead(stats.missingEmbeddings < 0 ? 503 : 200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-          // Cloud memory: saves whose embedding failed in this process. Data only; the
-          // dashboard view of it waits for a design review.
+          // Cloud memory: saves whose embedding failed in this process, cleared once the
+          // server reports none missing. Data only; the dashboard view of it waits for a
+          // design review.
           const { embeddingSupportOf } = await import("../storage/interface.js");
-          const { embeddingFailures } = await import("../utils/embeddingHealth.js");
+          const { clearEmbeddingFailures, embeddingFailures } = await import("../utils/embeddingHealth.js");
+          if (embeddingSupportOf(s).serverMetered && stats.missingEmbeddings === 0) clearEmbeddingFailures();
+          res.writeHead(stats.missingEmbeddings < 0 ? 503 : 200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
           return res.end(JSON.stringify({ ...report, scope: 'account', backend: activeStorageBackend,
             coverage: stats.missingEmbeddings < 0 ? 'unavailable' : activeStorageBackend === 'synalux' ? 'embedding_inventory' : 'backend_scan',
             ...(embeddingSupportOf(s).serverMetered ? { embeddingFailures: embeddingFailures() } : {}) }));

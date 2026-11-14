@@ -282,6 +282,6 @@ describe("embedding failures on cloud memory", () => {
     expect(state.lastReason).not.toContain("\n");
     expect(state.lastReason!.length).toBeLessThanOrEqual(160);
     clearEmbeddingFailures();
-    expect(embeddingFailures()).toEqual({ pending: 0, lastReason: null });
+    expect(embeddingFailures()).toEqual({ pending: 0, lastReason: null, planRefusal: null });
   });
 });

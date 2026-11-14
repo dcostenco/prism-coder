@@ -533,7 +533,9 @@ export async function sessionSearchMemoryHandler(args: unknown) {
     // Cloud memory: answer with keyword matches, labelled, instead of an error.
     if (embeddingSupportOf(storage!).serverMetered) {
       try {
-        const keyword = await knowledgeSearchHandler({ query, limit, ...(project ? { project } : {}) }) as {
+        const keyword = await knowledgeSearchHandler({
+          query, limit, enable_trace, ...(project ? { project } : {}), ...(activation !== undefined ? { activation } : {}),
+        }) as {
           content: Array<{ type: string; text: string }>; isError?: boolean;
         };
         if (!keyword.isError) {
@@ -541,7 +543,7 @@ export async function sessionSearchMemoryHandler(args: unknown) {
           return {
             ...keyword,
             content: [
-              { type: "text", text: `🔤 Keyword matches; semantic search unavailable: ${reason}\n\n${first?.text ?? ""}` },
+              { type: "text", text: `🔤 Keyword search used; semantic search unavailable: ${reason}\n\n${first?.text ?? ""}` },
               ...rest,
             ],
           };

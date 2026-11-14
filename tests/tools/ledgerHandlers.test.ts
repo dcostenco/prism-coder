@@ -210,7 +210,8 @@ import {
   refreshConfigStorageCache,
 } from "../../src/storage/configStorage.js";
 import { getLLMProvider } from "../../src/utils/llm/factory.js";
-import { clearEmbeddingFailures, embeddingFailures, recordEmbeddingFailure } from "../../src/utils/embeddingHealth.js";
+import { clearEmbeddingFailures, embeddingFailures, recordEmbeddingFailure, resetEmbeddingHealth } from "../../src/utils/embeddingHealth.js";
+import { SynaluxEmbeddingRefusedError } from "../../src/utils/llm/adapters/synalux.js";
 import { awaitSkillManifestSync, readNativeSkillBody } from "../../src/skillManifestSync.js";
 import { SKILL_DIGEST_UNAVAILABLE } from "../../src/utils/skillDigest.js";
 import {
@@ -2395,7 +2396,7 @@ describe("ledgerHandlers", () => {
       await new Promise((r) => setTimeout(r, 0));
       error.mockRestore();
       expect(first.isError).toBe(false);   // the save itself never waits for or fails on its embedding
-      expect(embeddingFailures()).toEqual({ pending: 1, lastReason: "Synalux embedding allowance used for today" });
+      expect(embeddingFailures()).toEqual({ pending: 1, lastReason: "Synalux embedding allowance used for today", planRefusal: null });
       const second = await sessionSaveLedgerHandler({ project: "test-project", conversation_id: "conv-001", summary: "second" });
       expect(second.content[0].text).toContain("⚠️ 1 save pending semantic index: Synalux embedding allowance used for today");
     });
@@ -2404,6 +2405,17 @@ describe("ledgerHandlers", () => {
       recordEmbeddingFailure(new Error("Synalux embedding allowance used for today"));
       const result = await sessionSaveLedgerHandler({ project: "test-project", conversation_id: "conv-001", summary: "local" });
       expect(result.content[0].text).not.toContain("pending semantic index");
+    });
+
+    it("after the plan refused embeddings, a save on cloud memory asks for none and says so once", async () => {
+      (storage as any).embeddingSupport = METERED;
+      recordEmbeddingFailure(new SynaluxEmbeddingRefusedError("plan_not_eligible", null));
+      mockGetLLMProvider.mockClear();
+      const result = await sessionSaveLedgerHandler({ project: "test-project", conversation_id: "conv-001", summary: "x" });
+      expect(mockGetLLMProvider).not.toHaveBeenCalled();
+      expect(result.content[0].text).toContain("optional semantic indexing was not queued");
+      expect(result.content[0].text).toContain("⚠️ Semantic index unavailable: Embeddings are not included in this Synalux plan");
+      resetEmbeddingHealth();
     });
 
     it("other stores record nothing and show nothing", async () => {

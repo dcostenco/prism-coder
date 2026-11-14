@@ -26,7 +26,7 @@ import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getEmbeddingProvider } from "../utils/llm/factory.js";
 import { SynaluxEmbeddingRefusedError } from "../utils/llm/adapters/synalux.js";
 import { embeddingSupportOf } from "../storage/interface.js";
-import { clearEmbeddingFailures, embeddingFailures } from "../utils/embeddingHealth.js";
+import { clearEmbeddingFailures, embeddingFailureNotice } from "../utils/embeddingHealth.js";
 import { getCurrentGitState, getGitDrift } from "../utils/git.js";
 import { getSetting, getAllSettings } from "../storage/configStorage.js";
 import { mergeHandoff, dbToHandoffSchema, sanitizeForMerge } from "../utils/crdtMerge.js";
@@ -86,14 +86,6 @@ import { notifyResourceUpdate } from "../server.js";
 // ─── Save Ledger Handler ──────────────────────────────────────
 
 /**
- * Appends an immutable session log entry.
- *
- * Think of the ledger as a "commit log" for agent work — once written, entries
- * are never modified. This creates a permanent audit trail of all work done.
- *
- * After saving, generates an embedding vector for the entry via fire-and-forget.
- */
-/**
  * When an embedding repair loop stops.
  * On cloud memory: when the Portal refuses (the day's allowance is used, or the
  * plan has none), or when a batch repairs nothing twice in a row. Other stores
@@ -111,6 +103,14 @@ export function embeddingRepairLimit(serverMetered: boolean): { stop(stats: { re
   };
 }
 
+/**
+ * Appends an immutable session log entry.
+ *
+ * Think of the ledger as a "commit log" for agent work — once written, entries
+ * are never modified. This creates a permanent audit trail of all work done.
+ *
+ * After saving, generates an embedding vector for the entry via fire-and-forget.
+ */
 export async function backfillEmbeddingsHandler(args: unknown) {
   if (!isBackfillEmbeddingsArgs(args)) {
     throw new Error("Invalid arguments for session_backfill_embeddings");
@@ -327,12 +327,17 @@ export async function sessionHealthCheckHandler(args: unknown) {
 
     // Step 1: Fetch raw health statistics from the database
     const stats = await storage.getHealthStats(PRISM_USER_ID);
+    // Cloud memory: the server's inventory says every memory has its vector, so the
+    // failures recorded here have been repaired (in this process or another).
+    const metered = embeddingSupportOf(storage).serverMetered;
+    if (metered && stats.missingEmbeddings === 0) clearEmbeddingFailures();
 
     // Step 2: Run all 4 checks in the pure-JS engine
     const report: HealthReport = runHealthCheck(stats);
 
     // Step 3: If auto_fix is true, repair what we can
     let fixedCount = 0;
+    let repairStopped: string | null = null;
     if (autoFix && report.issues.length > 0) {
       const embeddingIssue = report.issues.find(
         i => i.check === "missing_embeddings"
@@ -344,15 +349,17 @@ export async function sessionHealthCheckHandler(args: unknown) {
         try {
           let hasMore = true;
           let cursorId: string | undefined = undefined;
-          const repairLimit = embeddingRepairLimit(embeddingSupportOf(await getStorage()).serverMetered);
+          const repairLimit = embeddingRepairLimit(metered);
           
           while (hasMore) {
             const result: any = await backfillEmbeddingsHandler({ dry_run: false, limit: 50, _cursor_id: cursorId });
             const stats = result._stats;
+            // Repairs made before a refusal still count, and the refusal is reported.
+            if (stats) fixedCount += stats.repaired;
+            if (stats?.refused) repairStopped = stats.refused;
             if (repairLimit.stop(stats)) break;
             
             if (stats) {
-              fixedCount += stats.repaired;
               if (stats.last_id) {
                 cursorId = stats.last_id;
               } else {
@@ -429,16 +436,17 @@ export async function sessionHealthCheckHandler(args: unknown) {
       text += `🎉 No issues found — your brain is in perfect health!\n`;
     }
 
-    if (autoFix && fixedCount > 0) {
+    if (autoFix && (fixedCount > 0 || repairStopped)) {
       text += `\n### Auto-Fix Results\n`;
-      text += `🔧 Repaired ${fixedCount} issues automatically.\n`;
+      if (fixedCount > 0) text += `🔧 Repaired ${fixedCount} issues automatically.\n`;
+      if (repairStopped) text += `⏸️ Embedding repair stopped: ${repairStopped}. The rest are repaired by a later run.\n`;
     }
 
     // Cloud memory: saves whose embedding failed in this session, and why.
-    const failures = embeddingFailures();
-    if (failures.pending > 0 && embeddingSupportOf(await getStorage()).serverMetered) {
+    const notice = metered ? embeddingFailureNotice() : "";
+    if (notice) {
       text += `\n### Semantic Index\n`;
-      text += `⚠️ ${failures.pending} ${failures.pending === 1 ? "save" : "saves"} pending semantic index: ${failures.lastReason}\n`;
+      text += notice;
     }
 
     text += `\n---\n`;

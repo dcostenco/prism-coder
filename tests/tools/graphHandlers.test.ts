@@ -126,9 +126,20 @@ describe("cloud memory embedding failures", () => {
     } as any);
     const out = await graphHandlers.sessionSearchMemoryHandler({ query: "pos", project: "prism" });
     expect(out.isError).toBeFalsy();
-    expect(out.content[0].text).toMatch(/^🔤 Keyword matches; semantic search unavailable: Synalux embedding allowance used for today/);
+    expect(out.content[0].text).toMatch(/^🔤 Keyword search used; semantic search unavailable: Synalux embedding allowance used for today/);
     expect(storage.searchKnowledge).toHaveBeenCalledOnce();
     expect(storage.searchMemory).not.toHaveBeenCalled();
+  });
+
+  it("the fallback keeps the caller's trace request", async () => {
+    const { getEmbeddingProvider } = await import("../../src/utils/llm/factory.js");
+    const storage = { embeddingSupport: METERED, searchKnowledge: vi.fn(async () => keywordResult), searchMemory: vi.fn() };
+    vi.mocked(getStorage).mockResolvedValue(storage as any);
+    vi.mocked(getEmbeddingProvider).mockReturnValueOnce({ generateEmbedding: vi.fn().mockRejectedValue(new Error("refused")) } as any);
+    const out = await graphHandlers.sessionSearchMemoryHandler({ query: "pos", project: "prism", enable_trace: true });
+    // The label goes on the first block; the keyword search's trace and evidence blocks follow unchanged.
+    expect(out.content[0].text).toMatch(/^🔤 Keyword search used/);
+    expect(out.content[1].text).toMatch(/^=== MEMORY TRACE ===[\s\S]*"strategy": "keyword"/);
   });
 
   it("other stores keep the error and its hint, with no keyword search", async () => {
