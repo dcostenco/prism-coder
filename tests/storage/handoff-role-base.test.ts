@@ -69,4 +69,64 @@ describe("exact memory-role merge base", () => {
         remote.get.mockRejectedValue(new Error("synthetic history outage"));
         await expect(new SupabaseStorage().getHandoffAtVersion("roles",4,"owner","dev")).rejects.toThrow("history outage");
     });
+    it("uses the explicit restore RPC only for a role-exact versioned history restore", async () => {
+        remote.rpc.mockResolvedValue({status:"updated",version:3,history_saved:true});
+        const handoff={project:"restore",user_id:"owner",role:"dev",key_context:null,active_branch:null};
+        await new SupabaseStorage().saveHandoff(handoff,2,{restoreContextFields:true});
+        expect(remote.rpc).toHaveBeenCalledWith("restore_handoff_with_version",expect.objectContaining({
+            p_project:"restore",p_user_id:"owner",p_role:"dev",p_expected_version:2,p_key_context:null,p_active_branch:null,
+        }));
+        remote.rpc.mockClear();
+        await new SupabaseStorage().saveHandoff(handoff,2);
+        expect(remote.rpc).toHaveBeenCalledWith("save_handoff_with_version",expect.anything());
+    });
+    it.each([undefined,null,0,-1,1.5])("refuses restore without a positive integer current version: %s",async expected=>{
+        await expect(new SupabaseStorage().saveHandoff({project:"restore",user_id:"owner"},expected,{restoreContextFields:true}))
+            .rejects.toThrow("positive current version");
+        expect(remote.rpc).not.toHaveBeenCalled();
+    });
+    it("does not downgrade an unavailable restore RPC to an ordinary save",async()=>{
+        remote.rpc.mockRejectedValue(new Error("restore RPC unavailable"));
+        await expect(new SupabaseStorage().saveHandoff({project:"restore",user_id:"owner",role:"dev"},2,{restoreContextFields:true}))
+            .rejects.toThrow("restore RPC unavailable");
+        expect(remote.rpc).toHaveBeenCalledTimes(1);
+        expect(remote.rpc.mock.calls[0][0]).toBe("restore_handoff_with_version");
+    });
+    it.each([null,{}, {status:"created",version:3,history_saved:true},{status:"updated",version:3},{status:"updated",version:4,history_saved:true}])(
+        "does not certify malformed or non-atomic restore completion: %j",async result=>{
+            remote.rpc.mockResolvedValue(result);
+            await expect(new SupabaseStorage().saveHandoff({project:"restore",user_id:"owner",role:"global"},2,{restoreContextFields:true}))
+                .rejects.toThrow("restoration was not confirmed");
+        });
+    it("rejects malformed historical context before a direct restore request",async()=>{
+        await expect(new SupabaseStorage().saveHandoff({project:"restore",user_id:"owner",role:"dev",key_context:42 as any},2,{restoreContextFields:true}))
+            .rejects.toThrow("text or null");
+        expect(remote.rpc).not.toHaveBeenCalled();
+    });
+    it.each([undefined,"","   "])("never substitutes global for an unproven restore role: %s",async role=>{
+        await expect(new SupabaseStorage().saveHandoff({project:"restore",user_id:"owner",role},2,{restoreContextFields:true}))
+            .rejects.toThrow("explicit memory role");
+        expect(remote.rpc).not.toHaveBeenCalled();
+    });
+    it("SQLite restores null context in the same exact role without touching another role",async()=>{
+        const identity={project:"local-restore",user_id:"owner",role:"dev"};
+        await testDb.storage.saveHandoff({...identity,last_summary:"New",key_context:"New context",active_branch:"feature/new"});
+        await testDb.storage.saveHandoff({...identity,role:"qa",key_context:"QA context",active_branch:"qa"});
+        await testDb.storage.saveHistorySnapshot({...identity,role:"qa",version:1});
+        await testDb.storage.saveHandoff({...identity,last_summary:"Restored",key_context:null,active_branch:null},1,{restoreContextFields:true});
+        await testDb.storage.saveHistorySnapshot({...identity,version:2});
+        expect(await testDb.storage.getHandoffAtVersion(identity.project,2,identity.user_id,"dev"))
+            .toMatchObject({key_context:null,active_branch:null,version:2});
+        expect(await testDb.storage.getHandoffAtVersion(identity.project,1,identity.user_id,"qa"))
+            .toMatchObject({key_context:"QA context",active_branch:"qa",version:1});
+    });
+    it("SQLite never recreates a missing current partition during explicit restoration",async()=>{
+        const identity={project:"vanished-restore",user_id:"owner",role:"dev"};
+        expect(await testDb.storage.saveHandoff({...identity,key_context:null,active_branch:null},2,{restoreContextFields:true}))
+            .toEqual({status:"conflict",current_version:0});
+        expect(await testDb.storage.loadContext(identity.project,"quick",identity.user_id,identity.role)).toBeNull();
+        // Ordinary versioned saves retain their existing first-create behavior.
+        expect(await testDb.storage.saveHandoff({...identity,last_summary:"Ordinary save"},2))
+            .toMatchObject({status:"created",version:1});
+    });
 });

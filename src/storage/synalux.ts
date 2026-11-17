@@ -63,10 +63,12 @@ import { isSynaluxSignedOut } from "../utils/synaluxCredentialState.js";
 import { KnowledgeSearchRequestSchema, KnowledgeSearchResponseSchema, ProjectAnalyticsResponseSchema, FactoryPipelinesResponseSchema, FactoryPipelineResponseSchema, FactoryHarnessResponseSchema, FactoryRunResponseSchema, FactoryRunsResponseSchema } from "./portalContracts.js";
 import type { VerificationHarness, ValidationResult } from '../verification/schema.js';
 import type { EmbeddingSupport } from "./interface.js";
+import { contextRestoreRequested, assertContextRestoreResult } from "./interface.js";
 import type {
   LedgerEntry,
   HandoffEntry,
   SaveHandoffResult,
+  SaveHandoffOptions,
   ContextResult,
   KnowledgeSearchResult,
   SemanticSearchResult,
@@ -530,16 +532,17 @@ export class SynaluxStorage extends SupabaseStorage {
 
   // ─── Handoff ─────────────────────────────────────────────────
 
-  async saveHandoff(handoff: HandoffEntry, expectedVersion?: number | null): Promise<SaveHandoffResult> {
+  async saveHandoff(handoff: HandoffEntry, expectedVersion?: number | null, options?: SaveHandoffOptions): Promise<SaveHandoffResult> {
+    const restoreContext = contextRestoreRequested(handoff, expectedVersion, options);
     const result = await this.portalPost("/api/v1/prism/memory", {
-      action: "save_handoff",
+      action: restoreContext ? "restore_handoff" : "save_handoff",
       project: handoff.project,
       last_summary: handoff.last_summary,
-      key_context: handoff.key_context,
+      key_context: restoreContext ? handoff.key_context ?? null : handoff.key_context,
       open_todos: handoff.pending_todo,
       active_decisions: handoff.active_decisions,
       keywords: handoff.keywords,
-      active_branch: handoff.active_branch,
+      active_branch: restoreContext ? handoff.active_branch ?? null : handoff.active_branch,
       role: handoff.role,
       expected_version: expectedVersion ?? undefined,
     });
@@ -553,6 +556,7 @@ export class SynaluxStorage extends SupabaseStorage {
     }
 
     const value = candidate as Record<string, unknown>;
+    if (restoreContext) assertContextRestoreResult(value, expectedVersion as number);
     if (value.status === "conflict" && Number.isSafeInteger(value.current_version)) {
       return {
         status: "conflict",

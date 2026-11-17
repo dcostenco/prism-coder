@@ -133,6 +133,38 @@ export interface SaveHandoffResult {
   history_saved?: boolean;
 }
 
+export interface SaveHandoffOptions {
+  /** Exact-role history restoration with positive OCC; null clears newer context. */
+  restoreContextFields?: boolean;
+}
+
+export function contextRestoreRequested(handoff: HandoffEntry, expectedVersion?: number | null, options?: SaveHandoffOptions): boolean {
+  if (options?.restoreContextFields !== undefined && typeof options.restoreContextFields !== "boolean") {
+    throw new Error("restoreContextFields must be boolean");
+  }
+  if (options?.restoreContextFields !== true) return false;
+  if (!Number.isSafeInteger(expectedVersion) || (expectedVersion as number) < 1) {
+    throw new Error("Context restoration requires a positive current version");
+  }
+  if (typeof handoff.role !== "string" || handoff.role.trim().length === 0) {
+    throw new Error("Context restoration requires an explicit memory role");
+  }
+  for (const value of [handoff.key_context, handoff.active_branch]) {
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      throw new Error("Historical context fields must be text or null");
+    }
+  }
+  return true;
+}
+
+export function assertContextRestoreResult(result: unknown, expectedVersion: number): void {
+  const value = result && typeof result === "object" && !Array.isArray(result)
+    ? result as Record<string, unknown> : undefined;
+  if (value?.status === "conflict" && Number.isSafeInteger(value.current_version) && (value.current_version as number) >= 0) return;
+  if (value?.status === "updated" && value.version === expectedVersion + 1 && value.history_saved === true) return;
+  throw new Error("Context restoration was not confirmed; reload context before taking further action");
+}
+
 /**
  * Result of a loadContext operation (progressive loading).
  */
@@ -434,7 +466,7 @@ export interface StorageBackend {
    * Upsert handoff state with optimistic concurrency control.
    * Returns status (created/updated/conflict) + new version.
    */
-  saveHandoff(handoff: HandoffEntry, expectedVersion?: number | null): Promise<SaveHandoffResult>;
+  saveHandoff(handoff: HandoffEntry, expectedVersion?: number | null, options?: SaveHandoffOptions): Promise<SaveHandoffResult>;
 
   /**
    * Retrieve a historical handoff snapshot by version number.

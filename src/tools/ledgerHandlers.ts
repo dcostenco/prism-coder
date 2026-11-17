@@ -3051,7 +3051,7 @@ export async function memoryCheckoutHandler(args: unknown) {
   };
 
   // 4. Save with OCC — pass current version to prevent race conditions
-  const result = await storage.saveHandoff(revertHandoff, currentVersion);
+  const result = await storage.saveHandoff(revertHandoff, currentVersion, { restoreContextFields: true });
 
   if (result.status === "conflict") {
     return {

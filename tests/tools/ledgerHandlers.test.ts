@@ -2691,7 +2691,7 @@ describe("ledgerHandlers", () => {
       expect(result.isError).toBe(false);
       expect(storage.getHandoffAtVersion).toHaveBeenCalledWith(project, 4, "test-user-id", "dev");
       expect(storage.loadContext).toHaveBeenCalledWith(project, "quick", "test-user-id", "dev");
-      expect(storage.saveHandoff).toHaveBeenCalledWith(expect.objectContaining({ role: "dev", last_summary: "[REVERTED TO v4] Own dev state" }), 9);
+      expect(storage.saveHandoff).toHaveBeenCalledWith(expect.objectContaining({ role: "dev", last_summary: "[REVERTED TO v4] Own dev state" }), 9, { restoreContextFields: true });
       expect(storage.getHistory).not.toHaveBeenCalled();
     });
     it("never restores another role merely because its version number matches", async () => {
@@ -2699,6 +2699,14 @@ describe("ledgerHandlers", () => {
       const result = await memoryCheckoutHandler({ project, target_version: 4, role: "dev" });
       expect(result.isError).toBe(true);
       expect(storage.saveHandoff).not.toHaveBeenCalled();
+    });
+    it("explicitly restores null historical context instead of preserving newer cloud fields", async () => {
+      storage.getHandoffAtVersion.mockResolvedValue({ ...dev, key_context: null, active_branch: null, metadata: {} } as any);
+      const result = await memoryCheckoutHandler({ project, target_version: 4, role: "dev" });
+      expect(result.isError).toBe(false);
+      expect(storage.saveHandoff).toHaveBeenCalledWith(expect.objectContaining({
+        project, user_id: "test-user-id", role: "dev", key_context: null, active_branch: null,
+      }), 9, { restoreContextFields: true });
     });
     it("refuses an unverifiable current OCC state instead of making an unconditional save", async () => {
       storage.loadContext.mockResolvedValue(null);

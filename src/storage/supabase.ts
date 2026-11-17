@@ -28,6 +28,9 @@ import {
   LedgerEntry,
   HandoffEntry,
   SaveHandoffResult,
+  SaveHandoffOptions,
+  contextRestoreRequested,
+  assertContextRestoreResult,
   ContextResult,
   KnowledgeSearchResult,
   SemanticSearchResult,
@@ -195,10 +198,12 @@ export class SupabaseStorage implements StorageBackend {
 
   async saveHandoff(
     handoff: HandoffEntry,
-    expectedVersion?: number | null
+    expectedVersion?: number | null,
+    options?: SaveHandoffOptions
   ): Promise<SaveHandoffResult> {
+    const restoreContext = contextRestoreRequested(handoff, expectedVersion, options);
     try {
-      const result = await supabaseRpc("save_handoff_with_version", {
+      const result = await supabaseRpc(restoreContext ? "restore_handoff_with_version" : "save_handoff_with_version", {
         p_project: handoff.project,
         p_expected_version: expectedVersion ?? null,
         p_last_summary: handoff.last_summary ?? null,
@@ -212,6 +217,7 @@ export class SupabaseStorage implements StorageBackend {
       });
 
       const data = Array.isArray(result) ? result[0] : result;
+      if (restoreContext) assertContextRestoreResult(data, expectedVersion as number);
 
       if (data?.status === "conflict") {
         return {

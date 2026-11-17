@@ -24,12 +24,14 @@ import { randomUUID } from "crypto";
 import { AccessLogBuffer } from "../utils/accessLogBuffer.js";
 import { PRISM_ACTR_BUFFER_FLUSH_MS } from "../config.js";
 import { getSetting as cfgGet, setSetting as cfgSet, getAllSettings as cfgGetAll } from "./configStorage.js";
+import { contextRestoreRequested } from "./interface.js";
 
 import type {
   StorageBackend,
   LedgerEntry,
   HandoffEntry,
   SaveHandoffResult,
+  SaveHandoffOptions,
   ContextResult,
   KnowledgeSearchResult,
   SemanticSearchResult,
@@ -1228,8 +1230,10 @@ export class SqliteStorage implements StorageBackend {
 
   async saveHandoff(
     handoff: HandoffEntry,
-    expectedVersion?: number | null
+    expectedVersion?: number | null,
+    options?: SaveHandoffOptions
   ): Promise<SaveHandoffResult> {
+    const restoreContext = contextRestoreRequested(handoff, expectedVersion, options);
     const role = handoff.role || "global"; // v3.0: default to 'global'
 
     // CASE 1: No expectedVersion → UPSERT (create or force-update)
@@ -1324,7 +1328,10 @@ export class SqliteStorage implements StorageBackend {
         };
       }
 
-      // Doesn't exist — create it
+      // A restore cannot recreate a partition removed after its OCC read.
+      if (restoreContext) return { status: "conflict", current_version: 0 };
+
+      // Doesn't exist — create it for an ordinary save.
       return this.saveHandoff(handoff, null);
     }
 
