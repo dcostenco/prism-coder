@@ -121,7 +121,10 @@ function saveLocalImages(event) {
     localImageBusy = true;
     localImageSequence++;
     imageFieldsDisabled();
-    return localCodingRequest('/image-preferences', settings).then(function() {
+    return localCodingRequest('/image-preferences', settings).then(function(data) {
+        // Only our own image change can advance the existing coding/role form.
+        // A newer snapshot from another tab must still require explicit reload.
+        if (data && typeof localCodingRevision === 'string' && data.previousRevision === localCodingRevision && typeof data.revision === 'string') localCodingRevision = data.revision;
         localImageBusy = false;
         return loadLocalImages(true);
     }).catch(function(error) {

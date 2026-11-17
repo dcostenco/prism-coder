@@ -139,6 +139,7 @@ import {
 import {
   SESSION_SAVE_LEDGER_TOOL,
   SESSION_SAVE_HANDOFF_TOOL,
+  SESSION_SHARE_PROJECT_MEMORY_TOOL,
   SESSION_LOAD_CONTEXT_TOOL,
   SESSION_BOOTSTRAP_TOOL,
   SESSION_ROUTE_PROMPT_TOOL,
@@ -195,6 +196,7 @@ import {
 
   sessionSaveLedgerHandler,
   sessionSaveHandoffHandler,
+  sessionShareProjectMemoryHandler,
   sessionLoadContextHandler,
   sessionBootstrapHandler,
   sessionRoutePromptHandler,
@@ -262,6 +264,8 @@ import {
   // v15.4: prism_infer — local-first inference (RAM-gated cascade)
   PRISM_INFER_TOOL,
   prismInferHandler,
+  FILE_METADATA_TOOL,
+  fileMetadataHandler,
 } from "./tools/index.js";
 
 // ─── Security: Boundary Tags for Context Output ──────────────
@@ -286,6 +290,7 @@ const BASE_TOOLS: Tool[] = [
   BRAVE_ANSWERS_TOOL,                 // brave_answers — AI-grounded answers
   RESEARCH_PAPER_ANALYSIS_TOOL,       // gemini_research_paper_analysis — paper analysis
   PRISM_INFER_TOOL,                   // prism_infer — local-first inference (token-saving cascade)
+  FILE_METADATA_TOOL,
   // youcom_web_search — optional You.com web search, gated on YDC_API_KEY
   ...(YDC_API_KEY ? [YOUCOM_WEB_SEARCH_TOOL] : []),
 ];
@@ -302,6 +307,7 @@ function buildSessionMemoryTools(): Tool[] {
     SKILL_MANAGE_TOOL,           // skill_manage — list/delete scoped skills, release/restore platform skills
     SESSION_SAVE_LEDGER_TOOL,    // session_save_ledger — append immutable session log
     SESSION_SAVE_HANDOFF_TOOL,   // session_save_handoff — upsert latest project state (now with OCC)
+    SESSION_SHARE_PROJECT_MEMORY_TOOL,
     SESSION_LOAD_CONTEXT_TOOL,   // session_load_context — explicit project reload / legacy fallback
     KNOWLEDGE_SEARCH_TOOL,       // knowledge_search — search accumulated knowledge
     KNOWLEDGE_FORGET_TOOL,       // knowledge_forget — prune bad/old memories
@@ -863,6 +869,15 @@ export function createServer() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
+    // Local metadata is a separate deterministic operation. Keep names/paths out
+    // of inference, provider routing, and generic invocation/telemetry handling.
+    if (name === FILE_METADATA_TOOL.name) {
+      return fileMetadataHandler(args, async () => {
+        if (!server.getClientCapabilities()?.roots) return [];
+        return (await server.listRoots({}, { timeout: 3000, maxTotalTimeout: 3000 })).roots;
+      });
+    }
+
     // Start the root span for this MCP tool invocation.
     // All child spans (llm.generate_text, worker.vlm_caption, etc.) are
     // automatically parented to this span via the propagated context.
@@ -943,6 +958,11 @@ export function createServer() {
             result = await sessionSaveHandoffHandler(args, server); // Handoff sync (paid, opt-in, fail-soft): seal to the account's
             // devices and relay ciphertext. Gated entirely inside the module.
             void import("./sync/handoffSync.js").then(m => m.pushHandoffFromArgs(args)).catch(() => {});
+            break;
+
+          case "session_share_project_memory":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
+            result = await sessionShareProjectMemoryHandler(args);
             break;
 
           case "session_load_context":

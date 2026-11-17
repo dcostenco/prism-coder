@@ -651,17 +651,21 @@ async function callLayer1Unleased(
         /** Read an oversize prompt whole, window by window, instead of as an
          *  excerpt. Explicit oMLX sets it with strictErrors. */
         readOversizeWhole?: boolean;
+        /** Trusted oMLX host policy replaces text heuristics; never an input argument.
+         * Requires strict, whole-input semantic reads and cannot apply to images. */
+        authoritativePolicy?: boolean;
     },
 ): Promise<Layer1Verdict> {
     if (!userPrompt || !userPrompt.trim()) return "ERROR";
 
     const oversize = userPrompt.length > MAX_CLASSIFIER_PROMPT_LENGTH;
     const hasImages = !!images?.length;
-    const deterministic = opts?.deterministic === false ? null
+    if (opts?.authoritativePolicy && (hasImages || !opts.strictErrors || !opts.readOversizeWhole || opts.classifierInput)) return "ERROR";
+    const deterministic = opts?.deterministic === false || opts?.authoritativePolicy ? null
         : classifyDeterministicLayer1(userPrompt);
     if (deterministic === "OBVIOUS_RESERVED") return deterministic;
 
-    if (oversize && keywordBackstop(userPrompt) === "OBVIOUS_RESERVED") {
+    if (oversize && !opts?.authoritativePolicy && keywordBackstop(userPrompt) === "OBVIOUS_RESERVED") {
         // The regex floor has no length limit — reserved vocabulary anywhere
         // in the full text (including the middle the excerpt can't see)
         // short-circuits to reserved handling.

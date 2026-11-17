@@ -162,4 +162,41 @@ describe("SynaluxStorage.saveHandoff", () => {
       },
     });
   });
+
+  it.each([
+    { name: "null", snapshot: { project: "prismcoach", role: null, version: 21, last_summary: "legacy" } },
+    { name: "omitted", snapshot: { project: "prismcoach", version: 21, last_summary: "legacy" } },
+  ])("accepts $name legacy global handoff role", async ({ snapshot }) => {
+    fetchMock
+      .mockResolvedValueOnce(response({ status: "success", jwt: "jwt-1", expires_in: 900 }))
+      .mockResolvedValueOnce(response({ status: "success", versions: [{ version: 21, snapshot }] }));
+
+    const SynaluxStorage = await importStorage();
+    const storage = new SynaluxStorage();
+    await expect(storage.getHandoffAtVersion("prismcoach", 21)).resolves.toEqual(snapshot);
+  });
+
+  it("rejects a legacy null role for a non-global request", async () => {
+    fetchMock
+      .mockResolvedValueOnce(response({ status: "success", jwt: "jwt-1", expires_in: 900 }))
+      .mockResolvedValueOnce(response({ status: "success", versions: [{ version: 21, snapshot: { project: "prismcoach", role: null, version: 21 } }] }));
+
+    const SynaluxStorage = await importStorage();
+    const storage = new SynaluxStorage();
+    await expect(storage.getHandoffAtVersion("prismcoach", 21, "user", "dev"))
+      .rejects.toThrow("Handoff history identity mismatch");
+  });
+
+  it.each([
+    { name: "wrong project", snapshot: { project: "other", role: "global", version: 21 } },
+    { name: "wrong version", snapshot: { project: "prismcoach", role: "global", version: 20 } },
+  ])("rejects a global snapshot with $name", async ({ snapshot }) => {
+    fetchMock
+      .mockResolvedValueOnce(response({ status: "success", jwt: "jwt-1", expires_in: 900 }))
+      .mockResolvedValueOnce(response({ status: "success", versions: [{ version: 21, snapshot }] }));
+
+    const SynaluxStorage = await importStorage();
+    const storage = new SynaluxStorage();
+    await expect(storage.getHandoffAtVersion("prismcoach", 21)).rejects.toThrow("Handoff history identity mismatch");
+  });
 });

@@ -446,6 +446,13 @@ export interface OmlxInspection {
     evidence_scope: "authenticated_server_counters_only";
 }
 
+/** Runtime engine names (for example batched) are distinct from model kinds.
+ * Older category-only status responses remain supported when model_type is absent. */
+function codingModelType(entry: { model_type?: unknown; engine_type?: unknown }): "llm" | "vlm" | undefined {
+    const kind = entry.model_type === undefined ? entry.engine_type : entry.model_type;
+    return kind === "llm" || kind === "vlm" ? kind : undefined;
+}
+
 /** Sanitized model inventory, not filesystem paths or a load/fit guarantee. */
 export async function inspectOmlxCodingModels(options: OmlxConnectionOptions = {}): Promise<import("./ollamaCodingModels.js").LocalCodingModelObservation[]> {
     if (options.signal?.aborted || (options.deadlineMs !== undefined && Date.now() >= options.deadlineMs)) throw new OmlxError("omlx_inspection_timeout");
@@ -455,7 +462,7 @@ export async function inspectOmlxCodingModels(options: OmlxConnectionOptions = {
     const raw = await inspectionJson(`${url}/models/status`, apiKey, options.fetchImpl ?? fetch, timeout, "GET", options.signal);
     if (!Array.isArray(raw.models) || raw.models.length > MAX_ADVERTISED_MODELS) throw new OmlxError("omlx_inspection_models_invalid");
     const ids = new Set<string>();
-    return raw.models.filter(entry => entry && typeof entry === "object" && ["llm", "vlm"].includes(entry.engine_type)).map(entry => {
+    return raw.models.filter(entry => entry && typeof entry === "object" && codingModelType(entry) !== undefined).map(entry => {
         if (typeof entry.id !== "string" || !MODEL_ID_PATTERN.test(entry.id) || entry.id.includes(apiKey) || ids.has(entry.id)
             || typeof entry.loaded !== "boolean") throw new OmlxError("omlx_inspection_models_invalid");
         ids.add(entry.id);
@@ -585,24 +592,38 @@ export async function reclaimIdleOmlxMemory(target: OmlxTarget, available: () =>
     const victims = models.filter((entry: any) => entry.loaded && !entry.is_loading && !entry.pinned && entry.id !== target.model)
         .sort((a: any, b: any) => (Number.isFinite(a.last_access) ? a.last_access : Infinity)
             - (Number.isFinite(b.last_access) ? b.last_access : Infinity));
-    for (const victim of victims) {
-        check();
-        if (readAvailable() >= required) return;
-        let ack: Record<string, unknown>;
-        try { ack = await probe(`${target.url}/models/${encodeURIComponent(victim.id)}/unload-idle`, "POST"); }
-        catch (error) {
-            if (error instanceof OmlxError && error.reason === "omlx_idle_model_busy") continue;
-            throw error;
-        }
-        if (ack.status !== "ok" || ack.model_id !== victim.id) throw new OmlxError("omlx_idle_unload_unconfirmed");
-        // The shared RAM reader caches for one second. Wait for an observed
-        // increase; never add advertised model bytes to an old sample.
-        const drainDeadline = Math.min(deadlineMs, Date.now() + RECLAIM_DRAIN_MS);
-        do {
+    // Completion can precede deferred GPU cleanup. Try every other candidate
+    // first, then briefly retry busy ones through the same server idle gate.
+    // Real activity/pinning remains authoritative on every attempt.
+    let retryDeadline: number | undefined;
+    let candidates = victims;
+    while (candidates.length) {
+        const busy: typeof victims = [];
+        for (const victim of candidates) {
             check();
+            if (retryDeadline !== undefined && Date.now() >= retryDeadline) break;
             if (readAvailable() >= required) return;
-            await new Promise(resolve => setTimeout(resolve, RECLAIM_POLL_MS));
-        } while (Date.now() < drainDeadline);
+            let ack: Record<string, unknown>;
+            try { ack = await probe(`${target.url}/models/${encodeURIComponent(victim.id)}/unload-idle`, "POST"); }
+            catch (error) {
+                if (error instanceof OmlxError && error.reason === "omlx_idle_model_busy") { busy.push(victim); continue; }
+                throw error;
+            }
+            if (ack.status !== "ok" || ack.model_id !== victim.id) throw new OmlxError("omlx_idle_unload_unconfirmed");
+            // The shared RAM reader caches for one second. Wait for an observed
+            // increase; never add advertised model bytes to an old sample.
+            const drainDeadline = Math.min(deadlineMs, Date.now() + RECLAIM_DRAIN_MS);
+            do {
+                check();
+                if (readAvailable() >= required) return;
+                await new Promise(resolve => setTimeout(resolve, RECLAIM_POLL_MS));
+            } while (Date.now() < drainDeadline);
+        }
+        if (!busy.length) break;
+        retryDeadline ??= Math.min(deadlineMs, Date.now() + RECLAIM_DRAIN_MS);
+        if (Date.now() >= retryDeadline) break;
+        await new Promise(resolve => setTimeout(resolve, Math.min(RECLAIM_POLL_MS, retryDeadline! - Date.now())));
+        candidates = busy;
     }
     check();
     if (readAvailable() < required) throw new OmlxError("omlx_memory_pressure");
@@ -646,7 +667,7 @@ export async function inspectOmlx(options: OmlxConnectionOptions & { timeoutMs?:
 export interface OmlxServingInspection {
     model_id: string; model_path: string; max_context_window: number;
     loaded: boolean; is_loading: boolean; distributed: boolean;
-    engine_type: "llm" | "vlm"; config_model_type: string; source_type: "local" | "hf_cache";
+    engine_type: "batched" | "llm" | "vlm"; config_model_type: string; source_type: "local" | "hf_cache";
     serving_identity_verified: false; generation_enabled: false; qualification: "not_qualified";
     evidence_scope: "authenticated_model_status_only";
 }
@@ -665,11 +686,13 @@ export async function inspectOmlxServing(target: OmlxTarget, options: { fetchImp
         || new Set(models.map(entry => entry.id)).size !== models.length) throw new OmlxError("omlx_serving_inventory_invalid");
     const model = models.find(entry => entry.id === target.model);
     if (!model) throw new OmlxError("omlx_serving_model_unavailable");
+    const kind = codingModelType(model);
+    const compatibleEngine = model.engine_type === "batched" ? kind === "llm" : kind !== undefined && model.engine_type === kind;
     if (typeof model.model_path !== "string" || model.model_path.length > 4096 || /[\u0000-\u001f\u007f]/.test(model.model_path)
         || !isAbsolute(model.model_path) || resolve(model.model_path) !== model.model_path || model.model_path.includes(key)
         || !Number.isSafeInteger(model.max_context_window) || model.max_context_window !== target.contextTokens
         || model.max_context_window <= 0 || !["loaded", "is_loading", "distributed"].every(field => typeof model[field] === "boolean")
-        || !["llm", "vlm"].includes(model.engine_type) || !["local", "hf_cache"].includes(model.source_type)
+        || !compatibleEngine || !["local", "hf_cache"].includes(model.source_type)
         || typeof model.config_model_type !== "string" || !MODEL_ID_PATTERN.test(model.config_model_type)
         || model.config_model_type.includes(key)) throw new OmlxError("omlx_serving_model_invalid");
     return { model_id: target.model, model_path: model.model_path, max_context_window: model.max_context_window,

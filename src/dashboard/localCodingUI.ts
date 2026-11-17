@@ -29,6 +29,12 @@ export function localCodingPanelHTML(): string {
       </details></section>
       <section aria-labelledby="local-ai-models-title"><h3 class="setting-section" id="local-ai-models-title" style="margin-top:24px">2. Models</h3>
       <p class="setting-desc">Models are detected from your servers. The same model may serve coder and reviewer. Unavailable IDs stay saved; explicit task choices take precedence. Ollama uses its configured local connection.</p>
+      <form onsubmit="saveExecutionRoles(event)" style="display:grid;gap:12px;margin-top:18px">
+        ${["coder", "reviewer"].map(role => `<label class="setting-label" for="execution-role-${role}">${role === "coder" ? "Coder" : "Reviewer"} execution</label><select class="setting-select" id="execution-role-${role}" style="width:100%" onchange="renderExecutionRoleDetail('${role}')" disabled></select><p class="setting-desc" id="execution-role-${role}-detail" style="margin:0;overflow-wrap:anywhere" aria-live="polite"></p>`).join("")}
+        <p class="setting-desc">Auto follows the local preferences and plan fallback policy. Exact local choices never switch models or cloud. Synalux-managed cloud uses your Synalux plan. Developer subscriptions do not supply API credits.</p>
+        <button class="skill-save-btn" id="execution-role-save" type="submit" disabled>Save execution roles</button>
+        <p class="setting-desc" id="execution-role-status" aria-live="polite"></p>
+      </form>
       <form id="local-coding-form" onsubmit="saveLocalCoding(event)" style="display:grid;gap:14px;margin-top:18px">
         <label class="setting-label" for="local-coding-backend">Preferred coding backend</label>
         <select class="setting-select" id="local-coding-backend" style="width:100%;max-width:100%" disabled>
@@ -39,7 +45,7 @@ export function localCodingPanelHTML(): string {
           <p class="setting-desc" id="local-coding-${backend}-discovery" style="margin:0;overflow-wrap:anywhere" role="status"></p>
         </fieldset>`).join("")}
         <p class="setting-desc" id="local-coding-memory" style="margin:0"></p>
-        <div class="skill-actions" style="flex-wrap:wrap"><button class="skill-save-btn" id="local-coding-save" type="submit" disabled>Save coding preference</button><button class="skill-upload-btn" type="button" onclick="loadLocalCoding(false)">Check saved connection</button></div>
+        <div class="skill-actions" style="flex-wrap:wrap"><button class="skill-save-btn" id="local-coding-save" type="submit" disabled>Save coding preference</button><button class="skill-upload-btn" type="button" onclick="loadLocalCoding(false)">Check saved connection</button><button class="skill-upload-btn" id="local-coding-reload" type="button" title="Replace unsaved coding and role edits with the saved choices" onclick="loadLocalCoding(true)">Reload saved choices</button></div>
       </form>
       <p id="local-coding-saved" class="setting-desc" aria-live="polite"></p>
       ${localImagePanelHTML()}
@@ -80,6 +86,40 @@ var localCodingDiscoveryErrors = {};
 var localCodingClassifier = '';
 var localCodingSavedSource = 'existing';
 var localAiPreview = null;
+var localCodingRevision = '';
+function renderExecutionRoleDetail(role) {
+    var select = document.getElementById('execution-role-' + role);
+    var option = select.options[select.selectedIndex];
+    document.getElementById('execution-role-' + role + '-detail').textContent = option ? option.textContent : '';
+}
+function renderExecutionRoles(data) {
+    var catalog = data.executionCatalog || {}, hosts = catalog.hosts || [];
+    ['coder','reviewer'].forEach(function(role) {
+        var select = document.getElementById('execution-role-' + role), assigned = data.assignments && data.assignments[role] || {runtime:'auto'};
+        select.textContent = '';
+        function add(value, label) { var option = document.createElement('option'); option.value = JSON.stringify(value); option.textContent = label; select.appendChild(option); }
+        add({runtime:'auto'}, 'Auto — use local preferences and plan policy');
+        ['omlx','ollama'].forEach(function(backend) { localCodingModels[backend].forEach(function(model) { add({runtime:backend,model:model.id}, backend + ' · ' + model.id); }); });
+        add({runtime:'synalux'}, 'Synalux-managed cloud · ' + (catalog.cloud && catalog.cloud.status || 'unknown'));
+        hosts.forEach(function(host) { add({runtime:'host',profile:host.id}, 'Host handoff · ' + host.provider + ' · ' + host.model + (host.effort ? ' · ' + host.effort : '') + ' · configured, execution unproved'); });
+        var encoded = JSON.stringify(assigned);
+        if (!Array.prototype.some.call(select.options, function(option) { return option.value === encoded; })) add(assigned, 'Unavailable saved choice · ' + assigned.runtime + (assigned.model ? ' · ' + assigned.model : ''));
+        select.value = encoded; select.disabled = !data.canManage || localCodingBusy;
+        renderExecutionRoleDetail(role);
+    });
+    document.getElementById('execution-role-save').disabled = !data.canManage || localCodingBusy;
+}
+function saveExecutionRoles(event) {
+    event.preventDefault();
+    var assignments = {};
+    ['coder','reviewer'].forEach(function(role) { assignments[role] = JSON.parse(document.getElementById('execution-role-' + role).value); });
+    document.getElementById('execution-role-save').disabled = true;
+    document.getElementById('execution-role-status').textContent = 'Saving…';
+    return localCodingRequest('/role-preferences', {assignments:assignments,revision:localCodingRevision}).then(function() {
+        document.getElementById('execution-role-status').textContent = 'Saved. No models were loaded or hosts executed.';
+        return loadLocalCoding(true);
+    }).catch(function(error) { document.getElementById('execution-role-status').textContent = error.message; document.getElementById('execution-role-save').disabled = false; });
+}
 function localCodingGiB(bytes) { return (bytes / Math.pow(1024, 3)).toFixed(1) + ' GiB'; }
 function renderLocalCodingMemory() {
     ['omlx','ollama'].forEach(function(backend) {
@@ -152,6 +192,10 @@ function loadLocalCoding(reset) {
             });
             document.getElementById('local-coding-' + backend + '-discovery').textContent = data.discoveryErrors && data.discoveryErrors[backend] || localCodingModels[backend].length + ' models detected. Refresh checks inventory without loading models.';
         });
+        if (reset || !localCodingLoaded) {
+            localCodingRevision = data.revision || '';
+            renderExecutionRoles(data);
+        }
         localCodingLoaded = true;
         document.getElementById('local-coding-memory').textContent = 'Available RAM: ' + (data.availableMemoryBytes ? localCodingGiB(data.availableMemoryBytes) : 'unknown') + '. Estimates are per request, not the sum of assigned roles. Coding/review also need their safety model; the same resident model is counted once. Workload peaks remain unknown. Fresh runtime admission checks still apply.';
         renderLocalCodingMemory();
@@ -199,7 +243,7 @@ function saveLocalCoding(event) {
     localCodingReadSequence++;
     document.getElementById('local-coding-error').textContent = '';
     document.getElementById('local-coding-save').disabled = true;
-    return localCodingRequest('/model-preferences', settings).then(function() {
+    return localCodingRequest('/model-preferences', {settings:settings,revision:localCodingRevision}).then(function() {
         localCodingBusy = false;
         return loadLocalCoding(true);
     }).catch(function(error) { localCodingBusy = false; document.getElementById('local-coding-error').textContent = error.message; document.getElementById('local-coding-save').disabled = false; });

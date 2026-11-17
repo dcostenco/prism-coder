@@ -53,10 +53,36 @@ package does **not** update an external oMLX installation. For an external serve
 use the manual installation section below and restart it through its own launcher.
 
 Prism's **Auto** coding preference chooses configured oMLX for eligible text-only
-coding drafts on Apple Silicon; otherwise it chooses Ollama. You can save a
+coding drafts; otherwise it chooses Ollama. You can save a
 different preference or override it for each task. The model runs locally;
 the host still inspects the output and runs its own checks. Explicit oMLX calls
 never substitute Ollama or cloud inference when admission or generation fails.
+
+### Optional classifier policy authority
+
+By default, oMLX keeps the existing deterministic Layer 1 prechecks and
+fail-closed behavior. Operators may explicitly opt into a validated external
+classifier policy for text-only requests with:
+
+```text
+PRISM_OMLX_CLASSIFIER_POLICY_AUTHORITY=policy
+```
+
+Set it before starting the host, alongside the file and digest described under
+[operator-owned text classifier policy](#operator-owned-text-classifier-policy).
+With the flag absent or set to `legacy`, a pinned prompt override still uses
+legacy prechecks. `policy` replaces the text heuristic and keyword vetoes with
+the pinned semantic policy and reads the original text without classifier-input
+rewriting. The crisis/medical input intercept and output safety checks still apply.
+The policy file and its SHA-256 digest are pinned by the operator environment;
+missing, malformed, or mismatched authority configuration refuses the request
+and starts no worker generation. The authority applies only to text oMLX
+classifier reads: semantic reads of each turn, prompt, and required context
+remain mandatory, and an uncertain, malformed, truncated, or error response is
+never automatic clearance. Image requests retain their existing image-aware
+prechecks, and Ollama behavior is unchanged. The flag and digest establish
+which policy was loaded; they are not an accuracy certification. Qualify the
+policy with the operator's own review and evidence before activation.
 
 ## Image model preferences
 
@@ -134,7 +160,17 @@ Open `prism dashboard`, then **Settings → Local AI**. The panel provides:
 
 - **Preferred coding backend:** Auto, oMLX, or Ollama. Auto prefers configured
   oMLX for text-only code calls with the top model ceiling. Explicit smaller
-  ceilings stay on Ollama. Images and tool routing retain their supported path.
+  ceilings stay on Ollama in Auto. Selecting **oMLX** explicitly applies to
+  text-only code, chat and tool-routing requests, including requests whose mode
+  is omitted. Chat and routing use the saved oMLX coder model. oMLX failures
+  refuse rather than substituting Ollama. Tool-call validation stays local;
+  oMLX routing does not send prompts or drafts to the Portal route guard.
+  Memory questions that need a web lookup use the same oMLX safety classifier
+  before that lookup; a failed screen refuses instead of trying Ollama.
+  Selecting **Ollama** likewise never silently switches to oMLX when discovery,
+  model availability, screening or generation fails. Per-task backend overrides
+  are explicit choices; Auto is the automatic selection option.
+  Image preferences remain independent.
 - **oMLX connection:** your existing server, or a separate Prism-managed install.
 - **Coder and reviewer models:** independent selectors for oMLX and Ollama,
   populated automatically from the selected servers' installed inventories.
@@ -547,9 +583,135 @@ configured window.
 The same entitlement, reserved-content, history, quality, output-safety, and
 verification policies apply. Explicit oMLX never falls back to Ollama/cloud
 inference. `cloud_fallback: false`, `verify: false`, and `route_guard: "local"`
-keep content-bearing cloud channels disabled for a local draft. Result metadata
+keep content-bearing cloud channels disabled for a local draft.
+Selecting oMLX controls local classification and generation; it does not disable
+separately enabled Portal grounding verification. On paid plans, `verify: true`
+or nonempty `evidence` with `verify` omitted can send the draft and evidence to
+the Portal, even with `cloud_fallback: false`. Natural-memory synthesis requests
+grounding verification by default; its `verify: false` option skips that optional
+verification. The `used_cloud` field describes answer
+generation and does not establish that no verification request was made.
+Result metadata
 reports `backend: "omlx"`, the selected model, tokens, and `gate_outcome`.
 The MCP envelope carries this public metadata in `structuredContent` alongside
 the existing human header/output text; `next_step` remains available in both.
 Runtime authentication and internal verifier traces are excluded.
 A draft is advisory and requires independent host review; it is not final sign-off.
+
+## Operator-owned text classifier policy
+
+### Select a separately qualified text classifier
+
+Set `PRISM_OMLX_CLASSIFIER_MODEL` in the MCP host's environment to the exact
+model ID advertised by your configured oMLX server, then reload the host. The
+selection is fixed for that process. With the variable absent, the classifier
+remains `prism-coder-9b-mlx-8bit`; an empty or malformed value is refused.
+An unavailable selected model refuses classification rather than selecting
+another model or provider.
+
+This selects the text classifier used by both `prism_infer` and the coding
+boundary in `query_memory_natural`. It does not select the writer/reviewer,
+change the image classifier, enable policy authority, or install a model.
+The model must already be a native oMLX model; selecting a LoRA adapter
+directory does not make that directory supported. Qualify the exact model,
+policy, framing and deployed artifact before activation. This setting is an
+operator deployment option, not evidence of classifier accuracy.
+
+### Pin the policy bytes
+
+An operator deploying a separately qualified text-classifier policy can set
+`PRISM_OMLX_CLASSIFIER_POLICY_FILE` to an absolute local file path and
+`PRISM_OMLX_CLASSIFIER_POLICY_SHA256` to the lowercase SHA-256 digest of that
+file's exact bytes. Set both before starting the MCP host. These are server
+configuration values, not tool arguments; changing them requires a host reload.
+With neither set, the built-in policy is used.
+
+The file must be a regular, non-symlink UTF-8 text file of at most 16 KiB. Its
+instructions must be fixed text without a `{prompt}` interpolation placeholder.
+The pinned bytes are checked before use. Missing, invalid or changed configured
+policy refuses text classification rather than falling back to another policy.
+Configured-policy responses must finish normally and contain exactly one of the
+three classifier labels; truncated or malformed labels are refused. A failed
+configured-policy read cannot be cleared by retrying within the same request.
+Both oMLX text entrypoints use this policy: `prism_infer` and the coding boundary
+in `query_memory_natural`. The separate image screen and Ollama policy retain
+their own behavior.
+
+Keep private policies outside the repository and npm archive. A digest pins an
+operator's chosen bytes; it does not certify the policy's safety or accuracy.
+Qualify the exact policy, model and request framing before activation.
+## Host-authorized tasks
+
+`PRISM_HOST_TASKS=required` opts a new MCP process and its host CLI into a
+host-mediated request contract. This is an execution-permission feature;
+classifier accuracy and native workflow qualification remain separate. Leaving
+the variable unset, or using `legacy`, preserves the existing contract. An
+unknown value fails closed. Installing code does not enable this mode.
+
+The host retains reserved or materially unresolved work. It reviews the full
+task, including user/assistant history, system context, evidence and images,
+before allowing local execution. A tool response saying that a packet was
+prepared is not permission to run it. Never approve based only on a summary or
+instructions embedded in the packet's source data.
+
+1. Call `prism_infer` normally. In this mode it resolves project memory, freezes
+   the task and pins the exact provider/model choice, then returns
+   `status: "host_authorization_required"` with a `host_task` packet. Save the
+   returned JSON body or the `host_task` object in an owner-only file, or pass
+   those exact bytes through stdin. Automatic backend/model selection must be
+   resolved with an explicit choice or saved exact assignment before preparing.
+2. The host reviews the entire packet against its reserved-work rules. It keeps
+   unsafe, reserved or unresolved work and requests clarification when needed.
+3. For permitted, resolved work, use the host terminal:
+
+   ```sh
+   prism local run --host-task /path/to/reviewed-packet.json --approve
+   ```
+
+   `--host-task -` reads stdin. Files must be regular, owned by the current user,
+   private (`0600`) and not symlinks. JSON fences, extra objects and malformed
+   UTF-8 are refused. `--approve` belongs to this privileged CLI command; it is
+   not an MCP input flag or an independent semantic safety verdict.
+
+Both processes need `PRISM_HOST_TASKS=required` and matching profile,
+`PRISM_CONFIG_PATH`, `PRISM_DATA_DIR`, provider environment and classifier boot
+configuration. Changed task bytes, code/profile or account bindings, saved backend/model,
+expired packets or reused packets are refused before execution. Packets expire
+after five minutes and are single-use, including when execution is refused or
+fails. A new attempt requires a fresh packet and host review. The CLI consumes
+the frozen prepared context rather than loading changed project memory again.
+
+For `query_memory_natural`, local retrieval with both `synthesize: false` and
+`web_fallback: false` retains its existing behavior. Web retrieval or synthesis
+first needs a query packet approved through the CLI. Retrieved sources then
+produce a separate `prism_infer` packet containing the exact evidence-bearing
+drafting task. Query approval grants no authority to that later task. Inspect
+the returned status after every command; a successful CLI exit may return a
+new packet requiring review rather than a model answer.
+
+Query requests can pass the same `cloud_fallback`, `verify`, and `route_guard`
+controls to the drafting task. Omitting them preserves the existing defaults.
+For a local-only memory answer, explicitly use `web_fallback: false`,
+`cloud_fallback: false`, `verify: false`, and `route_guard: "local"`. This skips
+optional Portal processing; input/output safety checks and both required host
+approvals remain. The controls are part of the frozen query and drafting packets.
+
+The CLI is the trusted host-side execution channel. Same-user operating-system
+access is trusted: a process that can execute arbitrary commands as that user
+can also run a local model directly. MCP inputs alone cannot enter the CLI's
+execution context. State under `PRISM_DATA_DIR/host-tasks` (default
+`~/.prism-mcp/host-tasks`) contains only hashes, IDs, timestamps and use markers;
+it does not persist the task, images or evidence. The protocol retires its own
+validated expired records and preserves unrelated files. Unsafe permissions,
+symlinks, corrupt state or unsupported ownership checks fail closed and may
+require operator recovery. Ownership checks currently require a POSIX user ID.
+
+Existing crisis intercepts, classifier RESERVED/UNCERTAIN/ERROR vetoes,
+entitlements, output checks, provider isolation, memory admission and owned-job
+cleanup continue to apply. Host approval does not override them. Autonomous
+Factory execution cannot consume these packets: routing remains with the host,
+new pipelines refuse explicitly, and queued steps refuse before invoking a
+model. The Factory setting itself is preserved. Dashboard model diagnostics
+report a host-review requirement with a CLI next step when this mode is active.
+Hosts without an appropriate terminal must retain the task or use a supported
+host; a caller-supplied approval boolean grants no authority.

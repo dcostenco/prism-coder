@@ -228,6 +228,7 @@ import {
   sessionForgetMemoryHandler,
   sessionExportMemoryHandler,
   memoryHistoryHandler,
+  memoryCheckoutHandler,
   sessionSaveImageHandler,
   sessionViewImageHandler,
   sanitizeMemoryInput,
@@ -2538,6 +2539,13 @@ describe("ledgerHandlers", () => {
       expect(result.content[0].text).toContain("Versioned history snapshot saved");
     });
 
+    it("does not submit a partial duplicate when the writer already committed canonical history", async () => {
+      storage.saveHandoff.mockResolvedValue({ status: "updated", version: 4, history_saved: true } as any);
+      const result = await sessionSaveHandoffHandler({ ...validArgs, role: "dev" });
+      expect(result.isError).not.toBe(true);
+      expect(storage.saveHistorySnapshot).not.toHaveBeenCalled();
+    });
+
     it("keeps the durable handoff successful when its optional history snapshot fails", async () => {
       storage.saveHandoff.mockResolvedValue({ status: "updated", version: 4 });
       storage.saveHistorySnapshot.mockRejectedValueOnce(new Error("history unavailable"));
@@ -2592,7 +2600,7 @@ describe("ledgerHandlers", () => {
         .mockResolvedValueOnce({ status: "conflict", current_version: 10 })
         .mockResolvedValueOnce({ status: "updated", version: 11 });
 
-      storage.getHandoffAtVersion.mockResolvedValue(null);
+      storage.getHandoffAtVersion.mockResolvedValue({ last_summary: "Original state", version: 8 });
       storage.loadContext.mockResolvedValue({
         last_summary: "Current state",
         version: 10,
@@ -2610,7 +2618,7 @@ describe("ledgerHandlers", () => {
     it("gives up after MAX_MERGE_ATTEMPTS (3) retries", async () => {
       // All attempts return conflict
       storage.saveHandoff.mockResolvedValue({ status: "conflict", current_version: 10 });
-      storage.getHandoffAtVersion.mockResolvedValue(null);
+      storage.getHandoffAtVersion.mockResolvedValue({ last_summary: "Original state", version: 5 });
       storage.loadContext.mockResolvedValue({
         last_summary: "Current state",
         version: 10,
@@ -2663,6 +2671,78 @@ describe("ledgerHandlers", () => {
   // ====================================================================
   // 5. memoryHistoryHandler
   // ====================================================================
+
+  describe("RS checkout role and version boundaries", () => {
+    const project = "role-checkout";
+    const dev = { project, user_id: "test-user-id", role: "dev", version: 4, last_summary: "Own dev state" };
+    beforeEach(() => {
+      mockGetSetting.mockResolvedValue("dev");
+      storage.getHistory.mockResolvedValue([
+        { version: 4, snapshot: { ...dev, role: "qa", last_summary: "Other role" } },
+        { version: 4, snapshot: dev },
+      ] as any);
+      storage.getHandoffAtVersion.mockResolvedValue(dev as any);
+      storage.loadContext.mockImplementation(async (_project: string, _level: string, _user: string, role?: string) =>
+        role === "dev" ? { project, role, version: 9 } : null);
+      storage.saveHandoff.mockResolvedValue({ status: "updated", version: 10 });
+    });
+    it("uses the configured role's exact history and current OCC even when global is absent", async () => {
+      const result = await memoryCheckoutHandler({ project, target_version: 4 });
+      expect(result.isError).toBe(false);
+      expect(storage.getHandoffAtVersion).toHaveBeenCalledWith(project, 4, "test-user-id", "dev");
+      expect(storage.loadContext).toHaveBeenCalledWith(project, "quick", "test-user-id", "dev");
+      expect(storage.saveHandoff).toHaveBeenCalledWith(expect.objectContaining({ role: "dev", last_summary: "[REVERTED TO v4] Own dev state" }), 9);
+      expect(storage.getHistory).not.toHaveBeenCalled();
+    });
+    it("never restores another role merely because its version number matches", async () => {
+      storage.getHandoffAtVersion.mockResolvedValue(null);
+      const result = await memoryCheckoutHandler({ project, target_version: 4, role: "dev" });
+      expect(result.isError).toBe(true);
+      expect(storage.saveHandoff).not.toHaveBeenCalled();
+    });
+    it("refuses an unverifiable current OCC state instead of making an unconditional save", async () => {
+      storage.loadContext.mockResolvedValue(null);
+      const result = await memoryCheckoutHandler({ project, target_version: 4, role: "dev" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/reload/i);
+      expect(storage.saveHandoff).not.toHaveBeenCalled();
+    });
+    it("keeps an unavailable exact history read from falling back to all-role history", async () => {
+      storage.getHandoffAtVersion.mockRejectedValue(new Error("history unavailable"));
+      const result = await memoryCheckoutHandler({ project, target_version: 4, role: "dev" });
+      expect(result.isError).toBe(true);
+      expect(storage.saveHandoff).not.toHaveBeenCalled();
+    });
+    it.each([{project:"other-project"},{role:"qa"},{version:5}])("rejects mismatched snapshot identity: %j", async patch => {
+      storage.getHandoffAtVersion.mockResolvedValue({...dev,...patch} as any);
+      const result=await memoryCheckoutHandler({project,target_version:4,role:"dev"});
+      expect(result.isError).toBe(true); expect(storage.saveHandoff).not.toHaveBeenCalled();
+    });
+    it("refuses another role's returned current state instead of using its OCC version", async () => {
+      storage.loadContext.mockResolvedValue({role:"qa",version:9} as any);
+      const result=await memoryCheckoutHandler({project,target_version:4,role:"dev"});
+      expect(result.isError).toBe(true); expect(storage.saveHandoff).not.toHaveBeenCalled();
+    });
+    it("does not silently substitute the default role for an explicitly empty checkout role", async () => {
+      await expect(memoryCheckoutHandler({project,target_version:4,role:""})).rejects.toThrow(/Invalid arguments/);
+      expect(storage.saveHandoff).not.toHaveBeenCalled();
+    });
+    it("reports restored primary state without claiming undo history when its snapshot fails", async () => {
+      storage.saveHistorySnapshot.mockRejectedValue(new Error("history unavailable"));
+      const result = await memoryCheckoutHandler({ project, target_version: 4, role: "dev" });
+      expect(storage.saveHandoff).toHaveBeenCalledTimes(1);
+      expect(result.isError).toBe(false);
+      expect(result.content[0].text).toMatch(/restored.*history.*not saved/is);
+      expect(result.content[0].text).not.toContain("This revert is also saved in history");
+    });
+    it("uses the writer's atomic history proof without issuing a second snapshot", async () => {
+      storage.saveHandoff.mockResolvedValue({ status: "updated", version: 10, history_saved: true });
+      const result = await memoryCheckoutHandler({ project, target_version: 4, role: "dev" });
+      expect(result.isError).toBe(false);
+      expect(result.content[0].text).toContain("This revert is also saved in history");
+      expect(storage.saveHistorySnapshot).not.toHaveBeenCalled();
+    });
+  });
 
   describe("memoryHistoryHandler", () => {
     it("returns empty history message when no snapshots exist", async () => {

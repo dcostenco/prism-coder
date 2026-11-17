@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { hostTasksRequired } from '../utils/hostTasks.js';
 import type { StartPipelineArgs } from '../tools/pipelineDefinitions.js';
 
 const MAX_FILES = 2;
@@ -22,6 +23,7 @@ const MESSAGES = {
   context: 'The host must supply the project and absolute working_directory before starting Factory.',
   paid: 'Paid Factory execution is unavailable until Portal pipeline and verification APIs and their schema are ready.',
   candidate: 'Bounded implementation with concrete files and verification; the host should call the recommended pipeline tool automatically.',
+  hostTasks: 'Host-authorized execution requires the host to review and execute task packets through the CLI; autonomous Factory execution is unavailable in this mode.',
 } as const;
 
 export interface FactoryPromptContext {
@@ -46,6 +48,7 @@ export interface FactoryPromptRoute {
 /** Routing is read-only. Pipeline creation remains a separate, side-effecting MCP call. */
 export function routeFactoryPrompt(prompt: string, context: FactoryPromptContext): FactoryPromptRoute {
   const host = (reason: string, candidate = false): FactoryPromptRoute => ({ target: 'host', candidate, reason, recommended_tool: null });
+  if (hostTasksRequired()) return host(MESSAGES.hostTasks);
   if (CLINICAL_REQUEST.test(prompt)) return host(MESSAGES.clinical);
   if (RESERVED_REQUEST.test(prompt)) return host(MESSAGES.reserved);
   if (!IMPLEMENTATION_REQUEST.test(prompt.trim()) || prompt.length > MAX_PROMPT_CHARS) return host(MESSAGES.ordinary);

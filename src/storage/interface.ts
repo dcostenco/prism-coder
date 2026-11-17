@@ -129,6 +129,8 @@ export interface SaveHandoffResult {
   status: "created" | "updated" | "conflict";
   version?: number;
   current_version?: number; // Only present on conflict
+  /** The writer committed canonical history in the same transaction. */
+  history_saved?: boolean;
 }
 
 /**
@@ -444,7 +446,7 @@ export interface StorageBackend {
    * @param userId - User who owns the handoff (default: 'default')
    * @returns The snapshot at that version, or null if not found
    */
-  getHandoffAtVersion(project: string, version: number, userId?: string): Promise<Record<string, unknown> | null>;
+  getHandoffAtVersion(project: string, version: number, userId?: string, role?: string): Promise<Record<string, unknown> | null>;
 
   /**
    * Patch handoff fields by project + userId (used for embedding backfill).

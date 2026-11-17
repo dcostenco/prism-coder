@@ -33,12 +33,39 @@ describe("default production coding entrypoints", () => {
         expect(await inferText("Draft a Python identity helper.", { mode: "code" })).toBeNull();
         expect(selectUnassignedCodingModel).toHaveBeenCalledWith(expect.objectContaining({ backend: "omlx", role: "coder", ceiling: "27b" }));
         expect(Object.keys(vi.mocked(selectUnassignedCodingModel).mock.calls[0][0]).sort())
-            .toEqual(["backend", "ceiling", "deadlineMs", "ollamaUrl", "role"]);
+            .toEqual(["backend", "ceiling", "deadlineMs", "ollamaUrl", "role", "signal"]);
+        expect(vi.mocked(selectUnassignedCodingModel).mock.calls[0][0].signal).toBeUndefined();
+    });
+    it("MCP cancellation reaches selection before generation can start", async () => {
+        const controller = new AbortController();
+        let entered!: () => void;
+        const selecting = new Promise<void>(resolve => { entered = resolve; });
+        vi.mocked(selectUnassignedCodingModel).mockImplementation(options => {
+            entered();
+            return new Promise((_resolve, reject) => {
+                if (!options.signal) { reject(new Error("missing caller cancellation")); return; }
+                options.signal.addEventListener("abort", () => reject(new Error("selection aborted")), { once: true });
+            });
+        });
+        const pending = prismInferHandler({ prompt: "Draft a Python identity helper.", mode: "code",
+            cloud_fallback: false, escalation: "report" }, undefined, { signal: controller.signal });
+        await selecting;
+        const suppliedSignal = vi.mocked(selectUnassignedCodingModel).mock.calls[0][0].signal;
+        controller.abort();
+        const response = await pending;
+        expect(suppliedSignal).toBe(controller.signal);
+        expect(response).toMatchObject({ isError: true, content: [{ text: "prism_infer: caller_cancelled" }] });
     });
     it.each(["coder", "reviewer"] as const)("MCP default dependencies reach the selector for %s", async local_role => {
         const response = await prismInferHandler({ prompt: "Draft a Python identity helper.", mode: "code", local_role,
             cloud_fallback: false, escalation: "report" });
         expect(response.structuredContent).toMatchObject({ backend: "refused", gate_outcome: { reason: "local_coding_model_unavailable" } });
         expect(selectUnassignedCodingModel).toHaveBeenCalledWith(expect.objectContaining({ backend: "omlx", role: local_role }));
+    });
+    it.each([undefined, "route", "chat"] as const)("MCP production dependencies honor saved oMLX for mode %s", async mode => {
+        const response = await prismInferHandler({ prompt: "Look up my saved project notes.", mode,
+            cloud_fallback: false, escalation: "report" });
+        expect(response.structuredContent).toMatchObject({ backend: "refused", gate_outcome: { reason: "local_coding_model_unavailable" } });
+        expect(selectUnassignedCodingModel).toHaveBeenCalledWith(expect.objectContaining({ backend: "omlx", role: "coder" }));
     });
 });

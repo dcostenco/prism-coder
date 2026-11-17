@@ -13,6 +13,19 @@ function fixture(overrides: Record<string, unknown> = {}, weightBytes = 12 * GIB
     return { fetcher };
 }
 describe("discovered Ollama coding models", () => {
+    it("RH sizes KV memory for a requested continuation context without changing legacy defaults", async () => {
+        const { fetcher } = fixture();
+        const legacy = await selectedOllamaCodingModel("http://local", id, "27b", fetcher);
+        const larger = await selectedOllamaCodingModel("http://local", id, "27b", fetcher, { requestedContextTokens: 32768 });
+        expect(legacy.ctxTokens).toBe(4096); expect(larger.ctxTokens).toBe(32768);
+        expect(larger.minFreeGb).toBeGreaterThan(legacy.minFreeGb);
+        const sameBucket = await Promise.all([20000, 20080].map(requestedContextTokens =>
+            selectedOllamaCodingModel("http://local", id, "27b", fetcher, { requestedContextTokens })));
+        expect(sameBucket.map(choice => choice.ctxTokens)).toEqual([20480, 20480]);
+        await expect(selectedOllamaCodingModel("http://local", id, "27b", fetcher, { requestedContextTokens: 32769 }))
+            .rejects.toThrow("ollama_model_context_insufficient");
+        expect(fetcher.mock.calls.every(([url]) => !String(url).endsWith("/api/chat"))).toBe(true);
+    });
     it("discovers arbitrary IDs, weights and loaded memory without inference or pull calls", async () => {
         const { fetcher } = fixture();
         expect(await inspectOllamaCodingModels("http://local", fetcher)).toEqual([{ id, weightBytes: 12 * GIB, loaded: true, loadedBytes: 13 * GIB, contextTokens: 4096 }]);

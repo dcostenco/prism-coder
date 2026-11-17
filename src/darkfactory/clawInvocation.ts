@@ -86,6 +86,10 @@ export async function invokeClawAgent(
   timeoutMs = 120000 // 2 min default timeout for internal executions
 ): Promise<{ success: boolean; resultText: string }> {
 
+  if ((await import('../utils/hostTasks.js')).hostTasksRequired()) {
+    return { success: false, resultText: 'host_authorization_required: autonomous Factory execution cannot consume host-reviewed task packets; use the host CLI workflow.' };
+  }
+
   // BYOM Override: Provide path to use alternative open-source pipelines 
   // (e.g. through the OpenAI structured adapter which also points to local endpoints like Ollama / vLLM if configured)
   const llm = spec.modelOverride 
