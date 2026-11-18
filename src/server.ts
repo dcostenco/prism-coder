@@ -40,6 +40,7 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { appendHostImageRoute, HOST_IMAGE_ROUTING_GUIDANCE } from "./tools/hostImageRouting.js";
 import { monitorMcpTransport } from "./mcpTransportHealth.js";
 import { buildVSCodePrompt } from "./aba-protocol.js";
 import {
@@ -486,6 +487,7 @@ export const PRISM_SERVER_INSTRUCTIONS =
   `do not auto-load skill files must fetch each body with knowledge_search, passing the skill name ` +
   `exactly as listed. ` +
   `AFTER turn one, call session_route_prompt at the start of any turn with a new task, changed work, or reported defect. Pass the verbatim message as {prompt} and held skills as {loaded}; supply current project, working_directory, files_involved and test_command when known. Read and follow returned skills. When prism_factory_route has target factory, automatically call recommended_tool with recommended_args, then monitor status. Routing itself never executes code. ` +
+  `${HOST_IMAGE_ROUTING_GUIDANCE} ` +
   `Emit no preamble. Print the complete tool result verbatim as the entire first-turn startup display, before any optional ` +
   `answer. Do not summarize, paraphrase, rename headings, reformat, or omit any returned section. Preserve its order and ` +
   `line content. For a greeting-only prompt, stop after the verbatim startup display. ` +
@@ -985,7 +987,7 @@ export function createServer() {
             // Deliberately NOT gated on SESSION_MEMORY_ENABLED: routing is
             // on-device against a cached table, so it must keep working when
             // the memory backend is unconfigured or unreachable.
-            result = await sessionRoutePromptHandler(args); break;
+            result = appendHostImageRoute(await sessionRoutePromptHandler(args), args, server.getClientVersion()?.name); break;
 
           case "knowledge_search":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");

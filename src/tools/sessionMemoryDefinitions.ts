@@ -1,4 +1,5 @@
 import { type Tool } from "@modelcontextprotocol/sdk/types.js";
+import { HOST_IMAGE_ROUTING_GUIDANCE } from "./hostImageRouting.js";
 
 // ─── Session Save Ledger ─────────────────────────────────────
 
@@ -220,7 +221,8 @@ export const SESSION_ROUTE_PROMPT_TOOL: Tool = {
     "does return skills, read and follow them before doing the work \u2014 they are the rules for the task at hand, " +
     "not background. It also checks bounded implementation requests for Factory. Supply the current project, working_directory, files_involved and test_command when known. " +
     "When prism_factory_route recommends session_start_pipeline, call it automatically with recommended_args, then report the pipeline id and monitor it. " +
-    "Routing itself does not execute code. Skip it only for follow-ups within work you have already routed.",
+    "Routing itself does not execute code. Skip it only for follow-ups within work you have already routed. " +
+    HOST_IMAGE_ROUTING_GUIDANCE,
   annotations: {
     readOnlyHint: true,
     destructiveHint: false,
@@ -249,6 +251,22 @@ export const SESSION_ROUTE_PROMPT_TOOL: Tool = {
       files_involved: { type: "array", items: { type: "string" }, description: "Relative code files the current implementation task concerns." },
       test_command: { type: "string", description: "Repository verification command, supplied by the host from the request or repository instructions." },
       allowed_write_paths: { type: "array", items: { type: "string" }, description: "Relative files the user authorized Factory to change." },
+      image_generation: {
+        type: "object",
+        description: "Include only for an actual request to generate an image. Prism detects the MCP client independently.",
+        properties: {
+          available_tools: {
+            type: "array", maxItems: 32, items: { type: "string", maxLength: 128 },
+            description: "Exact names of image generation tools callable by this host in this session.",
+          },
+          host_model: {
+            type: "string", maxLength: 128,
+            description: "Caller-reported chat model from runtime metadata, if available. Prism does not verify this value.",
+          },
+        },
+        required: ["available_tools"],
+        additionalProperties: false,
+      },
     },
     required: ["prompt"],
   },

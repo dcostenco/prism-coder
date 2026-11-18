@@ -3,12 +3,12 @@ import { JSDOM } from 'jsdom';
 import { localCodingPanelHTML, localCodingScript } from '../../src/dashboard/localCodingUI.js';
 const windows: JSDOM[] = [];
 afterEach(() => windows.splice(0).forEach(dom => dom.window.close()));
-function fixture() {
+function fixture(runScripts: 'outside-only' | 'dangerously' = 'outside-only') {
     let settings: any = {};
     let outage = false, present = true, failed = false;
     let inputState = 'update_required', inputReason = 'omlx_image_server_update_required';
     const calls: string[] = [], posts: any[] = [];
-    const dom = new JSDOM(localCodingPanelHTML(), { url: 'http://127.0.0.1', runScripts: 'outside-only' }); windows.push(dom);
+    const dom = new JSDOM(localCodingPanelHTML(), { url: 'http://127.0.0.1', runScripts }); windows.push(dom);
     const reads: { gate: Promise<void>; data: unknown }[] = [];
     function snapshot(next: { outage?: boolean; present?: boolean } = {}) {
         const unavailable = next.outage ?? outage, installed = next.present ?? present;
@@ -37,6 +37,33 @@ function fixture() {
             reads.push({ gate: new Promise<void>(resolve => { release = resolve; }), data: snapshot(next) }); return release; } };
 }
 describe('independent image selector journey', () => {
+    it('opens optional SDXL Turbo setup without starting a download, model or settings change', async () => {
+        // Run the candidate's event handlers so a request added to the disclosure would be observed.
+        const f = fixture('dangerously');
+        const document = f.dom.window.document;
+        const section = document.querySelector<HTMLDetailsElement>('details#local-image-generation-setup')!;
+        expect(section.open).toBe(false);
+        await f.load();
+        const previousRequests = [...f.calls];
+        const toggled = new Promise<void>(resolve => section.addEventListener('toggle', () => resolve(), { once: true }));
+        section.querySelector('summary')!.click();
+        expect(section.open).toBe(true);
+        await toggled;
+        expect(f.calls).toEqual(previousRequests);
+        expect(f.posts).toEqual([]);
+
+        const download = section.querySelector<HTMLAnchorElement>('#local-image-sdxl-download')!;
+        const license = section.querySelector<HTMLAnchorElement>('#local-image-sdxl-license')!;
+        expect(download.origin).toBe('https://huggingface.co');
+        expect(download.pathname).toMatch(/^\/stabilityai\/sdxl-turbo\/(?:blob|resolve)\/[^/]+\/sd_xl_turbo_1\.0_fp16\.safetensors$/);
+        expect(license.origin).toBe('https://huggingface.co');
+        expect(license.pathname).toMatch(/^\/stabilityai\/sdxl-turbo\/(?:blob|resolve)\/[^/]+\/LICENSE(?:\.md|\.txt)?$/i);
+        expect(section.textContent).toMatch(/commercial/i);
+        expect(section.textContent).toMatch(/regist/i);
+        expect(section.textContent).toMatch(/(?:\$|USD\s*)1(?:,000,000|\s*(?:million|m)\b)/i);
+        expect(section.textContent).toMatch(/annual|yearly|per year/i);
+    });
+
     it('checks the unsaved oMLX choice and shows the upgrade action separately from vision metadata', async () => {
         const f = fixture(); await f.load(); f.field('omlx-model').value = 'new/vlm';
         await (f.dom.window as any).imageSelectionChanged('omlx');
