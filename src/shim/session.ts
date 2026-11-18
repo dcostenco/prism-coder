@@ -27,7 +27,7 @@ interface PendingSubscriptionOp {
 const REINIT_ID_PREFIX = "prism-shim-reinit-";
 const REPLAY_ID_PREFIX = "prism-shim-replay-";
 const CONFIG_MISMATCH_MESSAGE =
-  "prism daemon is running with a different PRISM_USER_ID / PRISM_STORAGE / SUPABASE_URL; run `node dist/daemon.js restart` or align the environment";
+  "prism daemon is running with a different PRISM_USER_ID / PRISM_STORAGE / SUPABASE_URL / PRISM_HDC_ENABLED / PRISM_ENABLE_HIVEMIND; run `node dist/daemon.js restart` or align the environment";
 const CRASH_LOOP_MESSAGE = "request was in flight during repeated prism daemon crashes; not retried";
 
 function tryParseJson(line: string): any {

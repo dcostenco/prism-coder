@@ -136,6 +136,8 @@ import {
   // ─── v0.4.0: New tool definitions (Enhancements #2 and #4) ───
   SESSION_COMPACT_LEDGER_TOOL,
   SESSION_SEARCH_MEMORY_TOOL,
+  SESSION_BACKFILL_EMBEDDINGS_TOOL,
+  SESSION_INTUITIVE_RECALL_TOOL,
   // ─── v2.0: Time Travel tool definitions ───
   MEMORY_HISTORY_TOOL,
   MEMORY_CHECKOUT_TOOL,
@@ -169,6 +171,7 @@ import {
   // ─── v0.4.0: New tool handlers ───
   compactLedgerHandler,
   sessionSearchMemoryHandler,
+  sessionIntuitiveRecallHandler,
   backfillEmbeddingsHandler,
   sessionBackfillLinksHandler,
   sessionSynthesizeEdgesHandler,
@@ -279,6 +282,8 @@ function buildSessionMemoryTools(autoloadList: string[]): Tool[] {
     KNOWLEDGE_FORGET_TOOL,       // knowledge_forget — prune bad/old memories
     SESSION_COMPACT_LEDGER_TOOL, // session_compact_ledger — auto-compact old ledger entries (v0.4.0)
     SESSION_SEARCH_MEMORY_TOOL,  // session_search_memory — semantic search via embeddings (v0.4.0)
+    SESSION_BACKFILL_EMBEDDINGS_TOOL,
+    SESSION_INTUITIVE_RECALL_TOOL,
     MEMORY_HISTORY_TOOL,         // memory_history — view version timeline (v2.0)
     MEMORY_CHECKOUT_TOOL,        // memory_checkout — revert to past version (v2.0)
     // ─── v2.0: Visual Memory tools ───
@@ -857,6 +862,10 @@ export function createServer() {
           case "session_search_memory":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
             result = await sessionSearchMemoryHandler(args); break;
+
+          case "session_intuitive_recall":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
+            result = await sessionIntuitiveRecallHandler(args); break;
 
           // ─── v2.0: Time Travel Tools ───
 

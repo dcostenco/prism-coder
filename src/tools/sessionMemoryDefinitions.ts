@@ -144,16 +144,8 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
         type: "integer",
         description: "Maximum token budget for context response. Uses 1 token ≈ 4 chars heuristic. When set, the response is truncated to fit within the budget. Default: unlimited.",
       },
-      toolAction: {
-        type: "string",
-        description: "Brief 2-5 word summary of what this tool is doing. Capitalize like a sentence.",
-      },
-      toolSummary: {
-        type: "string",
-        description: "Brief 2-5 word noun phrase describing what this tool call is about.",
-      },
     },
-    required: ["project", "toolAction", "toolSummary"],
+    required: ["project"],
   },
 };
 

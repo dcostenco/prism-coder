@@ -30,4 +30,16 @@ describe("computeConfigFingerprint", () => {
     const b = computeConfigFingerprint({});
     expect(a).toBe(b);
   });
+
+  it("differs when PRISM_HDC_ENABLED differs", () => {
+    const a = computeConfigFingerprint({ PRISM_HDC_ENABLED: "false" });
+    const b = computeConfigFingerprint({ PRISM_HDC_ENABLED: "true" });
+    expect(a).not.toBe(b);
+  });
+
+  it("differs when PRISM_ENABLE_HIVEMIND differs", () => {
+    const a = computeConfigFingerprint({ PRISM_ENABLE_HIVEMIND: "false" });
+    const b = computeConfigFingerprint({ PRISM_ENABLE_HIVEMIND: "true" });
+    expect(a).not.toBe(b);
+  });
 });

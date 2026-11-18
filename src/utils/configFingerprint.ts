@@ -14,6 +14,8 @@ const FINGERPRINTED_ENV_KEYS = [
   "PRISM_DASHBOARD_ORIGIN",
   "PRISM_DASHBOARD_PORT",
   "PRISM_INSTANCE",
+  "PRISM_HDC_ENABLED",
+  "PRISM_ENABLE_HIVEMIND",
 ] as const;
 
 export function computeConfigFingerprint(env: NodeJS.ProcessEnv = process.env): string {
