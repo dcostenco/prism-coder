@@ -65,7 +65,7 @@ export function omlxModelTarget(target: OmlxTarget, model: string): OmlxTarget {
 }
 export interface OmlxRequest {
     messages: readonly { role: string; content: string; images?: readonly string[] }[];
-    maxTokens: number; temperature?: number; timeoutMs: number; think?: boolean;
+    maxTokens: number; temperature?: number; timeoutMs: number; deadlineMs?: number; think?: boolean;
     profile?: Record<string, unknown>;
     /** false: ask the provider not to keep this request's prompt cache (a
      *  classifier request is unique and never reused). */
@@ -74,8 +74,8 @@ export interface OmlxRequest {
 export type LocalGeneration = { ok: true; text: string; thinking?: string; doneReason?: string; promptTokens?: number; completionTokens?: number }
     | { ok: false; reason: string };
 export interface OmlxRuntime {
-    detect: (model?: string) => Promise<OmlxTarget>;
-    detectImage?: (model: string, deadlineMs?: number) => Promise<OmlxTarget>;
+    detect: (model?: string, options?: Pick<OmlxConnectionOptions, "deadlineMs" | "signal">) => Promise<OmlxTarget>;
+    detectImage?: (model: string, deadlineMs?: number, signal?: AbortSignal) => Promise<OmlxTarget>;
     acquire: (port?: number, options?: OmlxLeaseOptions) => Promise<() => Promise<void>>;
     /** Clear this provider's stale owned-job marker on proof, or refuse. */
     recover?: (target: OmlxTarget) => Promise<void>;
@@ -104,11 +104,11 @@ function readDeviceMarker(path: string, name: string): DeviceMarker {
         const marker = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, count)));
         const fields = marker?.version === 1 ? MARKER_FIELDS.filter(field => field !== "provider_request_id") : MARKER_FIELDS;
         if (!marker || Object.keys(marker).length !== fields.length || !fields.every(field => Object.hasOwn(marker, field))
-            || ![1, 2].includes(marker.version) || marker.provider_hash !== name.slice(0, 64)
+            || ![1, 2, 3].includes(marker.version) || marker.provider_hash !== name.slice(0, 64)
             || typeof marker.job_id !== "string" || !NATIVE_UUID_PATTERN.test(marker.job_id)
             || typeof marker.active !== "boolean" || typeof marker.provider_started !== "boolean"
             || (marker.provider_started ? typeof marker.operation_id !== "string" || !NATIVE_UUID_PATTERN.test(marker.operation_id) : marker.operation_id !== null)
-            || (marker.version === 2 && (marker.provider_request_id !== null && (typeof marker.provider_request_id !== "string" || !NATIVE_ID_PATTERN.test(marker.provider_request_id))
+            || (marker.version >= 2 && (marker.provider_request_id !== null && (typeof marker.provider_request_id !== "string" || !NATIVE_ID_PATTERN.test(marker.provider_request_id))
                 || !marker.provider_started && marker.provider_request_id !== null))) throw new Error();
         const after = fstatSync(fd, { bigint: true }), current = lstatSync(path, { bigint: true });
         if (!current.isFile() || stateStamp(before) !== stateStamp(after) || stateStamp(after) !== stateStamp(current)) throw new Error();
@@ -216,7 +216,12 @@ export async function withOllamaResourceLease<T>(action: () => Promise<T>, port?
 let exclusiveTail: Promise<void> = Promise.resolve();
 const readers = new Set<Promise<void>>();
 const leaseContext = new AsyncLocalStorage<boolean>();
-export async function withInferenceResourceLease<T>(exclusive: boolean, action: () => Promise<T>, deadlineMs?: number): Promise<T> {
+export async function withInferenceResourceLease<T>(exclusive: boolean, action: () => Promise<T>, deadlineMs?: number, signal?: AbortSignal): Promise<T> {
+    const check = () => {
+        if (signal?.aborted) throw new OmlxError("omlx_task_cancelled");
+        if (deadlineMs !== undefined && Date.now() >= deadlineMs) throw new OmlxError("omlx_task_deadline_exceeded");
+    };
+    check();
     if (leaseContext.getStore() !== undefined) return action();
     const preceding = exclusiveTail;
     let release!: () => void;
@@ -226,16 +231,24 @@ export async function withInferenceResourceLease<T>(exclusive: boolean, action: 
     else readers.add(done);
     try {
         const waiting = Promise.all([preceding, ...precedingReaders]);
-        if (deadlineMs === undefined) await waiting;
+        if (deadlineMs === undefined && !signal) await waiting;
         else {
             let timer: ReturnType<typeof setTimeout> | undefined;
+            let onAbort: (() => void) | undefined;
             try {
                 await Promise.race([waiting, new Promise<never>((_resolve, reject) => {
-                    timer = setTimeout(() => reject(new OmlxError("omlx_task_deadline_exceeded")), Math.max(0, deadlineMs - Date.now()));
+                    onAbort = () => reject(new OmlxError("omlx_task_cancelled"));
+                    signal?.addEventListener("abort", onAbort, { once: true });
+                    if (deadlineMs !== undefined) {
+                        timer = setTimeout(() => reject(new OmlxError("omlx_task_deadline_exceeded")), Math.max(0, deadlineMs - Date.now()));
+                    }
                 })]);
-            } finally { clearTimeout(timer); }
-            if (Date.now() >= deadlineMs) throw new OmlxError("omlx_task_deadline_exceeded");
+            } finally {
+                clearTimeout(timer);
+                if (onAbort) signal?.removeEventListener("abort", onAbort);
+            }
         }
+        check();
         return await leaseContext.run(exclusive, action);
     } finally { readers.delete(done); release(); }
 }
@@ -359,9 +372,12 @@ export async function detectOmlx(requestedModel?: string, options: OmlxConnectio
     const { model, models } = selectedModel(requestedModel, managed ? { ...env, OMLX_MODEL: undefined } : env, settings, profiles);
     const contextTokens = await configuredContext(model, models, settings, directory);
     try {
+        const remaining = Math.min(PROBE_TIMEOUT_MS, (options.deadlineMs ?? Infinity) - Date.now());
+        if (remaining <= 0 || options.signal?.aborted) throw new OmlxError("omlx_inspection_timeout");
+        const timeout = AbortSignal.timeout(remaining);
         const response = await (options.fetchImpl ?? fetch)(`${url}/models`, {
             headers: { Authorization: `Bearer ${apiKey}` },
-            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS), redirect: "error",
+            signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout, redirect: "error",
         });
         if (!response.ok) throw new OmlxError(response.status === 401 || response.status === 403
             ? "omlx_auth_failed" : `omlx_models_http_${response.status}`);
@@ -896,14 +912,14 @@ export async function hasOmlxControl(target: OmlxTarget, fetchImpl: typeof fetch
 
 export function createOmlxRuntime(resources: Pick<OmlxRuntime, "listLoaded" | "unload" | "generate"> & Pick<Partial<OmlxRuntime>, "detect" | "detectImage" | "recover">,
     ollamaUrl: string): OmlxRuntime {
-    return { ...resources, reclaim: reclaimIdleOmlxMemory, detect: async model => {
+    return { ...resources, reclaim: reclaimIdleOmlxMemory, detect: async (model, options) => {
         // An explicit local request also keeps its classification/resource
         // probes on loopback, even if ordinary Ollama has a remote base URL.
         loopbackUrl(ollamaUrl, "");
-        return (resources.detect ?? detectOmlx)(model);
-    }, detectImage: async (model, deadlineMs) => {
+        return (resources.detect ?? detectOmlx)(model, options);
+    }, detectImage: async (model, deadlineMs, signal) => {
         loopbackUrl(ollamaUrl, "");
-        return resources.detectImage ? resources.detectImage(model, deadlineMs) : detectOmlxImage(model, { deadlineMs });
+        return resources.detectImage ? resources.detectImage(model, deadlineMs, signal) : detectOmlxImage(model, { deadlineMs, signal });
     }, acquire: acquireOmlxLease };
 }
 
@@ -912,7 +928,7 @@ export function createOmlxRuntime(resources: Pick<OmlxRuntime, "listLoaded" | "u
 export async function guardedOmlxGenerate(runtime: OmlxRuntime, target: OmlxTarget,
     request: OmlxRequest, freemem: () => number, watchIntervalMs = WATCH_INTERVAL_MS): Promise<LocalGeneration> {
     if (request.timeoutMs <= 0) return { ok: false, reason: "timeout" };
-    const deadline = Date.now() + request.timeoutMs;
+    const deadline = Math.min(request.deadlineMs ?? Infinity, Date.now() + request.timeoutMs);
     const inputBytes = request.messages.reduce((n, message) => n + Buffer.byteLength(message.content, "utf8") + 8, 0);
     if (inputBytes + request.maxTokens + 1_300 > target.contextTokens) return { ok: false, reason: "omlx_ctx_insufficient" };
     const contention = async (): Promise<string | null> => {
@@ -930,7 +946,7 @@ export async function guardedOmlxGenerate(runtime: OmlxRuntime, target: OmlxTarg
     let stopped = false;
     let watcher: ReturnType<typeof setInterval> | undefined;
     const fail = (reason: string) => { controller.abort(); stop({ ok: false, reason }); };
-    const timeout = setTimeout(() => fail("timeout"), request.timeoutMs);
+    const timeout = setTimeout(() => fail("timeout"), Math.max(0, deadline - Date.now()));
     const work = async (): Promise<LocalGeneration> => {
         let initial = await contention();
         // A late resource probe must never start generation after timeout.
@@ -951,7 +967,7 @@ export async function guardedOmlxGenerate(runtime: OmlxRuntime, target: OmlxTarg
             void contention().then(reason => { if (reason && !stopped) fail(reason); })
                 .finally(() => { checking = false; });
         }, watchIntervalMs);
-        const result = await runtime.generate(target, request, controller.signal)
+        const result = await runtime.generate(target, { ...request, timeoutMs: deadline - Date.now(), deadlineMs: deadline }, controller.signal)
             .catch(error => ({ ok: false as const, reason: controller.signal.aborted ? "timeout"
                 : error instanceof OmlxError ? error.reason : "omlx_network" }));
         if (stopped || controller.signal.aborted || Date.now() >= deadline) return { ok: false, reason: "timeout" };

@@ -6,7 +6,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as infer from "../src/tools/prismInferHandler.js";
 import {
   createSandboxServer,
   createServer,
@@ -28,6 +29,39 @@ function expectVerbatimStartupContract(instructions: string): void {
 }
 
 describe("Prism startup tool contract", () => {
+  it("forwards an MCP Cancel notification to prism_infer through the shipped server", async () => {
+    const server = createServer();
+    const client = new Client({ name: "cancel-test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    let entered!: (signal: AbortSignal | undefined) => void;
+    const forwarded = new Promise<AbortSignal | undefined>(resolve => { entered = resolve; });
+    let ended!: () => void;
+    const exit = new Promise<void>(resolve => { ended = resolve; });
+    const handler = vi.spyOn(infer, "prismInferHandler").mockImplementation(async (_args, _deps, context) => {
+      entered(context?.signal);
+      await exit;
+      return { content: [] };
+    });
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const stop = new AbortController();
+      const call = client.callTool({ name: "prism_infer", arguments: { prompt: "Draft a helper" } }, undefined, { signal: stop.signal });
+      const finished = call.catch(() => undefined);
+      const signal = await forwarded;
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal?.aborted).toBe(false);
+      const aborted = new Promise<void>(resolve => signal?.addEventListener("abort", () => resolve(), { once: true }));
+      stop.abort();
+      await aborted;
+      await finished;
+    } finally {
+      ended();
+      await client.close();
+      await server.close();
+      handler.mockRestore();
+    }
+  });
   it("adds session_bootstrap while preserving the established Prism surface", () => {
     const tools = getAllPossibleTools();
     const names = tools.map((tool) => tool.name);

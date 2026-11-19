@@ -868,7 +868,7 @@ export function createServer() {
   // child spans from LLM adapters and background workers are automatically
   // nested under this root span in Jaeger/Zipkin without explicit ref-passing.
   // When otel_enabled=false, getTracer() returns a no-op tracer — zero overhead.
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
 
     // Local metadata is a separate deterministic operation. Keep names/paths out
@@ -929,7 +929,7 @@ export function createServer() {
             result = await researchPaperAnalysisHandler(args); break;
 
           case "prism_infer":
-            result = await prismInferHandler(args); break;
+            result = await prismInferHandler(args, undefined, { signal: extra.signal }); break;
 
           // ── Optional You.com Web Search (only when YDC_API_KEY is set) ──
 

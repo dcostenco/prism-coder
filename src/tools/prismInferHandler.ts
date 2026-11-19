@@ -2319,16 +2319,20 @@ async function withCallerSignal<T>(signal: AbortSignal, context: InferExecutionC
     }
 }
 
-export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: InferExecutionContext): Promise<PrismInferResult> {
+export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: InferExecutionContext, started = Date.now()): Promise<PrismInferResult> {
     requireActive(context);
-    const started = Date.now();
     const localBudget = context?.requiredLocalBackend === "ollama" ? args.timeout_ms ?? 180_000 : undefined;
     if (localBudget !== undefined && (!Number.isSafeInteger(localBudget) || localBudget < 1 || localBudget > 900_000))
         throw new Error("prism_infer: invalid bounded Ollama bridge timeout");
     const localDeadline = localBudget === undefined ? undefined : started + localBudget;
+    let executionDeadline = localDeadline;
+    let usesOmlx = false;
     const requireBudget = () => {
         requireActive(context);
-        if (localDeadline !== undefined && Date.now() >= localDeadline) throw new Error("prism_infer: timeout");
+        if (executionDeadline !== undefined && Date.now() >= executionDeadline) {
+            if (usesOmlx) throw new OmlxError("omlx_task_deadline_exceeded");
+            throw new Error("prism_infer: timeout");
+        }
     };
     // Each HTTP exchange (classifier and answer-check retries included) gets
     // only the remaining request time. No race abandons an owned provider job.
@@ -2349,20 +2353,19 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
     // Backend and model are independent overrides. Resolve before taking a
     // device lease; never infer the reviewer role from prose or system text.
     const intercepted = [...(args.messages ?? []).filter(turn => turn.role === "user").map(turn => turn.content), args.prompt].some(text => Boolean(checkInputSafety(text)));
-    if (!intercepted) {
-        try { consumeHostExecution("prism_infer", args); }
-        catch (error) {
-            const reason = error instanceof HostAuthorizationError ? error.code : error instanceof Error ? error.message : "host_authorization_required";
-            if (args.escalation !== "report") throw error;
-            return { output: "", backend: "refused", model_picked: null, used_cloud: false,
-                latency_ms: Date.now() - started, ram_free_mb: Math.round(deps.freemem() / 1024 ** 2),
-                attempts: [{ tier: "host_authorization", reason }],
-                gate_outcome: { status: "refused", reason, served_anyway: false },
-                next_step: "Prepare the task through prism_infer and have the host review and execute its packet through the CLI." };
-        }
+    if (intercepted) return runInferWithResources(args, deps);
+    try { consumeHostExecution("prism_infer", args); }
+    catch (error) {
+        const reason = error instanceof HostAuthorizationError ? error.code : error instanceof Error ? error.message : "host_authorization_required";
+        if (args.escalation !== "report") throw error;
+        return { output: "", backend: "refused", model_picked: null, used_cloud: false,
+            latency_ms: Date.now() - started, ram_free_mb: Math.round(deps.freemem() / 1024 ** 2),
+            attempts: [{ tier: "host_authorization", reason }],
+            gate_outcome: { status: "refused", reason, served_anyway: false },
+            next_step: "Prepare the task through prism_infer and have the host review and execute its packet through the CLI." };
     }
     if (args.local_model || context?.requiredLocalBackend) args = { ...args, cloud_fallback: false };
-    if (!intercepted) {
+    {
         let imageRefusal = localImageRequestProblem(args);
         if (!imageRefusal && args.images?.length && args.local_backend === undefined) {
             let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2397,7 +2400,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
             throw new Error(`prism_infer: ${imageRefusal}`);
         }
     }
-    if (!intercepted && !args.images?.length && deps.codingPreference && !(args.local_backend && args.local_model)) {
+    if (!args.images?.length && deps.codingPreference && !(args.local_backend && args.local_model)) {
         // Auto cannot consider oMLX below the effective plan/caller ceiling.
         // Do not inspect an ineligible provider's configuration in that case.
         if (args.mode === "code") deps = { ...deps, entitlements: deps.entitlements ?? await getEntitlements() };
@@ -2456,7 +2459,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
             if (backend !== "omlx" || ceiling === "27b") {
                 if (backend === "omlx" && !validOmlxTimeout(args.timeout_ms))
                     throw new Error("prism_infer: invalid bounded oMLX generation parameters");
-                const budget = args.timeout_ms ?? (args.local_role ? CODING_ROLE_DEFAULTS[backend].timeoutMs : undefined);
+                const budget = args.timeout_ms ?? (args.local_role ? CODING_ROLE_DEFAULTS[backend].timeoutMs : backend === "omlx" ? 300_000 : undefined);
                 let selectionTimer: ReturnType<typeof setTimeout> | undefined;
                 let selectionAdmitted = false;
                 try {
@@ -2489,7 +2492,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
                     model = backend === "ollama"
                         ? await withInferenceResourceLease(false, () => withOllamaResourceLease(choose), localDeadline) : await choose();
                     if (!isLocalCodingModelId(model)) throw new Error("local_coding_model_unavailable");
-                    if (budget !== undefined) args = { ...args, timeout_ms: Math.max(1, started + budget - Date.now()) };
+                    if (backend === "ollama" && budget !== undefined) args = { ...args, timeout_ms: Math.max(1, started + budget - Date.now()) };
                 } catch (error) {
                     requireBudget();
                     if (!selectionAdmitted || error instanceof OmlxError) throw error;
@@ -2507,7 +2510,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
             ...(model ? { local_model: model } : {}) };
     }
     requireActive(context);
-    if (!intercepted && context?.requiredLocalBackend && args.local_backend !== context.requiredLocalBackend) {
+    if (context?.requiredLocalBackend && args.local_backend !== context.requiredLocalBackend) {
         const reason = `bridge_requires_${context.requiredLocalBackend}`;
         return { output: "", backend: "refused", model_picked: null, used_cloud: false,
             ram_free_mb: Math.round(deps.freemem() / 1024 ** 2), latency_ms: Date.now() - started,
@@ -2517,35 +2520,46 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
         const defaults = CODING_ROLE_DEFAULTS[args.local_backend === "omlx" ? "omlx" : "ollama"];
         args = { ...args, max_tokens: args.max_tokens ?? defaults.maxTokens, timeout_ms: args.timeout_ms ?? defaults.timeoutMs };
     }
-    const usesOmlx = args.local_backend === "omlx" || imageSelection?.backend === "omlx";
+    usesOmlx = args.local_backend === "omlx" || imageSelection?.backend === "omlx";
+    if (usesOmlx) {
+        if (!validOmlxTimeout(args.timeout_ms)) throw new Error("prism_infer: invalid bounded oMLX generation parameters");
+        executionDeadline = imageSelection?.backend === "omlx" ? imageDeadline : started + (args.timeout_ms ?? 300_000);
+    }
     const ownedAction = async () => {
-        requireActive(context);
+        requireBudget();
         let releaseDevice: (() => Promise<void>) | undefined;
         const runtime = usesOmlx ? deps.omlx : undefined;
         // Every owned generation, so the device outlives its marker writes.
         const generations = new Set<Promise<unknown>>();
-        const acquireTarget = async (targetPromise: Promise<OmlxTarget>) => {
-            const target = await targetPromise;
-            requireActive(context);
+        const acquireTarget = async (detect: () => Promise<OmlxTarget>) => {
+            requireBudget();
+            const target = await detect().catch(error => { requireBudget(); throw error; });
+            requireBudget();
             releaseDevice = await runtime!.acquire(undefined, { recoveryProviderId: target.url });
+            requireBudget();
             // Before Layer 1 or anything else: a stale marker of this provider
             // is cleared on proof, or the call is refused.
             await runtime!.recover?.(target);
-            requireActive(context);
+            requireBudget();
             return target;
         };
-        const scopedDeps = runtime ? { ...deps, omlx: { ...runtime,
-            detect: (model?: string) => acquireTarget(runtime.detect(model)),
-            ...(runtime.detectImage ? { detectImage: (model: string, deadlineMs?: number) => acquireTarget(runtime.detectImage!(model, deadlineMs)) } : {}),
+        const scopedDeps = runtime ? { ...deps, executionDeadlineMs: executionDeadline, omlx: { ...runtime,
+            detect: (model?: string) => acquireTarget(() => runtime.detect(model, { deadlineMs: executionDeadline, signal: context?.signal })),
+            ...(runtime.detectImage ? { detectImage: (model: string, deadlineMs?: number) => acquireTarget(() => runtime.detectImage!(model, deadlineMs, context?.signal)) } : {}),
             ...(runtime.reclaim ? { reclaim: (...args: Parameters<NonNullable<OmlxRuntime["reclaim"]>>) => {
-            const reclaim = withCallerSignal(args[2], context, signal => runtime.reclaim!(args[0], args[1], signal, args[3]));
-            generations.add(reclaim.catch(() => undefined));
-            return reclaim;
-        } } : {}), generate: (target: OmlxTarget, request: Parameters<OmlxRuntime["generate"]>[1], signal: AbortSignal) => {
-            const generation = withCallerSignal(signal, context, active => runtime.generate(target, request, active));
-            generations.add(generation.catch(() => undefined));
-            return generation;
-        } } } : !usesOmlx || context?.signal || localDeadline !== undefined ? { ...deps, callLocal: async (...callArgs: Parameters<InferDeps["callLocal"]>) => {
+                requireBudget();
+                const reclaim = withCallerSignal(args[2], context, signal => runtime.reclaim!(args[0], args[1], signal, Math.min(args[3], executionDeadline!)));
+                generations.add(reclaim.catch(() => undefined));
+                return reclaim;
+            } } : {}), generate: async (target: OmlxTarget, request: Parameters<OmlxRuntime["generate"]>[1], signal: AbortSignal) => {
+                requireBudget();
+                const deadlineMs = Math.min(request.deadlineMs ?? Infinity, executionDeadline!);
+                const generation = withCallerSignal(signal, context, active => runtime.generate(target, {
+                    ...request, timeoutMs: Math.min(request.timeoutMs, deadlineMs - Date.now()), deadlineMs,
+                }, active));
+                generations.add(generation.catch(() => undefined));
+                return generation;
+            } } } : !usesOmlx || context?.signal || localDeadline !== undefined ? { ...deps, callLocal: async (...callArgs: Parameters<InferDeps["callLocal"]>) => {
             // A cancelled metadata/classifier wait cannot start generation.
             // An in-flight ordinary Ollama call retains its lease until it
             // settles; aborting the caller is not backend stop evidence.
@@ -2613,7 +2627,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
                 } }) } : scopedDeps;
             const result = await runInferWithResources(args, boundDeps,
                 imageSelection?.backend === "omlx" ? { model: imageSelection.model, deadline: imageDeadline } : undefined);
-            requireBudget();
+            if (!usesOmlx || result.output) requireBudget();
+            else requireActive(context);
             const requested = selection ?? (args.local_model ? { source: "explicit" as const, requested_runtime: args.local_backend ?? "ollama",
                 requested_model: args.local_model, requested_effort: null, actual_runtime: null, actual_model: null, actual_effort: null } : undefined);
             return { ...result, ...(requested ? { selection: { ...requested, actual_runtime: result.output ? result.backend : null,
@@ -2627,9 +2642,22 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
             await releaseDevice?.();
         }
     };
-    return withInferenceResourceLease(usesOmlx, () =>
-        !usesOmlx && !intercepted
-            ? withOllamaResourceLease(ownedAction) : ownedAction());
+    try {
+        return await withInferenceResourceLease(usesOmlx, () => !usesOmlx
+            ? withOllamaResourceLease(ownedAction) : ownedAction(), executionDeadline, context?.signal);
+    } catch (error) {
+        requireActive(context);
+        if (error instanceof OmlxError && error.reason === "omlx_task_deadline_exceeded") {
+            if (usesOmlx && args.escalation === "report") {
+                return { output: "", backend: "refused", model_picked: null, used_cloud: false,
+                    latency_ms: Date.now() - started, ram_free_mb: Math.round(deps.freemem() / 1024 ** 2),
+                    attempts: [{ tier: "omlx", reason: "timeout" }],
+                    gate_outcome: { status: "refused", reason: "timeout", served_anyway: false }, ...(selection ? { selection } : {}) };
+            }
+            throw new Error("prism_infer: timeout");
+        }
+        throw error;
+    }
 }
 
 async function runInferWithResources(args: PrismInferArgs, deps: InferDeps, image?: { model: string; deadline: number }, cloudOnly = false): Promise<PrismInferResult> {
@@ -2947,7 +2975,8 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             omlxTarget = image ? await omlxRuntime.detectImage!(image.model, image.deadline) : await omlxRuntime.detect(args.local_model);
         }
         catch (error) {
-            const reason = error instanceof OmlxError ? error.reason : "omlx_detection_unavailable";
+            const reason = error instanceof OmlxError && error.reason === "omlx_task_deadline_exceeded" ? "timeout"
+                : error instanceof OmlxError ? error.reason : "omlx_detection_unavailable";
             attempts.push({ tier: "omlx", reason });
             if (wantReport) return refusedResult(reason);
             throw new Error(`prism_infer: ${reason}; explicit oMLX will not substitute another backend`);
@@ -2998,7 +3027,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         }
     }
     // oMLX classification and generation share one bounded deadline.
-    const omlxDeadline = image?.deadline ?? Date.now() + (args.timeout_ms ?? 300_000);
+    const omlxDeadline = image?.deadline ?? (omlxTarget ? deps.executionDeadlineMs : undefined) ?? Date.now() + (args.timeout_ms ?? 300_000);
     if (Date.now() >= omlxDeadline) {
         if (wantReport) return refusedResult("timeout");
         throw new Error("prism_infer: timeout");
@@ -4206,10 +4235,10 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     }
 
     // ── Local exhausted. Optional synalux fallback. ──
-    if (image) {
-        const reason = attempts.at(-1)?.reason ?? "omlx_generation_failed";
-        if (wantReport) return refusedResult(reason);
-        throw new OmlxError(reason);
+    const localFailure = attempts.at(-1)?.reason ?? "omlx_generation_failed";
+    if (image || (omlxTarget && (localFailure === "timeout" || localFailure === "omlx_stop_unproved"))) {
+        if (wantReport) return refusedResult(localFailure);
+        throw new OmlxError(localFailure);
     }
     if (allowCloud) {
         const cloudTimeout = args.timeout_ms ?? 90_000;
@@ -4573,6 +4602,7 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps, context
     structuredContent?: Record<string, unknown>;
     isError?: boolean;
 }> {
+    const started = Date.now();
     if (!isPrismInferArgs(args)) {
         const raw = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
         const mp = raw.messages !== undefined ? messagesProblem(raw.messages) : null;
@@ -4608,7 +4638,7 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps, context
             return hostTaskResponse(packet);
         }
         requireActive(context);
-        const result = await runInfer(prepared.args, deps ?? productionInferDeps(), context);
+        const result = await runInfer(prepared.args, deps ?? productionInferDeps(), context, started);
 
         debugLog(`[prism_infer] backend=${result.backend} model=${result.model_picked} latency=${result.latency_ms}ms free=${result.ram_free_mb}MB`);
 

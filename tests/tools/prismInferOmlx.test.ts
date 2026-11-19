@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { createServer } from "../../src/server.js";
+import * as inferHandler from "../../src/tools/prismInferHandler.js";
 import { PRISM_INFER_TOOL, runInfer, prismInferHandler, productionInferDeps, isPrismInferArgs, _resetLayer1HistoryCacheForTest, _resetClassifierLimitsForTest, callOllamaGenerate, type InferDeps, type PrismInferArgs } from "../../src/tools/prismInferHandler.js";
 import { selectUnassignedCodingModel } from "../../src/utils/localCodingModelSelection.js";
 import { selectedOllamaCodingModel } from "../../src/utils/ollamaCodingModels.js";
@@ -15,8 +19,9 @@ import { OmlxError, createOmlxTarget, type OmlxRequest, type OmlxRuntime, type O
 import { _setOrdinaryLeaseForTest, withInferenceResourceLease } from "../../src/utils/omlxProvider.js";
 import { ownedOmlxGenerate } from "../../src/utils/omlxOwned.js";
 import { OMLX_LAYER1_MODEL } from "../../src/utils/omlxLayer1.js";
-import { completes, endsWithoutTerminal, fakeControl, record } from "./omlxControlFake.js";
+import { completes, endsWithoutTerminal, fakeControl, record, sse, terminal } from "./omlxControlFake.js";
 import { CRISIS_RESPONSE } from "../../src/utils/safetyGate.js";
+import * as storage from "../../src/storage/index.js";
 
 const MODEL = "Qwen3.8-Flash-Next-oQ8e-mtp";
 // As detection returns it: carrying the provider credential.
@@ -55,6 +60,122 @@ function fixture() {
 }
 
 describe("trusted bridge execution context", () => {
+    it.each(["classification", "drafting"])("stops the owned %s operation on MCP Cancel without registering again", async phase => {
+        const f = fixture();
+        f.deps.callLayer1 = undefined;
+        let claimed!: () => void, released!: () => void;
+        const started = new Promise<void>(resolve => { claimed = resolve; });
+        const finished = new Promise<void>(resolve => { released = resolve; });
+        f.omlx.acquire = async () => async () => { released(); };
+        const provider = fakeControl({ script: async function* (ids, control) {
+            if (phase === "drafting" && ids.model === OMLX_LAYER1_MODEL) {
+                yield* completes("OBVIOUS_NOT_RESERVED")(ids, control);
+                return;
+            }
+            yield sse("claimed", { state: "claimed" });
+            claimed();
+            await control.cancelled;
+            yield sse("terminal", terminal(ids, "cancelled"));
+        } });
+        const stateDirectory = mkdtempSync(join(tmpdir(), "prism-owned-mcp-stop-"));
+        f.omlx.generate = (target, request, signal) => ownedOmlxGenerate(target, request, signal,
+            { fetchImpl: provider.fetchImpl, stateDirectory, drainBudgetMs: 300, cancelReadMs: 120 });
+        const realHandler = inferHandler.prismInferHandler;
+        const inject = vi.spyOn(inferHandler, "prismInferHandler").mockImplementation((args, _deps, context) => realHandler(args, f.deps, context));
+        const server = createServer();
+        const client = new Client({ name: "owned-cancellation-fixture", version: "1" });
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+        const stop = new AbortController();
+        try {
+            await server.connect(serverTransport);
+            await client.connect(clientTransport);
+            const call = client.callTool({ name: "prism_infer", arguments: { ...ask({ local_model: MODEL }) } }, undefined, { signal: stop.signal })
+                .catch(error => error as Error);
+            await Promise.race([started, call.then(() => { throw new Error("MCP replied before claiming the target operation"); })]);
+            const registrations = provider.calls.filter(item => item.method === "PUT");
+            expect(registrations).toHaveLength(phase === "classification" ? 1 : 2);
+            stop.abort();
+            await call;
+            await finished;
+            expect(provider.calls.filter(item => item.method === "PUT")).toEqual(registrations);
+            expect(provider.calls.filter(item => item.path.endsWith("/cancel")).map(item => item.path)).toEqual([`${registrations.at(-1)!.path}/cancel`]);
+            const marker = join(stateDirectory, createHash("sha256").update(TARGET.url).digest("hex") + ".json");
+            expect(JSON.parse(readFileSync(marker, "utf8"))).toMatchObject({ active: false });
+            expect(f.deps.callLocal).not.toHaveBeenCalled();
+            expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally { stop.abort(); await client.close(); await server.close(); inject.mockRestore(); }
+    });
+    it.each(["deadline", "cancel"])("removes a queued oMLX request on %s before any provider call", async trigger => {
+        const f = fixture();
+        let release!: () => void;
+        const held = new Promise<void>(resolve => { release = resolve; });
+        let entered!: () => void;
+        const occupied = new Promise<void>(resolve => { entered = resolve; });
+        const lease = withInferenceResourceLease(true, async () => { entered(); await held; });
+        await occupied;
+        const stop = new AbortController();
+        vi.useFakeTimers();
+        const pending = runInfer(ask({ timeout_ms: 100 }), f.deps, { signal: stop.signal });
+        let settled = false;
+        const outcome = pending.then(result => { settled = true; return result; }, error => { settled = true; return error as Error; });
+        try {
+            await vi.advanceTimersByTimeAsync(0);
+            if (trigger === "cancel") stop.abort();
+            await vi.advanceTimersByTimeAsync(trigger === "deadline" ? 101 : 1);
+            expect(settled).toBe(true);
+            if (trigger === "deadline") expect(await outcome).toMatchObject({ backend: "refused", gate_outcome: { reason: "timeout" } });
+            else expect(await outcome).toMatchObject({ message: "prism_infer: caller_cancelled" });
+            expect(f.omlx.detect).not.toHaveBeenCalled();
+        } finally {
+            release();
+            await lease;
+            await outcome;
+            vi.useRealTimers();
+        }
+        expect(f.omlx.generate).not.toHaveBeenCalled();
+        const next = fixture();
+        await runInfer(ask(), next.deps);
+        expect(next.omlx.generate).toHaveBeenCalled();
+    });
+    it("keeps the ingress deadline after discovering an unassigned oMLX model", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null });
+        const started = Date.now();
+        const date = vi.spyOn(Date, "now").mockReturnValue(started);
+        f.deps.codingModel = vi.fn(async () => { date.mockReturnValue(started + 600); return MODEL; });
+        try {
+            expect(await runInfer(ask({ timeout_ms: 1000 }), f.deps)).toMatchObject({ backend: "omlx", output: OUTPUT });
+            expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, { deadlineMs: started + 1000, signal: undefined });
+        } finally { date.mockRestore(); }
+    });
+    it("charges project-memory preparation against the public handler deadline", async () => {
+        const f = fixture();
+        const started = Date.now();
+        const date = vi.spyOn(Date, "now").mockReturnValue(started);
+        const context = { loadContext: vi.fn(async () => { date.mockReturnValue(started + 101); return {}; }) };
+        const backend = vi.spyOn(storage, "getStorage").mockResolvedValue(context as unknown as Awaited<ReturnType<typeof storage.getStorage>>);
+        try {
+            const reply = await prismInferHandler(ask({ project: "fixture-project", context_depth: "quick", timeout_ms: 100 }), f.deps);
+            expect(reply.structuredContent).toMatchObject({ backend: "refused", gate_outcome: { reason: "timeout" } });
+            expect(context.loadContext).toHaveBeenCalledOnce();
+            expect(f.omlx.detect).not.toHaveBeenCalled();
+            expect(f.omlx.generate).not.toHaveBeenCalled();
+        } finally { backend.mockRestore(); date.mockRestore(); }
+    });
+    it("serves deterministic safety while another request holds the device queue", async () => {
+        const f = fixture();
+        let release!: () => void, entered!: () => void;
+        const held = new Promise<void>(resolve => { release = resolve; });
+        const occupied = new Promise<void>(resolve => { entered = resolve; });
+        const lease = withInferenceResourceLease(true, async () => { entered(); await held; });
+        await occupied;
+        const result = runInfer(ask({ prompt: "I want to kill myself", timeout_ms: 10 }), f.deps);
+        try {
+            const beforeRelease = await Promise.race([result, new Promise<void>(resolve => setImmediate(resolve))]);
+            expect(beforeRelease).toMatchObject({ backend: "safety_gate", output: CRISIS_RESPONSE });
+            expect(f.omlx.detect).not.toHaveBeenCalled();
+        } finally { release(); await lease; await result; }
+    });
     it.each(['bounded', 'signal-only'])('OR retains the device lease while a timed-out limits probe settles (%s)', async contextKind => {
         _resetClassifierLimitsForTest();
         const f = fixture(), id = 'vendor/worker:lease-proof';
@@ -523,7 +644,7 @@ describe("saved execution roles", () => {
         f.deps.codingPreference = async () => ({ saved: "auto", effective: "omlx", configured: true, envOverride: null,
             assignment: { runtime: "omlx", model: MODEL } });
         const result = await runInfer(ask({ local_backend: undefined, local_role: "reviewer" }), f.deps);
-        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, expect.objectContaining({ deadlineMs: expect.any(Number) }));
         expect(result.selection).toMatchObject({ source: "role_assignment", requested_model: MODEL, actual_model: MODEL, actual_runtime: "omlx", actual_effort: null });
     });
     it("uses entitled Synalux cloud directly, leaving device providers unused", async () => {
@@ -616,7 +737,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         f.omlx.generate = vi.fn(async () => ({ ok: true as const, text: output, doneReason: "stop" }));
         const result = await runInfer(ask({ mode, local_backend: undefined, prompt: "Look up my saved project notes." }), f.deps);
         expect(result).toMatchObject({ backend: "omlx", model_picked: MODEL, used_cloud: false, output });
-        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, expect.objectContaining({ deadlineMs: expect.any(Number) }));
         expect(f.deps.listTags).not.toHaveBeenCalled();
         expect(f.deps.listLoaded).not.toHaveBeenCalled();
         expect(f.deps.callLocal).not.toHaveBeenCalled();
@@ -679,7 +800,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         const result = await runInfer(ask({ local_role }), f.deps);
         expect(result).toMatchObject({ backend: "omlx", model_picked: id, used_cloud: false, output: OUTPUT });
         expect(recommend.mock.calls[0].slice(0, 2)).toEqual(["omlx", local_role]);
-        expect(f.omlx.detect).toHaveBeenCalledWith(id);
+        expect(f.omlx.detect).toHaveBeenCalledWith(id, expect.objectContaining({ deadlineMs: expect.any(Number) }));
         expect(f.deps.listTags).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
     });
     it.each(["coder", "reviewer"] as const)("keeps discovered Ollama %s selection on its exact-model path", async local_role => {
@@ -718,7 +839,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         });
         f.omlx.detect = vi.fn(async model => createOmlxTarget("http://127.0.0.1:8000/v1", model!, 65536, "synthetic-provider-key"));
         expect(await runInfer(ask(), f.deps)).toMatchObject({ backend: "omlx", model_picked: id, output: OUTPUT });
-        expect(f.omlx.detect).toHaveBeenCalledWith(id);
+        expect(f.omlx.detect).toHaveBeenCalledWith(id, expect.objectContaining({ deadlineMs: expect.any(Number) }));
         expect(recommend).not.toHaveBeenCalled(); expect(inventory).not.toHaveBeenCalled();
     });
     it("refuses a lower oMLX ceiling before automatic discovery", async () => {
@@ -771,7 +892,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         const f = fixture();
         f.deps.codingPreference = vi.fn(async () => ({ saved: "auto", effective: "auto", envOverride: null, configured: true, model: MODEL }));
         expect(await runInfer(ask({ local_backend: undefined }), f.deps)).toMatchObject({ backend: "omlx", model_picked: MODEL });
-        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, expect.objectContaining({ deadlineMs: expect.any(Number) }));
         expect(f.deps.listTags).not.toHaveBeenCalled();
     });
     it("does not consult preferences when a task explicitly names backend and model", async () => {
@@ -784,7 +905,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         f.deps.codingPreference = async () => ({ saved: "ollama", effective: "ollama", configured: false, envOverride: null,
             models: { omlx: { coder: MODEL, reviewer: MODEL } } });
         expect(await runInfer(ask({ local_role }), f.deps)).toMatchObject({ backend: "omlx", model_picked: MODEL });
-        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, expect.objectContaining({ deadlineMs: expect.any(Number) }));
     });
     it.each(["coder", "reviewer"] as const)("uses the selected Ollama %s model without a named-tier fallback", async local_role => {
         const f = fixture(); const id = "org/next-build:tag";
@@ -857,7 +978,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
     it("detects first, classifies with the oMLX classifier without touching Ollama, and reports actual metadata", async () => {
         const f = fixture(); const result = await runInfer(ask({ local_model: MODEL }), f.deps);
         expect(f.events).toEqual(["detect", "classify", "generate"]);
-        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, expect.objectContaining({ deadlineMs: expect.any(Number) }));
         // The classifier reads with the oMLX model and the owned-path adapter, never Ollama's 4b.
         expect(vi.mocked(f.deps.callLayer1!).mock.calls[0][2]).toBe(OMLX_LAYER1_MODEL);
         expect(typeof vi.mocked(f.deps.callLayer1!).mock.calls[0][3]).toBe("function");
@@ -903,7 +1024,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         f.omlx.generate = vi.fn(() => new Promise(resolve => setTimeout(() => {
             f.events.push("generation-settled"); resolve({ ok: false as const, reason: "timeout" });
         }, 300)));
-        await expect(runInfer(ask({ timeout_ms: 50 }), f.deps)).rejects.toThrow("no backend produced output");
+        expect(await runInfer(ask({ timeout_ms: 50 }), f.deps)).toMatchObject({ backend: "refused", gate_outcome: { reason: "timeout" } });
         expect(f.events.indexOf("generation-settled")).toBeGreaterThan(-1);
         expect(f.events.indexOf("generation-settled")).toBeLessThan(f.events.indexOf("release"));
     });
@@ -1220,13 +1341,23 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         });
         const first = runInfer(ask(), f.deps); await started;
         const second = runInfer(ask(), f.deps);
-        let classified = false;
-        const standalone = callLayer1("Write a Python identity function.", "http://unused", "prism-coder:4b")
-            .then(() => { classified = true; });
-        await new Promise(resolve => setTimeout(resolve, 5));
-        expect(f.omlx.detect).toHaveBeenCalledTimes(1); expect(classified).toBe(false);
-        release(); await Promise.all([first, second, standalone]);
-        expect(f.omlx.generate).toHaveBeenCalledTimes(2); expect(classified).toBe(true);
+        const classificationFetch = vi.fn<typeof fetch>(async input => {
+            const path = new URL(String(input)).pathname;
+            if (path === "/api/show") return Response.json({ modelfile: "" });
+            if (path === "/api/chat") return Response.json({ message: { content: "OBVIOUS_NOT_RESERVED" } });
+            throw new Error("Unexpected classification fixture request");
+        });
+        const standalone = callLayer1("Write a Python identity function.", "http://fixture.invalid", "prism-coder:4b", classificationFetch);
+        try {
+            await new Promise(resolve => setTimeout(resolve, 5));
+            expect(f.omlx.detect).toHaveBeenCalledTimes(1);
+            expect(classificationFetch).not.toHaveBeenCalled();
+        } finally {
+            release();
+            await Promise.all([first, second, standalone]);
+        }
+        expect(f.omlx.generate).toHaveBeenCalledTimes(2);
+        expect(await standalone).toBe("OBVIOUS_NOT_RESERVED");
     });
     it("preserves configured oMLX thinking unless explicitly overridden", async () => {
         const f = fixture(); await runInfer(ask(), f.deps);
