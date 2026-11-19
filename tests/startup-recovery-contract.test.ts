@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { getAllPossibleTools, PRISM_SERVER_INSTRUCTIONS } from "../src/server.js";
 import { CONTEXT_RECOVERY_POLICY_LINES, CONTEXT_RECOVERY_POLICY_TEXT } from "../src/contextRecoveryPolicy.js";
+import { HOST_IMAGE_ROUTING_GUIDANCE } from "../src/tools/hostImageRouting.js";
 import { findRecoveryBlockers, flatten } from "./helpers/contextRecovery.js";
 
 const REPO = join(__dirname, "..");
@@ -119,6 +120,11 @@ describe("server instructions and tool descriptions", () => {
     // Startup itself is still exactly-once and still not replaceable.
     expect(text).toMatch(/call session_bootstrap exactly once/i);
     expect(text).toMatch(/Do not substitute session_load_context for the startup call/i);
+  });
+
+  it("keeps the complete host image route in the window Claude Code renders", () => {
+    const visible = PRISM_SERVER_INSTRUCTIONS.slice(0, CLAUDE_CODE_INSTRUCTION_WINDOW);
+    expect(visible).toContain(HOST_IMAGE_ROUTING_GUIDANCE);
   });
 
   it("each save tool and the load tool state the same remedy", () => {

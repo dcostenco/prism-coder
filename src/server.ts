@@ -477,17 +477,10 @@ export function getAvailableTools(): Tool[] {
 }
 
 export const PRISM_SERVER_INSTRUCTIONS =
-  `Prism MCP — The Mind Palace for AI Agents. On the first user turn of every conversation, ` +
-  `including greetings, call session_bootstrap exactly once BEFORE any user-facing response, passing the ` +
-  `user's verbatim first message as {prompt: "<first user message>"}. The prompt is matched against ` +
-  `prompt_keywords ON-DEVICE to load symptom-triggered skills on turn one; it is used for routing ` +
-  `only and never leaves the machine. Pass {} only when there is no user message. ` +
-  `When the startup display lists "Symptom-triggered skills", those skills matched the first message's ` +
-  `trigger rules — read each before proposing any change. Surfacing a name is not loading it: hosts that ` +
-  `do not auto-load skill files must fetch each body with knowledge_search, passing the skill name ` +
-  `exactly as listed. ` +
-  `AFTER turn one, call session_route_prompt at the start of any turn with a new task, changed work, or reported defect. Pass the verbatim message as {prompt} and held skills as {loaded}; supply current project, working_directory, files_involved and test_command when known. Read and follow returned skills. When prism_factory_route has target factory, automatically call recommended_tool with recommended_args, then monitor status. Routing itself never executes code. ` +
-  `${HOST_IMAGE_ROUTING_GUIDANCE} ` +
+  `Prism MCP. On each conversation's first user turn, including greetings, call session_bootstrap exactly once ` +
+  `BEFORE any user-facing response. Pass the user's verbatim first message as {prompt: "<first user message>"}. ` +
+  `The prompt matches prompt_keywords ON-DEVICE only for first-turn skill routing and never leaves the machine. ` +
+  `Pass {} only when there is no user message. ` +
   `Emit no preamble. Print the complete tool result verbatim as the entire first-turn startup display, before any optional ` +
   `answer. Do not summarize, paraphrase, rename headings, reformat, or omit any returned section. Preserve its order and ` +
   `line content. For a greeting-only prompt, stop after the verbatim startup display. ` +
@@ -495,6 +488,13 @@ export const PRISM_SERVER_INSTRUCTIONS =
   `session_load_context to recover when a save is refused with context_not_loaded (pass that save's project ` +
   `and conversation_id, then retry the save once; recovery is not a second startup), for an explicit project ` +
   `reload, or as an older-server fallback. ` +
+  `AFTER turn one, start new tasks, changed work, or reported defects with session_route_prompt. ` +
+  `${HOST_IMAGE_ROUTING_GUIDANCE} ` +
+  `When the startup display lists "Symptom-triggered skills", those skills matched the first message's ` +
+  `trigger rules — read each before proposing any change. Surfacing a name is not loading it: hosts that ` +
+  `do not auto-load skill files must fetch each body with knowledge_search, passing the skill name ` +
+  `exactly as listed. ` +
+  `For prompt routing, pass the verbatim message as {prompt} and held skills as {loaded}; supply current project, working_directory, files_involved and test_command when known. Read and follow returned skills. When prism_factory_route has target factory, automatically call recommended_tool with recommended_args, then monitor status. Routing itself never executes code. ` +
   `Use session_save_ledger to log completed work and session_save_handoff to preserve state for the next session. ` +
   `Reuse the conversation_id from session_bootstrap's <prism_session /> line for those saves and for ` +
   `session_detect_drift, the 60-minute goal-alignment drift check. Do not add the id to the visible greeting.\n\n` +

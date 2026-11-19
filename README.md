@@ -2,11 +2,11 @@
 
 **Give your AI agent memory that lasts — and see the cloud tokens it never had to spend.** Persistent sessions, knowledge graphs, offline tool-routing, and an auditable savings meter. Fully local and free.
 
-> **Current release: v20.22.5 — local oMLX images and memory accounting**
-> Choose an independent image model from discovered local inventory. Compatible
-> oMLX servers support controlled PNG image requests with local screening and
-> generation. Image accuracy depends on the model; Ollama image execution remains
-> unavailable for the saved image choice. See the [oMLX guide](docs/omlx.md).
+> **Current release: v20.22.5 — oMLX coding, review, and images**
+> Save exact coder and reviewer assignments, including models from an existing
+> or managed oMLX server. The image model has its own setting. Compatible oMLX
+> servers support controlled PNG requests with local screening. See the
+> [oMLX guide](docs/omlx.md).
 
 [![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm)](https://www.npmjs.com/package/prism-mcp-server)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8)](https://github.com/modelcontextprotocol/servers)
@@ -246,6 +246,11 @@ or by re-enabling after each run.
 
 ## What's New in v20.22.5
 
+- **Exact coder and reviewer assignments:** save the backend and model for each
+  role. Explicit task choices take precedence. Prism refuses incompatible
+  backend and model choices.
+- **Owner-reviewed local tasks:** a task packet binds the reviewed request,
+  runtime, model and environment for one execution through the oMLX bridge.
 - **Independent image model:** Settings exposes a separate image choice from
   discovered oMLX/Ollama inventory, without changing coder/reviewer assignments.
 - **Controlled local images:** compatible oMLX servers accept inline PNGs after

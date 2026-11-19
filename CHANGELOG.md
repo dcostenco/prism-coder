@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 20.22.5 — 2026-10-27
 
 - Add exact coder and reviewer execution-role assignments for local oMLX,
   Ollama, Synalux cloud and trusted host profiles. Non-code inference keeps its
@@ -14,9 +14,6 @@ All notable changes to this project will be documented in this file.
   bypass the bridge's oMLX-only contract.
 - Keep direct-Supabase merge history compatible with legacy schemas while
   preserving exact project, author, role and legacy-workspace isolation.
-
-## 20.22.5 — 2026-10-27
-
 - Add an independent Image model section with discovered oMLX and Ollama
   inventory. Image preferences remain separate from coder/reviewer roles;
   saving a choice does not install or load a model.
