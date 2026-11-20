@@ -486,6 +486,7 @@ export async function inspectOmlxCodingModels(options: OmlxConnectionOptions = {
         return { id: entry.id, loaded: entry.loaded,
             ...(positive(entry.estimated_size) ? { weightBytes: entry.estimated_size } : {}),
             ...(entry.loaded && positive(entry.actual_size) ? { loadedBytes: entry.actual_size } : {}),
+            ...(positive(entry.resident_estimated_size) ? { residentEstimateBytes: entry.resident_estimated_size } : {}),
             ...(positive(entry.max_context_window) ? { contextTokens: entry.max_context_window } : {}) };
     });
 }

@@ -6,7 +6,7 @@ function fixture(overrides: Record<string, unknown> = {}, weightBytes = 12 * GIB
         "example.block_count": 60, "example.embedding_length": 4096, "example.attention.head_count": 32, "example.attention.head_count_kv": 8, ...overrides };
     const fetcher = vi.fn(async (url: any, init?: RequestInit) => {
         const data = String(url).endsWith("/api/tags") ? { models: [{ name: id, size: weightBytes }] }
-            : String(url).endsWith("/api/ps") ? { models: [{ name: id, size_vram: 13 * GIB, context_length: 4096 }] }
+            : String(url).endsWith("/api/ps") ? { models: [{ name: id, size: 15 * GIB, size_vram: 13 * GIB, context_length: 4096 }] }
             : { model_info: info, capabilities: ["completion", "thinking"], parameters: "num_ctx 65536" };
         return new Response(JSON.stringify(data));
     });
@@ -28,7 +28,7 @@ describe("discovered Ollama coding models", () => {
     });
     it("discovers arbitrary IDs, weights and loaded memory without inference or pull calls", async () => {
         const { fetcher } = fixture();
-        expect(await inspectOllamaCodingModels("http://local", fetcher)).toEqual([{ id, weightBytes: 12 * GIB, loaded: true, loadedBytes: 13 * GIB, contextTokens: 4096 }]);
+        expect(await inspectOllamaCodingModels("http://local", fetcher)).toEqual([{ id, weightBytes: 12 * GIB, loaded: true, loadedBytes: 15 * GIB, loadedVramBytes: 13 * GIB, contextTokens: 4096 }]);
         expect(fetcher.mock.calls.map(call => call[0])).toEqual(["http://local/api/tags", "http://local/api/ps"]);
         expect(fetcher.mock.calls.every(call => call[1]?.redirect === "error")).toBe(true);
     });

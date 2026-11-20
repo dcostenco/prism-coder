@@ -29,6 +29,21 @@ describe("available memory estimate", () => {
         expect(parse(snapshot("10", "20", "1000000"))).toBe(30 * 16384);
     });
 
+    it("reports reclaimable headroom without crediting it to automatic cold loads", async () => {
+        vi.mocked(execSync).mockReturnValue(snapshot("130452", "518539", "1073915", "19452", "11273"));
+        const memory = await import("../../src/utils/availableMemory.js");
+        expect(memory.getReclaimableMemoryBytes()).toBe((130452 + 1073915) * 16384);
+        expect(memory.getAvailableMemoryBytes()).toBe((130452 + 518539) * 16384);
+    });
+
+    it("requires one valid inactive counter and keeps zero-valued samples", async () => {
+        const { parseDarwinReclaimableMemoryEstimate: parse } = await import("../../src/utils/availableMemory.js");
+        expect(parse(snapshot().replace("Pages inactive: 100.\n", ""))).toBeNull();
+        expect(parse(snapshot() + "Pages inactive: 1.\n")).toBeNull();
+        expect(parse(snapshot("10", "80", "-1"))).toBeNull();
+        expect(parse(snapshot("0", "500", "0"))).toBe(0);
+    });
+
     it("accepts zero, CRLF and both macOS page sizes", async () => {
         const { parseDarwinMemoryEstimate: parse } = await import("../../src/utils/availableMemory.js");
         expect(parse(snapshot("0", "3"))).toBe(3 * 16384);

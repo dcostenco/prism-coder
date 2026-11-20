@@ -121,20 +121,36 @@ function saveExecutionRoles(event) {
     }).catch(function(error) { document.getElementById('execution-role-status').textContent = error.message; document.getElementById('execution-role-save').disabled = false; });
 }
 function localCodingGiB(bytes) { return (bytes / Math.pow(1024, 3)).toFixed(1) + ' GiB'; }
+function localAvailableRamText(bytes) {
+    return Number.isSafeInteger(bytes) && bytes >= 0 ? localCodingGiB(bytes) : 'unknown';
+}
+function localModelMemoryText(backend, model) {
+    var sizeLabel = backend === 'omlx' ? 'Server model size estimate: ' : 'Stored model: ';
+    var text = sizeLabel + localAvailableRamText(model.weightBytes);
+    if (model.loaded === true) {
+        text += ' · Reported loaded memory: ' + localAvailableRamText(model.loadedBytes);
+        if (backend === 'ollama' && Number.isSafeInteger(model.loadedVramBytes) && model.loadedVramBytes >= 0) {
+            text += ' · GPU portion: ' + localCodingGiB(model.loadedVramBytes);
+        }
+    } else if (model.loaded === false) {
+        text += ' · Not loaded';
+    } else {
+        text += ' · Load status unknown';
+    }
+    if (backend === 'omlx') text += ' · Server resident estimate: ' + localAvailableRamText(model.residentEstimateBytes);
+    return text;
+}
 function renderLocalCodingMemory() {
     ['omlx','ollama'].forEach(function(backend) {
         ['coder','reviewer'].forEach(function(role) {
             var id = document.getElementById('local-coding-' + backend + '-' + role).value;
             var model = localCodingModels[backend].filter(function(item) { return item.id === id; })[0];
             var text = !id ? 'Uses the backend default. No role-specific model is saved.' : !model ? (localCodingDiscoveryErrors[backend] ? 'Inventory unavailable; model availability and memory are unknown.' : 'Saved model is unavailable. It will be refused rather than replaced.') :
-                (model.weightBytes ? 'Reported weights: ' + localCodingGiB(model.weightBytes) : 'Weight size unknown') +
-                (model.loadedBytes ? ' · Loaded memory: ' + localCodingGiB(model.loadedBytes) : model.loaded === true ? ' · Loaded; memory unknown' : model.loaded === false ? ' · Not loaded' : ' · Load status unknown') +
-                (model.weightBytes ? ' · Cold-load RAM estimate: at least ' + localCodingGiB(Math.max(model.weightBytes * 1.5, model.weightBytes + 2 * Math.pow(1024,3))) : ' · RAM requirements unknown');
-            if (backend === 'omlx' && id) {
+                localModelMemoryText(backend, model);
+            if (backend === 'omlx' && model) {
                 var classifier = localCodingModels.omlx.filter(function(item) { return item.id === localCodingClassifier; })[0];
                 if (id === localCodingClassifier) text += ' · Shares the safety model; no duplicate weight allocation.';
-                else if (model && model.weightBytes && classifier && classifier.weightBytes) text += ' · With safety dependency: at least ' + localCodingGiB(Math.max(model.weightBytes * 1.5, model.weightBytes + 2 * Math.pow(1024,3)) + Math.max(classifier.weightBytes * 1.5, classifier.weightBytes + 2 * Math.pow(1024,3))) + ' cold-load RAM; peak unknown.';
-                else text += ' · Coding/review safety dependency RAM unknown.';
+                else text += ' · Safety model resident estimate: ' + localAvailableRamText(classifier && classifier.residentEstimateBytes);
             }
             document.getElementById('local-coding-' + backend + '-' + role + '-memory').textContent = text;
         });
@@ -197,7 +213,7 @@ function loadLocalCoding(reset) {
             renderExecutionRoles(data);
         }
         localCodingLoaded = true;
-        document.getElementById('local-coding-memory').textContent = 'Available RAM: ' + (data.availableMemoryBytes ? localCodingGiB(data.availableMemoryBytes) : 'unknown') + '. Estimates are per request, not the sum of assigned roles. Coding/review also need their safety model; the same resident model is counted once. Workload peaks remain unknown. Fresh runtime admission checks still apply.';
+        document.getElementById('local-coding-memory').textContent = 'Host RAM estimate: ' + localAvailableRamText(data.availableMemoryBytes) + '. Load and prefill peaks depend on the request and current model residency. Runtime admission checks still apply.';
         renderLocalCodingMemory();
         var admin = document.getElementById('local-coding-admin');
         admin.style.display = connection.adminUrl ? 'inline' : 'none';

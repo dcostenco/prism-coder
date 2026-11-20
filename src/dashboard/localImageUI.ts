@@ -78,9 +78,7 @@ function renderLocalImageMetadata() {
         var model = localImageModels[backend].filter(function(item) { return item.id === id; })[0];
         var text = !id ? 'No image model selected. No coding model is inherited.' : !model ? (localImageErrors[backend] ? 'Inventory unavailable; saved model availability is unknown.' : 'Selected model is unavailable in the current inventory.') :
             'Installed · Advertised vision: ' + model.capability.vision + ' (' + (model.capability.source === 'omlx.engine_type' ? 'oMLX engine metadata' : model.capability.source === 'ollama.show.capabilities' ? 'Ollama exact model metadata' : 'metadata unavailable or not inspected') + ')' +
-            (model.weightBytes ? ' · Weights: ' + localCodingGiB(model.weightBytes) : ' · Weight size unknown') +
-            (model.loadedBytes ? ' · Loaded memory: ' + localCodingGiB(model.loadedBytes) : model.loaded === true ? ' · Loaded; memory unknown' : model.loaded === false ? ' · Not loaded' : ' · Load status unknown') +
-            (model.residentEstimateBytes ? ' · Server resident estimate: ' + localCodingGiB(model.residentEstimateBytes) : '');
+            ' · ' + localModelMemoryText(backend, model);
         document.getElementById('local-image-' + backend + '-metadata').textContent = text + ' Image peak RAM unknown; execution requires a compatible server and current resource checks.' + (localImageErrors[backend] ? ' ' + localImageErrors[backend] : '');
     });
 }
@@ -119,7 +117,7 @@ function loadLocalImages(reset) {
         });
         localImageLoaded = true;
         localImageCanManage = data.canManage;
-        document.getElementById('local-image-memory').textContent = 'Available RAM: ' + (data.availableMemoryBytes ? localCodingGiB(data.availableMemoryBytes) : 'unknown') + '. Metadata is advisory; image peak RAM is unknown. Refresh never loads, downloads or unloads a model.';
+        document.getElementById('local-image-memory').textContent = 'Host RAM estimate: ' + localAvailableRamText(data.availableMemoryBytes) + '. Image peak RAM is unknown. Refresh never loads, downloads or unloads a model.';
         document.getElementById('local-image-saved').textContent = 'Saved image backend: ' + (settings.backend || 'not selected') + ' · oMLX checks compatibility on each request; saving does not load a model.';
         if (!data.canManage) document.getElementById('local-image-error').textContent = 'Open this dashboard on this Mac to change image preferences.';
         renderLocalImageMetadata();

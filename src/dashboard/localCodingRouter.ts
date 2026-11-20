@@ -6,7 +6,7 @@ import { readLocalCodingSettings, saveLocalCodingSettings, resolveLocalCodingMod
 import { omlxSetup, OmlxSetupError, OMLX_SETUP_MODELS } from "../utils/omlxSetup.js";
 import { inspectOllamaCodingModels, inspectOllamaImageModels } from "../utils/ollamaCodingModels.js";
 import { isLocalCodingModelId } from "../utils/localCodingSettings.js";
-import { getAvailableMemoryBytes } from "../utils/availableMemory.js";
+import { getReclaimableMemoryBytes } from "../utils/availableMemory.js";
 import { readLocalImageSettings } from "../utils/localImageSettings.js";
 import { activateLocalAiSource, inspectLocalAiSource, localAiAssignments, localAiSnapshot, saveLocalAiModels, saveLocalAiImages, saveExecutionRoles, LocalAiConflict, type LocalAiSaveRevision } from "./localAiActions.js";
 import { configuredHostProfiles } from "../utils/executionRoles.js";
@@ -46,7 +46,7 @@ export interface LocalCodingRouterDeps {
 }
 const defaults: LocalCodingRouterDeps = { setup: omlxSetup, settings: readLocalCodingSettings, save: saveLocalCodingSettings,
     preference: localCodingPreference, inspect: inspectOmlx, detect: detectOmlx, control: hasOmlxControl, connectionControl: inspectOmlxControl, configuredModel: configuredOmlxModel,
-    omlxModels: inspectOmlxCodingModels, ollamaModels: inspectOllamaCodingModels, availableMemory: getAvailableMemoryBytes,
+    omlxModels: inspectOmlxCodingModels, ollamaModels: inspectOllamaCodingModels, availableMemory: getReclaimableMemoryBytes,
     snapshot: localAiSnapshot, inspectSource: inspectLocalAiSource, activateSource: activateLocalAiSource, saveModels: saveLocalAiModels,
     saveRoles: saveExecutionRoles, hostProfiles: configuredHostProfiles,
     cloudStatus: async () => { const e = await getEntitlements(); return e.source === "fallback_free" ? "unknown" : e.features.cloud_fallback ? "entitled" : "not_in_plan"; },

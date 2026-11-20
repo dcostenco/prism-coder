@@ -11,11 +11,21 @@ export interface LocalCodingModelObservation {
     id: string;
     weightBytes?: number;
     loadedBytes?: number;
+    loadedVramBytes?: number;
+    residentEstimateBytes?: number;
     loaded: boolean;
     contextTokens?: number;
 }
 export interface LocalModelProbeOptions { deadlineMs?: number; signal?: AbortSignal; requestedContextTokens?: number; track?: (promise: Promise<unknown>) => void }
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+
+function ollamaLoadedMemory(model?: { size?: unknown; size_vram?: unknown }): { loadedBytes?: number; loadedVramBytes?: number } {
+    const vram = model?.size_vram;
+    return {
+        ...(positive(model?.size) ? { loadedBytes: model.size } : {}),
+        ...(vram === 0 || positive(vram) ? { loadedVramBytes: vram } : {}),
+    };
+}
 
 /** Read-only metadata probes; never pulls or loads a model. */
 async function metadata(url: string, fetchImpl: typeof fetch, model?: string, options: LocalModelProbeOptions = {}): Promise<Record<string, any>> {
@@ -112,7 +122,7 @@ export async function inspectOllamaImageModels(selectedId?: string, url = PRISM_
             const loaded = ps.models.find((row: any) => row && (row.name === entry.name || row.model === entry.name));
             return { id: entry.name, loaded: Boolean(loaded), capability: advertisedImageCapability("ollama", {}),
                 ...(positive(entry.size) ? { weightBytes: entry.size } : {}),
-                ...(positive(loaded?.size_vram) ? { loadedBytes: loaded.size_vram } : {}) };
+                ...ollamaLoadedMemory(loaded) };
         });
         const selected = models.find(model => model.id === selectedId);
         if (selected) {
@@ -133,7 +143,7 @@ export async function inspectOllamaCodingModels(url = PRISM_LOCAL_LLM_URL, fetch
         const loaded = ps.models.find((entry: any) => entry && (entry.name === model.name || entry.model === model.name));
         return { id: model.name, loaded: Boolean(loaded),
             ...(positive(model.size) ? { weightBytes: model.size } : {}),
-            ...(positive(loaded?.size_vram) ? { loadedBytes: loaded.size_vram } : {}),
+            ...ollamaLoadedMemory(loaded),
             ...(positive(loaded?.context_length) ? { contextTokens: loaded.context_length } : {}) };
     });
 }

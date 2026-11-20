@@ -22,7 +22,7 @@
  */
 
 import { readFileSync, writeFileSync, readdirSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { freemem, homedir } from "node:os";
 import { join, resolve, extname, sep } from "node:path";
 import { execSync, execFileSync } from "node:child_process";
 
@@ -53,29 +53,26 @@ const OLLAMA_HOST = "http://localhost:11434";
 const TIER_ORDER = ["27b", "9b", "4b", "2b"];
 const TIER_RAM   = { "27b": 17_000, "9b": 7_000, "4b": 3_000, "2b": 1_500 }; // MB
 
-function freeRamMB() {
+async function availableColdLoadBytes() {
   try {
-    const out = execSync("vm_stat", { encoding: "utf8" });
-    let free = 0, inactive = 0, spec = 0;
-    for (const line of out.split("\n")) {
-      const n = parseInt(line.match(/(\d+)/)?.[1] ?? "0") * 16;
-      if (line.includes("Pages free"))        free     = n;
-      if (line.includes("Pages inactive"))    inactive = n;
-      if (line.includes("Pages speculative")) spec     = n;
-    }
-    return free + spec + inactive; // KB → divide by 1024 for MB
-  } catch { return 8_000 * 1024; } // safe default
+    const { getAvailableMemoryBytes } = await import("../dist/utils/availableMemory.js");
+    return getAvailableMemoryBytes();
+  } catch (error) {
+    if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
+    // This standalone script is also usable from an unbuilt checkout.
+    return freemem();
+  }
 }
 
-function pickModel(ceiling) {
+export function pickModel(ceiling, availableBytes) {
+  if (!Number.isSafeInteger(availableBytes) || availableBytes < 0) return null;
   const ceilingIdx = ceiling ? TIER_ORDER.indexOf(ceiling) : 0;
-  const freeKB = freeRamMB();
-  const freeMB = freeKB / 1024;
+  const freeMB = availableBytes / (1024 ** 2);
   for (let i = Math.max(0, ceilingIdx); i < TIER_ORDER.length; i++) {
     const tier = TIER_ORDER[i];
     if (freeMB >= TIER_RAM[tier]) return `dcostenco/prism-coder:${tier}`;
   }
-  return "dcostenco/prism-coder:2b";
+  return null;
 }
 
 // ── IS_MAIN detection (must come before args parsing so import doesn't exit) ──
@@ -87,7 +84,7 @@ const IS_MAIN = process.argv[1] && (
 // ── CLI args (only parsed when run directly) ──────────────────────────────────
 let ceiling = null;
 let outputFile = null;
-let MODEL = process.env.PRISM_MODEL || pickModel(null);
+let MODEL = process.env.PRISM_MODEL;
 let MAX_ROUNDS = parseInt(process.env.PRISM_MAX_ROUNDS ?? "6");
 let TIMEOUT_MS = parseInt(process.env.PRISM_TIMEOUT_MS ?? "120000");
 let prompt = "";
@@ -109,13 +106,17 @@ if (IS_MAIN) {
     args.splice(outIdx, 2);
   }
 
-  MODEL = process.env.PRISM_MODEL || pickModel(ceiling);
   MAX_ROUNDS = parseInt(process.env.PRISM_MAX_ROUNDS ?? "6");
   TIMEOUT_MS = parseInt(process.env.PRISM_TIMEOUT_MS ?? "120000");
 
   prompt = args.join(" ").trim();
   if (!prompt) {
     console.error("Usage: node scripts/prism-agent.mjs [--ceiling 9b] [-o output.py] \"your question\"");
+    process.exit(1);
+  }
+  MODEL ||= pickModel(ceiling, await availableColdLoadBytes());
+  if (!MODEL) {
+    console.error("Available memory is below the minimum for automatic Ollama model selection.");
     process.exit(1);
   }
 }

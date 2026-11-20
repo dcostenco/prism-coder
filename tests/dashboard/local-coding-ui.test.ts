@@ -3,7 +3,7 @@ import { JSDOM } from "jsdom";
 import { localCodingPanelHTML, localCodingScript } from "../../src/dashboard/localCodingUI.js";
 const windows: JSDOM[] = [];
 afterEach(() => { windows.splice(0).forEach(dom => dom.window.close()); });
-function fixture() {
+function fixture(availableMemoryBytes: number | null = 20 * 1024 ** 3) {
     let settings: any = { backend: "auto", source: "existing" };
     let assignments: any = {}, revision = 'a'.repeat(64), imageSettings: any = {}, changeBeforeImageSave = false;
     const posts: any[] = [];
@@ -20,10 +20,10 @@ function fixture() {
             if (body.revision !== revision) return { ok: false, json: async () => ({error:'Preferences changed. Refresh and retry.'}) } as Response;
             if (body.settings) settings = body.settings; if (body.assignments) assignments = body.assignments;
             return { ok: true, json: async () => ({ saved: true }) } as Response; }
-        if (String(_url).startsWith('/api/local-coding/image-models')) return { ok:true,json:async()=>({settings:imageSettings,discovered:{omlx:[{id:'new/vision',capability:{vision:true,source:'omlx.engine_type'}}],ollama:[]},discoveryErrors:{},availableMemoryBytes:20*1024**3,canManage:true}) } as Response;
+        if (String(_url).startsWith('/api/local-coding/image-models')) return { ok:true,json:async()=>({settings:imageSettings,discovered:{omlx:[{id:'new/vision',capability:{vision:true,source:'omlx.engine_type'}}],ollama:[]},discoveryErrors:{},availableMemoryBytes,canManage:true}) } as Response;
         return { ok: true, json: async () => ({ settings, assignments, revision, executionCatalog: { cloud: {status:'entitled'}, hosts: [{id:'b'.repeat(64),provider:'fixture',model:'host-model',effort:'high',status:'configured'}] }, preference: { envOverride: null }, canManage: true,
             connection: { connected: true, control: true, model: "new/build", models: inventory.map(m => m.id) },
-            discovered: { omlx: inventory, ollama: [{ id: "next:tag", loaded: true }] }, discoveryErrors, availableMemoryBytes: 20 * 1024 ** 3,
+            discovered: { omlx: inventory, ollama: [{ id: "next:tag", loaded: true }] }, discoveryErrors, availableMemoryBytes,
             managed: { supported: true, installed: true, models: [], freeDiskGB: 100, job: null, server: { connected: true } } }) } as Response;
     };
     dom.window.eval(localCodingScript());
@@ -36,6 +36,46 @@ function fixture() {
         removeModel: () => { inventory = []; }, failInventory: () => { inventory = []; discoveryErrors = { omlx: 'Inventory unavailable' }; } };
 }
 describe("local model assignment controls", () => {
+    it('shows provider-specific sizes without inventing a combined cold-load minimum', async () => {
+        const f = fixture();
+        const read = f.dom.window.fetch;
+        const gib = 1024 ** 3;
+        f.dom.window.fetch = async (url, init) => {
+            const response = await read(url, init);
+            const data = await response.json();
+            data.requiredClassifier = 'safety/check';
+            data.discovered = {
+                omlx: [
+                    { id: 'new/build', loaded: false, weightBytes: 16 * gib, residentEstimateBytes: 14 * gib },
+                    { id: 'safety/check', loaded: false, weightBytes: 9 * gib, residentEstimateBytes: 8 * gib },
+                ],
+                ollama: [{ id: 'next:tag', loaded: true, weightBytes: 12 * gib, loadedBytes: 15 * gib, loadedVramBytes: 10 * gib }],
+            };
+            return { ok: true, json: async () => data } as Response;
+        };
+        await f.load();
+        const memory = (backend: string) => f.dom.window.document.getElementById('local-coding-' + backend + '-coder-memory')!.textContent;
+        f.field('omlx-coder').value = 'new/build';
+        f.field('ollama-coder').value = 'next:tag';
+        (f.dom.window as any).renderLocalCodingMemory();
+        expect(memory('omlx')).toContain('Server resident estimate: 14.0 GiB');
+        expect(memory('omlx')).toContain('Safety model resident estimate: 8.0 GiB');
+        expect(memory('omlx')).not.toContain('at least');
+        expect(memory('ollama')).toContain('Stored model: 12.0 GiB');
+        expect(memory('ollama')).toContain('Reported loaded memory: 15.0 GiB');
+        expect(memory('ollama')).toContain('GPU portion: 10.0 GiB');
+    });
+    it.each([[0, '0.0 GiB'], [null, 'unknown'], [-1, 'unknown']] as const)(
+        'reports %s bytes as %s in the coding and image panels', async (bytes, expected) => {
+            const f = fixture(bytes);
+            await f.load();
+            await f.loadImages();
+            for (const panel of ['coding', 'image']) {
+                expect(f.dom.window.document.getElementById('local-' + panel + '-memory')!.textContent)
+                    .toContain('Host RAM estimate: ' + expected);
+            }
+        },
+    );
     it.each(['coding','roles'])('an image save advances only the same-tab revision for the next %s save', async kind => {
         const f = fixture(); await f.load(); await f.loadImages(); const w = f.dom.window as any;
         f.field('omlx-coder').value = 'new/build';
@@ -160,8 +200,8 @@ describe("local model assignment controls", () => {
         expect(f.posts[0].settings.models).toEqual({ omlx: { coder: 'new/build', reviewer: 'new/build' }, ollama: { coder: 'next:tag', reviewer: 'next:tag' } });
         (f.dom.window as any).localCodingLoaded = false;
         await f.load(); expect(f.field('omlx-reviewer').value).toBe('new/build'); expect(f.field('ollama-reviewer').value).toBe('next:tag');
-        expect(f.field('omlx-reviewer-memory').textContent).toContain('Reported weights: 12.0 GiB');
-        expect(f.field('ollama-reviewer-memory').textContent).toContain('RAM requirements unknown');
+        expect(f.field('omlx-reviewer-memory').textContent).toContain('Server model size estimate: 12.0 GiB');
+        expect(f.field('ollama-reviewer-memory').textContent).toContain('Reported loaded memory: unknown');
     });
     it("preserves unsaved choices on refresh and shows a missing saved ID instead of replacing it", async () => {
         const f = fixture(); await f.load(); f.field('omlx-reviewer').value = 'new/build'; await f.load();
