@@ -182,9 +182,13 @@ function loadLocalCoding(reset) {
         var override = data.preference.envOverride;
         document.getElementById('local-coding-saved').textContent = 'Saved: ' + settings.backend + ' · ' + settings.source + (override ? ' · Environment override: ' + override : ' · Applies to new tasks without restarting');
         var connection = data.connection;
-        var classifier = connection.models.indexOf(data.requiredClassifier) >= 0;
+        var classifierStatus = data.classifierError;
+        if (!classifierStatus && connection.connected) {
+            classifierStatus = connection.models.indexOf(data.requiredClassifier) >= 0 ? 'classifier advertised' : 'required classifier not advertised';
+        }
         document.getElementById('local-coding-connection').textContent = !connection.connected ? 'oMLX not connected. Start or configure the selected server.' :
-            'oMLX connected · ' + (connection.model || 'choose a coding model') + ' · ' + (connection.control ? 'Prism control available' : 'Prism control unavailable') + ' · ' + (classifier ? 'classifier advertised' : 'required classifier not advertised');
+            'oMLX connected · ' + (connection.model || 'choose a coding model') + ' · ' + (connection.control ? 'Prism control available' : 'Prism control unavailable');
+        if (classifierStatus) document.getElementById('local-coding-connection').textContent += ' · ' + classifierStatus;
         if (connection.error) document.getElementById('local-coding-connection').textContent += ' · ' + connection.error;
         localCodingModels = data.discovered || {omlx:[],ollama:[]};
         localCodingClassifier = data.requiredClassifier || '';

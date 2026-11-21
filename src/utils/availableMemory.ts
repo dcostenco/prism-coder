@@ -62,7 +62,7 @@ function darwinAvailable(counter: DarwinCounter): number | null {
  * On macOS uses one vm_stat snapshot; elsewhere uses os.freemem(). Cached 1 s.
  */
 function getMemoryEstimate(counter: DarwinCounter): number {
-    const now = Date.now();
+    const now = performance.now();
     const cached = cache.get(counter);
     if (cached && now - cached.ts < TTL_MS) return cached.bytes;
 

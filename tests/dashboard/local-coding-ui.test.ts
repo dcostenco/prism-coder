@@ -65,6 +65,22 @@ describe("local model assignment controls", () => {
         expect(memory('ollama')).toContain('Reported loaded memory: 15.0 GiB');
         expect(memory('ollama')).toContain('GPU portion: 10.0 GiB');
     });
+    it('shows an invalid oMLX safety model configuration while keeping recovery controls available', async () => {
+        const f = fixture();
+        const read = f.dom.window.fetch;
+        const message = 'Invalid oMLX safety model configuration. Check PRISM_OMLX_CLASSIFIER_MODEL.';
+        f.dom.window.fetch = async (url, init) => {
+            const response = await read(url, init);
+            const data = await response.json();
+            data.requiredClassifier = null;
+            data.classifierError = message;
+            return { ok: true, json: async () => data } as Response;
+        };
+        await f.load();
+        expect(f.field('connection').textContent).toContain(message);
+        expect(f.field('connection').textContent).not.toContain('required classifier not advertised');
+        expect(f.field('omlx-coder').disabled).toBe(false);
+    });
     it.each([[0, '0.0 GiB'], [null, 'unknown'], [-1, 'unknown']] as const)(
         'reports %s bytes as %s in the coding and image panels', async (bytes, expected) => {
             const f = fixture(bytes);

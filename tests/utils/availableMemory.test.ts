@@ -13,7 +13,7 @@ describe("available memory estimate", () => {
         vi.resetModules();
         vi.clearAllMocks();
         vi.stubGlobal("process", { ...process, platform: "darwin" });
-        vi.spyOn(Date, "now").mockReturnValue(10000);
+        vi.spyOn(performance, "now").mockReturnValue(10000);
         vi.mocked(execSync).mockReturnValue(snapshot());
     });
     afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -76,11 +76,24 @@ describe("available memory estimate", () => {
         vi.mocked(execSync).mockReturnValue(snapshot());
         expect(read()).toBe(123);
         expect(execSync).toHaveBeenCalledTimes(1);
-        vi.mocked(Date.now).mockReturnValue(11000);
+        vi.mocked(performance.now).mockReturnValue(11000);
         expect(read()).toBe(90 * 16384);
-        vi.mocked(Date.now).mockReturnValue(12000);
+        vi.mocked(performance.now).mockReturnValue(12000);
         vi.mocked(execSync).mockImplementation(() => { throw new Error("unavailable"); });
         expect(read()).toBe(123);
+    });
+
+    it("expires cached estimates after elapsed time when the wall clock moves backward", async () => {
+        vi.spyOn(Date, "now").mockReturnValue(10000);
+        const memory = await import("../../src/utils/availableMemory.js");
+        expect(memory.getAvailableMemoryBytes()).toBe(90 * 16384);
+        expect(memory.getReclaimableMemoryBytes()).toBe(110 * 16384);
+        vi.mocked(Date.now).mockReturnValue(5000);
+        vi.mocked(performance.now).mockReturnValue(11000);
+        vi.mocked(execSync).mockReturnValue(snapshot("0", "0", "0"));
+        expect(memory.getAvailableMemoryBytes()).toBe(0);
+        expect(memory.getReclaimableMemoryBytes()).toBe(0);
+        expect(execSync).toHaveBeenCalledTimes(4);
     });
 
     it("keeps a valid zero without falling back to a larger number", async () => {

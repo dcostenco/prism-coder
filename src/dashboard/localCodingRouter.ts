@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { configuredOmlxModel, detectOmlx, hasOmlxControl, inspectOmlx, inspectOmlxControl, inspectOmlxCodingModels, inspectOmlxImageModels, inspectOmlxImageInput, OmlxError } from "../utils/omlxProvider.js";
 import { localCodingPreference } from "../utils/localCodingPreference.js";
 import { readLocalCodingSettings, saveLocalCodingSettings, resolveLocalCodingModel } from "../utils/localCodingSettings.js";
-import { omlxSetup, OmlxSetupError, OMLX_SETUP_MODELS } from "../utils/omlxSetup.js";
+import { omlxSetup, OmlxSetupError } from "../utils/omlxSetup.js";
+import { omlxLayer1Model } from "../utils/omlxLayer1.js";
 import { inspectOllamaCodingModels, inspectOllamaImageModels } from "../utils/ollamaCodingModels.js";
 import { isLocalCodingModelId } from "../utils/localCodingSettings.js";
 import { getReclaimableMemoryBytes } from "../utils/availableMemory.js";
@@ -13,6 +14,7 @@ import { configuredHostProfiles } from "../utils/executionRoles.js";
 import { getEntitlements } from "../utils/entitlements.js";
 
 const MAX_BODY_BYTES = 4096;
+const CLASSIFIER_CONFIGURATION_ERROR = "Invalid oMLX safety model configuration. Check PRISM_OMLX_CLASSIFIER_MODEL.";
 // Public synthetic 32x32 red square. Contains no user image or metadata.
 const LOCAL_AI_TEST_PNG = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR4nO3NsQ0AAAzCMP5/un0CNkuZ41wybXsHAAAAAAAAAAAAxR4yw/wuPL6QkAAAAABJRU5ErkJggg==";
 const LOCAL_AI_TEST_REFERENCE = Object.freeze({ source: "builtin-diagnostic", description: "Solid red square", width: 32, height: 32,
@@ -59,6 +61,10 @@ function json(res: ServerResponse, status: number, value: unknown) {
 }
 function loopback(req: IncomingMessage) {
     return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress ?? "");
+}
+function dashboardClassifier(): string | null {
+    try { return omlxLayer1Model(); }
+    catch { return null; }
 }
 async function readBody(req: IncomingMessage, requireBody = false): Promise<unknown> {
     const chunks: Buffer[] = []; let size = 0;
@@ -138,12 +144,13 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
                 const model = resolveLocalCodingModel(settings, "omlx", "coder") ?? await deps.configuredModel();
                 if (model) connection.model = model;
             } catch (error) { connection.error = error instanceof OmlxError ? error.reason : "Connection check unavailable."; }
+            const requiredClassifier = dashboardClassifier();
             json(res, 200, { settings, preference, preferenceError, managed, connection, discovered, discoveryErrors,
                 revision: snapshot.revision, assignments: snapshot.assignments,
                 executionCatalog: { schema: 1, hosts, cloud: { runtime: "synalux", status: cloud, model: null, effort: null,
                     billing: "Synalux plan; developer subscriptions do not provide API credits" } },
                 availableMemoryBytes: deps.availableMemory(), canManage: loopback(req),
-                requiredClassifier: OMLX_SETUP_MODELS[0].id }); return true;
+                requiredClassifier, classifierError: requiredClassifier === null ? CLASSIFIER_CONFIGURATION_ERROR : undefined }); return true;
         }
         if (req.method !== "POST") { json(res, 405, { error: "Method not allowed" }); return true; }
         // Installing packages is a local operator action. A configured remote
@@ -195,8 +202,14 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
             const model = purpose === "image" ? images.models?.[backend] : resolveLocalCodingModel(coding, backend, purpose);
             if (!model) { json(res, 200, { status: "blocked", reason: "model_not_selected", message: "Choose and save a model before testing." }); return true; }
             if (purpose === "image" && backend === "ollama") { json(res, 200, { status: "blocked", reason: "local_image_backend_not_enabled", message: "Ollama image execution is unavailable. Your selection is preserved." }); return true; }
-            if (purpose !== "image" && backend === "omlx" && !(await deps.inspect()).advertised_models.includes(OMLX_SETUP_MODELS[0].id)) {
-                json(res, 200, { status: "blocked", reason: "classifier_missing", message: "The required coding/review safety model is not installed. Image tasks do not require the coding pack." }); return true;
+            if (purpose !== "image" && backend === "omlx") {
+                const classifier = dashboardClassifier();
+                if (classifier === null) {
+                    json(res, 200, { status: "blocked", reason: "omlx_classifier_model_invalid", message: CLASSIFIER_CONFIGURATION_ERROR }); return true;
+                }
+                if (!(await deps.inspect()).advertised_models.includes(classifier)) {
+                    json(res, 200, { status: "blocked", reason: "classifier_missing", message: "The required coding/review safety model is not installed. Image tasks do not require the coding pack." }); return true;
+                }
             }
             const args = { mode: "code", max_tokens: 48, think: false, timeout_ms: 60_000, cloud_fallback: false, verify: false,
                 strict_entitlements: true, model_ceiling: "27b", route_guard: "local", escalation: "report",

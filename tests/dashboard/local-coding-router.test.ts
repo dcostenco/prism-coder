@@ -9,13 +9,13 @@ import { LocalAiConflict } from "../../src/dashboard/localAiActions.js";
 
 const servers: Server[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))); });
-async function fixture(overrides = {}) {
+async function fixture(overrides = {}, handle = handleLocalCodingRoutes) {
     let saved: LocalCodingSettings = { backend: "auto", source: "existing" };
     let revision = "a".repeat(64);
     const install = vi.fn(async () => ({ id: "fixture", state: "running" }));
     const start = vi.fn(async () => ({ starting: true, running: false }));
     const server = createServer(async (req, res) => {
-        const handled = await handleLocalCodingRoutes(new URL(req.url!, "http://127.0.0.1"), req, res, {
+        const handled = await handle(new URL(req.url!, "http://127.0.0.1"), req, res, {
             setup: { install, start, status: async () => ({ supported: true, installed: false, memoryGB: 48, freeDiskGB: 100,
                 requirements: { memoryGB: 32, freeDiskGB: 40 }, models: [], job: null, server: { connected: false, models: [] } }) },
             settings: async () => saved,
@@ -146,6 +146,35 @@ describe("dashboard local coding actions", () => {
         expect(await (await f.post("/api/local-coding/test", { backend: "ollama", purpose: "image" })).json()).toMatchObject({ status: "blocked", reason: "local_image_backend_not_enabled" });
         expect(infer).not.toHaveBeenCalled();
     });
+    it.each([
+        { configured: "local/custom-safety", advertised: ["local/custom-safety"], required: "local/custom-safety", status: "passed", reason: undefined },
+        { configured: "local/custom-safety", advertised: ["prism-coder-9b-mlx-8bit"], required: "local/custom-safety", status: "blocked", reason: "classifier_missing" },
+        { configured: "invalid safety ID", advertised: ["prism-coder-9b-mlx-8bit"], required: null, status: "blocked", reason: "omlx_classifier_model_invalid" },
+    ])("binds the oMLX dashboard and quick test to the host classifier: $configured with $advertised",
+        async ({ configured, advertised, required, status, reason }) => {
+            vi.resetModules();
+            vi.stubEnv("PRISM_OMLX_CLASSIFIER_MODEL", configured);
+            try {
+                const { handleLocalCodingRoutes: handle } = await import("../../src/dashboard/localCodingRouter.js");
+                const worker = "future/coder";
+                const infer = vi.fn(async () => ({ structuredContent: { backend: "omlx", model_picked: worker,
+                    used_cloud: false, output: "LOCAL_READY", gate_outcome: { status: "success" } } }));
+                const f = await fixture({ infer, settings: async () => ({ backend: "omlx", source: "existing", models: { omlx: { coder: worker } } }),
+                    connectionControl: async () => true,
+                    inspect: async () => ({ url: "http://127.0.0.1:8127/v1", advertised_models: advertised }),
+                    imageSettings: async () => ({}) }, handle);
+                const summary = await fetch(f.base + "/api/local-coding");
+                const diagnostic = await f.post("/api/local-coding/test", { backend: "omlx", purpose: "coder" });
+                expect(summary.status).toBe(200);
+                const data = await summary.json();
+                expect(data.requiredClassifier).toBe(required);
+                if (!required) expect(data.classifierError).toContain("PRISM_OMLX_CLASSIFIER_MODEL");
+                const result = await diagnostic.json();
+                expect(result.status).toBe(status);
+                expect(result.reason).toBe(reason);
+                expect(infer).toHaveBeenCalledTimes(status === "passed" ? 1 : 0);
+            } finally { vi.unstubAllEnvs(); }
+        });
     it("discovers both backends and persists the same model for both roles", async () => {
         const models = { omlx: { coder: "new/build", reviewer: "new/build" }, ollama: { coder: "future:tag", reviewer: "future:tag" } };
         const f = await fixture({ ollamaModels: async () => [{ id: "future:tag", loaded: false, weightBytes: 12345678 }] });
