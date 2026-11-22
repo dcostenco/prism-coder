@@ -35,6 +35,26 @@ describe("host task records", () => {
         expect(() => consumeHostTaskRecord(record, { directory, now: () => 1000 + HOST_TASK_TTL_MS })).toThrow("expired");
         expect(readdirSync(directory)).toEqual([record.id + ".json"]);
     });
+    it("refuses a claim whose deadline elapsed while its marker was being written", () => {
+        const record = createHostTaskRecord(binding, options());
+        let reads = 0;
+        const now = () => reads++ === 0 ? record.expires_at - 1 : record.expires_at;
+        expect(() => consumeHostTaskRecord(record, { directory, now })).toThrow("host_task_expired");
+        expect(readdirSync(directory)).toContain(record.id + ".used");
+    });
+    it("clears the orphan marker when the pending record was retired during the claim", () => {
+        const record = createHostTaskRecord(binding, options());
+        let retired = false;
+        const now = () => {
+            if (!retired) {
+                retired = true;
+                unlinkSync(join(directory, record.id + ".json"));
+            }
+            return 1000;
+        };
+        expect(() => consumeHostTaskRecord(record, { directory, now })).toThrow("ENOENT");
+        expect(readdirSync(directory)).toEqual([]);
+    });
     it("refuses symlink records and unsafe record permissions", () => {
         const record = createHostTaskRecord(binding, options());
         const path = join(directory, record.id + ".json");

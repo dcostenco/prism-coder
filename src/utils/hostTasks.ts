@@ -1,18 +1,26 @@
 /** Host-mediated execution. MCP can prepare tasks; only the host CLI enters execution. */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createHash } from "node:crypto";
+import { createHash, pbkdf2 } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { PRISM_LOCAL_LLM_URL, PRISM_USER_ID } from "../config.js";
 import { getSetting } from "../storage/configStorage.js";
 import { readLocalCodingSettings } from "./localCodingSettings.js";
 import { readLocalImageSettings } from "./localImageSettings.js";
 import { configuredHostProfiles, readExecutionAssignments } from "./executionRoles.js";
-import { createHostTaskRecord, consumeHostTaskRecord, type HostTaskKind, type HostTaskRecord } from "./hostTaskRecords.js";
+import {
+    checkHostTaskCapacity, checkHostTaskPending, createHostTaskId, createHostTaskRecord,
+    consumeHostTaskRecord, validateHostTaskRecord,
+    type HostTaskKind, type HostTaskRecord,
+} from "./hostTaskRecords.js";
 
 export const MAX_HOST_TASK_BYTES = 64 * 1024 * 1024;
+const ENVIRONMENT_BINDING_ITERATIONS = 600_000;
+const deriveEnvironmentDigest = promisify(pbkdf2);
+let preparing = 0;
 const mode = process.env.PRISM_HOST_TASKS;
 const configPath = resolve(process.env.PRISM_CONFIG_PATH ?? resolve(homedir(), ".prism-mcp", "prism-config.db"));
 const directory = resolve(process.env.PRISM_DATA_DIR ?? resolve(homedir(), ".prism-mcp"), "host-tasks");
@@ -70,7 +78,7 @@ export function hostTaskDigest(value: unknown): string {
 function object(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
-async function environmentDigest(): Promise<string> {
+async function environmentDigest(id: string): Promise<string> {
     const stored = {
         signedOut: await getSetting("PRISM_SYNALUX_SIGNED_OUT", "", { fresh: true }),
         baseUrl: await getSetting("PRISM_SYNALUX_BASE_URL", "", { fresh: true }),
@@ -81,9 +89,11 @@ async function environmentDigest(): Promise<string> {
     // Empty launcher values resolve through the same persisted profile.
     const account = { stored, effectiveKey: process.env.PRISM_SYNALUX_API_KEY?.trim() || stored.apiKey,
         effectiveUrl: process.env.PRISM_SYNALUX_BASE_URL?.trim() || process.env.SYNALUX_BASE_URL?.trim() || stored.baseUrl || stored.legacyUrl };
-    return hostTaskDigest({ codeBinding: codeDigest, configPath, directory, user: PRISM_USER_ID, ollamaUrl: PRISM_LOCAL_LLM_URL,
+    const environment = canonical({ codeBinding: codeDigest, configPath, directory, user: PRISM_USER_ID, ollamaUrl: PRISM_LOCAL_LLM_URL,
         account, boot: bootBinding, coding: await readLocalCodingSettings(), images: await readLocalImageSettings(),
         executionRoles: await readExecutionAssignments(), hostProfiles: await configuredHostProfiles() });
+    const key = await deriveEnvironmentDigest(environment, Buffer.from(id, "hex"), ENVIRONMENT_BINDING_ITERATIONS, 32, "sha256");
+    return key.toString("hex");
 }
 function payload(packet: HostTaskPacket) {
     return { request: packet.request, execution: packet.execution, metadata: packet.metadata };
@@ -94,10 +104,15 @@ export async function prepareHostTask(kind: HostTaskKind, request: Record<string
     if (!hostTasksRequired()) throw new Error("host_tasks_not_enabled");
     // Snapshot before any await: later caller mutation cannot retarget an approval.
     const task = snapshotHostTask({ request, execution: prepared, metadata });
-    const environment_sha256 = await environmentDigest();
-    const record = createHostTaskRecord({ kind, request_sha256: hostTaskDigest(task.request),
-        task_sha256: hostTaskDigest(task), environment_sha256 }, { directory });
-    return { record, ...task };
+    checkHostTaskCapacity({ directory }, preparing);
+    preparing++;
+    try {
+        const id = createHostTaskId();
+        const environment_sha256 = await environmentDigest(id);
+        const record = createHostTaskRecord({ kind, request_sha256: hostTaskDigest(task.request),
+            task_sha256: hostTaskDigest(task), environment_sha256 }, { directory, id });
+        return { record, ...task };
+    } finally { preparing--; }
 }
 
 export function hostTaskResponse(packet: HostTaskPacket) {
@@ -130,9 +145,15 @@ export async function executeApprovedHostTask<T>(input: unknown,
     const packet = (object(raw) && Object.hasOwn(raw, "host_task") ? raw.host_task : raw) as HostTaskPacket;
     if (!object(packet) || Object.keys(packet).sort().join(",") !== "execution,metadata,record,request"
         || !object(packet.record) || !object(packet.request) || !object(packet.execution) || !object(packet.metadata)) throw new Error("host_task_invalid_packet");
+    validateHostTaskRecord(packet.record);
     if (packet.record.request_sha256 !== hostTaskDigest(packet.request)
-        || packet.record.task_sha256 !== hostTaskDigest(payload(packet))
-        || packet.record.environment_sha256 !== await environmentDigest()) throw new Error("host_task_binding_changed");
+        || packet.record.task_sha256 !== hostTaskDigest(payload(packet))) throw new Error("host_task_binding_changed");
+    try { checkHostTaskPending(packet.record, { directory }); }
+    catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("host_task_binding_changed");
+        throw error;
+    }
+    if (packet.record.environment_sha256 !== await environmentDigest(packet.record.id)) throw new Error("host_task_binding_changed");
     // The OS-owned record, not a caller flag, establishes the prepared binding.
     // Claim before invoking any callback; a refused/failed task is still spent.
     consumeHostTaskRecord(packet.record, { directory });

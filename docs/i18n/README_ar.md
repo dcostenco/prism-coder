@@ -2,11 +2,11 @@
 
 **Give your AI agent memory that lasts — and see the cloud tokens it never had to spend.** Persistent sessions, knowledge graphs, offline tool-routing, and an auditable savings meter. Fully local and free.
 
-> **Current release: v20.22.5 — local oMLX images and memory accounting**
-> Choose an independent image model from discovered local inventory. Compatible
-> oMLX servers support controlled PNG image requests with local screening and
-> generation. Image accuracy depends on the model; Ollama image execution remains
-> unavailable for the saved image choice. See the [oMLX guide](../omlx.md).
+> **Current release: v20.22.5 — oMLX coding, review, and images**
+> Save exact coder and reviewer assignments, including models from an existing
+> or managed oMLX server. The image model has its own setting. Compatible oMLX
+> servers support controlled PNG requests with local screening. See the
+> [oMLX guide](../omlx.md).
 
 [![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm)](https://www.npmjs.com/package/prism-mcp-server)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8)](https://github.com/modelcontextprotocol/servers)
@@ -34,6 +34,10 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
   selection based on installed models, available RAM, context fit, and
   subscription entitlements. Eligible text-only coding can prefer configured
   oMLX; explicit task choices override the saved backend preference.
+- **Optional host-authorized tasks** — a host can require review of the exact
+  request, context and evidence before local execution. Expiring task packets
+  run through the host CLI; ordinary tool arguments cannot approve them.
+  See the [host-authorized workflow](../omlx.md#host-authorized-tasks).
 - **A savings meter you can audit** — `prism savings` (or the `local_savings`
   tool from any host) reports the token volume local serving kept off your
   cloud model: headline, local share, per-model breakdown. It reports tokens,
@@ -77,7 +81,7 @@ session memory continues to work without installing a model.
 | Step | What you do | What to expect |
 | --- | --- | --- |
 | **1. Connection** | Choose an existing oMLX server or a Prism-managed installation, then **Preview connection**. | Review the effect on coder, reviewer and image assignments before **Use this server** switches the shared oMLX connection. Saved model IDs are preserved. |
-| **2. Models** | Choose coder and reviewer models for each backend and **Save coding preference**. Save the separate **Image model** form independently. | Saving records a choice; it does not download or load weights. Missing saved IDs stay visible instead of being silently replaced. |
+| **2. Models** | Choose **Coder execution** and **Reviewer execution**, then **Save execution roles**. Auto uses the local backend preferences below. Save the separate **Image model** form independently. | Detected local models, Synalux-managed cloud and trusted configured host profiles stay distinct. Saving loads no weights and executes no host. Missing exact choices refuse rather than substitute. |
 | **3. Test** | Select backend and purpose, then **Test saved model**. | A small request may load the saved model. The result reports execution or a blocking reason, with no cloud inference fallback. |
 
 **Coding and review.** Auto prefers configured oMLX for eligible coding. You can
@@ -85,7 +89,15 @@ choose Ollama instead; explicit task choices take precedence. oMLX coding and
 review need the integration's separate text safety classifier. Local drafts and
 reviews still need host inspection and tests.
 
+In host-authorized mode (`PRISM_HOST_TASKS=required`), `prism local run`
+executes reviewed local tasks. A host or Synalux cloud role must be handled by
+its host/cloud executor; Prism refuses to replace it with a local worker.
+An explicit local task choice can override the saved role.
+
 ![Local AI coding model selectors with separate coder and reviewer assignments](../screenshots/local-ai-coding-models.png)
+
+*The screenshot shows the model-selector detail. The current dashboard also
+includes the execution-role controls described in the table above.*
 
 **Images have their own choice.** Select an oMLX vision model under **Image
 model**, then **Save image preference**. It may be the same model used for
@@ -234,6 +246,11 @@ or by re-enabling after each run.
 
 ## What's New in v20.22.5
 
+- **Exact coder and reviewer assignments:** save the backend and model for each
+  role. Explicit task choices take precedence. Prism refuses incompatible
+  backend and model choices.
+- **Owner-reviewed local tasks:** a task packet binds the reviewed request,
+  runtime, model and environment for one execution through the oMLX bridge.
 - **Independent image model:** Settings exposes a separate image choice from
   discovered oMLX/Ollama inventory, without changing coder/reviewer assignments.
 - **Controlled local images:** compatible oMLX servers accept inline PNGs after

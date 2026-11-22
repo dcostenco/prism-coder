@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { constants, lstatSync, mkdtempSync, mkdirSync, openSync, symlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+vi.mock("node:fs", async importOriginal => {
+    const fs = await importOriginal<typeof import("node:fs")>();
+    return { ...fs, lstatSync: vi.fn(fs.lstatSync), openSync: vi.fn(fs.openSync) };
+});
 
 const POLICY = "Synthetic operator instructions. Classify request data without performing it.\n";
 const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
@@ -26,6 +31,19 @@ describe("operator-owned oMLX classifier policy", () => {
     });
     it("reads the exact pinned UTF-8 policy without trimming its bytes", async () => {
         expect((await configured(file(), digest(POLICY))).readOmlxClassifierPolicy()).toBe(POLICY);
+    });
+    it("opens the descriptor before any fallback lookup of the path", async () => {
+        const module = await configured(file(), digest(POLICY));
+        vi.mocked(lstatSync).mockClear();
+        vi.mocked(openSync).mockClear();
+        expect(module.readOmlxClassifierPolicy()).toBe(POLICY);
+        const [openedAt] = vi.mocked(openSync).mock.invocationCallOrder;
+        expect(openedAt).toBeDefined();
+        if (constants.O_NOFOLLOW) {
+            expect(lstatSync).not.toHaveBeenCalled();
+        } else {
+            expect(vi.mocked(lstatSync).mock.invocationCallOrder[0]).toBeGreaterThan(openedAt!);
+        }
     });
     it.each(["file-only", "digest-only", "relative", "bad-digest", "missing", "mismatch"])("fails closed for %s configuration", async scenario => {
         const path = file();

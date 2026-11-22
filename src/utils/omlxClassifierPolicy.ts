@@ -22,13 +22,17 @@ export function readOmlxClassifierPolicy(): string | undefined {
     if (policyFile === undefined && policyDigest === undefined) return undefined;
     try {
         if (!policyFile || !isAbsolute(policyFile) || !policyDigest || !/^[a-f0-9]{64}$/.test(policyDigest)) throw new Error();
-        const entry = lstatSync(policyFile);
-        if (!entry.isFile() || entry.isSymbolicLink()) throw new Error();
-        const fd = openSync(policyFile, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+        const noFollow = constants.O_NOFOLLOW ?? 0;
+        const fd = openSync(policyFile, constants.O_RDONLY | noFollow | (constants.O_NONBLOCK ?? 0));
         let bytes: Buffer;
         try {
-            const stat = fstatSync(fd);
-            if (!stat.isFile() || stat.size <= 0 || stat.size > OMLX_CLASSIFIER_POLICY_MAX_BYTES) throw new Error();
+            const stat = fstatSync(fd, { bigint: true });
+            if (!stat.isFile() || stat.size <= 0n || stat.size > BigInt(OMLX_CLASSIFIER_POLICY_MAX_BYTES)) throw new Error();
+            // On platforms without O_NOFOLLOW, verify the name against the opened file before reading.
+            if (!noFollow) {
+                const entry = lstatSync(policyFile, { bigint: true });
+                if (!entry.isFile() || entry.dev !== stat.dev || entry.ino !== stat.ino) throw new Error();
+            }
             const buffer = Buffer.alloc(OMLX_CLASSIFIER_POLICY_MAX_BYTES + 1);
             let length = 0;
             while (length < buffer.length) {
