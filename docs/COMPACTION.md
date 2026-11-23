@@ -178,10 +178,13 @@ return thousands of entries, bloating the context window it's meant to manage.
    │       on-device summarization. If it cannot serve, stop compaction.
    └── Use the configured cloud provider only when the local-only policy is
        inactive and local inference is disabled or verified inventory and RAM
-       checks show no local tier can run. A closed local listener or empty inventory
-       still goes through the deterministic keyword check. Safety refusals,
-       authorization failures, malformed replies, cancellation, and unknown
-       provider failures abort compaction before the configured provider or writes.
+       checks show no local tier can run. Closed-listener evidence requires every
+       underlying connection result to be a refusal. The model inventory must
+       contain valid, unique IDs. A closed listener or empty inventory still goes
+       through the deterministic keyword check. Local classification and generation
+       require completed replies. Safety refusals, authorization failures, malformed
+       or partial replies, cancellation, and unknown provider failures abort
+       compaction before the configured provider or writes.
        │
        ▼
 4. If multiple chunks → meta-summarize chunk summaries into one final summary

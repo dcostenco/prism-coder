@@ -179,7 +179,11 @@ describe("Compaction inference failure boundary", () => {
         { label: "missing model list", path: "/api/tags", status: 200, body: "{}" },
         { label: "blank model name", path: "/api/tags", status: 200, body: '{"models":[{"name":" "}]}' },
         { label: "inventory contains a provider error", path: "/api/tags", status: 200, body: '{"models":[],"error":"denied"}' },
+        { label: "model ID with spaces", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture bad:latest"}]}' },
+        { label: "duplicate catalog model IDs", path: "/api/tags", status: 200, body: '{"models":[{"name":"other:latest"},{"name":"other:latest"}]}' },
         { label: "loaded model lookup denied", path: "/api/ps", status: 403, body: "{}" },
+        { label: "invalid loaded model ID", path: "/api/ps", status: 200, body: '{"models":[{"name":"other model"}]}' },
+        { label: "duplicate loaded model IDs", path: "/api/ps", status: 200, body: '{"models":[{"name":"other:latest"},{"name":"other:latest"}]}' },
     ])("keeps $label out of fallback", async ({ path, status, body }) => {
         respond = route => route === path ? new Response(body, { status }) : undefined;
         await expect(compactFixture()).rejects.toThrow();
@@ -195,6 +199,23 @@ describe("Compaction inference failure boundary", () => {
         expectNoFallbackOrWrites();
     });
 
+    it.each([
+        { label: "mixed address failures", wrap: (refused: Error, timeout: Error) => new AggregateError([refused, timeout]) },
+        { label: "an empty aggregate", wrap: () => new AggregateError([]) },
+        { label: "a conflicting nested cause", wrap: (_refused: Error, timeout: Error) => new Error("Wrapped", { cause: timeout }) },
+    ])("keeps $label out of closed-listener fallback", async ({ wrap }) => {
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        const refused = Object.assign(new Error("Connection refused"), { code: "ECONNREFUSED" });
+        const timeout = Object.assign(new Error("Connection timed out"), { code: "ETIMEDOUT" });
+        const cause = Object.assign(wrap(refused, timeout), { code: "ECONNREFUSED" });
+        respond = path => {
+            if (path === "/api/tags") throw new TypeError("Fetch failed", { cause });
+        };
+        await expect(compactFixture()).rejects.toThrow("Fetch failed");
+        expectNoFallbackOrWrites();
+        expect(callLayer1).not.toHaveBeenCalled();
+    });
+
     it("honors the first authorization denial from the actual classifier", async () => {
         const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
         vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
@@ -204,7 +225,7 @@ describe("Compaction inference failure boundary", () => {
             if (path !== "/api/chat") return;
             requests++;
             return requests === 1 ? new Response("{}", { status: 403 })
-                : Response.json({ message: { content: "OBVIOUS_NOT_RESERVED" } });
+                : Response.json({ message: { content: "OBVIOUS_NOT_RESERVED" }, done: true });
         };
         await expect(compactFixture()).rejects.toThrow(/classification could not be confirmed/);
         expect(requests).toBe(1);
@@ -225,6 +246,38 @@ describe("Compaction inference failure boundary", () => {
         expectNoFallbackOrWrites();
     });
 
+    describe.each(["classifier", "generator"])("protected %s response", phase => {
+        it.each([
+            { label: "unfinished", status: 200, envelope: { done: false } },
+            { label: "missing completion", status: 200, envelope: {} },
+            { label: "nonboolean completion", status: 200, envelope: { done: "true" } },
+            { label: "truncated", status: 200, envelope: { done: true, done_reason: "length" } },
+            { label: "partial HTTP response", status: 206, envelope: { done: true } },
+            { label: "explicit provider error", status: 200, envelope: { done: true, error: "" } },
+            { label: "nontext content", status: 200, envelope: { done: true, message: { content: 7 } } },
+        ])("refuses $label before fallback or ledger writes", async ({ status, envelope }) => {
+            const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+            vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+            vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+            if (phase === "classifier") freeMemory = 0;
+            const classification = phase === "classifier";
+            const validText = classification ? "OBVIOUS_NOT_RESERVED" : JSON.stringify({ summary: "Routine maintenance summary." });
+            let requests = 0;
+            respond = path => {
+                if (path !== "/api/chat") return;
+                requests++;
+                if (!classification && requests === 1) {
+                    return Response.json({ done: true, done_reason: "stop", message: { content: "OBVIOUS_NOT_RESERVED" } });
+                }
+                return Response.json({ message: { content: validText }, ...envelope }, { status });
+            };
+            const failure = classification ? /classification could not be confirmed/ : /local generation did not complete/;
+            await expect(compactFixture()).rejects.toThrow(failure);
+            expect(requests).toBe(classification ? 1 : 2);
+            expectNoFallbackOrWrites();
+        });
+    });
+
     it.each([1, 2])("keeps originals if classification refuses after %s locally summarized chunks", async successfulChunks => {
         vi.mocked(callLayer1).mockResolvedValue("ERROR");
         vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
@@ -241,15 +294,16 @@ describe("Compaction inference failure boundary", () => {
         expectNoFallbackOrWrites();
     });
 
-    it.each(["empty inventory", "unrelated model", "closed listener", "insufficient RAM"])(
+    it.each(["empty inventory", "unrelated model", "closed listener", "all addresses refused", "insufficient RAM"])(
         "uses the configured fallback after confirmed local unavailability from %s", async evidence => {
         vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
         vi.mocked(callLayer1).mockResolvedValue("OBVIOUS_NOT_RESERVED");
         if (evidence === "empty inventory") installed = [];
         if (evidence === "unrelated model") installed = ["fixture-other:latest"];
-        if (evidence === "closed listener") respond = path => {
+        if (evidence === "closed listener" || evidence === "all addresses refused") respond = path => {
             if (path === "/api/tags") {
-                const cause = Object.assign(new Error("Connection refused"), { code: "ECONNREFUSED" });
+                const refused = Object.assign(new Error("Connection refused"), { code: "ECONNREFUSED" });
+                const cause = evidence === "closed listener" ? refused : new AggregateError([refused, refused]);
                 throw new TypeError("Fetch failed", { cause });
             }
         };
@@ -288,6 +342,23 @@ describe("Compaction inference failure boundary", () => {
         expect(localResponses).toBe(1);
         expect(generateText).not.toHaveBeenCalled();
         expect(storage.saveLedger).toHaveBeenCalledOnce();
+    });
+
+    it("writes a local rollup after complete classifier and generator replies", async () => {
+        const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+        vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+        const summary = "Summarized routine maintenance.";
+        let requests = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            const content = ++requests === 1 ? "OBVIOUS_NOT_RESERVED" : JSON.stringify({ summary });
+            return Response.json({ done: true, done_reason: "stop", message: { content } });
+        };
+        expect((await compactFixture()).isError).toBe(false);
+        expect(requests).toBe(2);
+        expect(generateText).not.toHaveBeenCalled();
+        expect(storage.saveLedger).toHaveBeenCalledOnce();
+        expect(storage.patchLedger).toHaveBeenCalledOnce();
     });
 
     it("compaction routes local summaries through inferText", async () => {

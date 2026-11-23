@@ -650,6 +650,8 @@ async function callLayer1Unleased(
         strictErrors?: boolean;
         /** Return the first provider failure for callers that must stop on it. */
         retryOnError?: boolean;
+        /** Require terminal non-streaming Ollama evidence before reading the verdict. */
+        requireCompleteResponse?: boolean;
         /** Read an oversize prompt whole, window by window, instead of as an
          *  excerpt. Explicit oMLX sets it with strictErrors. */
         readOversizeWhole?: boolean;
@@ -727,17 +729,21 @@ async function callLayer1Unleased(
             return "ERROR";
         }
 
-        if (!res.ok) return "ERROR";
+        if (!res.ok || (opts?.requireCompleteResponse && res.status !== 200)) return "ERROR";
 
-        let data: unknown;
+        let data: { error?: unknown; done?: unknown; done_reason?: unknown; message?: { content?: string } } | null;
         try {
             data = await res.json();
         } catch {
             return "ERROR";
         }
 
-        if ((data as { error?: string })?.error) return "ERROR";
-        const text = (data as { message?: { content?: string } })?.message?.content;
+        if (opts?.requireCompleteResponse && (data?.done !== true || data.error !== undefined
+            || (data.done_reason !== undefined && data.done_reason !== "stop") || typeof data.message?.content !== "string")) {
+            return "ERROR";
+        }
+        if (data?.error) return "ERROR";
+        const text = data?.message?.content;
         return parseLayer1(text);
     };
 

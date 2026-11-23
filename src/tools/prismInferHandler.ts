@@ -1272,10 +1272,29 @@ export async function waitForOllamaUnloadDrain(
 }
 
 export function isOllamaConnectionRefused(error: unknown): boolean {
-    if (!(error instanceof Error)) return false;
-    if ((error as NodeJS.ErrnoException).code === "ECONNREFUSED") return true;
-    if (error instanceof AggregateError) return error.errors.length > 0 && error.errors.every(isOllamaConnectionRefused);
-    return error.cause !== undefined && isOllamaConnectionRefused(error.cause);
+    const ancestors = new Set<Error>();
+    function confirmsRefusal(failure: unknown): boolean {
+        if (!(failure instanceof Error) || ancestors.has(failure)) return false;
+        const code = (failure as NodeJS.ErrnoException).code;
+        if (code !== undefined && code !== "ECONNREFUSED") return false;
+        if (failure.name === "AbortError" || failure.name === "TimeoutError") return false;
+        ancestors.add(failure);
+        try {
+            const cause = failure.cause;
+            if (cause !== undefined && !confirmsRefusal(cause)) return false;
+            if (failure instanceof AggregateError) {
+                if (!Array.isArray(failure.errors) || failure.errors.length === 0) return false;
+                for (const member of failure.errors) {
+                    if (!confirmsRefusal(member)) return false;
+                }
+                return true;
+            }
+            return cause !== undefined || code === "ECONNREFUSED";
+        } finally {
+            ancestors.delete(failure);
+        }
+    }
+    return confirmsRefusal(error);
 }
 
 async function readOllamaModelNames(
@@ -1291,11 +1310,17 @@ async function readOllamaModelNames(
     }
     if (response.status !== 200) throw new Error(`prism_infer: Ollama inventory request failed with HTTP ${response.status}`);
     const data = await response.json().catch(() => null) as { models?: { name?: unknown }[]; error?: unknown } | null;
-    if (data?.error !== undefined || !Array.isArray(data?.models)
-        || data.models.some(model => typeof model?.name !== "string" || !model.name || model.name !== model.name.trim())) {
+    if (data?.error !== undefined || !Array.isArray(data?.models)) {
         throw new Error("prism_infer: invalid Ollama model inventory");
     }
-    return new Set(data.models.map(model => model.name as string));
+    const names = new Set<string>();
+    for (const model of data.models) {
+        if (!isLocalCodingModelId(model?.name) || names.has(model.name)) {
+            throw new Error("prism_infer: invalid Ollama model inventory");
+        }
+        names.add(model.name);
+    }
+    return names;
 }
 
 export async function strictLoaded(url: string, fetchImpl: typeof fetch = fetch): Promise<Set<string>> {
@@ -1700,12 +1725,12 @@ export async function callOllamaGenerate(
     images?: string[],
     history?: InferHistoryTurn[],
     contextTokens?: number,
-    execution?: { deadlineMs: number; signal?: AbortSignal },
+    execution?: { deadlineMs?: number; signal?: AbortSignal; requireCompleteResponse?: boolean },
 ): Promise<{ ok: true; text: string; doneReason?: string; promptTokens?: number; completionTokens?: number } | { ok: false; reason: string }> {
     try {
-        const requestFetch = execution ? (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        const requestFetch = execution && (execution.deadlineMs !== undefined || execution.signal) ? (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
             execution.signal?.throwIfAborted();
-            const remaining = execution.deadlineMs - Date.now();
+            const remaining = execution.deadlineMs === undefined ? timeoutMs : execution.deadlineMs - Date.now();
             if (remaining <= 0) throw new DOMException("Request deadline expired", "TimeoutError");
             return fetch(input, { ...init, signal: AbortSignal.any([AbortSignal.timeout(Math.min(timeoutMs, remaining)),
                 ...(execution.signal ? [execution.signal] : []), ...(init?.signal ? [init.signal] : [])]) });
@@ -1736,8 +1761,12 @@ export async function callOllamaGenerate(
             signal: AbortSignal.timeout(timeoutMs),
             redirect: "error",
         });
-        if (!res.ok) return { ok: false, reason: `ollama_http_${res.status}` };
+        if (!res.ok || (execution?.requireCompleteResponse && res.status !== 200)) return { ok: false, reason: `ollama_http_${res.status}` };
         const data = (await res.json()) as OllamaChatResp;
+        if (execution?.requireCompleteResponse && (data?.done !== true || data.error !== undefined
+            || (data.done_reason !== undefined && data.done_reason !== "stop") || typeof data.message?.content !== "string")) {
+            return { ok: false, reason: "ollama_incomplete_response" };
+        }
         if (data.error) return { ok: false, reason: `ollama_err:${data.error}` };
         const text = (data.message?.content ?? "").trim();
         if (!text) {
@@ -3211,7 +3240,9 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             ? (...[prompt, url, model, fetchImpl, images, opts]: Parameters<typeof defaultCallLayer1>) =>
                 baseL1(prompt, url, model, omlxL1Fetch ?? fetchImpl, images, {
                     ...opts, ...omlxL1Opts,
-                    ...(requireConfirmedExhaustion ? { strictErrors: true, readOversizeWhole: true, retryOnError: false } : {}),
+                    ...(requireConfirmedExhaustion ? {
+                        strictErrors: true, readOversizeWhole: true, retryOnError: false, requireCompleteResponse: !omlxL1Fetch,
+                    } : {}),
                 })
             : baseL1;
         const l1Model = omlxL1Fetch ? image ? generationTarget!.model : textClassifierModel! : resolveOllamaName("prism-coder:4b", installed);
@@ -4558,7 +4589,12 @@ export function productionInferDeps(requireConfirmedLocalExhaustion = false): In
         listLoaded: fetchImpl => requireConfirmedLocalExhaustion
             ? strictLoaded(PRISM_LOCAL_LLM_URL, fetchImpl)
             : listOllamaLoaded(PRISM_LOCAL_LLM_URL, fetchImpl),
-        callLocal: callOllamaGenerate,
+        callLocal: requireConfirmedLocalExhaustion
+            ? (url, model, prompt, system, maxTokens, temperature, timeoutMs, think, images, history, contextTokens, execution) =>
+                callOllamaGenerate(url, model, prompt, system, maxTokens, temperature, timeoutMs, think, images, history, contextTokens, {
+                    ...execution, requireCompleteResponse: true,
+                })
+            : callOllamaGenerate,
         callCloud: callSynaluxInference,
         ollamaUrl: PRISM_LOCAL_LLM_URL,
         callVerifier: SYNALUX_CONFIGURED ? callSynaluxVerifier : undefined,
