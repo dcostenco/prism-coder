@@ -1533,10 +1533,11 @@ const LEDGER_NODE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 export async function assembleTestMeContext(nodeId: string, project: string, storage: Pick<StorageBackend,
   "getLinkedLedgerSummaries" | "getLinksFrom" | "getLedgerEntries" | "searchKnowledge">,
-  nodeGroup?: "memory" | "keyword" | "category") {
+  requestedGroup?: "memory" | "keyword" | "category") {
+  const nodeGroup = requestedGroup ?? (LEDGER_NODE_ID.test(nodeId) ? "memory" : undefined);
   const contextMap = new Map<string, string>();
   if (storage.getLinkedLedgerSummaries) {
-    if (nodeGroup === "memory" || (nodeGroup === undefined && LEDGER_NODE_ID.test(nodeId))) {
+    if (nodeGroup === "memory") {
       const summaries = await storage.getLinkedLedgerSummaries(nodeId, 5);
       for (const entry of summaries) contextMap.set(entry.id, entry.summary.slice(0, 300));
     }
@@ -1572,6 +1573,7 @@ export async function assembleTestMeContext(nodeId: string, project: string, sto
   return {
     nodeId,
     project,
+    nodeGroup,
     contextItems: Array.from(contextMap.values())
   };
 }

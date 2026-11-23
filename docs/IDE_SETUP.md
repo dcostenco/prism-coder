@@ -594,9 +594,12 @@ OLLAMA_HOST=0.0.0.0 ollama serve
 
 # In your MCP config:
 "env": {
-  "LOCAL_LLM_URL": "http://192.168.1.100:11434"
+  "PRISM_LOCAL_LLM_URL": "http://192.168.1.100:11434"
 }
 ```
+
+Requests that carry on-device project memory in forced-local or strict-local mode
+require a loopback endpoint.
 
 ---
 

@@ -2235,14 +2235,15 @@ Run the full model stack on your own hardware — no cloud, full data sovereignt
 
 ```bash
 ollama pull dcostenco/prism-coder:9b       # default router
-export LOCAL_LLM_URL=http://localhost:11434
+export PRISM_LOCAL_LLM_URL=http://localhost:11434
 ```
 
 Self-hosted routing stays local: `9b → 4b` on desktop/server and `2b` on
 mobile/iPhone, with 27B available when installed and RAM-safe. Synalux-hosted
 paid tiers can use Gemini 3.6 Flash as the cloud fallback. For iOS or another
 machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point
-`LOCAL_LLM_URL` at the host's IP.
+`PRISM_LOCAL_LLM_URL` at the host's IP. Requests that carry on-device project
+memory in forced-local or strict-local mode require a loopback endpoint.
 
 ---
 
@@ -2252,7 +2253,7 @@ machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point
 |---|---|---|
 | `PRISM_STORAGE` | `local` / `synalux` / `supabase` / `auto` | `auto` |
 | `PRISM_SYNALUX_API_KEY` | Paid-tier portal key (`synalux_sk_...`) | -- (local if unset) |
-| `LOCAL_LLM_URL` | Ollama endpoint | `http://localhost:11434` |
+| `PRISM_LOCAL_LLM_URL` | Ollama endpoint | `http://127.0.0.1:11434` |
 | `PRISM_FORCE_LOCAL` | Force local SQLite regardless of credentials | `false` |
 | `TELEMETRY_WRITE_TOKEN` | Portal analytics token (optional — metrics display works without it) | -- |
 

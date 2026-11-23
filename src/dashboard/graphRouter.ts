@@ -400,9 +400,10 @@ export async function handleGraphRoutes(
 
       const { assembleTestMeContext, generateTestMeQuestions } = await import("../tools/graphHandlers.js");
       const context = await assembleTestMeContext(id, project, s, nodeGroup);
-      const result = nodeGroup === "memory" && context.contextItems.length === 0
+      const isMemory = context.nodeGroup === "memory";
+      const result = isMemory && context.contextItems.length === 0
         ? { questions: [], reason: "no_linked_context" }
-        : await generateTestMeQuestions(context, nodeGroup === "memory" ? "the selected memory" : id);
+        : await generateTestMeQuestions(context, isMemory ? "the selected memory" : id);
 
       // Classify outcome
       let tmStatus: "success" | "no_api_key" | "generation_failed" = "success";

@@ -4645,9 +4645,12 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps, context
                 ...(approved.metadata.memory ? { memory: approved.metadata.memory as PreparedInferArgs["memory"] } : {}) }
             : await prepareMemoryAwareInferArgs(request);
         if (!isPrismInferArgs(prepared.args)) throw new Error("host_task_invalid_execution");
+        const localOnly = context?.localOnly || approved?.metadata.localOnly === true
+            || (prepared.memory !== undefined && (PRISM_FORCE_LOCAL || PRISM_STRICT_LOCAL_MODE));
         const intercepted = [...(prepared.args.messages ?? []).filter(turn => turn.role === "user").map(turn => turn.content), prepared.args.prompt]
             .some(text => Boolean(checkInputSafety(text)));
         if (required && !approved && !intercepted) {
+            if (localOnly) prepared = { ...prepared, args: localInferArgs(prepared.args) };
             prepared = { ...prepared, args: await pinHostTaskSelection(prepared.args) };
             if (!isPrismInferArgs(prepared.args)) throw new Error("host_task_invalid_execution_selection");
             requireActive(context);
@@ -4655,12 +4658,16 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps, context
                 throw new Error("bridge_requires_omlx");
             }
             const packet = await prepareHostTask("prism_infer", request as unknown as Record<string, unknown>,
-                prepared.args as unknown as Record<string, unknown>, prepared.memory ? { memory: prepared.memory } : {});
+                prepared.args as unknown as Record<string, unknown>, {
+                    ...(prepared.memory ? { memory: prepared.memory } : {}),
+                    ...(localOnly ? { localOnly: true } : {}),
+                });
             requireActive(context);
             return hostTaskResponse(packet);
         }
         requireActive(context);
-        const result = await runInfer(prepared.args, deps ?? productionInferDeps(), context, started);
+        const result = await runInfer(prepared.args, deps ?? productionInferDeps(),
+            localOnly ? { ...context, localOnly: true } : context, started);
 
         debugLog(`[prism_infer] backend=${result.backend} model=${result.model_picked} latency=${result.latency_ms}ms free=${result.ram_free_mb}MB`);
 

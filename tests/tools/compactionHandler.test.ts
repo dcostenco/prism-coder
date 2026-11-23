@@ -266,6 +266,33 @@ describe("compactionHandler", () => {
       expect(result.isError).toBe(false);
       expect(result.content[0].text).toContain("No projects exceed the compaction threshold");
     });
+    it.each([9, 10])("retains every entry when a project exceeds the threshold but has only %s entries", async count => {
+      const entries = makeFakeEntries(count);
+      // SQLite treats a nonpositive limit as an unbounded read.
+      storage.getLedgerEntries.mockResolvedValue(entries);
+      const result = await compactLedgerHandler({ project: "test-project", threshold: 5, keep_recent: 10 });
+
+      expect(result.isError).toBe(false);
+      expect(result.content[0].text).toContain("No compaction needed");
+      expect(storage.getLedgerEntries).toHaveBeenCalledTimes(1);
+      expect(mockGenerateText).not.toHaveBeenCalled();
+      expect(storage.patchLedger).not.toHaveBeenCalled();
+    });
+    it.each([true, false])("excludes nonpositive automatic candidates from the operation (dry run: %s)", async dry_run => {
+      storage.getCompactionCandidates.mockResolvedValue([
+        { project: "keep-all", total_entries: 10, to_compact: 0 },
+        { project: "keep-fewer", total_entries: 9, to_compact: -1 },
+      ]);
+      storage.getLedgerEntries.mockResolvedValue(makeFakeEntries(10));
+
+      const result = await compactLedgerHandler({ threshold: 5, keep_recent: 10, dry_run });
+
+      expect(result.isError).toBe(false);
+      expect(result.content[0].text).not.toMatch(/keep-all|keep-fewer/);
+      expect(storage.getLedgerEntries).not.toHaveBeenCalled();
+      expect(mockGenerateText).not.toHaveBeenCalled();
+      expect(storage.patchLedger).not.toHaveBeenCalled();
+    });
   });
 
   // ====================================================================

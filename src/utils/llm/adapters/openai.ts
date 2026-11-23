@@ -73,18 +73,12 @@ export class OpenAIAdapter implements LLMProvider {
     // This lets users configure keys via the dashboard without touching .env.
     const apiKey  = getSettingSync("openai_api_key",  process.env.OPENAI_API_KEY ?? "");
     const baseURL = getSettingSync("openai_base_url", "https://api.openai.com/v1");
-    if (localOnly) {
-      const endpoint = new URL(baseURL);
-      const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname);
-      if (!loopback || !["http:", "https:"].includes(endpoint.protocol)
-        || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
-        throw new Error("Local-only model overrides require a loopback endpoint.");
-      }
+    const endpoint = new URL(baseURL);
+    const isLocal = ["http:", "https:"].includes(endpoint.protocol)
+      && ["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname);
+    if (localOnly && (!isLocal || endpoint.username || endpoint.password || endpoint.search || endpoint.hash)) {
+      throw new Error("Local-only model overrides require a loopback endpoint.");
     }
-
-    // Detect local inference endpoints — these don't need a real API key.
-    // Ollama and LM Studio use local HTTP servers with no authentication.
-    const isLocal = baseURL.includes("localhost") || baseURL.includes("127.0.0.1");
 
     // Fail construction if no key AND we're pointing at a real API endpoint.
     // The factory will catch this and fall back to GeminiAdapter gracefully.

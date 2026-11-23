@@ -73,6 +73,63 @@ describe("host-authorized inference entrypoints", () => {
         expect(result.structuredContent?.backend).toBe("omlx"); expect(f.generate).toHaveBeenCalledTimes(1);
         expect(state.memoryReads).toBe(1); expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.deps.listTags).not.toHaveBeenCalled();
     });
+    it.each(["PRISM_FORCE_LOCAL", "PRISM_STRICT_LOCAL_MODE"])("keeps public MCP project memory on-device with %s", async flag => {
+        vi.stubEnv(flag, "true");
+        vi.stubEnv("PRISM_HOST_TASKS", "legacy");
+        const { deps, generate } = await fixture();
+        deps.ollamaUrl = "http://ollama.fixture.test:11434";
+        const { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
+        const response = await prismInferHandler({ ...ask(), project: "fixture-project" }, deps,
+            { signal: new AbortController().signal });
+        expect(response).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("local_endpoint_required") }] });
+        expect(state.memoryReads).toBe(1);
+        for (const call of [generate, deps.callLocal, deps.callCloud, deps.callLayer1, deps.listTags, deps.omlx?.detect])
+            expect(call).not.toHaveBeenCalled();
+    });
+    it("pins the on-device guard in the approved project-memory execution", async () => {
+        vi.stubEnv("PRISM_FORCE_LOCAL", "true");
+        const { deps, generate } = await fixture();
+        deps.ollamaUrl = "http://ollama.fixture.test:11434";
+        const { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
+        const { executeApprovedHostTask } = await import("../../src/utils/hostTasks.js");
+        const request = { ...ask(), project: "fixture-project", cloud_fallback: true, verify: true };
+        const packet = body(await prismInferHandler(request, deps));
+        expect(packet.host_task.request).toEqual(request);
+        expect(packet.host_task.execution).toMatchObject({ cloud_fallback: false, verify: false, route_guard: "local" });
+        const result = await executeApprovedHostTask(packet, (_kind, input) => prismInferHandler(input, deps));
+        expect(result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("local_endpoint_required") }] });
+        expect(state.memoryReads).toBe(1);
+        for (const call of [generate, deps.callLocal, deps.callCloud, deps.callLayer1, deps.listTags, deps.omlx?.detect])
+            expect(call).not.toHaveBeenCalled();
+    });
+    it("keeps a trusted on-device draft local after host replay without a project", async () => {
+        vi.stubEnv("PRISM_FORCE_LOCAL", "true");
+        const { deps, generate } = await fixture();
+        deps.ollamaUrl = "http://ollama.fixture.test:11434";
+        const { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
+        const { executeApprovedHostTask } = await import("../../src/utils/hostTasks.js");
+        const request = { ...ask(), system: "Private evidence selected by the host." };
+        const packet = body(await prismInferHandler(request, deps, { localOnly: true }));
+        const result = await executeApprovedHostTask(packet, (_kind, input) => prismInferHandler(input, deps));
+        expect(result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("local_endpoint_required") }] });
+        expect(state.memoryReads).toBe(0);
+        for (const call of [generate, deps.callLocal, deps.callCloud, deps.callLayer1, deps.listTags, deps.omlx?.detect])
+            expect(call).not.toHaveBeenCalled();
+    });
+    it.each([true, false])("keeps the ordinary oMLX path available in forced-local mode (attach memory: %s)", async memory => {
+        vi.stubEnv("PRISM_FORCE_LOCAL", "true");
+        const { deps, generate } = await fixture();
+        // This URL is unused by the selected oMLX backend for a request without stored memory.
+        if (!memory) deps.ollamaUrl = "http://ollama.fixture.test:11434";
+        const { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
+        const { executeApprovedHostTask } = await import("../../src/utils/hostTasks.js");
+        const packet = body(await prismInferHandler({ ...ask(), ...(memory ? { project: "fixture-project" } : {}) }, deps));
+        const result = await executeApprovedHostTask(packet, (_kind, input) => prismInferHandler(input, deps));
+        expect(result.structuredContent?.backend).toBe("omlx");
+        expect(generate).toHaveBeenCalledTimes(1);
+        expect(state.memoryReads).toBe(memory ? 1 : 0);
+        expect(deps.callCloud).not.toHaveBeenCalled();
+    });
     it("pins the saved reviewer assignment without replacing it with the coder", async () => {
         const f = await fixture(), { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
         const response = body(await prismInferHandler({ ...ask(), local_model: undefined, local_role: "reviewer" }, f.deps));

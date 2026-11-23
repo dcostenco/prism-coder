@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { create, googleGenerate, anthropicCreate, sdkOptions, policy } = vi.hoisted(() => {
   process.env.GOOGLE_API_KEY = 'local-test-key';
   return { create: vi.fn(), googleGenerate: vi.fn(), anthropicCreate: vi.fn(), sdkOptions: vi.fn(),
-    policy: { force: false, baseURL: 'http://127.0.0.1:11434/v1' } };
+    policy: { force: false, baseURL: 'http://127.0.0.1:11434/v1', key: 'local-test-key' } };
 });
 vi.mock('openai', () => ({ default: class {
   constructor(options: unknown) { sdkOptions(options); }
@@ -12,7 +12,7 @@ vi.mock('@google/generative-ai', () => ({ GoogleGenerativeAI: class { getGenerat
 vi.mock('@anthropic-ai/sdk', () => ({ default: class { messages = { create: anthropicCreate }; } }));
 vi.mock('../../src/storage/configStorage.js', () => ({ getSettingSync: (key: string, fallback: string) =>
   key === 'openai_base_url' ? policy.baseURL
-    : key === 'anthropic_api_key' || key === 'openai_api_key' ? 'local-test-key' : fallback }));
+    : key === 'openai_api_key' ? policy.key : key === 'anthropic_api_key' ? 'local-test-key' : fallback }));
 vi.mock('../../src/config.js', async original => ({
   ...await original<typeof import('../../src/config.js')>(), get PRISM_FORCE_LOCAL() { return policy.force; },
 }));
@@ -22,7 +22,7 @@ import { invokeClawAgent } from '../../src/darkfactory/clawInvocation.js';
 
 beforeEach(() => {
   create.mockReset(); googleGenerate.mockReset(); anthropicCreate.mockReset(); sdkOptions.mockClear();
-  policy.force = false; policy.baseURL = 'http://127.0.0.1:11434/v1';
+  policy.force = false; policy.baseURL = 'http://127.0.0.1:11434/v1'; policy.key = 'local-test-key';
   create.mockResolvedValue({ choices: [{ message: { content: '{"pass":true}' } }] });
 });
 describe('Factory structured model requests', () => {
@@ -61,6 +61,25 @@ describe('Factory structured model requests', () => {
       await invokeClawAgent(spec, state as any);
       expect(create).toHaveBeenCalledWith(expect.objectContaining({ response_format: { type: 'json_object' }, max_tokens: 4096 }));
     } finally { vi.clearAllTimers(); vi.useRealTimers(); }
+  });
+  it('runs a keyless IPv6 loopback Factory override', async () => {
+    policy.force = true;
+    policy.baseURL = 'http://[::1]:11434/v1';
+    policy.key = '';
+    vi.useFakeTimers();
+    try {
+      const result = await invokeClawAgent({ objective: 'Local fixture', maxIterations: 1, modelOverride: 'fixture-model' },
+        { id: 'local-fixture', current_step: 'PLAN', project: 'fixture' } as any);
+      expect(result.success).toBe(true);
+      expect(sdkOptions).toHaveBeenCalledWith(expect.objectContaining({ baseURL: policy.baseURL, apiKey: 'ollama' }));
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ model: 'fixture-model' }));
+    } finally { vi.clearAllTimers(); vi.useRealTimers(); }
+  });
+  it('requires a key when a remote compatible hostname only resembles loopback', () => {
+    policy.baseURL = 'http://localhost.fixture.test/v1';
+    policy.key = '';
+    expect(() => new OpenAIAdapter()).toThrow(/API key is not set/);
+    expect(sdkOptions).not.toHaveBeenCalled();
   });
   it('sends JSON mode and the requested model instead of silently using the configured default', async () => {
     const value = await new OpenAIAdapter().generateText('Return a JSON evaluation.', 'Factory evaluation', { json: true, model: 'isolated-test-model' });

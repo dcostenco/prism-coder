@@ -1081,7 +1081,7 @@ export function renderDashboardHTML(version: string): string {
             <div style="display:flex; gap:0.5rem; margin-bottom:0.6rem;">
               <input type="text" id="nodeEditorInput" class="input-modern" style="flex:1; font-size:0.8rem; padding:0.3rem 0.6rem" placeholder="New keyword name...">
               <button onclick="submitNodeEdit()" class="btn-modern" style="padding:0.3rem 0.8rem; font-size:0.8rem">Apply</button>
-              <button onclick="document.getElementById('nodeEditorPanel').style.display='none'" class="btn-modern" style="background:transparent; border-color:var(--border-subtle); padding:0.3rem 0.8rem; font-size:0.8rem">Cancel</button>
+              <button onclick="closeGraphNodeEditor()" class="btn-modern" style="background:transparent; border-color:var(--border-subtle); padding:0.3rem 0.8rem; font-size:0.8rem">Cancel</button>
             </div>
             
             <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:0.3rem">Or merge into existing:</label>
@@ -1696,6 +1696,7 @@ var graphReadSequence = 0;
 var healthReadSequence = 0;
 var graphMetricsReadSequence = 0;
 var activeGraphNetwork = null;
+var testMeSelection = null;
 var analyticsDatePattern = new RegExp(${JSON.stringify(ANALYTICS_DATE_PATTERN.source)});
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -3164,8 +3165,29 @@ function updateGraphStatistics(container, data) {
         ? nodes.length + ' ' + dashboardReadMessages.graphSessions + ' · ' + data.edges.length + ' ' + dashboardReadMessages.graphStoredLinks
         : projects + ' ' + dashboardReadMessages.graphProjects + ' · ' + keywords + ' ' + dashboardReadMessages.graphKeywords + ' · ' + data.edges.length + ' ' + dashboardReadMessages.graphEdges;
 }
+function graphTestProject() {
+    var filter = document.getElementById('graphProjectFilter');
+    var project = document.getElementById('projectSelect');
+    return (filter ? filter.value : '') || (project ? project.value : '');
+}
+function closeGraphNodeEditor() {
+    testMeSelection = null;
+    var panel = document.getElementById('nodeEditorPanel');
+    if (panel) panel.style.display = 'none';
+    var input = document.getElementById('nodeEditorInput');
+    if (input) {
+        delete input.dataset.oldId;
+        delete input.dataset.group;
+    }
+    var quiz = document.getElementById('testMeContainer');
+    if (quiz) quiz.textContent = '';
+}
+function isCurrentTestMeSelection(selection) {
+    return selection && testMeSelection === selection && selection.project === graphTestProject();
+}
 function loadGraph() {
     var readSequence = ++graphReadSequence;
+    closeGraphNodeEditor();
     if (activeGraphNetwork && typeof activeGraphNetwork.destroy === 'function') activeGraphNetwork.destroy();
     activeGraphNetwork = null;
     return __awaiter(this, void 0, void 0, function () {
@@ -3304,15 +3326,15 @@ function loadGraph() {
                     allEdges = data.edges;
                     isFiltered = false;
                     network.on('click', function (params) {
+                        var filter = document.getElementById('graphProjectFilter');
+                        if (readSequence !== graphReadSequence || (filter && filter.value !== proj)) return;
                         if (params.nodes.length === 0) {
                             // Click on empty space — reset the graph if filtered
                             if (isFiltered) {
                                 network.setData({ nodes: allNodes, edges: allEdges });
                                 isFiltered = false;
                             }
-                            var panel = document.getElementById('nodeEditorPanel');
-                            if (panel)
-                                panel.style.display = 'none';
+                            closeGraphNodeEditor();
                             return;
                         }
                         var clickedId = params.nodes[0];
@@ -3328,6 +3350,7 @@ function loadGraph() {
                             input.value = nodeData.label;
                             input.dataset.oldId = clickedId;
                             input.dataset.group = nodeData.group;
+                            testMeSelection = { id: clickedId, group: nodeData.group, project: graphTestProject() };
                             // Populate merge dropdown
                             var mergeSelect = document.getElementById('nodeMergeSelect');
                             if (mergeSelect && !readOnly) {
@@ -3350,9 +3373,7 @@ function loadGraph() {
                             document.getElementById('nodeEditorPanel').style.display = 'block';
                         }
                         else {
-                            var panel = document.getElementById('nodeEditorPanel');
-                            if (panel)
-                                panel.style.display = 'none';
+                            closeGraphNodeEditor();
                         }
                         // Find all connected edges and nodes
                         var connectedEdges = allEdges.filter(function (e) {
@@ -3575,17 +3596,12 @@ function triggerCognitiveRoute() {
 }
 function triggerTestMe() {
     return __awaiter(this, void 0, void 0, function () {
-        var input, oldId, group, _gpf, _ps, project, btn, container, res, data, err_4;
+        var selection, btn, container, res, data;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
-                    input = document.getElementById('nodeEditorInput');
-                    oldId = input.dataset.oldId;
-                    group = input.dataset.group;
-                    _gpf = document.getElementById('graphProjectFilter');
-                    _ps = document.getElementById('projectSelect');
-                    project = (_gpf ? _gpf.value : '') || (_ps ? _ps.value : '');
-                    if (!oldId || !project)
+                    selection = testMeSelection;
+                    if (!isCurrentTestMeSelection(selection) || !selection.project)
                         return [2 /*return*/];
                     btn = document.getElementById('testMeBtn');
                     container = document.getElementById('testMeContainer');
@@ -3599,13 +3615,13 @@ function triggerTestMe() {
                     _a.label = 1;
                 case 1:
                     _a.trys.push([1, 4, 5, 6]);
-                    return [4 /*yield*/, fetch('/api/graph/test-me?id=' + encodeURIComponent(oldId) + '&project=' + encodeURIComponent(project) + '&group=' + encodeURIComponent(group))];
+                    return [4 /*yield*/, fetch('/api/graph/test-me?id=' + encodeURIComponent(selection.id) + '&project=' + encodeURIComponent(selection.project) + '&group=' + encodeURIComponent(selection.group))];
                 case 2:
                     res = _a.sent();
                     return [4 /*yield*/, res.json()];
                 case 3:
                     data = _a.sent();
-                    if (input.dataset.oldId !== oldId || input.dataset.group !== group)
+                    if (!isCurrentTestMeSelection(selection))
                         return [2 /*return*/];
                     if (data.reason === 'portal_projection_unavailable' || data.reason === 'no_linked_context') {
                         if (container)
@@ -3653,17 +3669,20 @@ function triggerTestMe() {
                     }
                     return [3 /*break*/, 6];
                 case 4:
-                    err_4 = _a.sent();
-                    showToast('Error generating quiz', true);
-                    if (container)
-                        container.innerHTML = '';
+                    _a.sent();
+                    if (isCurrentTestMeSelection(selection)) {
+                        showToast('Error generating quiz', true);
+                        if (container) container.innerHTML = '';
+                    }
                     return [3 /*break*/, 6];
                 case 5:
-                    if (btn && input.dataset.oldId === oldId && input.dataset.group === group && !(btn.title && btn.title.includes('Requires AI key'))) {
-                        btn.textContent = '📝 Test Me';
-                        btn.disabled = false;
+                    if (isCurrentTestMeSelection(selection)) {
+                        if (btn && !(btn.title && btn.title.includes('Requires AI key'))) {
+                            btn.textContent = '📝 Test Me';
+                            btn.disabled = false;
+                        }
+                        loadGraphMetrics();
                     }
-                    loadGraphMetrics(); // Refresh health metrics
                     return [7 /*endfinally*/];
                 case 6: return [2 /*return*/];
             }

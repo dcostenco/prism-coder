@@ -180,6 +180,24 @@ describe("cloud dashboard graph reads", () => {
     expect(JSON.parse(recorder.read().body).questions).toHaveLength(3);
   });
 
+  it("requires visible links for a groupless UUID Test Me request", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const storage = {
+      getLinkedLedgerSummaries: vi.fn(async () => []),
+      searchKnowledge: vi.fn(async () => ({ results: [{ id: "unlinked", summary: "Unlinked data" }] })),
+    };
+    const countBefore = quizProvider.generateText.mock.calls.length;
+    const recorder = responseRecorder();
+    await handleGraphRoutes(new URL("http://localhost/api/graph/test-me?"
+      + new URLSearchParams({ id, project: "example-project" })), { method: "GET" } as any,
+      recorder.response, async () => storage as any);
+
+    expect(storage.getLinkedLedgerSummaries).toHaveBeenCalledWith(id, 5);
+    expect(storage.searchKnowledge).not.toHaveBeenCalled();
+    expect(quizProvider.generateText).toHaveBeenCalledTimes(countBefore);
+    expect(JSON.parse(recorder.read().body)).toEqual({ questions: [], reason: "no_linked_context" });
+  });
+
   it("reports the missing older Portal projection through the Test Me endpoint", async () => {
     const storage = Object.create(SynaluxStorage.prototype) as SynaluxStorage;
     const portalRead = vi.spyOn(storage as any, "portalGet").mockResolvedValue({ links: [] });

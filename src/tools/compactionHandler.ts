@@ -187,7 +187,7 @@ export async function compactLedgerHandler(args: unknown) {
   }
 
   // Step 1: Find candidates
-  let candidates: any[];
+  let candidates: Awaited<ReturnType<typeof storage.getCompactionCandidates>>;
   if (project) {
     // If specific project, check it directly
     const entries = await storage.getLedgerEntries({
@@ -199,12 +199,12 @@ export async function compactLedgerHandler(args: unknown) {
       select: "id",
     });
     const count = entries.length;
-    if (count <= threshold) {
+    if (count <= threshold || count <= keep_recent) {
       return {
         content: [{
           type: "text",
           text: `✅ Project "${project}" has ${count} active entries ` +
-            `(threshold: ${threshold}). No compaction needed.`,
+            `(threshold: ${threshold}, keep recent: ${keep_recent}). No compaction needed.`,
         }],
         isError: false,
       };
@@ -215,11 +215,13 @@ export async function compactLedgerHandler(args: unknown) {
     candidates = await storage.getCompactionCandidates(threshold, keep_recent, PRISM_USER_ID);
   }
 
+  // The ledger reader interprets nonpositive limits as an unbounded read.
+  candidates = candidates.filter(candidate => Number.isSafeInteger(candidate.to_compact) && candidate.to_compact > 0);
   if (candidates.length === 0) {
     return {
       content: [{
         type: "text",
-        text: `✅ No projects exceed the compaction threshold (${threshold} entries). ` +
+        text: `✅ No projects exceed the compaction threshold (${threshold} entries) while retaining the ${keep_recent} most recent entries. ` +
           `All clear!`,
       }],
       isError: false,
