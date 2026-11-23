@@ -428,10 +428,11 @@ export const SESSION_COMPACT_LEDGER_TOOL: Tool = {
   name: "session_compact_ledger",
   description:
     "Auto-compact old session ledger entries by rolling them up into AI-generated summaries. " +
-    "This prevents the ledger from growing indefinitely and keeps deep context loading fast.\n\n" +
+    "This prevents the ledger from growing indefinitely and keeps deep context loading fast. " +
+    "Supported for SQLite and explicitly configured legacy Supabase storage. Synalux cloud storage does not support this operation yet.\n\n" +
     "How it works:\n" +
     "1. Finds projects with more entries than the threshold\n" +
-    "2. Summarizes old entries using Gemini (keeps recent entries intact)\n" +
+    "2. Summarizes old entries with the configured inference policy and keeps recent entries intact\n" +
     "3. Inserts a rollup entry and archives the originals (soft-delete)\n\n" +
     "Use dry_run=true to preview what would be compacted without executing.",
   inputSchema: {

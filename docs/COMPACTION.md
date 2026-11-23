@@ -15,6 +15,10 @@
 
 They are orthogonal. This document covers both.
 
+Ledger compaction and its dry run are available with SQLite and explicitly
+configured legacy Supabase storage. Synalux cloud memory requires a Portal
+operation that can save the rollup and archive its source entries together.
+
 ---
 
 ## Part 1 — LLM Context Compaction
@@ -263,7 +267,7 @@ Prism supports two backends, selected automatically:
 
 | Backend | When used | Notes |
 |---------|-----------|-------|
-| SQLite (local) | Free tier, `PRISM_FORCE_LOCAL=1`, no Synalux auth | Zero config, single file at `~/.prism-mcp/prism-local.db` |
+| SQLite (local) | Free tier, `PRISM_FORCE_LOCAL=true`, no Synalux auth | Zero config, single file at `~/.prism-mcp/prism-local.db` |
 | Supabase (cloud) | Paid tier via Synalux portal | Cross-device sync, Hivemind multi-agent, pgvector search |
 
 The session persistence model is identical on both backends. Compaction runs on whichever

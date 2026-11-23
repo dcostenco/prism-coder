@@ -409,6 +409,15 @@ describe("getStorage — synalux dashboard-config fallback", () => {
     expect(supabaseInstances).toHaveLength(1);
   });
 
+  it("forced local memory skips legacy reconciliation even with retained credentials", async () => {
+    process.env.PRISM_FORCE_LOCAL = "true";
+    process.env.SUPABASE_URL = "https://supabase.test";
+    process.env.SUPABASE_KEY = "synthetic-legacy-key";
+    const storage = await freshGetStorage();
+    expect(storage).toMatchObject({ tag: "sqlite" });
+    expect(mockReconcileHandoffs).not.toHaveBeenCalled();
+  });
+
   it("PRISM_FORCE_LOCAL overrides auto even when Synalux credentials are present", async () => {
     process.env.PRISM_STORAGE = "auto";
     process.env.PRISM_FORCE_LOCAL = "true";

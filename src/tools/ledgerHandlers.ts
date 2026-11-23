@@ -1031,9 +1031,9 @@ export async function sessionSaveLedgerHandler(args: unknown) {
   // ─── Fire-and-forget auto-compact ────────────────────────────
   // If the user has opted into auto-compact (via dashboard Settings → Boot),
   // run a health check after saving and compact if brain is degraded/unhealthy.
-  // Uses debounce Set to prevent concurrent Gemini calls for same project.
+  // Uses a Set to prevent concurrent compaction for the same project.
   getSetting("compaction_auto", "false").then(async (autoCompact) => {
-    if (autoCompact !== "true") return;
+    if (autoCompact !== "true" || storage.supportsLedgerCompaction === false) return;
     if (activeCompactions.has(project)) {
       debugLog(`[auto-compact] Skipped for "${project}" — compaction already in progress`);
       return;
@@ -1046,8 +1046,11 @@ export async function sessionSaveLedgerHandler(args: unknown) {
       const report = runHealthCheck(healthStats);
       if (report.status === "degraded" || report.status === "unhealthy") {
         debugLog(`[auto-compact] Brain "${project}" is ${report.status} — triggering compaction`);
-        await compactLedgerHandler({ project });
-        debugLog(`[auto-compact] Compaction complete for "${project}"`);
+        const result = await compactLedgerHandler({ project });
+        if (result.isError) throw new Error(result.content[0]?.text || "Ledger compaction failed");
+        if (result.structuredContent?.projects_compacted) {
+          debugLog(`[auto-compact] Compaction complete for "${project}"`);
+        }
       }
     } catch (err) {
       console.error(`[auto-compact] Non-fatal error for "${project}": ${err instanceof Error ? err.message : String(err)}`);

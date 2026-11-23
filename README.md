@@ -1552,24 +1552,24 @@ Search across all memories with highlighted results, knowledge graph editing, an
 
 ## Local-first and privacy
 
-The free tier runs entirely on your machine. Paid tiers add cloud sync through the Synalux portal, which is what enables cross-device memory and team sharing.
+Signed-out Prism uses local memory and can run inference on this device. A Synalux account adds the cloud features included in its plan. Cloud sync and team sharing use the Synalux portal.
 
-| | Local tier (free) | Cloud tier (paid) |
+| | Signed out | Signed in to Synalux |
 |---|---|---|
 | Memory storage | Local SQLite | Synalux portal (Supabase-backed) |
-| Inference | Local Ollama models | Local models + Gemini 3.6 Flash fallback |
-| API keys required | None | Synalux subscription key |
-| Web search / scrape | Not included | Via Synalux portal (provider keys server-side) |
-| What leaves your machine | Nothing | Memory text, file paths, search queries, and inference prompts/drafts when their cloud feature is used, sent to the portal over TLS. Cloud memory writes have personal identifiers redacted; inference and route requests are transient. |
+| Inference | Local models | Local models with plan-eligible Synalux fallback |
+| Synalux credentials | None | Account credentials |
+| Synalux web search / scrape | Unavailable | Available with an eligible plan (provider keys server-side) |
+| User content sent to Synalux | None | Memory text, file paths, search queries, and inference prompts/drafts when their cloud feature is used, sent to the portal over TLS. Cloud memory writes have personal identifiers redacted. Inference and route requests are transient. |
 | Works offline | ✅ | Local features yes; sync/cloud no |
 
 **Handling sensitive data.** Cloud memory writes pass through automatic
 redaction (SSNs, dates of birth, medical record numbers, phone numbers, emails,
 and clinical identifiers are stripped before storage). Cloud inference and
 route correction send the request over TLS for processing and do not store it
-as Prism memory. The **local tier** (no Synalux key) is the air-gap;
-`route_guard: "local"` only skips the route correction, and `cloud_fallback`
-and `verify` govern the other two channels.
+as Prism memory. Signed-out inference has no Synalux fallback.
+`route_guard: "local"` skips route correction. `cloud_fallback` and
+`verify` govern inference fallback and grounding verification respectively.
 
 ---
 
@@ -1701,15 +1701,14 @@ For the separate October 2026 coding and advisory-review comparison, see
 For the default **Ollama backend**, Prism tries an eligible local model first.
 If the quality gate detects an empty, truncated, think-only, or looping
 response, or the safety screen
-finds the request uncertain or reserved, a paid plan escalates the request
-through Gemini 3.6 Flash. Free-tier routing stays local and reports the
-outcome without making a cloud call.
+finds the request uncertain or reserved, an eligible signed-in account can
+escalate through Synalux. Signed-out routing reports the outcome without a
+cloud inference call.
 
-The flag follows the plan. Leave it unset and your plan decides: paid plans
-escalate, free plans never do. Pass `false` to forbid cloud inference fallback
-for a call, which the clinical delegation rules do for drafting; pass `true`
-to ask for it, which still requires a plan with cloud. A request that carries
-an image is never escalated; screenshots stay on this device.
+When you leave the flag unset, your account's entitlement decides. A signed-in
+Free account can use its daily cloud answer allowance. Pass `false` to forbid
+cloud inference fallback for a call. Pass `true` to request it with an eligible
+account. Prism keeps image requests on the device.
 
 Explicit `local_backend: "omlx"` never falls back to cloud inference or Ollama,
 regardless of plan or `cloud_fallback`. See [oMLX behavior](docs/omlx.md#runtime-behavior-and-failure-handling).
@@ -2080,7 +2079,7 @@ Router toggle or set `PRISM_TASK_ROUTER_ENABLED=false` for an explicit opt-out.
 <details>
 <summary>How Prism survives context compaction</summary>
 
-The LLM context window is treated as ephemeral scratch space; durable state lives in the persistent store (SQLite locally, the portal in the cloud). Every session begins with a mandatory no-argument `session_bootstrap` call, so Prism applies the dashboard's project and quick/standard/deep setting before the agent writes a response. When a project exceeds a threshold (default 50 entries), `session_compact_ledger` summarizes old entries into a rollup, soft-archives the originals, and links them in the graph. See [`docs/COMPACTION.md`](docs/COMPACTION.md)
+The LLM context window is treated as ephemeral scratch space; durable state lives in the persistent store (SQLite locally, the portal in the cloud). Every session begins with a mandatory no-argument `session_bootstrap` call, so Prism applies the dashboard's project and quick/standard/deep setting before the agent writes a response. In SQLite and explicitly configured legacy Supabase stores, `session_compact_ledger` summarizes old entries into a rollup, soft-archives the originals, and links them in the graph. Synalux cloud compaction requires a Portal operation for the rollup and archive. See [`docs/COMPACTION.md`](docs/COMPACTION.md)
 </details>
 
 ---

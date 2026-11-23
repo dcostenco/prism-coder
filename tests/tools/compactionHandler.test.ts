@@ -19,6 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+const localPolicy = vi.hoisted(() => ({ force: false, strict: false, enabled: false, infer: vi.fn() }));
 
 // ======================================================================
 // MOCKS — must be declared before imports that depend on them
@@ -44,8 +45,9 @@ vi.mock("../../src/config.js", () => ({
   PRISM_CAPTURE_PORTS: [],
   GOOGLE_API_KEY: "",
   SERVER_CONFIG: { name: "prism-test", version: "test" },
-  PRISM_LOCAL_LLM_ENABLED: false,
-  PRISM_STRICT_LOCAL_MODE: false,
+  get PRISM_LOCAL_LLM_ENABLED() { return localPolicy.enabled; },
+  get PRISM_STRICT_LOCAL_MODE() { return localPolicy.strict; },
+  get PRISM_FORCE_LOCAL() { return localPolicy.force; },
   SYNALUX_CONFIGURED: false,
 }));
 
@@ -74,6 +76,7 @@ vi.mock("../../src/utils/llm/factory.js", () => ({
 vi.mock("../../src/utils/localLlm.js", () => ({
   callLocalLlm: vi.fn(() => Promise.resolve(null)),
 }));
+vi.mock("../../src/tools/prismInferHandler.js", () => ({ inferText: localPolicy.infer }));
 
 // ======================================================================
 // IMPORTS — after mocks
@@ -158,6 +161,8 @@ describe("compactionHandler", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.assign(localPolicy, { force: false, strict: false, enabled: false });
+    localPolicy.infer.mockResolvedValue(null);
     storage = makeStorageStub();
     mockGetStorage.mockResolvedValue(storage as any);
 
@@ -326,6 +331,7 @@ describe("compactionHandler", () => {
 
       expect(result.isError).toBe(false);
       expect(result.content[0].text).toContain("compaction complete");
+      expect(result.structuredContent).toEqual({ projects_compacted: 1 });
 
       // Rollup entry created
       expect(storage.saveLedger).toHaveBeenCalledTimes(1);
@@ -579,6 +585,7 @@ describe("compactionHandler", () => {
 
       expect(result.isError).toBe(false);
       expect(result.content[0].text).toContain("no entries to compact");
+      expect(result.structuredContent).toEqual({ projects_compacted: 0 });
       expect(storage.saveLedger).not.toHaveBeenCalled();
     });
 
@@ -598,6 +605,35 @@ describe("compactionHandler", () => {
   // ====================================================================
 
   describe("LLM failure handling", () => {
+    it.each(["force", "strict"] as const)("keeps forced local memory off cloud when %s is set and local summarization is disabled", async flag => {
+      localPolicy[flag] = true;
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(60)).mockResolvedValueOnce(makeFakeEntries(3));
+      const result = await compactLedgerHandler({ project: "test-project", threshold: 50 });
+      expect(result.isError).toBe(true);
+      expect(mockGenerateText).not.toHaveBeenCalled();
+      expect(storage.saveLedger).not.toHaveBeenCalled();
+    });
+
+    it.each(["force", "strict"] as const)("binds the local-only compaction dispatch when %s is set", async flag => {
+      localPolicy[flag] = true;
+      localPolicy.enabled = true;
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(60)).mockResolvedValueOnce(makeFakeEntries(3));
+      const result = await compactLedgerHandler({ project: "test-project", threshold: 50 });
+      expect(localPolicy.infer).toHaveBeenCalledWith(expect.any(String), { mode: "chat", localOnly: true });
+      expect(result.isError).toBe(true);
+      expect(mockGenerateText).not.toHaveBeenCalled();
+    });
+
+    it("retains successful on-device compaction in forced local memory", async () => {
+      localPolicy.force = true;
+      localPolicy.enabled = true;
+      localPolicy.infer.mockResolvedValue('{"summary":"Local rollup","principles":[],"causal_links":[]}');
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(60)).mockResolvedValueOnce(makeFakeEntries(3));
+      const result = await compactLedgerHandler({ project: "test-project", threshold: 50 });
+      expect(result.isError).toBe(false);
+      expect(storage.saveLedger).toHaveBeenCalledOnce();
+      expect(mockGenerateText).not.toHaveBeenCalled();
+    });
     it("propagates non-HIPAA LLM errors as thrown exceptions", async () => {
       mockGenerateText.mockRejectedValue(new Error("Gemini 503: Service Unavailable"));
 
@@ -736,22 +772,40 @@ describe("compactionHandler", () => {
   // 14. Rollup entry missing from saveLedger response
   // ====================================================================
 
-  describe("rollup save returns null", () => {
-    it("does not create links when saveLedger returns no id", async () => {
+  describe("rollup write confirmation", () => {
+    it.each([{ saved: null }, { saved: [] }, { saved: [{}] }, { saved: { id: " " } }])(
+        "preserves the originals when saveLedger returns no id ($saved)", async ({ saved }) => {
       storage.getLedgerEntries
         .mockResolvedValueOnce(makeFakeEntries(60))
         .mockResolvedValueOnce(makeFakeEntries(3));
 
-      // saveLedger returns no id
-      storage.saveLedger.mockResolvedValue([{}]);
+      storage.saveLedger.mockResolvedValue(saved);
+
+      const result = await compactLedgerHandler({ project: "test-project", threshold: 50 });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("rollup ID");
+      expect(result.structuredContent?.projects_compacted ?? 0).toBe(0);
+      expect(storage.createLink).not.toHaveBeenCalled();
+      expect(storage.patchLedger).not.toHaveBeenCalled();
+    });
+
+    it("uses the ID returned by the SQLite deduplicated rollup result", async () => {
+      const entries = makeFakeEntries(3);
+      storage.getLedgerEntries
+        .mockResolvedValueOnce(makeFakeEntries(60))
+        .mockResolvedValueOnce(entries);
+      storage.saveLedger.mockResolvedValue({ id: "existing-rollup", deduplicated: true });
 
       const result = await compactLedgerHandler({ project: "test-project", threshold: 50 });
 
       expect(result.isError).toBe(false);
-      // No createLink calls since rollupId is null/undefined
-      expect(storage.createLink).not.toHaveBeenCalled();
-      // But original entries are still archived
-      expect(storage.patchLedger).toHaveBeenCalledTimes(3);
+      expect(result.structuredContent).toEqual({ projects_compacted: 1 });
+      expect(storage.createLink).toHaveBeenCalledWith(
+        expect.objectContaining({ source_id: "existing-rollup", target_id: entries[0].id, link_type: "spawned_from" }),
+        expect.any(String),
+      );
+      expect(storage.patchLedger).toHaveBeenCalledTimes(entries.length);
     });
   });
 

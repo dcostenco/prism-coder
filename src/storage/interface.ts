@@ -537,6 +537,9 @@ export interface StorageBackend {
 
   // ─── Compaction ────────────────────────────────────────────
 
+  /** False if the backend cannot persist the rollup and archive its sources. */
+  readonly supportsLedgerCompaction?: boolean;
+
   /**
    * Find projects that exceed the compaction threshold.
    */
@@ -830,6 +833,9 @@ export interface StorageBackend {
    * Used for 1-hop expansion during search result enrichment.
    */
   getLinksFrom(sourceId: string, userId: string, minStrength?: number, limit?: number): Promise<MemoryLink[]>;
+
+  /** Portal-backed projection of caller-visible targets for graph recall. */
+  getLinkedLedgerSummaries?(sourceId: string, limit: number): Promise<Array<{ id: string; summary: string }>>;
 
   /**
    * Get all inbound links pointing to a target entry.

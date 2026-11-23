@@ -11,7 +11,7 @@ import { getStorage } from "../storage/index.js";
 import { PRISM_USER_ID } from "../config.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
 import { inferText } from "./prismInferHandler.js";
-import { PRISM_LOCAL_LLM_ENABLED, PRISM_STRICT_LOCAL_MODE } from "../config.js";
+import { PRISM_FORCE_LOCAL, PRISM_LOCAL_LLM_ENABLED, PRISM_STRICT_LOCAL_MODE } from "../config.js";
 import { debugLog } from "../utils/logger.js";
 
 // ─── Constants ────────────────────────────────────────────────
@@ -132,6 +132,7 @@ function parseCompactionResponse(response: string, source: string): any {
 
 async function summarizeEntries(entries: any[]): Promise<any> {
   const prompt = buildCompactionPrompt(entries);
+  const localOnly = PRISM_FORCE_LOCAL || PRISM_STRICT_LOCAL_MODE;
 
   // ── Path 1: Local LLM (prism-coder:9b) ───────────────────────────
   if (PRISM_LOCAL_LLM_ENABLED) {
@@ -139,25 +140,19 @@ async function summarizeEntries(entries: any[]): Promise<any> {
     // Ledger content goes through the full ladder so Layer 1 screening, the
     // quality gate and the entitlement ceiling all apply — this summarises
     // session records that may carry sensitive material.
-    const localResponse = await inferText(prompt, { mode: "chat" });
+    const localResponse = await inferText(prompt, { mode: "chat", ...(localOnly ? { localOnly } : {}) });
     if (localResponse) {
       debugLog(`[compact_ledger] Local LLM summarization succeeded`);
       return parseCompactionResponse(localResponse, "local-llm");
     }
 
-    // FIX (HIPAA): In strict local mode, NEVER fall back to cloud.
-    // Session data (summaries, decisions, file paths) may contain ePHI.
-    // Sending this to Gemini/OpenRouter violates the deployment's data
-    // residency boundary and constitutes an unauthorized disclosure.
-    if (PRISM_STRICT_LOCAL_MODE) {
-      throw new Error(
-        "[HIPAA] Local LLM failed and PRISM_STRICT_LOCAL_MODE=true. " +
-        "Cloud fallback is blocked to prevent unauthorized PHI disclosure. " +
-        "Ensure Ollama is running and prism-coder:9b is available."
-      );
-    }
+  }
 
-    debugLog(`[compact_ledger] Local LLM returned null — falling back to cloud LLM`);
+  if (localOnly) {
+    throw new Error(
+      "[HIPAA] Local ledger summarization is unavailable under the active data residency policy. " +
+      "Enable local summarization and check the selected local provider."
+    );
   }
 
   // ── Path 2: Cloud LLM (Gemini / configured provider) ──────────────
@@ -186,6 +181,15 @@ export async function compactLedgerHandler(args: unknown) {
   );
 
   const storage = await getStorage();
+  if (storage.supportsLedgerCompaction === false) {
+    return {
+      content: [{
+        type: "text",
+        text: "Synalux cloud ledger compaction is unavailable. It requires Portal support for saving the rollup and archiving its source entries together.",
+      }],
+      isError: true,
+    };
+  }
 
   // Step 1: Find candidates
   let candidates: any[];
@@ -244,6 +248,7 @@ export async function compactLedgerHandler(args: unknown) {
 
   // Step 2: Compact each candidate project
   const results: string[] = [];
+  let projectsCompacted = 0;
 
   for (const candidate of candidates) {
     const proj = candidate.project;
@@ -336,7 +341,7 @@ export async function compactLedgerHandler(args: unknown) {
     )];
 
     // Step 4: Insert rollup entry via storage backend
-    const savedRollup: any = await storage.saveLedger({
+    const savedRollup = await storage.saveLedger({
       project: proj,
       user_id: PRISM_USER_ID,
       summary: `[ROLLUP of ${oldEntries.length} sessions] ${finalSummaryText}`,
@@ -348,9 +353,10 @@ export async function compactLedgerHandler(args: unknown) {
       conversation_id: `rollup-${Date.now()}`,
     });
 
-    const rollupId = savedRollup && savedRollup[0] ? savedRollup[0].id : null;
+    const rollup = Array.isArray(savedRollup) ? savedRollup[0] : savedRollup;
+    const rollupId = rollup && typeof rollup === "object" && "id" in rollup ? rollup.id : undefined;
 
-    if (rollupId) {
+    if (typeof rollupId === "string" && rollupId.trim()) {
       // ── v6.0 Phase 3: Auto-Linking on Save (Compaction) ──────────
       await Promise.all(oldEntries.map(async (entry: any) => {
         try {
@@ -405,6 +411,15 @@ export async function compactLedgerHandler(args: unknown) {
            debugLog(`[compact_ledger] Failed to create causal link: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
+    } else {
+      return {
+        content: [{
+          type: "text",
+          text: `The store did not confirm the rollup ID for "${proj}". Its original entries were left active.`,
+        }],
+        structuredContent: { projects_compacted: projectsCompacted },
+        isError: true,
+      };
     }
 
     // Step 5: Archive old entries (soft-delete)
@@ -414,6 +429,7 @@ export async function compactLedgerHandler(args: unknown) {
       });
     }
 
+    projectsCompacted++;
     results.push(
       `• ${proj}: ${oldEntries.length} entries → 1 rollup ` +
       `(${allKeywords.length} keywords preserved)`
@@ -426,6 +442,7 @@ export async function compactLedgerHandler(args: unknown) {
       text: `🧹 Ledger compaction complete:\n\n${results.join("\n")}\n\n` +
         `Original entries are archived (soft-deleted), not permanently removed.`,
     }],
+    structuredContent: { projects_compacted: projectsCompacted },
     isError: false,
   };
 }

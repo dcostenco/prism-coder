@@ -135,6 +135,8 @@ function buildContextLoadKey(project: string, level: string, userId: string, rol
 }
 
 export class SynaluxStorage extends SupabaseStorage {
+  readonly supportsLedgerCompaction = false;
+
   /**
    * Cloud memory keeps ledger vectors (save_embedding) but not handoff vectors
    * (patchHandoff is inherited and writes nowhere), and the local SDM index never
@@ -971,6 +973,21 @@ export class SynaluxStorage extends SupabaseStorage {
       created_at: row.created_at,
       last_traversed_at: row.last_traversed_at,
     })) as MemoryLink[];
+  }
+
+  async getLinkedLedgerSummaries(sourceId: string, limit: number): Promise<Array<{ id: string; summary: string }>> {
+    const query = new URLSearchParams({
+      source_id: sourceId,
+      limit: String(limit),
+      include_target_summaries: "true",
+    });
+    const result = await this.portalGet(`/api/v1/prism/graph/edge?${query.toString()}`);
+    const summaries = result.target_summaries;
+    if (!Array.isArray(summaries) || summaries.length > limit
+      || summaries.some(row => typeof row?.id !== "string" || typeof row?.summary !== "string")) {
+      throw new Error("Portal graph response does not contain the requested linked summaries.");
+    }
+    return summaries;
   }
 
   // ─── Project inventory + export ──────────────────────────────

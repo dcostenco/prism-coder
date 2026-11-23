@@ -543,6 +543,23 @@ describe("assembleTestMeContext", () => {
     expect(ctx.contextItems[0]).toContain("linked summary");
   });
 
+  it("uses authenticated linked summaries without direct ledger reads when the store exposes them", async () => {
+    const targetId = "11111111-1111-1111-1111-111111111111";
+    const storage = {
+      getLinkedLedgerSummaries: vi.fn(async () => [{ id: targetId, summary: "Scoped linked summary" }]),
+      getLinksFrom: vi.fn(async () => [{ target_id: targetId }]),
+      getLedgerEntries: vi.fn(async () => [{ id: targetId, summary: "Direct database result" }]),
+      searchKnowledge: vi.fn(async () => ({ results: [{ id: targetId, summary: "Duplicate search result" }] })),
+    };
+
+    const result = await graphHandlers.assembleTestMeContext("node", "project", storage as any);
+
+    expect(result.contextItems).toEqual(["Scoped linked summary"]);
+    expect(storage.getLinkedLedgerSummaries).toHaveBeenCalledWith("node", 5);
+    expect(storage.getLinksFrom).not.toHaveBeenCalled();
+    expect(storage.getLedgerEntries).not.toHaveBeenCalled();
+  });
+
   /**
    * When both graph links and searchKnowledge return the same entry,
    * it should appear only once in contextItems (dedup by ID).

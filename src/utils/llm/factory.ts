@@ -52,10 +52,14 @@ import { TracingLLMProvider } from "./adapters/traced.js";
 import { sanitizeForLog } from "../logger.js";
 import { SynaluxEmbeddingAdapter } from "./adapters/synalux.js";
 import { activeStorageBackend } from "../../storage/index.js";
+import { PRISM_FORCE_LOCAL, PRISM_STRICT_LOCAL_MODE } from "../../config.js";
 
 // Module-level singleton — one composed provider per MCP server process.
 let providerInstance: LLMProvider | null = null;
-let embeddingInstance: Pick<LLMProvider, "generateEmbedding"> | null = null;
+let embeddingInstance: {
+  backend: string;
+  provider: Pick<LLMProvider, "generateEmbedding">;
+} | null = null;
 
 // ─── Adapter Builders ─────────────────────────────────────────────────────────
 // Separated from getLLMProvider() so they can be called independently for the
@@ -126,6 +130,32 @@ export function getLLMProvider(): LLMProvider {
 
   // ── Resolve text provider ─────────────────────────────────────────────
   const textType = resolveProviderSetting("PRISM_TEXT_PROVIDER", "text_provider", "gemini");
+
+  if (PRISM_FORCE_LOCAL || PRISM_STRICT_LOCAL_MODE) {
+    const textDisabled = new DisabledTextAdapter();
+    providerInstance = new TracingLLMProvider({
+      async generateText(prompt, system, options) {
+        if (textType === "none") return textDisabled.generateText(prompt, system);
+        if (options?.model) throw new Error("Explicit text model overrides are unavailable in local-only mode.");
+        if (options?.json) {
+          system = [system, "Return only valid JSON."].filter(Boolean).join("\n\n");
+        }
+        const { inferText } = await import("../../tools/prismInferHandler.js");
+        const text = await inferText(prompt, {
+          system,
+          maxTokens: options?.maxOutputTokens,
+          localOnly: true,
+        });
+        if (!text) throw new Error("No local text model produced an answer.");
+        if (options?.json) JSON.parse(text);
+        return text;
+      },
+      async generateEmbedding(text) {
+        return getEmbeddingProvider().generateEmbedding(text);
+      },
+    }, "prism-local");
+    return providerInstance;
+  }
 
   // ── Resolve embedding provider ────────────────────────────────────────
   let embedType = resolveProviderSetting("PRISM_EMBEDDING_PROVIDER", "embedding_provider", "auto");
@@ -204,7 +234,8 @@ export function getLLMProvider(): LLMProvider {
  * substituting a different 768-dimensional vector space would corrupt search.
  */
 export function getEmbeddingProvider(): Pick<LLMProvider, "generateEmbedding"> {
-  if (embeddingInstance) return embeddingInstance;
+  const backend = activeStorageBackend;
+  if (embeddingInstance?.backend === backend) return embeddingInstance.provider;
 
   const textType = resolveProviderSetting("PRISM_TEXT_PROVIDER", "text_provider", "gemini");
   let embedType = resolveProviderSetting("PRISM_EMBEDDING_PROVIDER", "embedding_provider", "auto");
@@ -212,16 +243,21 @@ export function getEmbeddingProvider(): Pick<LLMProvider, "generateEmbedding"> {
     embedType = textType === "anthropic" ? "gemini" : textType;
   }
 
-  const configuredStorage = process.env.PRISM_STORAGE?.trim().toLowerCase();
-  const useSynalux = (activeStorageBackend === "synalux" || configuredStorage === "synalux")
-    && embedType === "gemini";
+  if (PRISM_FORCE_LOCAL && embedType !== "local") {
+    throw new Error("Forced local memory requires the Local embedding provider. Select it in Mind Palace settings.");
+  }
+
+  // Use the initialized store. The requested backend can differ after an
+  // account change or a local override and cannot authorize transmitting text.
+  const useSynalux = backend === "synalux" && embedType === "gemini";
   const adapter = useSynalux
     ? new SynaluxEmbeddingAdapter()
     : buildEmbeddingAdapter(embedType);
   const providerName = useSynalux ? "synalux" : embedType;
 
-  embeddingInstance = new TracingLLMProvider(adapter, providerName);
-  return embeddingInstance;
+  const provider = new TracingLLMProvider(adapter, providerName);
+  embeddingInstance = { backend, provider };
+  return provider;
 }
 
 /**
@@ -235,5 +271,5 @@ export function _resetLLMProvider(): void {
 
 export function _setLLMProviderForTest(mock: LLMProvider): void {
   providerInstance = mock;
-  embeddingInstance = mock;
+  embeddingInstance = { backend: activeStorageBackend, provider: mock };
 }

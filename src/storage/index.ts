@@ -259,7 +259,7 @@ async function initializeStorage(): Promise<StorageBackend> {
   // newer handoffs from Supabase into SQLite. Fixes the split-brain where one
   // client (e.g. Claude Desktop) writes to Supabase but another (e.g.
   // Antigravity) reads from SQLite and sees stale data.
-  if (activeStorageBackend === "local" && await ensureSupabaseCredentials()) {
+  if (activeStorageBackend === "local" && !PRISM_FORCE_LOCAL && await ensureSupabaseCredentials()) {
     try {
       const { reconcileHandoffs } = await import("./reconcile.js");
       const { SqliteStorage } = await import("./sqlite.js");

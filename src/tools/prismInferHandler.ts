@@ -23,7 +23,7 @@
 import { ownedOmlxGenerate, recoverOwnedOmlx, validateOmlxRequestEnvelope } from "../utils/omlxOwned.js";
 import { approvedHostTask, consumeHostExecution, HostAuthorizationError, hostTaskResponse, hostTasksRequired, prepareHostTask, snapshotHostTask } from "../utils/hostTasks.js";
 import { validateOmlxImageInput } from "../utils/omlxImages.js";
-import { OmlxError, createOmlxRuntime, guardedOmlxGenerate, omlxModelTarget, withInferenceResourceLease, withOllamaResourceLease, OMLX_MIN_AVAILABLE_BYTES, type OmlxRuntime, type OmlxTarget } from "../utils/omlxProvider.js";
+import { OmlxError, createOmlxRuntime, guardedOmlxGenerate, loopbackUrl, omlxModelTarget, withInferenceResourceLease, withOllamaResourceLease, OMLX_MIN_AVAILABLE_BYTES, type OmlxRuntime, type OmlxTarget } from "../utils/omlxProvider.js";
 import { omlxLayer1Model, omlxLayer1Fetch, omlxLayer1Options } from "../utils/omlxLayer1.js";
 import { createHash } from "node:crypto";
 import { type Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -32,8 +32,10 @@ import { getSynaluxJwt, invalidateSynaluxJwt } from "../utils/synaluxJwt.js";
 import { getAvailableMemoryBytes } from "../utils/availableMemory.js";
 import { downscaleImages, productionDownscaleDeps, resolveMaxImageEdge } from "../utils/imageDownscale.js";
 import {
+    PRISM_FORCE_LOCAL,
     PRISM_SYNALUX_BASE_URL,
     PRISM_LOCAL_LLM_URL,
+    PRISM_STRICT_LOCAL_MODE,
     PRISM_USER_ID,
     SYNALUX_CONFIGURED,
 } from "../config.js";
@@ -4475,17 +4477,27 @@ export function productionInferDeps(): InferDeps {
  */
 export async function inferText(
     prompt: string,
-    opts: { system?: string; mode?: "route" | "chat" | "code"; maxTokens?: number } = {},
+    opts: { system?: string; mode?: "route" | "chat" | "code"; maxTokens?: number; localOnly?: boolean } = {},
 ): Promise<string | null> {
     try {
+        const localOnly = opts.localOnly || PRISM_FORCE_LOCAL || PRISM_STRICT_LOCAL_MODE;
+        const deps = productionInferDeps();
+        if (localOnly) {
+            loopbackUrl(deps.ollamaUrl, "");
+            deps.callLayer1 = (text, url, model, fetchImpl = fetch, images, options) => {
+                const localFetch = ((input, init) => fetchImpl(input, { ...init, redirect: "error" })) as typeof fetch;
+                return defaultCallLayer1(text, url, model, localFetch, images, options);
+            };
+        }
         const result = await runInfer(
             {
                 prompt,
                 system: opts.system,
                 mode: opts.mode ?? "chat",
                 ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
+                ...(localOnly ? { cloud_fallback: false, route_guard: "local", verify: false } : {}),
             },
-            productionInferDeps(),
+            deps,
         );
         const text = (result.output ?? "").trim();
         return text.length > 0 ? text : null;

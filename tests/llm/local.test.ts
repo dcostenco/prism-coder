@@ -74,6 +74,22 @@ describe("LocalEmbeddingAdapter", () => {
     expect(adapter.loadPromise).toBeInstanceOf(Promise);
   });
 
+  it("uses cached weights only in forced-local memory mode", async () => {
+    vi.stubEnv("PRISM_FORCE_LOCAL", "true");
+    mockSettings();
+    try {
+      vi.resetModules();
+      const adapter = await makeAdapter();
+      await adapter.loadPromise;
+      expect(mockPipelineFactory).toHaveBeenCalledWith("feature-extraction", expect.any(String), expect.objectContaining({
+        local_files_only: true,
+      }));
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+
   it("construction is synchronous (loadPromise is a fire-and-forget)", async () => {
     mockSettings();
     let constructed = false;

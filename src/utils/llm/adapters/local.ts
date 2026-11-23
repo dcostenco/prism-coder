@@ -1,4 +1,5 @@
 import { getSettingSync } from "../../../storage/configStorage.js";
+import { PRISM_FORCE_LOCAL } from "../../../config.js";
 import { debugLog } from "../../logger.js";
 import type { LLMProvider } from "../provider.js";
 
@@ -123,7 +124,11 @@ export class LocalEmbeddingAdapter implements LLMProvider {
     }
 
     try {
-      const pipelineInstance = await transformers.pipeline("feature-extraction", model, { dtype, revision } as Parameters<typeof transformers.pipeline>[2]);
+      const pipelineInstance = await transformers.pipeline("feature-extraction", model, {
+        dtype,
+        revision,
+        ...(PRISM_FORCE_LOCAL ? { local_files_only: true } : {}),
+      } as Parameters<typeof transformers.pipeline>[2]);
       this.pipe = pipelineInstance as (text: string, opts: object) => Promise<unknown>;
 
       try {
