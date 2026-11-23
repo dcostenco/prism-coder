@@ -13,11 +13,13 @@ import { getLLMProvider } from "../utils/llm/factory.js";
 import { inferText } from "./prismInferHandler.js";
 import { PRISM_FORCE_LOCAL, PRISM_LOCAL_LLM_ENABLED, PRISM_STRICT_LOCAL_MODE } from "../config.js";
 import { debugLog } from "../utils/logger.js";
+import { BCBA_RESPONSE, checkInputSafety, CRISIS_RESPONSE, MEDICAL_RESPONSE } from "../utils/safetyGate.js";
 
 // ─── Constants ────────────────────────────────────────────────
 
 const COMPACTION_CHUNK_SIZE = 10;
 const MAX_ENTRIES_PER_RUN = 100;
+const SAFETY_NOTICES = new Set([BCBA_RESPONSE, CRISIS_RESPONSE, MEDICAL_RESPONSE]);
 
 // ─── Type Guard ───────────────────────────────────────────────
 
@@ -115,19 +117,31 @@ function buildCompactionPrompt(entries: any[]): string {
  * Parse LLM response into structured compaction result.
  * Shared by both execution paths.
  */
-function parseCompactionResponse(response: string, source: string): any {
+function parseCompactionResponse(response: string, source: string) {
+  let parsed;
   try {
     const cleanJson = response.replace(/^```json\n?/, "").replace(/\n?```$/, "");
-    return JSON.parse(cleanJson);
+    parsed = JSON.parse(cleanJson);
   } catch (err) {
     debugLog(`[compact_ledger] Failed to parse JSON from ${source}: ${err}`);
-    return { summary: response, principles: [], causal_links: [] };
+    parsed = response;
   }
+  const text = typeof parsed === "string" ? parsed : parsed?.summary;
+  const summary = typeof text === "string" ? text.trim() : "";
+  if (!summary || SAFETY_NOTICES.has(summary)) {
+    throw new Error("Ledger compaction did not receive a usable summary. The original entries were retained.");
+  }
+  return { summary, principles: parsed?.principles ?? [], causal_links: parsed?.causal_links ?? [] };
 }
 
-async function summarizeEntries(entries: any[]): Promise<any> {
+async function summarizeEntries(entries: any[]) {
   const prompt = buildCompactionPrompt(entries);
   const localOnly = PRISM_FORCE_LOCAL || PRISM_STRICT_LOCAL_MODE;
+
+  // A safety notice is user guidance. It cannot replace the source entries.
+  if (checkInputSafety(prompt)) {
+    throw new Error("Ledger compaction stopped at the input safety gate. The original entries were retained.");
+  }
 
   // ── Path 1: Local LLM (prism-coder:9b) ───────────────────────────
   if (PRISM_LOCAL_LLM_ENABLED) {
@@ -261,7 +275,7 @@ export async function compactLedgerHandler(args: unknown) {
       "archived_at": "is.null",
       "deleted_at": "is.null",
       "is_rollup": "eq.false",
-      order: "last_accessed_at.asc.nullsfirst,created_at.asc",
+      order: "created_at.asc,id.asc",
       limit: String(toCompact),
       select: "id,summary,decisions,files_changed,keywords,session_date",
     });
@@ -282,7 +296,7 @@ export async function compactLedgerHandler(args: unknown) {
       const chunks = compactionChunks(oldEntries);
       if (chunks.length === 1) {
         const res = await summarizeEntries(chunks[0]);
-        finalSummaryText = typeof res === 'string' ? res : (res.summary || JSON.stringify(res));
+        finalSummaryText = res.summary;
         finalPrinciples = res.principles || [];
         finalCausalLinks = res.causal_links || [];
       } else {
@@ -303,7 +317,7 @@ export async function compactLedgerHandler(args: unknown) {
           files_changed: [],
         }));
         const metaRes = await summarizeEntries(metaEntries);
-        finalSummaryText = typeof metaRes === 'string' ? metaRes : (metaRes.summary || JSON.stringify(metaRes));
+        finalSummaryText = metaRes.summary;
         finalPrinciples.push(...(metaRes.principles || []));
         finalCausalLinks.push(...(metaRes.causal_links || []));
       }

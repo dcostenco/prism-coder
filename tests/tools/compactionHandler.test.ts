@@ -83,6 +83,7 @@ vi.mock("../../src/tools/prismInferHandler.js", () => ({ inferText: localPolicy.
 // ======================================================================
 
 import { getStorage } from "../../src/storage/index.js";
+import { checkInputSafety, MEDICAL_RESPONSE } from "../../src/utils/safetyGate.js";
 import {
   compactLedgerHandler,
   isCompactLedgerArgs,
@@ -632,6 +633,36 @@ describe("compactionHandler", () => {
   // ====================================================================
 
   describe("LLM failure handling", () => {
+    it.each([true, false])("refuses safety-gated compaction input before either provider (local enabled: %s)", async enabled => {
+      localPolicy.enabled = enabled;
+      localPolicy.infer.mockImplementation(async (prompt: string) => checkInputSafety(prompt));
+      const quotedRecord = { ...makeFakeEntries(1)[0], summary: "Synthetic quoted example. What dose of this vitamin should I take?" };
+      expect(checkInputSafety(quotedRecord.summary)).toBe(MEDICAL_RESPONSE);
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(11)).mockResolvedValueOnce([quotedRecord]);
+
+      await expect(compactLedgerHandler({ project: "test-project", threshold: 5 })).rejects.toThrow(/input safety gate/i);
+
+      expect(localPolicy.infer).not.toHaveBeenCalled();
+      expect(mockGenerateText).not.toHaveBeenCalled();
+      expect(storage.saveLedger).not.toHaveBeenCalled();
+      expect(storage.patchLedger).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      MEDICAL_RESPONSE,
+      " \n ",
+      JSON.stringify({ summary: MEDICAL_RESPONSE }),
+      JSON.stringify({ principles: [], causal_links: [] }),
+    ])("refuses unusable generated compaction output %j before any write", async output => {
+      mockGenerateText.mockResolvedValue(output);
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(11)).mockResolvedValueOnce(makeFakeEntries(1));
+
+      await expect(compactLedgerHandler({ project: "test-project", threshold: 5 })).rejects.toThrow(/usable summary/i);
+
+      expect(storage.saveLedger).not.toHaveBeenCalled();
+      expect(storage.patchLedger).not.toHaveBeenCalled();
+    });
+
     it.each(["force", "strict"] as const)("keeps forced local memory off cloud when %s is set and local summarization is disabled", async flag => {
       localPolicy[flag] = true;
       storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(60)).mockResolvedValueOnce(makeFakeEntries(3));
@@ -920,6 +951,26 @@ describe("compactionHandler", () => {
   // ====================================================================
 
   describe("custom threshold and keep_recent", () => {
+    it("retains newest creation when only the newest entry has never been accessed", async () => {
+      const entries = makeFakeEntries(11).map((entry, index) => ({
+        ...entry,
+        created_at: entry.session_date,
+        last_accessed_at: index === 10 ? null : "2026-12-01T00:00:00Z",
+      }));
+      const [oldest] = entries;
+      const newest = entries[10];
+      storage.getLedgerEntries.mockResolvedValueOnce(entries)
+        .mockImplementationOnce(async (query?: Record<string, string>) => {
+          expect(query?.limit).toBe("1");
+          return [query?.order?.startsWith("created_at.asc") ? oldest : newest];
+        });
+
+      const result = await compactLedgerHandler({ project: "test-project", threshold: 5, keep_recent: 10 });
+
+      expect(result.isError).toBe(false);
+      expect(storage.patchLedger).toHaveBeenCalledExactlyOnceWith(oldest.id, expect.objectContaining({ archived_at: expect.any(String) }));
+    });
+
     it("uses custom threshold for the compaction gate", async () => {
       // 25 entries with threshold 20 => should compact
       storage.getLedgerEntries

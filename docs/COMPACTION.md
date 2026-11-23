@@ -160,7 +160,7 @@ return thousands of entries, bloating the context window it's meant to manage.
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
 | `threshold` | 50 | Run compaction when a project has more than N active entries |
-| `keep_recent` | 10 | Always keep the N most recent entries untouched |
+| `keep_recent` | 10 | Keep the N newest entries by creation time |
 | `dry_run` | false | Preview what would be compacted without executing |
 
 **Execution pipeline:**

@@ -118,6 +118,59 @@ describe('dashboard graph node cap', () => {
     expect(container?.textContent).not.toContain('Previous project quiz');
   });
 
+  it('binds quizzes to an explicit graph project instead of the separate header project', async () => {
+    const topic = 'debugging';
+    const quizProjects: string[] = [];
+    let selectNode: ((params: { nodes: string[] }) => void) | undefined;
+    const page = new JSDOM(renderDashboardHTML('test'), {
+      runScripts: 'dangerously',
+      virtualConsole: new VirtualConsole(),
+      beforeParse(window) {
+        window.vis = { Network: class {
+          on(name: string, callback: typeof selectNode) { if (name === 'click') selectNode = callback; }
+          setData() {}
+          destroy() {}
+        } } as never;
+        window.fetch = (async (input: string | URL | Request) => {
+          const url = new URL(String(input), 'http://localhost');
+          if (url.pathname === '/api/graph/test-me') {
+            quizProjects.push(url.searchParams.get('project')!);
+            return Response.json({ questions: [{ q: 'Scoped question', a: 'Scoped answer' }] });
+          }
+          if (url.pathname === '/api/graph') {
+            return Response.json({ nodes: [{ id: topic, label: 'Debugging', group: 'keyword' }], edges: [] });
+          }
+          return Response.json({});
+        }) as typeof window.fetch;
+      },
+    });
+    pages.push(page);
+    const window = page.window as typeof page.window & { loadGraph(): Promise<void>; triggerTestMe(): Promise<void> };
+    await vi.waitFor(() => expect(selectNode).toBeDefined());
+    const doc = window.document;
+    const header = doc.getElementById('projectSelect') as HTMLSelectElement;
+    const filter = doc.getElementById('graphProjectFilter') as HTMLSelectElement;
+    const quiz = doc.getElementById('testMeBtn') as HTMLButtonElement;
+    const content = doc.getElementById('testMeContainer');
+    header.add(new window.Option('Other project', 'other-project'));
+    header.value = 'other-project';
+    selectNode!({ nodes: [topic] });
+
+    await window.triggerTestMe();
+    expect(quizProjects).toEqual([]);
+    expect(quiz.disabled).toBe(true);
+    expect(content?.textContent).toMatch(/choose a project in the graph filter/i);
+
+    filter.add(new window.Option('Graph project', 'graph-project'));
+    filter.value = 'graph-project';
+    await window.loadGraph();
+    selectNode!({ nodes: [topic] });
+    expect(quiz.disabled).toBe(false);
+    await window.triggerTestMe();
+    expect(quizProjects).toEqual(['graph-project']);
+    expect(content?.textContent).toContain('Scoped question');
+  });
+
   it('labels a cloud memory graph as sessions and stored links', async () => {
     const nodes = [
       { id: 'a', label: 'First session', group: 'memory', value: 1 },

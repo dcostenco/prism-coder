@@ -3167,8 +3167,7 @@ function updateGraphStatistics(container, data) {
 }
 function graphTestProject() {
     var filter = document.getElementById('graphProjectFilter');
-    var project = document.getElementById('projectSelect');
-    return (filter ? filter.value : '') || (project ? project.value : '');
+    return filter ? filter.value : '';
 }
 function closeGraphNodeEditor() {
     testMeSelection = null;
@@ -3350,7 +3349,7 @@ function loadGraph() {
                             input.value = nodeData.label;
                             input.dataset.oldId = clickedId;
                             input.dataset.group = nodeData.group;
-                            testMeSelection = { id: clickedId, group: nodeData.group, project: graphTestProject() };
+                            testMeSelection = { id: clickedId, group: nodeData.group, project: proj };
                             // Populate merge dropdown
                             var mergeSelect = document.getElementById('nodeMergeSelect');
                             if (mergeSelect && !readOnly) {
@@ -3363,9 +3362,9 @@ function loadGraph() {
                             var tmBtn = document.getElementById('testMeBtn');
                             var tmCont = document.getElementById('testMeContainer');
                             if (tmCont)
-                                tmCont.innerHTML = '';
+                                tmCont.textContent = proj ? '' : dashboardReadMessages.graphChooseProjectForQuiz;
                             if (tmBtn) {
-                                tmBtn.disabled = false;
+                                tmBtn.disabled = !proj;
                                 tmBtn.textContent = '📝 Test Me';
                                 tmBtn.style.opacity = '1';
                                 tmBtn.title = 'Generate 3 quiz questions using AI';
