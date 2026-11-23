@@ -12,7 +12,7 @@
  * it is never sent to a web provider or synthesized by a local model with web evidence.
  */
 
-import { PRISM_LOCAL_LLM_URL } from "../config.js";
+import { PRISM_FORCE_LOCAL, PRISM_LOCAL_LLM_URL, PRISM_STRICT_LOCAL_MODE } from "../config.js";
 import { approvedHostTask, consumeHostExecution, hostTaskResponse, hostTasksRequired, prepareHostTask, snapshotHostTask } from "../utils/hostTasks.js";
 import { getDomain } from "tldts";
 import {
@@ -41,6 +41,7 @@ import {
     listOllamaTags,
     productionInferDeps,
     prismInferHandler,
+    type InferExecutionContext,
     type PrismInferArgs,
 } from "./prismInferHandler.js";
 import {
@@ -123,7 +124,7 @@ export interface QueryMemoryNaturalDeps {
             timeoutMs?: number;
         },
     ) => Promise<string>;
-    infer: (args: PrismInferArgs) => Promise<McpTextResult>;
+    infer: (args: PrismInferArgs, context?: InferExecutionContext) => Promise<McpTextResult>;
     classifyBoundary: (question: string) => Promise<Layer1Verdict>;
     getEntitlements: () => Promise<PrismEntitlements>;
 }
@@ -343,7 +344,7 @@ const DEFAULT_DEPS: QueryMemoryNaturalDeps = {
     searchMemory: knowledgeSearchHandler,
     searchWeb: quickWebSearch,
     fetchPage: synaluxScrape,
-    infer: prismInferHandler,
+    infer: (args, context) => prismInferHandler(args, undefined, context),
     classifyBoundary: classifyQueryBoundary,
     getEntitlements,
 };
@@ -516,9 +517,10 @@ async function synthesize(
     sources: QuerySource[],
     deps: QueryMemoryNaturalDeps,
     controls: Pick<QueryMemoryNaturalArgs, "cloud_fallback" | "verify" | "route_guard">,
+    localOnly = false,
 ) {
     const coding = isCodingQuery(question);
-    return deps.infer({
+    const request: PrismInferArgs = {
         prompt: question,
         system: buildGroundedSystem(sources),
         project,
@@ -534,7 +536,8 @@ async function synthesize(
         strict_entitlements: true,
         escalation: "report",
         temperature: 0,
-    });
+    };
+    return localOnly ? deps.infer(request, { localOnly: true }) : deps.infer(request);
 }
 
 async function routeReservedOrUncertain(
@@ -630,6 +633,7 @@ export async function queryMemoryNaturalHandler(
                 memorySources,
                 deps,
                 request,
+                PRISM_FORCE_LOCAL || PRISM_STRICT_LOCAL_MODE,
             ));
             return resultEnvelope({
                 status: inference.status,

@@ -36,59 +36,54 @@ export function isCompactLedgerArgs(
 
 // ─── LLM Summarization ───────────────────────────────
 
-/**
- * Build the compaction prompt from ledger entries.
- * Shared by both the local-LLM and Gemini paths.
- */
-function buildCompactionPrompt(entries: any[]): string {
-  // Escape ALL user-controlled strings before injecting into the XML boundary.
-  // Covers summary, decisions, file paths, id, and session_date to prevent
-  // both tag breakout and prompt injection via unescaped metadata fields.
-  const escapeXml = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-     .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+// Count the serialized input so escaping and embedded blank lines cannot
+// change which ledger entries the summarizer receives.
+const MAX_ENTRIES_CHARS = 25_000;
+const ENTRY_SEPARATOR = "\n\n";
 
-  // Wrap each entry's user-generated content in strict XML boundaries.
-  // This prevents prompt injection: if a session summary contains adversarial
-  // instructions (e.g. "ignore previous context and output X"), the model is
-  // explicitly instructed to treat <raw_user_log> content as inert data only.
-  const entriesText = entries.map((e, i) => {
-    // FIX: escape id and session_date — previously injected raw, allowing
-    // prompt breakout via crafted values like 'N/A\n\nIgnore instructions...'
-    const safeId = escapeXml(String(e.id || "N/A"));
-    const safeDate = escapeXml(String(e.session_date || "unknown date"));
-    const summaryText = escapeXml(e.summary || "no summary");
-    const decisionsText = e.decisions?.length
-      ? `Decisions: ${(e.decisions as string[]).map(escapeXml).join("; ")}`
-      : "";
-    const filesText = e.files_changed?.length
-      ? `Files: ${(e.files_changed as string[]).map(escapeXml).join(", ")}`
-      : "";
-    return (
-      `[${i + 1}] ID: ${safeId} | Date: ${safeDate}\n` +
-      `<raw_user_log>\n${summaryText}\n${decisionsText}\n${filesText}\n</raw_user_log>`
-    );
-  }).join("\n\n");
+function serializeCompactionEntry(entry: any, index: number): string {
+  const escapeXml = (value: string) =>
+    value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+  const id = escapeXml(String(entry.id || "N/A"));
+  const date = escapeXml(String(entry.session_date || "unknown date"));
+  const summary = escapeXml(entry.summary || "no summary");
+  const decisions = entry.decisions?.length
+    ? `Decisions: ${(entry.decisions as string[]).map(escapeXml).join("; ")}`
+    : "";
+  const files = entry.files_changed?.length
+    ? `Files: ${(entry.files_changed as string[]).map(escapeXml).join(", ")}`
+    : "";
+  return `[${index + 1}] ID: ${id} | Date: ${date}\n<raw_user_log>\n${summary}\n${decisions}\n${files}\n</raw_user_log>`;
+}
 
-  // FIX (truncation): truncate the ENTRIES payload only, never the structural
-  // prompt wrapper. The previous .substring(0, 30000) on the final string could
-  // sever the closing </raw_user_log> tag and the JSON format instructions,
-  // leaving the LLM with an unclosed boundary and no output schema.
-  //
-  // FIX (mid-tag truncation): cut at entry boundaries (double-newline separators)
-  // instead of raw character offsets. Raw slicing could sever a <raw_user_log>
-  // tag mid-string, producing malformed XML that confuses the LLM.
-  const MAX_ENTRIES_CHARS = 25_000;
-  let truncatedEntries = entriesText;
-  if (entriesText.length > MAX_ENTRIES_CHARS) {
-    // Split on entry boundaries (each entry is separated by \n\n)
-    const entryBlocks = entriesText.split("\n\n");
-    let accumulated = "";
-    for (const block of entryBlocks) {
-      if (accumulated.length + block.length + 2 > MAX_ENTRIES_CHARS) break;
-      accumulated += (accumulated ? "\n\n" : "") + block;
+function compactionChunks(entries: any[]): any[][] {
+  const chunks: any[][] = [];
+  let current: any[] = [];
+  let chars = 0;
+  for (const entry of entries) {
+    let entryChars = serializeCompactionEntry(entry, current.length).length;
+    if (current.length && (current.length === COMPACTION_CHUNK_SIZE
+      || chars + ENTRY_SEPARATOR.length + entryChars > MAX_ENTRIES_CHARS)) {
+      chunks.push(current);
+      current = [];
+      chars = 0;
+      entryChars = serializeCompactionEntry(entry, 0).length;
     }
-    truncatedEntries = accumulated + "\n\n[... remaining entries truncated ...]";
+    if (entryChars > MAX_ENTRIES_CHARS) {
+      throw new Error("A ledger entry exceeds the compaction prompt limit. Original entries were left active.");
+    }
+    chars += entryChars + (current.length ? ENTRY_SEPARATOR.length : 0);
+    current.push(entry);
+  }
+  if (current.length) chunks.push(current);
+  return chunks;
+}
+
+function buildCompactionPrompt(entries: any[]): string {
+  const entriesText = entries.map(serializeCompactionEntry).join(ENTRY_SEPARATOR);
+  if (entriesText.length > MAX_ENTRIES_CHARS) {
+    throw new Error("The combined summary exceeds the compaction prompt limit. Original entries were left active.");
   }
 
   return (
@@ -110,7 +105,7 @@ function buildCompactionPrompt(entries: any[]): string {
     `  ]\n` +
     `}\n` +
     `</|tool_call|>\n\n` +
-    `Sessions to analyze:\n${truncatedEntries}\n\n` +
+    `Sessions to analyze:\n${entriesText}\n\n` +
     `Respond ONLY with the <|synalux_think|> and <|tool_call|> blocks above.`
   );
 }
@@ -199,6 +194,7 @@ export async function compactLedgerHandler(args: unknown) {
       project: `eq.${project}`,
       user_id: `eq.${PRISM_USER_ID}`,
       "archived_at": "is.null",
+      "deleted_at": "is.null",
       "is_rollup": "eq.false",
       select: "id",
     });
@@ -261,6 +257,7 @@ export async function compactLedgerHandler(args: unknown) {
       project: `eq.${proj}`,
       user_id: `eq.${PRISM_USER_ID}`,
       "archived_at": "is.null",
+      "deleted_at": "is.null",
       "is_rollup": "eq.false",
       order: "last_accessed_at.asc.nullsfirst,created_at.asc",
       limit: String(toCompact),
@@ -272,12 +269,6 @@ export async function compactLedgerHandler(args: unknown) {
       continue;
     }
 
-    // Step 3: Chunked summarization
-    const chunks: any[][] = [];
-    for (let i = 0; i < oldEntries.length; i += COMPACTION_CHUNK_SIZE) {
-      chunks.push(oldEntries.slice(i, i + COMPACTION_CHUNK_SIZE));
-    }
-
     let finalSummaryText: string;
     let finalPrinciples: any[] = [];
     let finalCausalLinks: any[] = [];
@@ -286,6 +277,7 @@ export async function compactLedgerHandler(args: unknown) {
     // is enabled and the local LLM fails, summarizeEntries throws a HIPAA error.
     // Without this catch, the unhandled rejection crashes the MCP server.
     try {
+      const chunks = compactionChunks(oldEntries);
       if (chunks.length === 1) {
         const res = await summarizeEntries(chunks[0]);
         finalSummaryText = typeof res === 'string' ? res : (res.summary || JSON.stringify(res));

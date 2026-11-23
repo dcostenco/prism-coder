@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+const residency = vi.hoisted(() => ({ force: false, strict: false }));
+vi.mock("../../src/config.js", async original => ({
+    ...await original<typeof import("../../src/config.js")>(),
+    get PRISM_FORCE_LOCAL() { return residency.force; },
+    get PRISM_STRICT_LOCAL_MODE() { return residency.strict; },
+}));
 import {
     buildAuthorityScopedQuery,
     quickWebSearch,
@@ -117,7 +123,23 @@ describe("query_memory_natural grounded fallback", () => {
     let deps: QueryMemoryNaturalDeps;
 
     beforeEach(() => {
+        residency.force = false;
+        residency.strict = false;
         deps = makeDeps();
+    });
+
+    it.each(["force", "strict"] as const)("restricts memory synthesis to the device in %s mode", async policy => {
+        residency[policy] = true;
+        vi.mocked(deps.searchMemory).mockResolvedValue(memoryResult("fixture-memory", "Stored on-device evidence"));
+
+        const result = await queryMemoryNaturalHandler({ question: "What did I decide?", project: "fixture",
+            verify: true, cloud_fallback: true }, deps);
+
+        expect(parseResult(result).retrieval).toBe("memory");
+        expect(deps.infer).toHaveBeenCalledWith(expect.objectContaining({
+            evidence: [{ source: "fixture-memory", content: "Stored on-device evidence" }],
+        }), { localOnly: true });
+        expect(deps.searchWeb).not.toHaveBeenCalled();
     });
 
     it.each(["What did we decide about draft notes?", "What files did we change about draft notes?"])("reports the executed memory query for %s", async question => {

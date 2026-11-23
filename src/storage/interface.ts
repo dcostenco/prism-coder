@@ -28,6 +28,8 @@ import { VerificationHarness, ValidationResult } from "../verification/schema.js
  * These are append-only — once created, they are never modified
  * (except for adding embeddings or archiving during compaction).
  */
+export class LinkedLedgerProjectionUnavailableError extends Error {}
+
 export interface LedgerEntry {
   // Identity
   id?: string;

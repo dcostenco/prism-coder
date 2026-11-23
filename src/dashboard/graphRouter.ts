@@ -16,7 +16,7 @@
  */
 
 import type * as http from "http";
-import type { StorageBackend } from "../storage/interface.js";
+import { LinkedLedgerProjectionUnavailableError, type StorageBackend } from "../storage/interface.js";
 import { PRISM_USER_ID } from "../config.js";
 import { recordSynthesisRun, recordTestMeRequest, getGraphMetricsSnapshot } from "../observability/graphMetrics.js";
 
@@ -375,6 +375,8 @@ export async function handleGraphRoutes(
     const tmStart = Date.now();
     const id = url.searchParams.get("id");
     const project = url.searchParams.get("project");
+    const group = url.searchParams.get("group");
+    const nodeGroup = group === "memory" || group === "keyword" || group === "category" ? group : undefined;
 
     if (!id || !project) {
       recordTestMeRequest({
@@ -397,8 +399,10 @@ export async function handleGraphRoutes(
       }
 
       const { assembleTestMeContext, generateTestMeQuestions } = await import("../tools/graphHandlers.js");
-      const context = await assembleTestMeContext(id, project, s);
-      const result = await generateTestMeQuestions(context, id);
+      const context = await assembleTestMeContext(id, project, s, nodeGroup);
+      const result = nodeGroup === "memory" && context.contextItems.length === 0
+        ? { questions: [], reason: "no_linked_context" }
+        : await generateTestMeQuestions(context, nodeGroup === "memory" ? "the selected memory" : id);
 
       // Classify outcome
       let tmStatus: "success" | "no_api_key" | "generation_failed" = "success";
@@ -425,7 +429,9 @@ export async function handleGraphRoutes(
       });
       console.error("[Dashboard] Test Me error:", err);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ questions: [], reason: "generation_failed" }));
+      const reason = err instanceof LinkedLedgerProjectionUnavailableError
+        ? "portal_projection_unavailable" : "generation_failed";
+      res.end(JSON.stringify({ questions: [], reason }));
       return true;
     }
   }

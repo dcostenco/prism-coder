@@ -2301,7 +2301,10 @@ const _evictionMutex = (() => {
 })();
 
 /** Trusted host transport controls. Never accepted from model/tool arguments. */
-export interface InferExecutionContext { signal?: AbortSignal; requiredLocalBackend?: "omlx" | "ollama" }
+export interface InferExecutionContext { signal?: AbortSignal; requiredLocalBackend?: "omlx" | "ollama"; localOnly?: boolean }
+function localInferArgs(args: PrismInferArgs): PrismInferArgs {
+    return { ...args, cloud_fallback: false, route_guard: "local", verify: false };
+}
 function requireActive(context?: InferExecutionContext): void {
     if (context?.signal?.aborted) throw new Error("prism_infer: caller_cancelled");
 }
@@ -2356,6 +2359,20 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
     // device lease; never infer the reviewer role from prose or system text.
     const intercepted = [...(args.messages ?? []).filter(turn => turn.role === "user").map(turn => turn.content), args.prompt].some(text => Boolean(checkInputSafety(text)));
     if (intercepted) return runInferWithResources(args, deps);
+    if (context?.localOnly) {
+        args = localInferArgs(args);
+        loopbackUrl(deps.ollamaUrl, "");
+        const screen = deps.callLayer1 ?? defaultCallLayer1;
+        deps = {
+            ...deps,
+            callVerifier: undefined,
+            callRouteGuard: undefined,
+            callLayer1: (text, url, model, fetchImpl = fetch, images, options) => {
+                const localFetch = ((input, init) => fetchImpl(input, { ...init, redirect: "error" })) as typeof fetch;
+                return screen(text, url, model, localFetch, images, options);
+            },
+        };
+    }
     try { consumeHostExecution("prism_infer", args); }
     catch (error) {
         const reason = error instanceof HostAuthorizationError ? error.code : error instanceof Error ? error.message : "host_authorization_required";
@@ -4481,23 +4498,15 @@ export async function inferText(
 ): Promise<string | null> {
     try {
         const localOnly = opts.localOnly || PRISM_FORCE_LOCAL || PRISM_STRICT_LOCAL_MODE;
-        const deps = productionInferDeps();
-        if (localOnly) {
-            loopbackUrl(deps.ollamaUrl, "");
-            deps.callLayer1 = (text, url, model, fetchImpl = fetch, images, options) => {
-                const localFetch = ((input, init) => fetchImpl(input, { ...init, redirect: "error" })) as typeof fetch;
-                return defaultCallLayer1(text, url, model, localFetch, images, options);
-            };
-        }
         const result = await runInfer(
             {
                 prompt,
                 system: opts.system,
                 mode: opts.mode ?? "chat",
                 ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
-                ...(localOnly ? { cloud_fallback: false, route_guard: "local", verify: false } : {}),
             },
-            deps,
+            productionInferDeps(),
+            { localOnly },
         );
         const text = (result.output ?? "").trim();
         return text.length > 0 ? text : null;
@@ -4628,7 +4637,8 @@ export async function prismInferHandler(args: unknown, deps?: InferDeps, context
     try {
         requireActive(context);
         const required = hostTasksRequired();
-        const request = required ? snapshotHostTask(args) : args;
+        const requested = context?.localOnly ? localInferArgs(args) : args;
+        const request = required ? snapshotHostTask(requested) : requested;
         const approved = required ? approvedHostTask("prism_infer", request) : undefined;
         let prepared: PreparedInferArgs = approved
             ? { args: approved.execution as unknown as PrismInferArgs,

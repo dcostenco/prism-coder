@@ -68,11 +68,19 @@ export class OpenAIAdapter implements LLMProvider {
   // One instance per factory singleton = one instance per MCP server process.
   private client: OpenAI;
 
-  constructor() {
+  constructor({ localOnly = false } = {}) {
     // Priority: dashboard setting → environment variable → empty string.
     // This lets users configure keys via the dashboard without touching .env.
     const apiKey  = getSettingSync("openai_api_key",  process.env.OPENAI_API_KEY ?? "");
     const baseURL = getSettingSync("openai_base_url", "https://api.openai.com/v1");
+    if (localOnly) {
+      const endpoint = new URL(baseURL);
+      const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname);
+      if (!loopback || !["http:", "https:"].includes(endpoint.protocol)
+        || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+        throw new Error("Local-only model overrides require a loopback endpoint.");
+      }
+    }
 
     // Detect local inference endpoints — these don't need a real API key.
     // Ollama and LM Studio use local HTTP servers with no authentication.
@@ -92,6 +100,7 @@ export class OpenAIAdapter implements LLMProvider {
       // "ollama" is the conventional placeholder in the Ollama docs.
       apiKey:  apiKey || "ollama",
       baseURL,
+      ...(localOnly ? { fetch: (input, init) => globalThis.fetch(input, { ...init, redirect: "error" }) } : {}),
     });
 
     debugLog(`[OpenAIAdapter] Initialized — baseURL=${baseURL}, keyless=${!apiKey}`);

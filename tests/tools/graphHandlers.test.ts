@@ -544,6 +544,7 @@ describe("assembleTestMeContext", () => {
   });
 
   it("uses authenticated linked summaries without direct ledger reads when the store exposes them", async () => {
+    const nodeId = "22222222-2222-4222-8222-222222222222";
     const targetId = "11111111-1111-1111-1111-111111111111";
     const storage = {
       getLinkedLedgerSummaries: vi.fn(async () => [{ id: targetId, summary: "Scoped linked summary" }]),
@@ -552,12 +553,13 @@ describe("assembleTestMeContext", () => {
       searchKnowledge: vi.fn(async () => ({ results: [{ id: targetId, summary: "Duplicate search result" }] })),
     };
 
-    const result = await graphHandlers.assembleTestMeContext("node", "project", storage as any);
+    const result = await graphHandlers.assembleTestMeContext(nodeId, "project", storage as any, "memory");
 
     expect(result.contextItems).toEqual(["Scoped linked summary"]);
-    expect(storage.getLinkedLedgerSummaries).toHaveBeenCalledWith("node", 5);
+    expect(storage.getLinkedLedgerSummaries).toHaveBeenCalledWith(nodeId, 5);
     expect(storage.getLinksFrom).not.toHaveBeenCalled();
     expect(storage.getLedgerEntries).not.toHaveBeenCalled();
+    expect(storage.searchKnowledge).not.toHaveBeenCalled();
   });
 
   /**

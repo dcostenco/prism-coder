@@ -1556,7 +1556,7 @@ Signed-out Prism uses local memory and can run inference on this device. A Synal
 
 | | Signed out | Signed in to Synalux |
 |---|---|---|
-| Memory storage | Local SQLite | Synalux portal (Supabase-backed) |
+| Memory storage | Local SQLite | Portal-backed memory when the plan includes it and the backend is selected. Local SQLite when local storage is selected. |
 | Inference | Local models | Local models with plan-eligible Synalux fallback |
 | Synalux credentials | None | Account credentials |
 | Synalux web search / scrape | Unavailable | Available with an eligible plan (provider keys server-side) |

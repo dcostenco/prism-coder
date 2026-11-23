@@ -61,6 +61,19 @@ describe("default production coding entrypoints", () => {
             vi.unstubAllEnvs();
         }
     });
+    it("protects memory evidence before classification when the configured Ollama is remote", async () => {
+        vi.stubEnv("PRISM_LOCAL_LLM_URL", "http://network-ollama.test:11434");
+        try {
+            vi.resetModules();
+            const { prismInferHandler } = await import("../../src/tools/prismInferHandler.js");
+            const { getEntitlements } = await import("../../src/utils/entitlements.js");
+            expect(await prismInferHandler({ prompt: "Describe a saved project decision.", mode: "chat",
+                evidence: [{ source: "memory", content: "private fixture text" }],
+                verify: true, cloud_fallback: true }, undefined, { localOnly: true }))
+                .toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/local_endpoint_required/) }] });
+            expect(getEntitlements).not.toHaveBeenCalled();
+        } finally { vi.unstubAllEnvs(); }
+    });
     it("MCP cancellation reaches selection before generation can start", async () => {
         const controller = new AbortController();
         let entered!: () => void;

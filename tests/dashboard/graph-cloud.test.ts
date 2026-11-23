@@ -1,5 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { handleGraphRoutes } from "../../src/dashboard/graphRouter.js";
+import { SynaluxStorage } from "../../src/storage/synalux.js";
+
+const quizProvider = vi.hoisted(() => ({
+  generateText: vi.fn(async () => JSON.stringify([
+    { q: "What changed?", a: "A scoped fix." },
+    { q: "Why?", a: "To preserve the boundary." },
+    { q: "How is it checked?", a: "An authenticated projection." },
+  ])),
+}));
+vi.mock("../../src/utils/llm/factory.js", async original => ({
+  ...await original<typeof import("../../src/utils/llm/factory.js")>(),
+  getLLMProvider: () => quizProvider,
+}));
 
 function responseRecorder() {
   let statusCode = 0;
@@ -151,5 +164,52 @@ describe("cloud dashboard graph reads", () => {
       createdAfter: expect.any(String),
     }));
     expect(storage.getLedgerEntries).not.toHaveBeenCalled();
+  });
+
+  it.each(["keyword", "category"])("uses scoped search for a symbolic keyword selection (%s)", async group => {
+    const id = group === "category" ? "cat:debugging" : "debugging";
+    const getLinkedLedgerSummaries = vi.fn(async () => { throw new Error("A symbolic node is not a ledger ID"); });
+    const searchKnowledge = vi.fn(async () => ({ results: [{ id: "scoped", summary: "Project evidence" }] }));
+    const recorder = responseRecorder();
+    await handleGraphRoutes(new URL("http://localhost/api/graph/test-me?"
+      + new URLSearchParams({ id, project: "example-project", group })), { method: "GET" } as any,
+      recorder.response, async () => ({ getLinkedLedgerSummaries, searchKnowledge }) as any);
+
+    expect(getLinkedLedgerSummaries).not.toHaveBeenCalled();
+    expect(searchKnowledge).toHaveBeenCalledWith(expect.objectContaining({ project: "example-project", keywords: [id] }));
+    expect(JSON.parse(recorder.read().body).questions).toHaveLength(3);
+  });
+
+  it("reports the missing older Portal projection through the Test Me endpoint", async () => {
+    const storage = Object.create(SynaluxStorage.prototype) as SynaluxStorage;
+    const portalRead = vi.spyOn(storage as any, "portalGet").mockResolvedValue({ links: [] });
+    const recorder = responseRecorder();
+    const countBefore = quizProvider.generateText.mock.calls.length;
+
+    await handleGraphRoutes(new URL("http://localhost/api/graph/test-me?id=11111111-1111-4111-8111-111111111111&project=example-project&group=memory"),
+      { method: "GET" } as any, recorder.response, async () => storage);
+
+    expect(portalRead).toHaveBeenCalledWith(expect.stringContaining("include_target_summaries=true"));
+    expect(JSON.parse(recorder.read().body)).toEqual({ questions: [], reason: "portal_projection_unavailable" });
+    expect(quizProvider.generateText).toHaveBeenCalledTimes(countBefore);
+  });
+
+  it("generates Test Me questions for the selected memory using only its linked context", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const storage = {
+      getLinkedLedgerSummaries: vi.fn(async () => [{ id: "linked-memory", summary: "A verified linked fact" }]),
+      searchKnowledge: vi.fn(),
+    };
+    const recorder = responseRecorder();
+    await handleGraphRoutes(new URL("http://localhost/api/graph/test-me?"
+      + new URLSearchParams({ id, project: "example-project", group: "memory" })), { method: "GET" } as any,
+      recorder.response, async () => storage as any);
+
+    expect(storage.getLinkedLedgerSummaries).toHaveBeenCalledWith(id, 5);
+    expect(storage.searchKnowledge).not.toHaveBeenCalled();
+    const prompt = quizProvider.generateText.mock.calls.at(-1)?.[0] as unknown as string;
+    expect(prompt).toContain("A verified linked fact");
+    expect(prompt).not.toContain(id);
+    expect(JSON.parse(recorder.read().body).questions).toHaveLength(3);
   });
 });

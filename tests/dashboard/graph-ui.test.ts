@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM, VirtualConsole } from 'jsdom';
 import { renderDashboardHTML } from '../../src/dashboard/ui.js';
 
@@ -12,6 +12,51 @@ afterEach(() => {
 });
 
 describe('dashboard graph node cap', () => {
+  it('opens the read-only quiz for a hosted memory and explains the older Portal projection', async () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    let clickGraph: ((params: { nodes: string[] }) => void) | undefined;
+    const requests: string[] = [];
+    const page = new JSDOM(renderDashboardHTML('test'), {
+      runScripts: 'dangerously',
+      virtualConsole: new VirtualConsole(),
+      beforeParse(window) {
+        window.vis = { Network: class {
+          on(name: string, callback: typeof clickGraph) { if (name === 'click') clickGraph = callback; }
+          setData() {}
+          destroy() {}
+        } } as never;
+        window.fetch = (async (input: string | URL | Request) => {
+          const path = String(input);
+          if (path.startsWith('/api/graph/test-me?')) {
+            requests.push(path);
+            return new Response(JSON.stringify({ reason: 'portal_projection_unavailable', questions: [] }));
+          }
+          if (path === '/api/graph' || path.startsWith('/api/graph?')) {
+            return new Response(JSON.stringify({
+              graphType: 'memory', nodes: [{ id, label: 'Selected cloud memory', group: 'memory' }], edges: [],
+            }));
+          }
+          return new Response('{}');
+        }) as typeof window.fetch;
+      },
+    });
+    pages.push(page);
+    await vi.waitFor(() => expect(clickGraph).toBeDefined());
+    const doc = page.window.document;
+    const graphProject = doc.getElementById('graphProjectFilter') as HTMLSelectElement;
+    graphProject.add(new page.window.Option('Example', 'example-project'));
+    graphProject.value = 'example-project';
+    clickGraph!({ nodes: [id] });
+    expect(doc.getElementById('nodeEditorPanel')?.style.display).toBe('block');
+    expect(doc.getElementById('nodeEditControls')?.hidden).toBe(true);
+    doc.getElementById('testMeBtn')!.click();
+
+    await vi.waitFor(() => expect(doc.getElementById('testMeContainer')?.textContent).toMatch(/Synalux Portal.*updated/i));
+    expect(requests).toHaveLength(1);
+    expect(new URL(requests[0], 'http://localhost').searchParams.get('group')).toBe('memory');
+    expect(new URL(requests[0], 'http://localhost').searchParams.get('id')).toBe(id);
+  });
+
   it('labels a cloud memory graph as sessions and stored links', async () => {
     const nodes = [
       { id: 'a', label: 'First session', group: 'memory', value: 1 },

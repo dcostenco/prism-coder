@@ -63,7 +63,7 @@ import { isSynaluxSignedOut } from "../utils/synaluxCredentialState.js";
 import { KnowledgeSearchRequestSchema, KnowledgeSearchResponseSchema, ProjectAnalyticsResponseSchema, FactoryPipelinesResponseSchema, FactoryPipelineResponseSchema, FactoryHarnessResponseSchema, FactoryRunResponseSchema, FactoryRunsResponseSchema } from "./portalContracts.js";
 import type { VerificationHarness, ValidationResult } from '../verification/schema.js';
 import type { EmbeddingSupport } from "./interface.js";
-import { contextRestoreRequested, assertContextRestoreResult } from "./interface.js";
+import { contextRestoreRequested, assertContextRestoreResult, LinkedLedgerProjectionUnavailableError } from "./interface.js";
 import type {
   LedgerEntry,
   HandoffEntry,
@@ -983,6 +983,9 @@ export class SynaluxStorage extends SupabaseStorage {
     });
     const result = await this.portalGet(`/api/v1/prism/graph/edge?${query.toString()}`);
     const summaries = result.target_summaries;
+    if (summaries === undefined) {
+      throw new LinkedLedgerProjectionUnavailableError("Portal graph response does not contain the requested linked summaries.");
+    }
     if (!Array.isArray(summaries) || summaries.length > limit
       || summaries.some(row => typeof row?.id !== "string" || typeof row?.summary !== "string")) {
       throw new Error("Portal graph response does not contain the requested linked summaries.");

@@ -692,6 +692,36 @@ describe("compactionHandler", () => {
   // ====================================================================
 
   describe("chunked summarization", () => {
+    it("sends every archived entry to a complete chunk even when XML escaping expands the prompt", async () => {
+      const entries = makeFakeEntries(4).map((entry, index) => ({
+        ...entry,
+        summary: "durable-marker-" + index + "\n\n" + "&".repeat(2400),
+      }));
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(60)).mockResolvedValueOnce(entries);
+
+      const result = await compactLedgerHandler({ project: "test-project", threshold: 50 });
+
+      expect(result.isError).toBe(false);
+      const prompts = mockGenerateText.mock.calls.map(call => call[0] as unknown as string);
+      for (const [index, entry] of entries.entries()) {
+        expect(prompts.some(prompt => prompt?.includes("durable-marker-" + index)
+          && prompt.includes("</raw_user_log>"))).toBe(true);
+        expect(storage.patchLedger).toHaveBeenCalledWith(entry.id, expect.objectContaining({ archived_at: expect.any(String) }));
+      }
+    });
+
+    it("keeps every original active when a single entry cannot fit without truncation", async () => {
+      const entries = makeFakeEntries(2);
+      entries[0].summary = "&".repeat(6000);
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(60)).mockResolvedValueOnce(entries);
+
+      await expect(compactLedgerHandler({ project: "test-project", threshold: 50 })).rejects.toThrow(/compaction prompt limit/i);
+
+      expect(mockGenerateText).not.toHaveBeenCalled();
+      expect(storage.saveLedger).not.toHaveBeenCalled();
+      expect(storage.patchLedger).not.toHaveBeenCalled();
+    });
+
     it("splits entries into chunks of COMPACTION_CHUNK_SIZE (10)", async () => {
       // 25 entries => 3 chunks (10, 10, 5) + 1 meta-summarization
       const entries = makeFakeEntries(25);
@@ -773,6 +803,30 @@ describe("compactionHandler", () => {
   // ====================================================================
 
   describe("rollup write confirmation", () => {
+    it.each([2, 3])("keeps deleted entries out of the count and prompt with %i active entries", async (count) => {
+      const entries = makeFakeEntries(count + 1).map((entry, index) => ({
+        ...entry,
+        summary: index === 0 ? "soft-deleted private entry" : "active-entry-" + index,
+        deleted_at: index === 0 ? "2026-11-22T00:00:00Z" : null,
+      }));
+      storage.getLedgerEntries.mockImplementation(async (query: Record<string, string>) => {
+        const matched = query.deleted_at === "is.null" ? entries.slice(1) : entries;
+        return query.limit ? matched.slice(0, Number(query.limit)) : matched;
+      });
+
+      const result = await compactLedgerHandler({ project: "test-project", threshold: 2, keep_recent: 1 });
+
+      expect(result.isError).toBe(false);
+      if (count === 2) {
+        expect(mockGenerateText).not.toHaveBeenCalled();
+        expect(storage.patchLedger).not.toHaveBeenCalled();
+      } else {
+        expect(mockGenerateText).toHaveBeenCalledWith(expect.stringContaining("active-entry-2"));
+        expect(mockGenerateText).not.toHaveBeenCalledWith(expect.stringContaining("soft-deleted private entry"));
+        expect(storage.patchLedger.mock.calls.map(call => call[0])).toEqual([entries[1].id, entries[2].id]);
+      }
+    });
+
     it.each([{ saved: null }, { saved: [] }, { saved: [{}] }, { saved: { id: " " } }])(
         "preserves the originals when saveLedger returns no id ($saved)", async ({ saved }) => {
       storage.getLedgerEntries

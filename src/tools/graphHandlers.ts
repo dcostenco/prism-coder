@@ -1529,12 +1529,17 @@ export async function sessionSynthesizeEdgesHandler(args: unknown) {
 
 // ─── Step 4: LLM Context Assembly (Test Me) ──────────────────────────
 
+const LEDGER_NODE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function assembleTestMeContext(nodeId: string, project: string, storage: Pick<StorageBackend,
-  "getLinkedLedgerSummaries" | "getLinksFrom" | "getLedgerEntries" | "searchKnowledge">) {
+  "getLinkedLedgerSummaries" | "getLinksFrom" | "getLedgerEntries" | "searchKnowledge">,
+  nodeGroup?: "memory" | "keyword" | "category") {
   const contextMap = new Map<string, string>();
   if (storage.getLinkedLedgerSummaries) {
-    const summaries = await storage.getLinkedLedgerSummaries(nodeId, 5);
-    for (const entry of summaries) contextMap.set(entry.id, entry.summary.slice(0, 300));
+    if (nodeGroup === "memory" || (nodeGroup === undefined && LEDGER_NODE_ID.test(nodeId))) {
+      const summaries = await storage.getLinkedLedgerSummaries(nodeId, 5);
+      for (const entry of summaries) contextMap.set(entry.id, entry.summary.slice(0, 300));
+    }
   } else {
     const outboundLinks = await storage.getLinksFrom(nodeId, PRISM_USER_ID, 0.0, 5);
     for (const link of outboundLinks) {
@@ -1548,17 +1553,19 @@ export async function assembleTestMeContext(nodeId: string, project: string, sto
     }
   }
 
-  const semanticResult = await storage.searchKnowledge({
-    project,
-    keywords: [nodeId],
-    limit: 5,
-    userId: PRISM_USER_ID
-  });
-
-  const semanticEntries = semanticResult?.results || [];
-  for (const entry of semanticEntries as any[]) {
-    if (entry.id && !contextMap.has(entry.id) && entry.summary) {
-      contextMap.set(entry.id, entry.summary.substring(0, 300));
+  if (nodeGroup !== "memory") {
+    const semanticResult = await storage.searchKnowledge({
+      project,
+      keywords: [nodeId],
+      limit: 5,
+      userId: PRISM_USER_ID
+    });
+    for (const entry of semanticResult?.results || []) {
+      if (!entry || typeof entry !== "object") continue;
+      const { id, summary } = entry as Record<string, unknown>;
+      if (typeof id === "string" && id && !contextMap.has(id) && typeof summary === "string" && summary) {
+        contextMap.set(id, summary.slice(0, 300));
+      }
     }
   }
 
