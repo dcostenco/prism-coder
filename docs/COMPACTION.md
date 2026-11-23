@@ -169,14 +169,16 @@ return thousands of entries, bloating the context window it's meant to manage.
 1. Query oldest entries exceeding threshold
        │
        ▼
-2. Chunk into groups of 10
+2. Split into chunks of up to 10
        │
        ▼
-3. LLM summarization per chunk
-   ├── Try Prism inference when PRISM_LOCAL_LLM_ENABLED=true
+3. Summarize chunks in order and stop at the first failure
+   ├── Try local Prism inference when PRISM_LOCAL_LLM_ENABLED=true
    │   └── PRISM_FORCE_LOCAL=true or PRISM_STRICT_LOCAL_MODE=true requires
    │       on-device summarization. If it cannot serve, stop compaction.
-   └── Use the configured cloud provider only when the local-only policy is inactive
+   └── Use the configured cloud provider only when the local-only policy is
+       inactive and local inference is disabled or has exhausted its providers.
+       A safety refusal, authorization refusal, or unknown error aborts compaction.
        │
        ▼
 4. If multiple chunks → meta-summarize chunk summaries into one final summary

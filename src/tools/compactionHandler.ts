@@ -178,7 +178,7 @@ async function summarizeEntries(entries: any[]) {
     // Ledger content goes through the full ladder so Layer 1 screening, the
     // quality gate and the entitlement ceiling all apply — this summarises
     // session records that may carry sensitive material.
-    const localResponse = await inferText(prompt, { mode: "chat", ...(localOnly ? { localOnly } : {}) });
+    const localResponse = await inferText(prompt, { mode: "chat", localOnly, callerHandlesFallback: true });
     if (localResponse) {
       debugLog(`[compact_ledger] Local LLM summarization succeeded`);
       return parseCompactionResponse(localResponse, "local-llm");
@@ -329,9 +329,10 @@ export async function compactLedgerHandler(args: unknown) {
         finalPrinciples = res.principles || [];
         finalCausalLinks = res.causal_links || [];
       } else {
-        const chunkSummaries = await Promise.all(
-          chunks.map(chunk => summarizeEntries(chunk))
-        );
+        const chunkSummaries: Awaited<ReturnType<typeof summarizeEntries>>[] = [];
+        for (const chunk of chunks) {
+          chunkSummaries.push(await summarizeEntries(chunk));
+        }
 
         chunkSummaries.forEach(s => {
           finalPrinciples.push(...(s.principles || []));

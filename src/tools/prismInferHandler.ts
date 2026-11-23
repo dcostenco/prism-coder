@@ -1748,13 +1748,21 @@ export async function callOllamaGenerate(
 
 // ─── Cloud fallback via synalux portal ─────────────────────────
 
+class InferenceRefusalError extends Error {}
+
+class InferenceUnavailableError extends Error {
+    constructor(message: string, readonly attempts: PrismInferResult["attempts"]) {
+        super(message);
+    }
+}
+
 /**
  * Typed refusal for reserved clinical content (plan v2 §5.1) — callers can
  * distinguish "refused for safety" from infrastructure failure via
  * `refusal_reason` instead of parsing the message. Also ledgered so refusals
  * are visible in delegation metrics (backend='refused').
  */
-export class ReservedRefusalError extends Error {
+export class ReservedRefusalError extends InferenceRefusalError {
     readonly refusal_reason = "layer1_reserved";
     constructor(
         verdict: string,
@@ -2877,7 +2885,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     const withheldAnswer = (reason: "answer_ungrounded" | "answer_unverified"): PrismInferResult => {
         if (wantReport) return refusedResult(reason);
         const why = reason === "answer_ungrounded" ? "did not match the conversation" : "could not be checked against the conversation";
-        const e = new Error(`prism_infer: the local answer ${why} and was withheld; no cloud answer was available. `
+        const e = new InferenceRefusalError(`prism_infer: the local answer ${why} and was withheld; no cloud answer was available. `
             + `attempts=${JSON.stringify(attempts)}`);
         (e as unknown as { attempts: typeof attempts; refusal_reason: string }).attempts = attempts;
         (e as unknown as { refusal_reason: string }).refusal_reason = reason;
@@ -3555,7 +3563,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                     history_turns: args.messages?.length ?? 0,
                     refusal_layer: "backstop",
                 });
-                throw new Error(
+                throw new InferenceRefusalError(
                     `prism_infer: classifier failed + keyword backstop caught reserved content. attempts=${JSON.stringify(attempts)}`
                 );
             }
@@ -4335,11 +4343,10 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         });
     }
 
-    const err = new Error(
-        `prism_infer: no backend produced output. attempts=${JSON.stringify(attempts)}, free=${fmtGb(freeBytes)}`
+    throw new InferenceUnavailableError(
+        `prism_infer: no backend produced output. attempts=${JSON.stringify(attempts)}, free=${fmtGb(freeBytes)}`,
+        attempts,
     );
-    (err as unknown as { attempts: typeof attempts }).attempts = attempts;
-    throw err;
 }
 
 /**
@@ -4520,11 +4527,18 @@ export function productionInferDeps(): InferDeps {
  * Run a prompt through the full prism ladder and return plain text, or null.
  *
  * Drop-in replacement for the `callLocalLlm` bypass: same shape, but every gate
- * applies and the model is CHOSEN rather than hardcoded.
+ * applies and the model is chosen by Prism.
+ * A caller that handles fallback gets null only after provider exhaustion.
  */
 export async function inferText(
     prompt: string,
-    opts: { system?: string; mode?: "route" | "chat" | "code"; maxTokens?: number; localOnly?: boolean } = {},
+    opts: {
+        system?: string;
+        mode?: "route" | "chat" | "code";
+        maxTokens?: number;
+        localOnly?: boolean;
+        callerHandlesFallback?: boolean;
+    } = {},
 ): Promise<string | null> {
     try {
         const localOnly = opts.localOnly || PRISM_FORCE_LOCAL || PRISM_STRICT_LOCAL_MODE;
@@ -4534,26 +4548,25 @@ export async function inferText(
                 system: opts.system,
                 mode: opts.mode ?? "chat",
                 ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
+                ...(opts.callerHandlesFallback ? { cloud_fallback: false } : {}),
             },
             productionInferDeps(),
             { localOnly },
         );
         const text = (result.output ?? "").trim();
+        if (opts.callerHandlesFallback &&
+            (!text || result.backend === "safety_gate" || result.gate_outcome?.status === "refused")) {
+            throw new InferenceRefusalError(result.gate_outcome?.reason ?? "prism_infer: local inference returned no usable answer");
+        }
         return text.length > 0 ? text : null;
     } catch (err) {
-        // A Layer 1 refusal must NOT look like an outage.
-        //
-        // runInfer throws makeReservedRefusal(...) when the classifier declines
-        // reserved content. Collapsing that to null told callers "no local
-        // answer", and callers respond to that by trying the cloud — so the
-        // refusal became the trigger for the exact disclosure the classifier
-        // exists to prevent. Fail closed: rethrow so a refusal propagates, and
-        // return null only for genuine unavailability.
-        const message = (err as Error).message ?? "";
-        if (err instanceof ReservedRefusalError || err instanceof HostAuthorizationError) {
-            debugLog("[inferText] authorization/scope refusal — propagating");
+        // A caller that can send this prompt elsewhere needs an explicit
+        // exhaustion signal. Safety, authorization and unknown failures stop it.
+        if (err instanceof InferenceRefusalError || err instanceof HostAuthorizationError ||
+            (opts.callerHandlesFallback && !(err instanceof InferenceUnavailableError))) {
             throw err;
         }
+        const message = err instanceof Error ? err.message : "";
         debugLog(`[inferText] no backend produced output: ${message.slice(0, 160)}`);
         return null;
     }
