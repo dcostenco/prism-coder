@@ -7,6 +7,7 @@
  * ═══════════════════════════════════════════════════════════════════
  */
 
+import { z } from "zod";
 import { getStorage } from "../storage/index.js";
 import { PRISM_USER_ID } from "../config.js";
 import { getLLMProvider } from "../utils/llm/factory.js";
@@ -21,6 +22,22 @@ const COMPACTION_CHUNK_SIZE = 10;
 const MAX_ENTRIES_PER_RUN = 100;
 const SAFETY_NOTICES = new Set([BCBA_RESPONSE, CRISIS_RESPONSE, MEDICAL_RESPONSE]);
 const UNUSABLE_SUMMARY = "Ledger compaction did not receive a usable summary. The original entries were retained.";
+
+const nonblankResponseText = z.string().refine(value => value.trim().length > 0);
+const compactionReplySchema = z.object({
+  summary: z.string().trim().min(1),
+  principles: z.array(z.object({
+    concept: nonblankResponseText,
+    description: nonblankResponseText,
+    related_entities: z.array(z.string()).optional(),
+  })).default([]),
+  causal_links: z.array(z.object({
+    source_id: nonblankResponseText,
+    target_id: nonblankResponseText,
+    relation: z.enum(["led_to", "caused_by"]),
+    reason: z.string().optional(),
+  })).default([]),
+});
 
 // ─── Type Guard ───────────────────────────────────────────────
 
@@ -126,7 +143,7 @@ function parseCompactionResponse(response: string, source: string) {
   const tagged = body.match(/^<(?:\|tool_call\||tool_call)>([\s\S]*)(?:<\/(?:\|tool_call\||tool_call)>|<\|tool_call_end\|>)$/i);
   const payload = (tagged?.[1] ?? body).trim();
   const fenced = payload.match(/^```(?:json)?([\s\S]*)```$/i);
-  let parsed;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(fenced?.[1] ?? payload);
   } catch {
@@ -138,12 +155,12 @@ function parseCompactionResponse(response: string, source: string) {
     debugLog(`[compact_ledger] Using plain-text summary from ${source}`);
     parsed = reply;
   }
-  const text = typeof parsed === "string" && !tagged ? parsed : parsed?.summary;
-  const summary = typeof text === "string" ? text.trim() : "";
-  if (!summary || SAFETY_NOTICES.has(summary)) {
+  // Optional details must be safe to consume before any rollup or link write.
+  const replyResult = compactionReplySchema.safeParse(typeof parsed === "string" && !tagged ? { summary: parsed } : parsed);
+  if (!replyResult.success || SAFETY_NOTICES.has(replyResult.data.summary)) {
     throw new Error(UNUSABLE_SUMMARY);
   }
-  return { summary, principles: parsed?.principles ?? [], causal_links: parsed?.causal_links ?? [] };
+  return replyResult.data;
 }
 
 async function summarizeEntries(entries: any[]) {

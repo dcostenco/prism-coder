@@ -222,6 +222,8 @@ combined summary cannot fit, compaction stops before writing the rollup or
 archiving the project's originals.
 
 Tagged model responses are decoded before compaction accepts the summary.
+The optional principles and causal links are also validated before the rollup
+or its links are written.
 An empty summary, a safety notice, or a malformed structured reply leaves
 the original entries active.
 

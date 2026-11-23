@@ -701,6 +701,33 @@ describe("compactionHandler", () => {
       expect(storage.patchLedger).toHaveBeenCalledWith(older.id, expect.objectContaining({ archived_at: expect.any(String) }));
     });
 
+    it.each([
+      ["principles object", { principles: {} }, false],
+      ["causal-links string", { causal_links: "oops" }, true],
+      ["null principle", { principles: [null] }, true],
+      ["null causal link", { causal_links: [null] }, false],
+      ["non-string concept", { principles: [{ concept: 1, description: "A lesson" }] }, false],
+      ["non-string related entity", { principles: [{ concept: "A lesson", description: "Supported detail", related_entities: ["file", 1] }] }, true],
+      ["non-string source ID", { causal_links: [{ source_id: 1, target_id: "entry-002", relation: "led_to" }] }, false],
+      ["non-string relation", { causal_links: [{ source_id: "entry-001", target_id: "entry-002", relation: 3 }] }, true],
+      ["non-string causal reason", { causal_links: [{ source_id: "entry-001", target_id: "entry-002", relation: "caused_by", reason: 3 }] }, false],
+    ] as const)("rejects malformed compaction metadata (%s) before any write", async (_case, metadata, local) => {
+      const output = '<|tool_call|>' + JSON.stringify({ summary: "A usable summary", ...metadata }) + '</|tool_call|>';
+      localPolicy.enabled = local;
+      localPolicy.infer.mockResolvedValue(output);
+      mockGenerateText.mockResolvedValue(output);
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(11)).mockResolvedValueOnce(makeFakeEntries(1));
+
+      const result = await compactLedgerHandler({ project: "test-project", threshold: 5 }).catch(error => error);
+
+      expect(storage.saveLedger).not.toHaveBeenCalled();
+      expect(storage.patchLedger).not.toHaveBeenCalled();
+      expect(storage.createLink).not.toHaveBeenCalled();
+      expect(storage.upsertSemanticKnowledge).not.toHaveBeenCalled();
+      expect(result).toBeInstanceOf(Error);
+      expect(result.message).toMatch(/usable summary/i);
+    });
+
     it.each(["force", "strict"] as const)("keeps forced local memory off cloud when %s is set and local summarization is disabled", async flag => {
       localPolicy[flag] = true;
       storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(60)).mockResolvedValueOnce(makeFakeEntries(3));
