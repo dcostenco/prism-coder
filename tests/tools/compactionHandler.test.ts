@@ -633,6 +633,32 @@ describe("compactionHandler", () => {
   // ====================================================================
 
   describe("LLM failure handling", () => {
+    it("propagates a local inference rejection before cloud fallback or ledger writes", async () => {
+      localPolicy.enabled = true;
+      const refusal = new Error("Local inference refused the compaction input");
+      localPolicy.infer.mockRejectedValueOnce(refusal);
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(11)).mockResolvedValueOnce(makeFakeEntries(1));
+
+      await expect(compactLedgerHandler({ project: "test-project", threshold: 5 })).rejects.toBe(refusal);
+      expect(localPolicy.infer).toHaveBeenCalledOnce();
+      expect(mockGenerateText).not.toHaveBeenCalled();
+      expect(storage.saveLedger).not.toHaveBeenCalled();
+      expect(storage.patchLedger).not.toHaveBeenCalled();
+    });
+
+    it("tries the configured cloud provider when local inference returns null and fallback is permitted", async () => {
+      localPolicy.enabled = true;
+      localPolicy.infer.mockResolvedValueOnce(null);
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(11)).mockResolvedValueOnce(makeFakeEntries(1));
+
+      const result = await compactLedgerHandler({ project: "test-project", threshold: 5 });
+
+      expect(result.isError).toBe(false);
+      expect(localPolicy.infer).toHaveBeenCalledOnce();
+      expect(mockGenerateText).toHaveBeenCalledOnce();
+      expect(storage.saveLedger).toHaveBeenCalledOnce();
+    });
+
     it.each([true, false])("refuses safety-gated compaction input before either provider (local enabled: %s)", async enabled => {
       localPolicy.enabled = enabled;
       localPolicy.infer.mockImplementation(async (prompt: string) => checkInputSafety(prompt));

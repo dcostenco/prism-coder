@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
  * A Layer 1 refusal must never be reported as "no local answer".
  *
  * Callers of the old `callLocalLlm` helper treated null as unavailability and
- * responded by trying the cloud — compactionHandler does exactly that, on
- * ledger content, three lines after the local attempt. When inferText caught
+ * responded by trying the cloud for ledger content when cloud fallback
+ * was allowed. When inferText caught
  * every throw into null, a reserved-content refusal became indistinguishable
  * from "Ollama is down", so the classifier's refusal was the trigger for the
  * cloud disclosure it exists to prevent.
@@ -46,16 +46,13 @@ describe("inferText fails CLOSED on a reserved-content refusal", () => {
         expect(body).toMatch(/return null/);
     });
 
-    it("compaction's cloud fallback is only reachable on unavailability", async () => {
+    it("compaction routes local summaries through inferText", async () => {
         const { readFileSync } = await import("node:fs");
         const src = readFileSync(
             fileURLToPath(new URL("../../src/tools/compactionHandler.ts", import.meta.url)),
             "utf8",
         );
-        // The fallback triggers on a falsy local response. That is now only
-        // reachable when inferText returns null — a refusal propagates past it.
         expect(src).toMatch(/const localResponse = await inferText/);
-        expect(src).toMatch(/falling back to cloud LLM/);
         expect(src, "compaction reintroduced a direct local-LLM call")
             .not.toMatch(/callLocalLlm/);
     });
