@@ -177,8 +177,11 @@ return thousands of entries, bloating the context window it's meant to manage.
    │   └── PRISM_FORCE_LOCAL=true or PRISM_STRICT_LOCAL_MODE=true requires
    │       on-device summarization. If it cannot serve, stop compaction.
    └── Use the configured cloud provider only when the local-only policy is
-       inactive and local inference is disabled or has exhausted its providers.
-       A safety refusal, authorization refusal, or unknown error aborts compaction.
+       inactive and local inference is disabled or verified inventory and RAM
+       checks show no local tier can run. A closed local listener or empty inventory
+       still goes through the deterministic keyword check. Safety refusals,
+       authorization failures, malformed replies, cancellation, and unknown
+       provider failures abort compaction before the configured provider or writes.
        │
        ▼
 4. If multiple chunks → meta-summarize chunk summaries into one final summary

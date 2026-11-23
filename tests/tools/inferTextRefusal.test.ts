@@ -61,7 +61,7 @@ vi.mock("../../src/utils/localCodingPreference.js", async original => ({
     ...await original<typeof import("../../src/utils/localCodingPreference.js")>(),
     localCodingPreference: async () => ({ saved: "ollama", effective: "ollama", configured: true, envOverride: null }),
 }));
-vi.mock("../../src/utils/availableMemory.js", () => ({ getAvailableMemoryBytes: () => 16 * 1024 ** 3 }));
+vi.mock("../../src/utils/availableMemory.js", () => ({ getAvailableMemoryBytes: () => freeMemory }));
 vi.mock("../../src/utils/omlxProvider.js", async original => ({
     ...await original<typeof import("../../src/utils/omlxProvider.js")>(),
     withInferenceResourceLease: async (_exclusive: boolean, action: () => Promise<unknown>) => action(),
@@ -74,6 +74,8 @@ vi.mock("../../src/utils/synaluxJwt.js", () => ({
 }));
 
 let installed: string[];
+let freeMemory: number;
+let respond: (path: string) => Response | undefined;
 
 function compactFixture(count = 1) {
     const entries = Array.from({ length: count + 1 }, (_, index) => ({
@@ -101,6 +103,8 @@ describe("Compaction inference failure boundary", () => {
     beforeEach(() => {
         vi.resetAllMocks();
         installed = ["prism-coder:4b"];
+        freeMemory = 16 * 1024 ** 3;
+        respond = () => undefined;
         vi.mocked(getEntitlements).mockResolvedValue(FREE_ENTITLEMENTS);
         vi.mocked(callLayer1).mockResolvedValue("ERROR");
         vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_RESERVED");
@@ -108,12 +112,12 @@ describe("Compaction inference failure boundary", () => {
         storage.saveLedger.mockResolvedValue([{ id: "rollup-fixture" }]);
         vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
             const url = new URL(input);
-            if (url.origin === "http://127.0.0.1:11434" && url.pathname === "/api/tags") {
-                return Response.json({ models: installed.map(name => ({ name })) });
-            }
-            if (url.origin === "http://127.0.0.1:11434" && url.pathname === "/api/ps") {
-                return Response.json({ models: [] });
-            }
+            if (url.origin !== "http://127.0.0.1:11434") throw new Error("Unexpected provider origin");
+            const override = respond(url.pathname);
+            if (override) return override;
+            if (url.pathname === "/api/tags") return Response.json({ models: installed.map(name => ({ name })) });
+            if (url.pathname === "/api/ps") return Response.json({ models: [] });
+            if (url.pathname === "/api/show") return Response.json({ parameters: "num_ctx 32768" });
             throw new Error("Unexpected network request in the offline compaction fixture");
         }));
     });
@@ -166,14 +170,124 @@ describe("Compaction inference failure boundary", () => {
         expectNoFallbackOrWrites();
     });
 
-    it("uses the configured fallback after confirmed local unavailability", async () => {
-        installed = [];
+    it.each([
+        { label: "authorization required", path: "/api/tags", status: 401, body: "{}" },
+        { label: "access forbidden", path: "/api/tags", status: 403, body: "{}" },
+        { label: "service returned an ambiguous error", path: "/api/tags", status: 503, body: "{}" },
+        { label: "partial inventory", path: "/api/tags", status: 206, body: '{"models":[]}' },
+        { label: "malformed inventory", path: "/api/tags", status: 200, body: "invalid json" },
+        { label: "missing model list", path: "/api/tags", status: 200, body: "{}" },
+        { label: "blank model name", path: "/api/tags", status: 200, body: '{"models":[{"name":" "}]}' },
+        { label: "inventory contains a provider error", path: "/api/tags", status: 200, body: '{"models":[],"error":"denied"}' },
+        { label: "loaded model lookup denied", path: "/api/ps", status: 403, body: "{}" },
+    ])("keeps $label out of fallback", async ({ path, status, body }) => {
+        respond = route => route === path ? new Response(body, { status }) : undefined;
+        await expect(compactFixture()).rejects.toThrow();
+        expectNoFallbackOrWrites();
+        expect(callLayer1).not.toHaveBeenCalled();
+    });
+
+    it("refuses an ambiguous inventory timeout", async () => {
+        respond = path => {
+            if (path === "/api/tags") throw new DOMException("Inventory timeout", "TimeoutError");
+        };
+        await expect(compactFixture()).rejects.toThrow();
+        expectNoFallbackOrWrites();
+    });
+
+    it("honors the first authorization denial from the actual classifier", async () => {
+        const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+        vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        let requests = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            requests++;
+            return requests === 1 ? new Response("{}", { status: 403 })
+                : Response.json({ message: { content: "OBVIOUS_NOT_RESERVED" } });
+        };
+        await expect(compactFixture()).rejects.toThrow(/classification could not be confirmed/);
+        expect(requests).toBe(1);
+        expectNoFallbackOrWrites();
+    });
+
+    it.each(["denial", "malformed reply", "abort"])("stops on local generation %s", async failure => {
         vi.mocked(callLayer1).mockResolvedValue("OBVIOUS_NOT_RESERVED");
+        let requests = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            requests++;
+            if (failure === "abort") throw new DOMException("Fixture cancelled", "AbortError");
+            return failure === "denial" ? new Response("{}", { status: 401 }) : new Response("invalid json");
+        };
+        await expect(compactFixture()).rejects.toThrow(/local generation did not complete/);
+        expect(requests).toBe(1);
+        expectNoFallbackOrWrites();
+    });
+
+    it.each([1, 2])("keeps originals if classification refuses after %s locally summarized chunks", async successfulChunks => {
+        vi.mocked(callLayer1).mockResolvedValue("ERROR");
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        for (let i = 0; i < successfulChunks; i++) vi.mocked(callLayer1).mockResolvedValueOnce("OBVIOUS_NOT_RESERVED");
+        let localOutputs = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            localOutputs++;
+            return Response.json({ message: { content: JSON.stringify({ summary: "Summarized routine maintenance." }) }, done: true });
+        };
+        await expect(compactFixture(11)).rejects.toThrow(/classification could not be confirmed/);
+        expect(callLayer1).toHaveBeenCalledTimes(successfulChunks + 1);
+        expect(localOutputs).toBe(successfulChunks);
+        expectNoFallbackOrWrites();
+    });
+
+    it.each(["empty inventory", "unrelated model", "closed listener", "insufficient RAM"])(
+        "uses the configured fallback after confirmed local unavailability from %s", async evidence => {
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        vi.mocked(callLayer1).mockResolvedValue("OBVIOUS_NOT_RESERVED");
+        if (evidence === "empty inventory") installed = [];
+        if (evidence === "unrelated model") installed = ["fixture-other:latest"];
+        if (evidence === "closed listener") respond = path => {
+            if (path === "/api/tags") {
+                const cause = Object.assign(new Error("Connection refused"), { code: "ECONNREFUSED" });
+                throw new TypeError("Fetch failed", { cause });
+            }
+        };
+        if (evidence === "insufficient RAM") freeMemory = 0;
         const result = await compactFixture();
         expect(result.isError).toBe(false);
         expect(generateText).toHaveBeenCalledOnce();
         expect(storage.saveLedger).toHaveBeenCalledOnce();
         expect(storage.patchLedger).toHaveBeenCalledOnce();
+    });
+
+    it("uses the keyword floor when verified inventory lacks a classifier", async () => {
+        installed = [];
+        await expect(compactFixture()).rejects.toThrow(/keyword backstop/);
+        expect(callLayer1).not.toHaveBeenCalled();
+        expectNoFallbackOrWrites();
+    });
+
+    it("uses a model warmed by classification before considering cloud fallback", async () => {
+        freeMemory = 0;
+        let warmed = false;
+        let localResponses = 0;
+        vi.mocked(callLayer1).mockImplementationOnce(async () => {
+            warmed = true;
+            return "OBVIOUS_NOT_RESERVED";
+        });
+        respond = path => {
+            if (path === "/api/ps") return Response.json({ models: warmed ? [{ name: "prism-coder:4b" }] : [] });
+            if (path === "/api/chat") {
+                localResponses++;
+                return Response.json({ message: { content: JSON.stringify({ summary: "Summarized routine maintenance." }) }, done: true });
+            }
+        };
+        const result = await compactFixture();
+        expect(result.isError).toBe(false);
+        expect(localResponses).toBe(1);
+        expect(generateText).not.toHaveBeenCalled();
+        expect(storage.saveLedger).toHaveBeenCalledOnce();
     });
 
     it("compaction routes local summaries through inferText", async () => {

@@ -648,6 +648,8 @@ async function callLayer1Unleased(
          *  than UNCERTAIN_LENGTH. Explicit oMLX sets it: with no cloud to
          *  escalate to, an excerpt nobody read is not clearance. */
         strictErrors?: boolean;
+        /** Return the first provider failure for callers that must stop on it. */
+        retryOnError?: boolean;
         /** Read an oversize prompt whole, window by window, instead of as an
          *  excerpt. Explicit oMLX sets it with strictErrors. */
         readOversizeWhole?: boolean;
@@ -864,7 +866,7 @@ async function callLayer1Unleased(
     const firstBudget = hasImages ? LAYER1_IMAGE_TIMEOUT_MS : LAYER1_TIMEOUT_MS;
     const retryBudget = hasImages ? LAYER1_IMAGE_TIMEOUT_MS : LAYER1_RETRY_TIMEOUT_MS;
     const first = await classify(firstBudget);
-    const settled = first !== "ERROR" ? first : await classify(retryBudget);
+    const settled = first === "ERROR" && opts?.retryOnError !== false ? await classify(retryBudget) : first;
 
     // The picture overrules the words. A mundane request about a clinical
     // screenshot is exactly the shape that classified as NOT_RESERVED.

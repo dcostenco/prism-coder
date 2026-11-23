@@ -1278,21 +1278,29 @@ export function isOllamaConnectionRefused(error: unknown): boolean {
     return error.cause !== undefined && isOllamaConnectionRefused(error.cause);
 }
 
-export async function strictLoaded(url: string, fetchImpl: typeof fetch = fetch): Promise<Set<string>> {
+async function readOllamaModelNames(
+    url: string, path: "/api/tags" | "/api/ps", fetchImpl: typeof fetch = fetch,
+): Promise<Set<string> | null> {
     let response: Response;
     try {
-        response = await fetchImpl(`${url}/api/ps`, { signal: AbortSignal.timeout(3_000), redirect: "error" });
+        response = await fetchImpl(`${url}${path}`, { signal: AbortSignal.timeout(3_000), redirect: "error" });
     } catch (error) {
-        // A closed local listener needs no daemon startup. Timeouts, DNS errors,
-        // HTTP errors and malformed state are unknown and still refuse.
-        if (isOllamaConnectionRefused(error)) return new Set();
-        throw new OmlxError("omlx_ollama_state_unavailable");
+        // Only a confirmed closed listener establishes transport unavailability.
+        if (isOllamaConnectionRefused(error)) return null;
+        throw error;
     }
+    if (response.status !== 200) throw new Error(`prism_infer: Ollama inventory request failed with HTTP ${response.status}`);
+    const data = await response.json().catch(() => null) as { models?: { name?: unknown }[]; error?: unknown } | null;
+    if (data?.error !== undefined || !Array.isArray(data?.models)
+        || data.models.some(model => typeof model?.name !== "string" || !model.name || model.name !== model.name.trim())) {
+        throw new Error("prism_infer: invalid Ollama model inventory");
+    }
+    return new Set(data.models.map(model => model.name as string));
+}
+
+export async function strictLoaded(url: string, fetchImpl: typeof fetch = fetch): Promise<Set<string>> {
     try {
-        if (!response.ok) throw new Error();
-        const data = await response.json() as { models?: { name?: unknown }[] };
-        if (!Array.isArray(data.models) || data.models.some(model => typeof model?.name !== "string" || !model.name)) throw new Error();
-        return new Set(data.models.map(model => model.name as string));
+        return await readOllamaModelNames(url, "/api/ps", fetchImpl) ?? new Set();
     } catch { throw new OmlxError("omlx_ollama_state_unavailable"); }
 }
 interface OllamaChatResp {
@@ -1756,6 +1764,8 @@ class InferenceUnavailableError extends Error {
     }
 }
 
+class ConfirmedLocalExhaustionError extends InferenceUnavailableError {}
+
 /**
  * Typed refusal for reserved clinical content (plan v2 §5.1) — callers can
  * distinguish "refused for safety" from infrastructure failure via
@@ -2180,6 +2190,8 @@ export interface PrismInferResult {
  * Accepts injected dependencies so tests can mock Ollama / synalux.
  */
 export interface InferDeps {
+    /** Internal policy for callers that own a separate configured-provider fallback. */
+    requireConfirmedLocalExhaustion?: boolean;
     /** Host-owned ordinary local bridge budget, never read from tool arguments. */
     executionDeadlineMs?: number;
     executionSignal?: AbortSignal;
@@ -2216,7 +2228,7 @@ export interface InferDeps {
     /** Injectable classifier-limits lookup for the hedge second read; defaults to probeClassifierLimits. */
     probeClassifierLimits?: typeof probeClassifierLimits;
     /** Injectable Layer 1 classifier for testing. Defaults to callLayer1 from layer1.ts. */
-    callLayer1?: (userPrompt: string, ollamaUrl: string, model: string, fetchImpl?: typeof fetch, images?: string[], opts?: { deterministic?: boolean; classifierInput?: ClassifierInputPolicy | null }) => Promise<Layer1Verdict>;
+    callLayer1?: typeof defaultCallLayer1;
     /** Injectable local answer check for testing. Defaults to groundAnswer (the 9b on this device). */
     groundAnswer?: (o: Parameters<typeof groundAnswer>[0]) => Promise<{ verdict: AnswerGroundingVerdict; reply?: string; ms?: number }>;
     /** Injectable runtime-context lookup for the local check. Defaults to probeLoadedContext (/api/ps). */
@@ -2796,8 +2808,10 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     // convert a gate-failed-but-usable local answer into a hard failure — an
     // explicit request still behaves as before and is refused at the point of
     // use with its attempt named.
+    const requireConfirmedExhaustion = deps.requireConfirmedLocalExhaustion === true;
     const planDefault = ent.features.cloud_fallback && !(args.images?.length);
-    let allowCloud = args.local_backend !== "omlx" && (args.cloud_fallback ?? planDefault) && ent.features.cloud_fallback;
+    let allowCloud = !requireConfirmedExhaustion && args.local_backend !== "omlx"
+        && (args.cloud_fallback ?? planDefault) && ent.features.cloud_fallback;
 
     // Verification only for paid plans (free users skip L3 grounding)
     const canVerify = ent.features.grounding_verifier;
@@ -3029,7 +3043,8 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         attempts.push({ tier: "omlx", reason: "authenticated_model_detected" });
     }
     const installed = omlxTarget ? new Set<string>() : await deps.listTags();
-    const loaded = omlxTarget ? new Set<string>() : await deps.listLoaded();
+    const noLocalModels = requireConfirmedExhaustion && !omlxTarget && installed?.size === 0;
+    const loaded = omlxTarget || noLocalModels ? new Set<string>() : await deps.listLoaded();
     let selectedOllama: Awaited<ReturnType<typeof selectedOllamaCodingModel>> | undefined;
     if (!omlxTarget && args.local_model) {
         if (mode !== "code" || args.images?.length) throw new Error("prism_infer: selected models require text-only code mode");
@@ -3192,11 +3207,15 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             },
                 () => omlxDeadline - Date.now())
             : undefined;
-        const l1fn = omlxL1Fetch
-            ? (...[prompt, url, model, , images, opts]: Parameters<typeof defaultCallLayer1>) =>
-                baseL1(prompt, url, model, omlxL1Fetch, images, { ...opts, ...omlxL1Opts })
+        const l1fn = omlxL1Fetch || requireConfirmedExhaustion
+            ? (...[prompt, url, model, fetchImpl, images, opts]: Parameters<typeof defaultCallLayer1>) =>
+                baseL1(prompt, url, model, omlxL1Fetch ?? fetchImpl, images, {
+                    ...opts, ...omlxL1Opts,
+                    ...(requireConfirmedExhaustion ? { strictErrors: true, readOversizeWhole: true, retryOnError: false } : {}),
+                })
             : baseL1;
         const l1Model = omlxL1Fetch ? image ? generationTarget!.model : textClassifierModel! : resolveOllamaName("prism-coder:4b", installed);
+        const classifierAbsent = requireConfirmedExhaustion && !omlxTarget && !installed.has(l1Model);
         secondReadModel = null;
         // The classifier must be able to SEE what it is classifying. Ollama
         // accepts `images` on a text-only model and silently ignores them
@@ -3243,10 +3262,14 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         // context (raise only) — see below.
         // The account's classifier-input policy; without one the classifier
         // reads the prompt as written.
-        const classifierInput = authoritativePolicy ? null
+        const classifierInput = authoritativePolicy || classifierAbsent ? null
             : await (deps.classifierInputPolicy ?? (() => getClassifierInputPolicy({ deadlineMs: CLASSIFIER_INPUT_LOAD_MS })))().catch(() => null);
         let l1: Layer1Verdict;
-        if (!args.messages?.length) {
+        if (classifierAbsent) {
+            // Verified absence takes the deterministic backstop path without a
+            // request to a missing classifier.
+            l1 = "ERROR";
+        } else if (!args.messages?.length) {
             // Single turn: one call; the classifier-input policy is passed when there is one.
             l1 = classifierInput && !authoritativePolicy
                 ? await l1fn(args.prompt, deps.ollamaUrl, l1Model, undefined, resolvedImages, { classifierInput, ...omlxL1Opts })
@@ -3576,6 +3599,9 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             if (wantReport) return refusedResult("omlx_classifier_error");
             throw new Error("prism_infer: omlx_classifier_error; explicit oMLX does not serve on the keyword backstop alone");
         }
+        if (requireConfirmedExhaustion && !classifierAbsent && l1 !== "OBVIOUS_NOT_RESERVED") {
+            throw new InferenceRefusalError("prism_infer: local classification could not be confirmed");
+        }
         if (l1 === "OBVIOUS_NOT_RESERVED") {
             debugLog(`[prism_infer] Layer 1 verdict=OBVIOUS_NOT_RESERVED — proceeding local`);
         }
@@ -3590,7 +3616,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     // Explicit oMLX classified on oMLX, so nothing of this call's is in Ollama.
     // Anything resident now belongs to another user: guardedOmlxGenerate
     // refuses generation (omlx_memory_contention) before any request.
-    const callLocal: InferDeps["callLocal"] = omlxTarget && omlxRuntime
+    const runLocal: InferDeps["callLocal"] = omlxTarget && omlxRuntime
         ? async (_url, _model, prompt, system, maxTokens, temperature, timeoutMs, think, _images, history) => {
             const messages = [...(system === undefined ? [] : [{ role: "system", content: system }]),
                 ...(history ?? []), { role: "user", content: prompt, ...(image ? { images: resolvedImages } : {}) }];
@@ -3599,14 +3625,17 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         : selectedOllama ? (url, model, prompt, system, maxTokens, temperature, timeoutMs, think, images, history) =>
             deps.callLocal(url, model, prompt, system, maxTokens, temperature, timeoutMs, think, images, history, selectedOllama!.ctxTokens)
         : deps.callLocal;
+    const callLocal: InferDeps["callLocal"] = requireConfirmedExhaustion ? async (...params) => {
+        const result = await runLocal(...params);
+        if (!result.ok) throw new InferenceRefusalError("prism_infer: local generation did not complete successfully");
+        return result;
+    } : runLocal;
 
-    // A second read ran the 9b after free RAM and the warm set were read
-    // above (and may have loaded it, or found it unloaded since); eviction and
-    // the tier RAM gate below must see the machine as it is now. Every other
-    // path keeps the one snapshot.
+    // Classification can change which models are warm. Recheck state after a
+    // second read and before using RAM admission as proof of local exhaustion.
     let genLoaded = loaded;
     let genFreeBytes = freeBytes;
-    if (secondReadModel !== null) {
+    if (secondReadModel !== null || (requireConfirmedExhaustion && !noLocalModels)) {
         genLoaded = await deps.listLoaded();
         genFreeBytes = deps.freemem();
     }
@@ -3617,6 +3646,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     let localDraft: { output: string; repaired: boolean; tier: string; gateReason?: string; promptTokens?: number; completionTokens?: number } | null = null;
     // A local answer to a conversation the answer check rejected or did not check: never served as answer text.
     let withheldReason: "answer_ungrounded" | "answer_unverified" | null = null;
+    let confirmedLocalExhaustion = false;
 
     if (installed) {
         const servingTiers = omlxTarget ? [{ tag: omlxTarget.model, weightsGb: 0, minFreeGb: OMLX_MIN_AVAILABLE_BYTES / 1024 ** 3, ctxTokens: omlxTarget.contextTokens }] : selectedOllama ? [selectedOllama] : MODEL_TIERS;
@@ -3626,6 +3656,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             ? MODEL_TIERS.findIndex(t => t.tag.endsWith(`:${effectiveCeiling}`))
             : -1;
         const ceilStart = omlxTarget || selectedOllama ? 0 : ceilIdx >= 0 ? ceilIdx : 0;
+        confirmedLocalExhaustion = requireConfirmedExhaustion && !omlxTarget && ceilStart < servingTiers.length;
 
         // Auto-evict: if the ceiling tier is installed but not warm and prism's
         // own smaller tier models are warm, unload them to make room.
@@ -3693,6 +3724,9 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                         );
                         const failed = evictResults.filter(r => r.status === "rejected").length;
                         if (failed > 0) {
+                            if (requireConfirmedExhaustion) {
+                                throw new InferenceRefusalError("prism_infer: local model memory state could not be confirmed");
+                            }
                             debugLog(`[prism_infer] evict: ${failed}/${tierModelsToEvict.length} unload requests failed`);
                         }
                         // Settle: give Ollama time to release buffers before re-reading RAM.
@@ -3800,6 +3834,9 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                 attempts.push({ tier: tier.tag, reason: "ram_insufficient" });
                 continue;
             }
+            // Only verified catalog absence and RAM admission skips prove exhaustion.
+            // Past here the tier was available, even if a probe or response later fails.
+            confirmedLocalExhaustion = false;
             // Ctx gate (§5.4): skip tiers whose live Modelfile num_ctx cannot
             // hold the PROMPT (+ system + small template margin). Ollama
             // silently truncates an over-ctx prompt and answers from the
@@ -4343,7 +4380,8 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
         });
     }
 
-    throw new InferenceUnavailableError(
+    const ExhaustionError = confirmedLocalExhaustion ? ConfirmedLocalExhaustionError : InferenceUnavailableError;
+    throw new ExhaustionError(
         `prism_infer: no backend produced output. attempts=${JSON.stringify(attempts)}, free=${fmtGb(freeBytes)}`,
         attempts,
     );
@@ -4500,8 +4538,9 @@ async function applyVerification(
  * Two handlers did exactly that, hardcoding `prism-coder:9b`, which is the tier
  * with the most special handling of the four.
  */
-export function productionInferDeps(): InferDeps {
+export function productionInferDeps(requireConfirmedLocalExhaustion = false): InferDeps {
     return {
+        requireConfirmedLocalExhaustion,
         imagePreference: readLocalImageSettings,
         codingPreference: localCodingPreference,
         codingModel: selectUnassignedCodingModel,
@@ -4513,8 +4552,12 @@ export function productionInferDeps(): InferDeps {
             recover: target => recoverOwnedOmlx(target),
         }, PRISM_LOCAL_LLM_URL),
         freemem: () => getAvailableMemoryBytes(),
-        listTags: fetchImpl => listOllamaTags(PRISM_LOCAL_LLM_URL, fetchImpl),
-        listLoaded: fetchImpl => listOllamaLoaded(PRISM_LOCAL_LLM_URL, fetchImpl),
+        listTags: async fetchImpl => requireConfirmedLocalExhaustion
+            ? await readOllamaModelNames(PRISM_LOCAL_LLM_URL, "/api/tags", fetchImpl) ?? new Set()
+            : listOllamaTags(PRISM_LOCAL_LLM_URL, fetchImpl),
+        listLoaded: fetchImpl => requireConfirmedLocalExhaustion
+            ? strictLoaded(PRISM_LOCAL_LLM_URL, fetchImpl)
+            : listOllamaLoaded(PRISM_LOCAL_LLM_URL, fetchImpl),
         callLocal: callOllamaGenerate,
         callCloud: callSynaluxInference,
         ollamaUrl: PRISM_LOCAL_LLM_URL,
@@ -4550,7 +4593,7 @@ export async function inferText(
                 ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
                 ...(opts.callerHandlesFallback ? { cloud_fallback: false } : {}),
             },
-            productionInferDeps(),
+            productionInferDeps(opts.callerHandlesFallback),
             { localOnly },
         );
         const text = (result.output ?? "").trim();
@@ -4563,7 +4606,7 @@ export async function inferText(
         // A caller that can send this prompt elsewhere needs an explicit
         // exhaustion signal. Safety, authorization and unknown failures stop it.
         if (err instanceof InferenceRefusalError || err instanceof HostAuthorizationError ||
-            (opts.callerHandlesFallback && !(err instanceof InferenceUnavailableError))) {
+            (opts.callerHandlesFallback && !(err instanceof ConfirmedLocalExhaustionError))) {
             throw err;
         }
         const message = err instanceof Error ? err.message : "";
