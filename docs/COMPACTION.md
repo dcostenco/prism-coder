@@ -221,6 +221,10 @@ XML-escaped entry text. Prism splits between entries. If one entry or the
 combined summary cannot fit, compaction stops before writing the rollup or
 archiving the project's originals.
 
+Tagged model responses are decoded before compaction accepts the summary.
+An empty summary, a safety notice, or a malformed structured reply leaves
+the original entries active.
+
 Source: [`src/tools/compactionHandler.ts`](https://github.com/dcostenco/prism-coder/blob/main/src/tools/compactionHandler.ts) — `MAX_ENTRIES_CHARS = 25_000`
 
 ### Background scheduler

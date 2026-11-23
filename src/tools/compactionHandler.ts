@@ -20,6 +20,7 @@ import { BCBA_RESPONSE, checkInputSafety, CRISIS_RESPONSE, MEDICAL_RESPONSE } fr
 const COMPACTION_CHUNK_SIZE = 10;
 const MAX_ENTRIES_PER_RUN = 100;
 const SAFETY_NOTICES = new Set([BCBA_RESPONSE, CRISIS_RESPONSE, MEDICAL_RESPONSE]);
+const UNUSABLE_SUMMARY = "Ledger compaction did not receive a usable summary. The original entries were retained.";
 
 // ─── Type Guard ───────────────────────────────────────────────
 
@@ -118,18 +119,29 @@ function buildCompactionPrompt(entries: any[]): string {
  * Shared by both execution paths.
  */
 function parseCompactionResponse(response: string, source: string) {
+  const reply = response.trim();
+  // Remove reasoning only before the payload. A summary can quote literal tags.
+  const body = reply.replace(/^<(\|synalux_think\||think)>[\s\S]*?<\/\1>\s*/i, "");
+  // Local models can mix the known opening and closing markers.
+  const tagged = body.match(/^<(?:\|tool_call\||tool_call)>([\s\S]*)(?:<\/(?:\|tool_call\||tool_call)>|<\|tool_call_end\|>)$/i);
+  const payload = (tagged?.[1] ?? body).trim();
+  const fenced = payload.match(/^```(?:json)?([\s\S]*)```$/i);
   let parsed;
   try {
-    const cleanJson = response.replace(/^```json\n?/, "").replace(/\n?```$/, "");
-    parsed = JSON.parse(cleanJson);
-  } catch (err) {
-    debugLog(`[compact_ledger] Failed to parse JSON from ${source}: ${err}`);
-    parsed = response;
+    parsed = JSON.parse(fenced?.[1] ?? payload);
+  } catch {
+    const looksStructured = body !== reply || /^(?:\{|\[|```)/.test(body)
+      || /<\/?(?:\||(?:think|tool_call)\b)/i.test(body);
+    if (looksStructured) {
+      throw new Error(UNUSABLE_SUMMARY);
+    }
+    debugLog(`[compact_ledger] Using plain-text summary from ${source}`);
+    parsed = reply;
   }
-  const text = typeof parsed === "string" ? parsed : parsed?.summary;
+  const text = typeof parsed === "string" && !tagged ? parsed : parsed?.summary;
   const summary = typeof text === "string" ? text.trim() : "";
   if (!summary || SAFETY_NOTICES.has(summary)) {
-    throw new Error("Ledger compaction did not receive a usable summary. The original entries were retained.");
+    throw new Error(UNUSABLE_SUMMARY);
   }
   return { summary, principles: parsed?.principles ?? [], causal_links: parsed?.causal_links ?? [] };
 }

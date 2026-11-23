@@ -663,6 +663,44 @@ describe("compactionHandler", () => {
       expect(storage.patchLedger).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ["blank summary", '<|tool_call|>{"summary":" "}</|tool_call|>'],
+      ["safety notice", '<|tool_call|>' + JSON.stringify({ summary: MEDICAL_RESPONSE }) + '</|tool_call|>'],
+      ["unterminated wrapper", '<|tool_call|>{"summary":"Partial rollup"}'],
+      ["truncated control marker", '<|tool_ca'],
+      ["malformed JSON", '<|tool_call|>{"summary":</|tool_call|>'],
+      ["untagged truncated JSON", '{"summary":"Partial rollup"'],
+      ["reasoning only", '<|synalux_think|>Working on the summary.</|synalux_think|>'],
+      ["non-JSON tool body", '<tool_call>Plain text inside a JSON envelope.</tool_call>'],
+    ])("refuses a structured compaction reply with %s before any write", async (_case, output) => {
+      mockGenerateText.mockResolvedValue(output);
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(11)).mockResolvedValueOnce(makeFakeEntries(1));
+
+      await expect(compactLedgerHandler({ project: "test-project", threshold: 5 })).rejects.toThrow(/usable summary/i);
+
+      expect(storage.saveLedger).not.toHaveBeenCalled();
+      expect(storage.patchLedger).not.toHaveBeenCalled();
+    });
+
+    it.each([false, true])("stores only the summary of a valid tagged compaction reply (local: %s)", async local => {
+      const summary = "A valid rollup documenting <think>literal markers</think>.";
+      const closeTag = local ? "</tool_call>" : "</|tool_call|>";
+      const output = '<|synalux_think|>Reasoning belongs outside the rollup.</|synalux_think|>\n'
+        + '<|tool_call|>' + JSON.stringify({ summary, principles: [], causal_links: [] }) + closeTag;
+      localPolicy.enabled = local;
+      localPolicy.infer.mockResolvedValue(output);
+      mockGenerateText.mockResolvedValue(output);
+      const [older] = makeFakeEntries(1);
+      storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(11)).mockResolvedValueOnce([older]);
+
+      const result = await compactLedgerHandler({ project: "test-project", threshold: 5 });
+
+      expect(result.isError).toBe(false);
+      expect(storage.saveLedger).toHaveBeenCalledWith(expect.objectContaining({ summary: `[ROLLUP of 1 sessions] ${summary}` }));
+      expect(storage.patchLedger).toHaveBeenCalledOnce();
+      expect(storage.patchLedger).toHaveBeenCalledWith(older.id, expect.objectContaining({ archived_at: expect.any(String) }));
+    });
+
     it.each(["force", "strict"] as const)("keeps forced local memory off cloud when %s is set and local summarization is disabled", async flag => {
       localPolicy[flag] = true;
       storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(60)).mockResolvedValueOnce(makeFakeEntries(3));
@@ -726,8 +764,7 @@ describe("compactionHandler", () => {
       expect(storage.patchLedger).not.toHaveBeenCalled();
     });
 
-    it("handles malformed LLM JSON response by falling back to raw text summary", async () => {
-      // Return something that is not valid JSON
+    it("preserves the plain text summary fallback", async () => {
       mockGenerateText.mockResolvedValue("This is just a plain text summary, not JSON.");
 
       storage.getLedgerEntries
