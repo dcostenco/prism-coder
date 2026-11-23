@@ -28,6 +28,15 @@ All notable changes to this project will be documented in this file.
   active and pinned models and refusing when safe reclamation is unavailable.
 - Correct the macOS available-memory estimate to count free and file-backed
   pages once. This remains an estimate, not a guarantee that a model will fit.
+- Report `output_origin` in the structured `prism_infer` result: `replaced` when
+  the input-safety intercept answered, or the final text differs from the draft
+  given to the output-safety, route-contract and verifier steps; otherwise
+  `repaired` when a deterministic code repair reported a change or the draft is
+  the answer to a repair prompt; otherwise `model`. The backend's answer, before
+  these steps, is as its adapter returned it (Ollama's trimmed, oMLX's after its
+  first `</think>`, local `<think>` blocks removed, cloud text as returned). It
+  is absent when the output is empty. `attempts` does not record every one of
+  these, so a caller that must not grade Prism's text reads this field.
 - Share idle Factory discovery across host processes to reduce duplicate polls.
 - Fix device-key filesystem races and strengthen cancellation handling.
   Update vulnerable dependencies and resolve the reported CodeQL findings.

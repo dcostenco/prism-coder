@@ -2092,6 +2092,8 @@ export async function callSynaluxRouteGuard(opts: {
 
 // ─── Main handler ──────────────────────────────────────────────
 
+export type OutputOrigin = "model" | "repaired" | "replaced";
+
 export interface PrismInferResult {
     selection?: { source: "explicit" | "role_assignment" | "auto"; requested_runtime: string; requested_model: string | null;
         requested_effort: string | null; actual_runtime: string | null; actual_model: string | null; actual_effort: null };
@@ -2135,6 +2137,15 @@ export interface PrismInferResult {
     route_guard?: RouteGuardOutcome;
     /** True when local output was served despite quality gate failure (cloud unavailable/failed). */
     quality_gate_failed?: boolean;
+    /** output_origin, by these rules: "replaced" when the input-safety intercept answered, or the final text differs
+     *  from the draft given to the output-safety, route-contract and verifier steps; otherwise "repaired" when a
+     *  deterministic code repair reported a change or the draft is the answer to a repair prompt; otherwise "model".
+     *  The backend's answer, before these steps, is as its adapter returned it: the Ollama adapter trims surrounding
+     *  whitespace, the oMLX adapter keeps only the text after its first `</think>` (trimmed), a local tier's answer has
+     *  its `<think>` blocks removed (stripThink, which also removes a literal block the answer contains), and a cloud
+     *  answer is as the cloud returned it. Absent when `output` is empty. `attempts` does not record every one of
+     *  these, so a caller that must not grade Prism's text reads this field. */
+    output_origin?: OutputOrigin;
     /** Failure contract (plan v2 §5.2) — structured terminal disposition,
      *  populated on every pipeline serve/refuse path (the pre-pipeline
      *  crisis intercept, backend "safety_gate", is outside the contract)
@@ -2696,6 +2707,7 @@ async function runInferWithResources(args: PrismInferArgs, deps: InferDeps, imag
     if (safetyIntercept) {
         return {
             output: safetyIntercept,
+            output_origin: "replaced",
             backend: "safety_gate",
             model_picked: null,
             ram_free_mb: Math.round(deps.freemem() / (1024 * 1024)),
@@ -3594,7 +3606,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     // Walk the tier table top → bottom, capped by model_ceiling. Each tier
     // logs its skip reason ("not_pulled" / "ram_insufficient" / fail reason)
     // so the caller can see exactly why each tier was bypassed.
-    let localDraft: { output: string; tier: string; gateReason?: string; promptTokens?: number; completionTokens?: number } | null = null;
+    let localDraft: { output: string; repaired: boolean; tier: string; gateReason?: string; promptTokens?: number; completionTokens?: number } | null = null;
     // A local answer to a conversation the answer check rejected or did not check: never served as answer text.
     let withheldReason: "answer_ungrounded" | "answer_unverified" | null = null;
 
@@ -3949,6 +3961,8 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
 
                 let { stripped, thinkOnly } = stripThink(result.text);
                 let output = stripped;
+                // For output_origin; the rules are on PrismInferResult.output_origin.
+                let outputRepaired = false;
 
                 // Quality gate — all modes. Route uses mode-aware empty floor (length===0).
                 let gate = passesQualityGate(output, thinkOnly, result.doneReason, mode, gateOptions);
@@ -4034,6 +4048,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                     );
                     if (deterministicRepair.changes.length > 0) {
                         output = deterministicRepair.output;
+                        outputRepaired = true;
                         gate = passesQualityGate(output, false, result.doneReason, mode, gateOptions);
                         if (gate.pass) {
                             gate = passesCodingQualityGate(args.prompt, output);
@@ -4089,6 +4104,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                                 ? passesCodingQualityGate(args.prompt, repairedStripped.stripped)
                                 : repairedGenericGate;
                             result = repaired;
+                            outputRepaired = true;
                             stripped = repairedStripped.stripped;
                             thinkOnly = repairedStripped.thinkOnly;
                             output = stripped;
@@ -4211,7 +4227,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                     // An answer grounding rejected or could not check is not kept: it is never served.
                     // Nor is any draft of a conversation's answer, whatever its shape.
                     if ((args.messages?.length ?? 0) === 0 && (gate.reason === "hard_truncation" || gate.reason === "loop_detected")) {
-                        localDraft = { output, tier: tier.tag, gateReason: gate.reason, promptTokens: result.promptTokens, completionTokens: result.completionTokens };
+                        localDraft = { output, repaired: outputRepaired, tier: tier.tag, gateReason: gate.reason, promptTokens: result.promptTokens, completionTokens: result.completionTokens };
                     }
                     if (gate.reason === "ungrounded" || gate.reason === "unverified") withheldReason = `answer_${gate.reason}`;
                     break;
@@ -4238,6 +4254,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                     prompt_tokens: result.promptTokens,
                     completion_tokens: result.completionTokens,
                     quality_gate_failed: gate.pass ? undefined : true,
+                    output_origin: outputRepaired ? "repaired" : "model",
                     clinical_sections: clinicalSections,
                     gate_outcome: gate.pass
                         ? { status: "success", served_anyway: false }
@@ -4313,6 +4330,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
             prompt_tokens: localDraft.promptTokens,
             completion_tokens: localDraft.completionTokens,
             quality_gate_failed: true,
+            output_origin: localDraft.repaired ? "repaired" : "model",
             gate_outcome: { status: "degraded", reason: localDraft.gateReason, served_anyway: true },
         });
     }
@@ -4331,6 +4349,12 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
  * by the supplied evidence; we surface that as a non-null `verification`
  * field so callers can route refusals separately from successes.
  */
+/** The partial result without the caller's origin: applyVerification decides the served text's origin. */
+function withoutOrigin<T extends { output_origin?: OutputOrigin }>(partial: T): Omit<T, "output_origin"> {
+    const { output_origin: _origin, ...rest } = partial;
+    return rest;
+}
+
 async function applyVerification(
     draft: string,
     args: PrismInferArgs,
@@ -4416,6 +4440,10 @@ async function applyVerification(
         routedDraft = routeGuard.output;
     }
 
+    // output_origin of the served text; the rules are on PrismInferResult.output_origin.
+    const originOf = (served: string): { output_origin?: OutputOrigin } =>
+        served === "" ? {} : { output_origin: served !== draft ? "replaced" : (partial.output_origin ?? "model") };
+
     // L1 output safety — intercept dangerous model-generated content
     const safeDraft = checkOutputSafety(routedDraft);
     // A grounded answer that something later replaces is no longer the checked
@@ -4425,7 +4453,7 @@ async function applyVerification(
 
     const shouldVerify = args.verify ?? (args.evidence !== undefined && args.evidence.length > 0);
     if (!shouldVerify || !deps.callVerifier) {
-        return { ...routedPartial, output: safeDraft, route_guard: routeGuard };
+        return { ...withoutOrigin(routedPartial), output: safeDraft, ...originOf(safeDraft), route_guard: routeGuard };
     }
     const verifier = deps.callVerifier;
     const outcome = await verifier({
@@ -4436,9 +4464,11 @@ async function applyVerification(
         ollamaUrl: deps.ollamaUrl,
     });
     if (grounded && outcome.finalText !== routedDraft) partial.attempts.push({ tier: "verifier", reason: "answer_check:replaced_by_verifier" });
+    const verifiedOutput = checkOutputSafety(outcome.finalText);
     return {
-        ...routedPartial,
-        output: checkOutputSafety(outcome.finalText),
+        ...withoutOrigin(routedPartial),
+        output: verifiedOutput,
+        ...originOf(verifiedOutput),
         route_guard: routeGuard,
         verification: {
             action: outcome.action,
@@ -4588,7 +4618,7 @@ const STRUCTURED_INFER_FIELDS = [
     "selection", "host_handoff",
     "output", "backend", "model_picked", "ram_free_mb", "latency_ms", "used_cloud",
     "next_step", "plan", "history_turns", "layer1_second_read", "refusal_layer",
-    "prompt_tokens", "completion_tokens", "quality_gate_failed", "entitlements_source",
+    "prompt_tokens", "completion_tokens", "quality_gate_failed", "entitlements_source", "output_origin",
 ] as const satisfies readonly (keyof PrismInferResult)[];
 
 /** Public machine contract. Never spread runtime objects, authentication,

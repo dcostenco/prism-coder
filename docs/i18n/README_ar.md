@@ -260,6 +260,12 @@ or by re-enabling after each run.
 - **Memory and model switching:** count macOS free and file-backed pages once,
   and reclaim eligible idle oMLX models without interrupting active or pinned
   work. Memory estimates do not guarantee fit.
+- **Answer origin:** the structured `prism_infer` result carries
+  `output_origin`: `replaced` when the input-safety intercept answered, or the
+  final text differs from the draft given to the output-safety, route-contract
+  and verifier steps; otherwise `repaired` when a deterministic code repair
+  reported a change or the draft is the answer to a repair prompt; otherwise
+  `model`. It is absent when the output is empty.
 - **Reliability:** updated oMLX installer pin, device-key race fixes, dependency
   and CodeQL remediation, shared idle Factory polling, and the civilian-use
   policy correction for Syria. Full details are in [CHANGELOG.md](../../CHANGELOG.md).
