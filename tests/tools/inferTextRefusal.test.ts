@@ -407,7 +407,9 @@ describe("Compaction inference failure boundary", () => {
             return '{"summary":"Routine maintenance."}';
         });
         await expect(compactFixture(1, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
-        expect(generateText).toHaveBeenCalledExactlyOnceWith(expect.any(String), undefined, { signal: controller.signal });
+        expect(generateText).toHaveBeenCalledExactlyOnceWith(expect.any(String), undefined, {
+            signal: controller.signal, requireCompleteResponse: true,
+        });
         expect(storage.saveLedger).not.toHaveBeenCalled();
         expect(storage.patchLedger).not.toHaveBeenCalled();
     });
@@ -452,6 +454,20 @@ describe("Compaction inference failure boundary", () => {
         expect(generateText).not.toHaveBeenCalled();
         expect(storage.saveLedger).toHaveBeenCalledOnce();
         expect(storage.patchLedger).toHaveBeenCalledOnce();
+    });
+
+    it("does not archive originals when a completed local reply fails the quality gate", async () => {
+        const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+        vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+        let requests = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            const content = ++requests === 1 ? "OBVIOUS_NOT_RESERVED" : "...";
+            return Response.json({ done: true, done_reason: "stop", message: { content } });
+        };
+        await expect(compactFixture()).rejects.toThrow(/empty_response/);
+        expect(requests).toBe(2);
+        expectNoFallbackOrWrites();
     });
 
     it("compaction routes local summaries through inferText", async () => {

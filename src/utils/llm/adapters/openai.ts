@@ -123,9 +123,13 @@ export class OpenAIAdapter implements LLMProvider {
       ? await this.client.chat.completions.create(request, { signal: options.signal })
       : await this.client.chat.completions.create(request);
 
+    const choice = response.choices[0];
+    if (options?.requireCompleteResponse && (choice?.finish_reason !== "stop" || choice.message?.refusal != null)) {
+      throw new Error("[OpenAIAdapter] Text generation did not complete.");
+    }
     // choices[0] is always the primary completion. ?? "" returns empty string
     // on null content (e.g. if the model returned a function call instead).
-    return response.choices[0]?.message?.content ?? "";
+    return choice?.message?.content ?? "";
   }
 
   // ─── Embedding Generation ────────────────────────────────────────────────

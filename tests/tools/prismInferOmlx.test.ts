@@ -1466,6 +1466,25 @@ describe("explicit oMLX classification through the real callLayer1 and the owned
         expect(f.deps.callCloud).not.toHaveBeenCalled();
     });
 
+    it.each(["classifier", "worker"] as const)("refuses a token-limited oMLX %s reply during ledger compaction", async phase => {
+        const f = fixture();
+        f.deps.callLayer1 = undefined;
+        f.deps.requireConfirmedLocalExhaustion = true;
+        f.omlx.generate = vi.fn(async (target: OmlxTarget) => {
+            const classifier = target.model === OMLX_LAYER1_MODEL;
+            const limited = phase === (classifier ? "classifier" : "worker");
+            return { ok: true as const, text: classifier ? "OBVIOUS_NOT_RESERVED" : OUTPUT, doneReason: limited ? "length" : "stop" };
+        });
+
+        const refusal = phase === "classifier" ? /omlx_classifier_error/ : /local generation did not complete/;
+        await expect(runInfer(ask({ mode: "chat", escalation: undefined, prompt: "Summarize this maintenance ledger." }),
+            f.deps, { signal: new AbortController().signal })).rejects.toThrow(refusal);
+        expect(vi.mocked(f.omlx.generate).mock.calls.map(call => call[0].model))
+            .toEqual(phase === "classifier" ? [OMLX_LAYER1_MODEL] : [OMLX_LAYER1_MODEL, MODEL]);
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+
     it("sends the history and context windows of a multi-turn call through the adapter too", async () => {
         const f = owned(() => ({ ok: true, text: "OBVIOUS_NOT_RESERVED", doneReason: "stop" }));
         const messages = [{ role: "user" as const, content: "The helper returns its argument." }, { role: "assistant" as const, content: OUTPUT }];

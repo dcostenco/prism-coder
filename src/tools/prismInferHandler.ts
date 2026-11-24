@@ -2652,7 +2652,12 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
                     ...request, timeoutMs: Math.min(request.timeoutMs, deadlineMs - Date.now()), deadlineMs,
                 }, active));
                 generations.add(generation.catch(() => undefined));
-                return generation;
+                const result = await generation;
+                // A terminal operation can still contain a token-limited answer.
+                if (deps.requireConfirmedLocalExhaustion && result.ok && result.doneReason !== "stop") {
+                    return { ok: false as const, reason: "omlx_incomplete_response" };
+                }
+                return result;
             } } } : !usesOmlx || context?.signal || localDeadline !== undefined ? { ...deps, callLocal: async (...callArgs: Parameters<InferDeps["callLocal"]>) => {
             // A cancelled metadata/classifier wait cannot start generation.
             // An in-flight ordinary Ollama call retains its lease until it
@@ -4677,7 +4682,7 @@ export async function inferText(
         opts.signal?.throwIfAborted();
         const text = (result.output ?? "").trim();
         if (opts.callerHandlesFallback &&
-            (!text || result.backend === "safety_gate" || result.gate_outcome?.status === "refused")) {
+            (!text || result.backend === "safety_gate" || result.gate_outcome?.status !== "success")) {
             throw new InferenceRefusalError(result.gate_outcome?.reason ?? "prism_infer: local inference returned no usable answer");
         }
         return text.length > 0 ? text : null;

@@ -94,6 +94,13 @@ export class AnthropicAdapter implements LLMProvider {
       ? await this.client.messages.create(request, { signal: options.signal })
       : await this.client.messages.create(request);
 
+    if (options?.requireCompleteResponse) {
+      const complete = options.json
+        ? response.stop_reason === "tool_use"
+        : response.stop_reason === "end_turn" || response.stop_reason === "stop_sequence";
+      if (!complete) throw new Error("[AnthropicAdapter] Text generation did not complete.");
+    }
+
     // Extract text from the first ContentBlock.
     // Anthropic returns an array of content blocks; we only use text blocks.
     const block = response.content[0];

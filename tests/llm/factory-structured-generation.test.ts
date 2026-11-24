@@ -144,4 +144,31 @@ describe('provider structured generation requests', () => {
     expect(await new AnthropicAdapter().generateText('plain')).toBe('plain');
     expect(anthropicCreate.mock.calls[1][0]).not.toHaveProperty('tools');
   });
+
+  it.each(['openai', 'anthropic', 'gemini'] as const)('%s requires completion for protected text alone', async provider => {
+    const { AnthropicAdapter } = await import('../../src/utils/llm/adapters/anthropic.js');
+    const { GeminiAdapter } = await import('../../src/utils/llm/adapters/gemini.js');
+    const body = 'Synthetic rollup text.';
+    const stop = { openai: 'stop', anthropic: 'end_turn', gemini: 'STOP' }[provider];
+    const limit = { openai: 'length', anthropic: 'max_tokens', gemini: 'MAX_TOKENS' }[provider];
+    const response = (reason?: string) => {
+      switch (provider) {
+        case 'openai':
+          create.mockResolvedValue({ choices: [{ finish_reason: reason, message: { role: 'assistant', content: body } }] });
+          return new OpenAIAdapter();
+        case 'anthropic':
+          anthropicCreate.mockResolvedValue({ stop_reason: reason, content: [{ type: 'text', text: body }] });
+          return new AnthropicAdapter();
+        case 'gemini':
+          googleGenerate.mockResolvedValue({ response: { candidates: [{ finishReason: reason }], text: () => body } });
+          return new GeminiAdapter();
+      }
+    };
+    const protectedText = new TracingLLMProvider(response(limit), provider);
+    const options = { requireCompleteResponse: true };
+    await expect(protectedText.generateText('Compact fixture entries.', undefined, options)).rejects.toThrow(/did not complete/);
+    await expect(response().generateText('Compact fixture entries.', undefined, options)).rejects.toThrow(/did not complete/);
+    await expect(response(stop).generateText('Compact fixture entries.', undefined, options)).resolves.toBe(body);
+    await expect(response(limit).generateText('Ordinary text.')).resolves.toBe(body);
+  });
 });

@@ -198,7 +198,7 @@ async function summarizeEntries(entries: any[], signal?: AbortSignal) {
   // ── Path 2: Cloud LLM (Gemini / configured provider) ──────────────
   const llm = getLLMProvider(); // throws if no API key configured
   signal?.throwIfAborted();
-  const response = signal ? await llm.generateText(prompt, undefined, { signal }) : await llm.generateText(prompt);
+  const response = await llm.generateText(prompt, undefined, { requireCompleteResponse: true, ...(signal ? { signal } : {}) });
   signal?.throwIfAborted();
   return parseCompactionResponse(response, "cloud-llm");
 }

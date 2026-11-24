@@ -28,6 +28,8 @@ export interface TextGenerationOptions {
   model?: string;
   maxOutputTokens?: number;
   signal?: AbortSignal;
+  /** Require a provider finish status that proves the response completed. */
+  requireCompleteResponse?: boolean;
 }
 
 export interface LLMProvider {

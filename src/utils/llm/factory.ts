@@ -145,6 +145,8 @@ export function getLLMProvider(): LLMProvider {
           system,
           maxTokens: options?.maxOutputTokens,
           localOnly: true,
+          ...(options?.requireCompleteResponse ? { callerHandlesFallback: true } : {}),
+          ...(options?.signal ? { signal: options.signal } : {}),
         });
         if (!text) throw new Error("No local text model produced an answer.");
         if (options?.json) JSON.parse(text);

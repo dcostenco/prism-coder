@@ -969,8 +969,10 @@ describe("compactionHandler", () => {
         expect(mockGenerateText).not.toHaveBeenCalled();
         expect(storage.patchLedger).not.toHaveBeenCalled();
       } else {
-        expect(mockGenerateText).toHaveBeenCalledWith(expect.stringContaining("active-entry-2"));
-        expect(mockGenerateText).not.toHaveBeenCalledWith(expect.stringContaining("soft-deleted private entry"));
+        expect(mockGenerateText).toHaveBeenCalledWith(expect.stringContaining("active-entry-2"), undefined, {
+          requireCompleteResponse: true,
+        });
+        expect(mockGenerateText.mock.calls.every(([prompt]) => !prompt.includes("soft-deleted private entry"))).toBe(true);
         expect(storage.patchLedger.mock.calls.map(call => call[0])).toEqual([entries[1].id, entries[2].id]);
       }
     });
