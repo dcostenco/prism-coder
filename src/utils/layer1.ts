@@ -160,12 +160,11 @@ const VALID: ReadonlySet<string> = new Set([
  * Note: OBVIOUS_NOT_RESERVED contains "RESERVED" as a substring — whole-token
  * matching via Set prevents the substring trap from inverting the gate.
  */
-export function parseLayer1(raw: string | null | undefined): Layer1Verdict {
+export function parseLayer1(raw: string | null | undefined, exact = false): Layer1Verdict {
     if (!raw) return "ERROR";
-    const m = raw.trim().toUpperCase().match(/[A-Z_]+/);
-    if (!m) return "ERROR";
-    const token = m[0];
-    return VALID.has(token) ? (token as Layer1Verdict) : "ERROR";
+    const text = raw.trim();
+    const token = exact ? text : text.toUpperCase().match(/[A-Z_]+/)?.[0];
+    return token && VALID.has(token) ? (token as Layer1Verdict) : "ERROR";
 }
 
 type IntentRule = (prompt: string) => boolean;
@@ -653,6 +652,8 @@ async function callLayer1Unleased(
         retryOnError?: boolean;
         /** Require terminal non-streaming Ollama evidence before reading the verdict. */
         requireCompleteResponse?: boolean;
+        /** Accept exactly one classifier label for a protected caller. */
+        requireExactVerdict?: boolean;
         /** Read an oversize prompt whole, window by window, instead of as an
          *  excerpt. Explicit oMLX sets it with strictErrors. */
         readOversizeWhole?: boolean;
@@ -745,7 +746,7 @@ async function callLayer1Unleased(
         }
         if (data?.error) return "ERROR";
         const text = data?.message?.content;
-        return parseLayer1(text);
+        return parseLayer1(text, opts?.requireExactVerdict);
     };
 
     // Image requests get the vision budget on both attempts, and an ERROR is

@@ -1439,15 +1439,30 @@ describe("explicit oMLX classification through the real callLayer1 and the owned
         f.deps.requireConfirmedLocalExhaustion = true;
         f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
             models: { omlx: { coder: MODEL } } });
+        const controller = new AbortController();
+        f.deps.listLoaded = vi.fn(async () => {
+            controller.abort();
+            return new Set<string>();
+        });
         const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected Ollama request"));
         try {
             const result = await runInfer(ask({ mode: "chat", local_backend: undefined, escalation: undefined,
-                prompt: "Summarize the maintenance ledger." }), f.deps, { signal: new AbortController().signal });
+                prompt: "Summarize the maintenance ledger." }), f.deps, { signal: controller.signal });
             expect(result).toMatchObject({ backend: "omlx", model_picked: MODEL });
             expect(ollamaChat(fetchSpy)).toEqual([]);
         } finally { fetchSpy.mockRestore(); }
         expect(vi.mocked(f.omlx.generate).mock.calls.map(call => call[0].model)).toEqual([OMLX_LAYER1_MODEL, MODEL]);
+        expect(f.deps.listLoaded).not.toHaveBeenCalled();
         expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+
+    it("refuses conflicting owned oMLX classifier labels during ledger compaction", async () => {
+        const f = owned(() => ({ ok: true, text: "OBVIOUS_NOT_RESERVED\nOBVIOUS_RESERVED", doneReason: "stop" }));
+        f.deps.requireConfirmedLocalExhaustion = true;
+        await expect(runInfer(ask({ mode: "chat", escalation: undefined, prompt: "Summarize this maintenance ledger." }),
+            f.deps, { signal: new AbortController().signal })).rejects.toThrow(/omlx_classifier_error/);
+        expect(vi.mocked(f.omlx.generate).mock.calls.map(call => call[0].model)).toEqual([OMLX_LAYER1_MODEL]);
         expect(f.deps.callCloud).not.toHaveBeenCalled();
     });
 

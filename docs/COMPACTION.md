@@ -184,6 +184,7 @@ return thousands of entries, bloating the context window it's meant to manage.
        aliases. A closed listener or empty inventory still goes
        through the deterministic keyword check. Local classification and generation
        require completed replies with assistant output when a role is present.
+       Compaction requires exactly one label from the local classifier.
        Safety refusals, authorization failures, malformed
        or partial replies, cancellation, and unknown provider failures abort
        compaction before the configured provider or writes.

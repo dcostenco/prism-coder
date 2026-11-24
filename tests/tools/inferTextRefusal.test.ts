@@ -287,6 +287,20 @@ describe("Compaction inference failure boundary", () => {
         });
     });
 
+    it("refuses conflicting classifier labels before fallback or ledger writes", async () => {
+        const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+        vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        freeMemory = 0;
+        respond = path => path === "/api/chat" ? Response.json({
+            done: true, done_reason: "stop",
+            message: { role: "assistant", content: "OBVIOUS_NOT_RESERVED\nOBVIOUS_RESERVED" },
+        }) : undefined;
+        await expect(compactFixture()).rejects.toThrow(/classification could not be confirmed/);
+        expect(callLayer1).toHaveBeenCalledOnce();
+        expectNoFallbackOrWrites();
+    });
+
     it.each([1, 2])("keeps originals if classification refuses after %s locally summarized chunks", async successfulChunks => {
         vi.mocked(callLayer1).mockResolvedValue("ERROR");
         vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");

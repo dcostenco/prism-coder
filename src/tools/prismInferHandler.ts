@@ -2631,6 +2631,14 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
         };
         const scopedDeps = runtime ? { ...deps, executionDeadlineMs: executionDeadline, omlx: { ...runtime,
             detect: (model?: string) => acquireTarget(() => runtime.detect(model, { deadlineMs: executionDeadline, signal: context?.signal })),
+            listLoaded: async () => {
+                requireBudget();
+                const probe = runtime.listLoaded();
+                generations.add(probe.catch(() => undefined));
+                const loaded = await probe;
+                requireBudget();
+                return loaded;
+            },
             ...(runtime.detectImage ? { detectImage: (model: string, deadlineMs?: number) => acquireTarget(() => runtime.detectImage!(model, deadlineMs, context?.signal)) } : {}),
             ...(runtime.reclaim ? { reclaim: (...args: Parameters<NonNullable<OmlxRuntime["reclaim"]>>) => {
                 requireBudget();
@@ -3269,7 +3277,8 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                 baseL1(prompt, url, model, omlxL1Fetch ?? fetchImpl, images, {
                     ...opts, ...omlxL1Opts,
                     ...(requireConfirmedExhaustion ? {
-                        strictErrors: true, readOversizeWhole: true, retryOnError: false, requireCompleteResponse: !omlxL1Fetch,
+                        strictErrors: true, readOversizeWhole: true, retryOnError: false,
+                        requireCompleteResponse: !omlxL1Fetch, requireExactVerdict: true,
                     } : {}),
                 })
             : baseL1;
@@ -3694,8 +3703,10 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
     // second read and before using RAM admission as proof of local exhaustion.
     let genLoaded = loaded;
     let genFreeBytes = freeBytes;
-    if (secondReadModel !== null || (requireConfirmedExhaustion && !noLocalModels)) {
+    if (secondReadModel !== null || (requireConfirmedExhaustion && !omlxTarget && !noLocalModels)) {
+        compactionSignal?.throwIfAborted();
         genLoaded = await deps.listLoaded();
+        compactionSignal?.throwIfAborted();
         genFreeBytes = deps.freemem();
     }
 
