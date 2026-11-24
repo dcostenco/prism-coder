@@ -117,7 +117,11 @@ export class OpenAIAdapter implements LLMProvider {
 
     debugLog(`[OpenAIAdapter] generateText — model=${model}, messages=${messages.length}`);
 
-    const response = await this.client.chat.completions.create({ model, messages, ...(options?.json ? { response_format: { type: "json_object" as const } } : {}), ...(options?.maxOutputTokens ? { max_tokens: options.maxOutputTokens } : {}) });
+    const request = { model, messages, ...(options?.json ? { response_format: { type: "json_object" as const } } : {}),
+      ...(options?.maxOutputTokens ? { max_tokens: options.maxOutputTokens } : {}) };
+    const response = options?.signal
+      ? await this.client.chat.completions.create(request, { signal: options.signal })
+      : await this.client.chat.completions.create(request);
 
     // choices[0] is always the primary completion. ?? "" returns empty string
     // on null content (e.g. if the model returned a function call instead).

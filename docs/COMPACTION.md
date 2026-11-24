@@ -213,8 +213,9 @@ return thousands of entries, bloating the context window it's meant to manage.
 ```
 
 Cancelling the MCP call prevents new provider requests and rollup writes.
-Compaction waits for an already-started provider exchange to settle and
-discards its reply if the caller cancelled. A project whose rollup write
+Compaction forwards cancellation to the owned oMLX operation and supported
+configured providers. It waits for an already-started Ollama exchange to
+settle and discards its reply if the caller cancelled. A project whose rollup write
 has already started finishes its existing write sequence before cancellation
 takes effect for the next project.
 

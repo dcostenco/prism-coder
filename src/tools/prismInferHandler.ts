@@ -2406,7 +2406,6 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
     };
     // Each HTTP exchange (classifier and answer-check retries included) gets
     // only the remaining request time. No race abandons an owned provider job.
-    const guardOllamaRequests = localDeadline !== undefined || (deps.requireConfirmedLocalExhaustion && !!context?.signal);
     const budgetFetch = (async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
         requireBudget();
         if (localDeadline === undefined) return fetch(url, init);
@@ -2613,6 +2612,7 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
     }
     const ownedAction = async () => {
         requireBudget();
+        const guardOllamaRequests = !usesOmlx && (localDeadline !== undefined || (deps.requireConfirmedLocalExhaustion && !!context?.signal));
         let releaseDevice: (() => Promise<void>) | undefined;
         const runtime = usesOmlx ? deps.omlx : undefined;
         // Every owned generation, so the device outlives its marker writes.

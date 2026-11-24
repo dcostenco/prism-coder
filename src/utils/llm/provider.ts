@@ -27,6 +27,7 @@ export interface TextGenerationOptions {
   json?: boolean;
   model?: string;
   maxOutputTokens?: number;
+  signal?: AbortSignal;
 }
 
 export interface LLMProvider {

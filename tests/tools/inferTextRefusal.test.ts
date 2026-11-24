@@ -183,6 +183,7 @@ describe("Compaction inference failure boundary", () => {
         { label: "model ID with spaces", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture bad:latest"}]}' },
         { label: "empty model name components", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture//:"}]}' },
         { label: "empty model tag", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture:"}]}' },
+        { label: "non-ASCII model ID that folds to ASCII", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture\u212a:latest"}]}' },
         { label: "conflicting inventory aliases", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture:latest","model":"different:latest"}]}' },
         { label: "duplicate catalog model IDs", path: "/api/tags", status: 200, body: '{"models":[{"name":"other:latest"},{"name":"other:latest"}]}' },
         { label: "duplicate default-registry catalog aliases", path: "/api/tags", status: 200, body: '{"models":[{"name":"other"},{"name":"registry.ollama.ai/library/Other:Latest"}]}' },
@@ -190,6 +191,7 @@ describe("Compaction inference failure boundary", () => {
         { label: "invalid loaded model ID", path: "/api/ps", status: 200, body: '{"models":[{"name":"other model"}]}' },
         { label: "duplicate loaded model IDs", path: "/api/ps", status: 200, body: '{"models":[{"name":"other:latest"},{"name":"other:latest"}]}' },
     ])("keeps $label out of fallback", async ({ path, status, body }) => {
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
         respond = route => route === path ? new Response(body, { status }) : undefined;
         await expect(compactFixture()).rejects.toThrow();
         expectNoFallbackOrWrites();
@@ -391,7 +393,7 @@ describe("Compaction inference failure boundary", () => {
             return '{"summary":"Routine maintenance."}';
         });
         await expect(compactFixture(1, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
-        expect(generateText).toHaveBeenCalledOnce();
+        expect(generateText).toHaveBeenCalledExactlyOnceWith(expect.any(String), undefined, { signal: controller.signal });
         expect(storage.saveLedger).not.toHaveBeenCalled();
         expect(storage.patchLedger).not.toHaveBeenCalled();
     });

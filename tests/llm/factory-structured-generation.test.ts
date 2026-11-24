@@ -8,7 +8,7 @@ vi.mock('openai', () => ({ default: class {
   constructor(options: unknown) { sdkOptions(options); }
   chat = { completions: { create } };
 } }));
-vi.mock('@google/generative-ai', () => ({ GoogleGenerativeAI: class { getGenerativeModel = (request: any) => ({ generateContent: (prompt: string) => googleGenerate(request, prompt) }); }, TaskType: { SEMANTIC_SIMILARITY: 'SEMANTIC_SIMILARITY' } }));
+vi.mock('@google/generative-ai', () => ({ GoogleGenerativeAI: class { getGenerativeModel = (request: any) => ({ generateContent: (...args: [string, unknown?]) => googleGenerate(request, ...args) }); }, TaskType: { SEMANTIC_SIMILARITY: 'SEMANTIC_SIMILARITY' } }));
 vi.mock('@anthropic-ai/sdk', () => ({ default: class { messages = { create: anthropicCreate }; } }));
 vi.mock('../../src/storage/configStorage.js', () => ({ getSettingSync: (key: string, fallback: string) =>
   key === 'openai_base_url' ? policy.baseURL
@@ -100,6 +100,19 @@ describe('Factory structured model requests', () => {
 });
 
 describe('provider structured generation requests', () => {
+  it('passes caller cancellation to each configured text transport', async () => {
+    const { signal } = new AbortController();
+    const { AnthropicAdapter } = await import('../../src/utils/llm/adapters/anthropic.js');
+    const { GeminiAdapter } = await import('../../src/utils/llm/adapters/gemini.js');
+    anthropicCreate.mockResolvedValue({ content: [{ type: 'text', text: 'plain' }] });
+    googleGenerate.mockResolvedValue({ response: { text: () => 'plain' } });
+    await new TracingLLMProvider(new OpenAIAdapter(), 'openai').generateText('plain', undefined, { signal });
+    await new AnthropicAdapter().generateText('plain', undefined, { signal });
+    await new GeminiAdapter().generateText('plain', undefined, { signal });
+    expect(create).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { signal });
+    expect(anthropicCreate).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { signal });
+    expect(googleGenerate).toHaveBeenCalledExactlyOnceWith(expect.any(Object), 'plain', { signal });
+  });
   it('Gemini sends model, JSON mime type, and output budget', async () => {
     process.env.GOOGLE_API_KEY = 'local-test-key';
     googleGenerate.mockResolvedValue({ response: { text: () => '{"ok":true}' } });

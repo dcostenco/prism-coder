@@ -88,7 +88,9 @@ export class GeminiAdapter implements LLMProvider {
       ...(options?.json || options?.maxOutputTokens ? { generationConfig: { ...(options?.json ? { responseMimeType: "application/json" } : {}), ...(options?.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}) } } : {}),
     });
 
-    const result = await model.generateContent(prompt);
+    const result = options?.signal
+      ? await model.generateContent(prompt, { signal: options.signal })
+      : await model.generateContent(prompt);
 
     // result.response.text() extracts the first candidate's text content.
     // This matches the prior behavior in all 6 migrated call sites.

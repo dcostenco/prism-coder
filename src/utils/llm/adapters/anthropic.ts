@@ -80,7 +80,7 @@ export class AnthropicAdapter implements LLMProvider {
 
     // Anthropic's Messages API uses system as a top-level field (not a message role).
     // This maps cleanly to LLMProvider's systemInstruction parameter.
-    const response = await this.client.messages.create({
+    const request: Anthropic.MessageCreateParamsNonStreaming = {
       model,
       max_tokens: options?.maxOutputTokens || getMaxTokens(),
       ...(systemInstruction ? { system: systemInstruction } : {}),
@@ -89,7 +89,10 @@ export class AnthropicAdapter implements LLMProvider {
         tools: [{ name: "emit_json", description: "Return the requested JSON object.", input_schema: { type: "object", additionalProperties: true } }],
         tool_choice: { type: "tool", name: "emit_json" },
       } : {}),
-    });
+    };
+    const response = options?.signal
+      ? await this.client.messages.create(request, { signal: options.signal })
+      : await this.client.messages.create(request);
 
     // Extract text from the first ContentBlock.
     // Anthropic returns an array of content blocks; we only use text blocks.

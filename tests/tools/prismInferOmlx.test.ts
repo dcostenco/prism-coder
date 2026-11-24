@@ -1434,6 +1434,23 @@ describe("explicit oMLX classification through the real callLayer1 and the owned
         expect(JSON.parse(f.classifierRequests[0].messages[1].content.split('\n')[0])).toEqual({ request: ask().prompt });
     });
 
+    it("keeps cancellable ledger compaction on its saved oMLX classifier and worker", async () => {
+        const f = owned(() => ({ ok: true, text: "OBVIOUS_NOT_RESERVED", doneReason: "stop" }));
+        f.deps.requireConfirmedLocalExhaustion = true;
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
+            models: { omlx: { coder: MODEL } } });
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected Ollama request"));
+        try {
+            const result = await runInfer(ask({ mode: "chat", local_backend: undefined, escalation: undefined,
+                prompt: "Summarize the maintenance ledger." }), f.deps, { signal: new AbortController().signal });
+            expect(result).toMatchObject({ backend: "omlx", model_picked: MODEL });
+            expect(ollamaChat(fetchSpy)).toEqual([]);
+        } finally { fetchSpy.mockRestore(); }
+        expect(vi.mocked(f.omlx.generate).mock.calls.map(call => call[0].model)).toEqual([OMLX_LAYER1_MODEL, MODEL]);
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+
     it("sends the history and context windows of a multi-turn call through the adapter too", async () => {
         const f = owned(() => ({ ok: true, text: "OBVIOUS_NOT_RESERVED", doneReason: "stop" }));
         const messages = [{ role: "user" as const, content: "The helper returns its argument." }, { role: "assistant" as const, content: OUTPUT }];
