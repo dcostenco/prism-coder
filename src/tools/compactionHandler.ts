@@ -179,7 +179,9 @@ async function summarizeEntries(entries: any[], signal?: AbortSignal) {
     // Ledger content goes through the full ladder so Layer 1 screening, the
     // quality gate and the entitlement ceiling all apply — this summarises
     // session records that may carry sensitive material.
-    const localResponse = await inferText(prompt, { mode: "chat", localOnly, callerHandlesFallback: true, signal });
+    const localResponse = await inferText(prompt, {
+      mode: "chat", localOnly, callerHandlesFallback: true, allowCompactionEnvelope: true, signal,
+    });
     signal?.throwIfAborted();
     if (localResponse) {
       debugLog(`[compact_ledger] Local LLM summarization succeeded`);

@@ -439,21 +439,39 @@ describe("Compaction inference failure boundary", () => {
         }));
     });
 
-    it("writes a local rollup after complete classifier and generator replies", async () => {
+    it.each([false, true])("writes a local rollup after complete replies (tagged summary: %s)", async tagged => {
         const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
         vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
         const summary = "Summarized routine maintenance.";
+        const payload = JSON.stringify({ summary });
+        const reply = tagged ? "<|synalux_think|>Combine the entries.</|synalux_think|>\n"
+            + "<|tool_call|>" + payload + "</|tool_call|>" : payload;
         let requests = 0;
         respond = path => {
             if (path !== "/api/chat") return;
-            const content = ++requests === 1 ? "OBVIOUS_NOT_RESERVED" : JSON.stringify({ summary });
+            const content = ++requests === 1 ? "OBVIOUS_NOT_RESERVED" : reply;
             return Response.json({ done: true, done_reason: "stop", message: { content } });
         };
         expect((await compactFixture()).isError).toBe(false);
         expect(requests).toBe(2);
         expect(generateText).not.toHaveBeenCalled();
         expect(storage.saveLedger).toHaveBeenCalledOnce();
+        expect(storage.saveLedger).toHaveBeenCalledWith(expect.objectContaining({ summary: expect.stringContaining(summary) }));
         expect(storage.patchLedger).toHaveBeenCalledOnce();
+    });
+
+    it("rejects a malformed tagged summary through the real inference path", async () => {
+        const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+        vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+        let requests = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            const content = ++requests === 1 ? "OBVIOUS_NOT_RESERVED" : '<|tool_call|>{"summary":</|tool_call|>';
+            return Response.json({ done: true, done_reason: "stop", message: { content } });
+        };
+        await expect(compactFixture()).rejects.toThrow(/did not receive a usable summary/);
+        expect(requests).toBe(2);
+        expectNoFallbackOrWrites();
     });
 
     it("does not archive originals when a completed local reply fails the quality gate", async () => {

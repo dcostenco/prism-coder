@@ -768,7 +768,9 @@ describe("compactionHandler", () => {
       localPolicy.enabled = true;
       storage.getLedgerEntries.mockResolvedValueOnce(makeFakeEntries(60)).mockResolvedValueOnce(makeFakeEntries(3));
       const result = await compactLedgerHandler({ project: "test-project", threshold: 50 });
-      expect(localPolicy.infer).toHaveBeenCalledWith(expect.any(String), { mode: "chat", localOnly: true, callerHandlesFallback: true });
+      expect(localPolicy.infer).toHaveBeenCalledWith(expect.any(String), {
+        mode: "chat", localOnly: true, callerHandlesFallback: true, allowCompactionEnvelope: true,
+      });
       expect(result.isError).toBe(true);
       expect(mockGenerateText).not.toHaveBeenCalled();
     });

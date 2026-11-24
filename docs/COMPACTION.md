@@ -186,7 +186,9 @@ return thousands of entries, bloating the context window it's meant to manage.
        require completed replies with assistant output when a role is present.
        Compaction requires exactly one label from the local classifier.
        oMLX and configured fallback providers must confirm output completion.
-       Local summaries must also pass Prism's quality gate before persistence.
+       Local summaries must pass the quality gate or contain the tagged JSON
+       envelope requested by the compactor. The compaction parser validates
+       the full summary and metadata before persistence.
        Safety refusals, authorization failures, malformed
        or partial replies, cancellation, and unknown provider failures abort
        compaction before the configured provider or writes.

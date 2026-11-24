@@ -4663,6 +4663,8 @@ export async function inferText(
         maxTokens?: number;
         localOnly?: boolean;
         callerHandlesFallback?: boolean;
+        /** The ledger compaction parser validates this caller's tagged JSON envelope. */
+        allowCompactionEnvelope?: boolean;
         signal?: AbortSignal;
     } = {},
 ): Promise<string | null> {
@@ -4681,9 +4683,12 @@ export async function inferText(
         );
         opts.signal?.throwIfAborted();
         const text = (result.output ?? "").trim();
+        const gate = result.gate_outcome;
+        const compactionEnvelope = opts.allowCompactionEnvelope
+            && gate?.status === "degraded" && gate.reason === "tool_call_bleed";
         if (opts.callerHandlesFallback &&
-            (!text || result.backend === "safety_gate" || result.gate_outcome?.status !== "success")) {
-            throw new InferenceRefusalError(result.gate_outcome?.reason ?? "prism_infer: local inference returned no usable answer");
+            (!text || result.backend === "safety_gate" || (gate?.status !== "success" && !compactionEnvelope))) {
+            throw new InferenceRefusalError(gate?.reason ?? "prism_infer: local inference returned no usable answer");
         }
         return text.length > 0 ? text : null;
     } catch (err) {
