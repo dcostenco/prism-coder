@@ -180,9 +180,11 @@ return thousands of entries, bloating the context window it's meant to manage.
        inactive and local inference is disabled or verified inventory and RAM
        checks show no local tier can run. Closed-listener evidence requires every
        underlying connection result to be a refusal. The model inventory must
-       contain valid, unique IDs. A closed listener or empty inventory still goes
+       contain valid, unique Ollama IDs after resolving registry and namespace
+       aliases. A closed listener or empty inventory still goes
        through the deterministic keyword check. Local classification and generation
-       require completed replies. Safety refusals, authorization failures, malformed
+       require completed replies with assistant output when a role is present.
+       Safety refusals, authorization failures, malformed
        or partial replies, cancellation, and unknown provider failures abort
        compaction before the configured provider or writes.
        │
@@ -209,6 +211,12 @@ return thousands of entries, bloating the context window it's meant to manage.
 8. Soft-archive originals: archived_at = now()
    (NOT hard-deleted — traceability preserved)
 ```
+
+Cancelling the MCP call prevents new provider requests and rollup writes.
+Compaction waits for an already-started provider exchange to settle and
+discards its reply if the caller cancelled. A project whose rollup write
+has already started finishes its existing write sequence before cancellation
+takes effect for the next project.
 
 ### Prompt injection protection
 

@@ -1001,7 +1001,7 @@ export function createServer() {
 
           case "session_compact_ledger":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
-            result = await compactLedgerHandler(args); break;
+            result = await compactLedgerHandler(args, extra.signal); break;
 
           case "session_search_memory":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");

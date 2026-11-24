@@ -163,7 +163,8 @@ function parseCompactionResponse(response: string, source: string) {
   return replyResult.data;
 }
 
-async function summarizeEntries(entries: any[]) {
+async function summarizeEntries(entries: any[], signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const prompt = buildCompactionPrompt(entries);
   const localOnly = PRISM_FORCE_LOCAL || PRISM_STRICT_LOCAL_MODE;
 
@@ -178,7 +179,8 @@ async function summarizeEntries(entries: any[]) {
     // Ledger content goes through the full ladder so Layer 1 screening, the
     // quality gate and the entitlement ceiling all apply — this summarises
     // session records that may carry sensitive material.
-    const localResponse = await inferText(prompt, { mode: "chat", localOnly, callerHandlesFallback: true });
+    const localResponse = await inferText(prompt, { mode: "chat", localOnly, callerHandlesFallback: true, signal });
+    signal?.throwIfAborted();
     if (localResponse) {
       debugLog(`[compact_ledger] Local LLM summarization succeeded`);
       return parseCompactionResponse(localResponse, "local-llm");
@@ -195,13 +197,16 @@ async function summarizeEntries(entries: any[]) {
 
   // ── Path 2: Cloud LLM (Gemini / configured provider) ──────────────
   const llm = getLLMProvider(); // throws if no API key configured
+  signal?.throwIfAborted();
   const response = await llm.generateText(prompt);
+  signal?.throwIfAborted();
   return parseCompactionResponse(response, "cloud-llm");
 }
 
 // ─── Main Handler ─────────────────────────────────────────────
 
-export async function compactLedgerHandler(args: unknown) {
+export async function compactLedgerHandler(args: unknown, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   if (!isCompactLedgerArgs(args)) {
     throw new Error("Invalid arguments for session_compact_ledger");
   }
@@ -219,6 +224,7 @@ export async function compactLedgerHandler(args: unknown) {
   );
 
   const storage = await getStorage();
+  signal?.throwIfAborted();
   if (storage.supportsLedgerCompaction === false) {
     return {
       content: [{
@@ -241,6 +247,7 @@ export async function compactLedgerHandler(args: unknown) {
       "is_rollup": "eq.false",
       select: "id",
     });
+    signal?.throwIfAborted();
     const count = entries.length;
     if (count <= threshold || count <= keep_recent) {
       return {
@@ -256,6 +263,7 @@ export async function compactLedgerHandler(args: unknown) {
   } else {
     // Auto-detect candidates using storage backend
     candidates = await storage.getCompactionCandidates(threshold, keep_recent, PRISM_USER_ID);
+    signal?.throwIfAborted();
   }
 
   // The ledger reader interprets nonpositive limits as an unbounded read.
@@ -292,6 +300,7 @@ export async function compactLedgerHandler(args: unknown) {
   let projectsCompacted = 0;
 
   for (const candidate of candidates) {
+    signal?.throwIfAborted();
     const proj = candidate.project;
     const toCompact = Math.min(candidate.to_compact, MAX_ENTRIES_PER_RUN);
 
@@ -308,6 +317,7 @@ export async function compactLedgerHandler(args: unknown) {
       limit: String(toCompact),
       select: "id,summary,decisions,files_changed,keywords,session_date",
     });
+    signal?.throwIfAborted();
 
     if (oldEntries.length === 0) {
       results.push(`• ${proj}: no entries to compact`);
@@ -324,14 +334,14 @@ export async function compactLedgerHandler(args: unknown) {
     try {
       const chunks = compactionChunks(oldEntries);
       if (chunks.length === 1) {
-        const res = await summarizeEntries(chunks[0]);
+        const res = await summarizeEntries(chunks[0], signal);
         finalSummaryText = res.summary;
         finalPrinciples = res.principles || [];
         finalCausalLinks = res.causal_links || [];
       } else {
         const chunkSummaries: Awaited<ReturnType<typeof summarizeEntries>>[] = [];
         for (const chunk of chunks) {
-          chunkSummaries.push(await summarizeEntries(chunk));
+          chunkSummaries.push(await summarizeEntries(chunk, signal));
         }
 
         chunkSummaries.forEach(s => {
@@ -346,12 +356,13 @@ export async function compactLedgerHandler(args: unknown) {
           decisions: [],
           files_changed: [],
         }));
-        const metaRes = await summarizeEntries(metaEntries);
+        const metaRes = await summarizeEntries(metaEntries, signal);
         finalSummaryText = metaRes.summary;
         finalPrinciples.push(...(metaRes.principles || []));
         finalCausalLinks.push(...(metaRes.causal_links || []));
       }
     } catch (err) {
+      signal?.throwIfAborted();
       // HIPAA strict mode: local LLM failed and cloud fallback is blocked.
       // Return a graceful MCP error instead of crashing the server.
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -378,6 +389,8 @@ export async function compactLedgerHandler(args: unknown) {
       oldEntries.flatMap((e: any) => e.files_changed || [])
     )];
 
+    // Complete this project's write sequence once its rollup write starts.
+    signal?.throwIfAborted();
     // Step 4: Insert rollup entry via storage backend
     const savedRollup = await storage.saveLedger({
       project: proj,

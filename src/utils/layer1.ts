@@ -1,4 +1,5 @@
 import { withInferenceResourceLease, withOllamaResourceLease } from "./omlxProvider.js";
+import { isCompleteOllamaChatResponse } from "./ollamaResponses.js";
 /**
  * Layer 1 semantic pre-classifier for prism_infer.
  * ─────────────────────────────────────────────────────────────
@@ -724,6 +725,7 @@ async function callLayer1Unleased(
                     options: { num_predict: 16, temperature: 0 },
                 }),
                 signal: AbortSignal.timeout(timeoutMs),
+                ...(opts?.requireCompleteResponse ? { redirect: "error" } : {}),
             });
         } catch {
             return "ERROR";
@@ -731,15 +733,14 @@ async function callLayer1Unleased(
 
         if (!res.ok || (opts?.requireCompleteResponse && res.status !== 200)) return "ERROR";
 
-        let data: { error?: unknown; done?: unknown; done_reason?: unknown; message?: { content?: string } } | null;
+        let data: { error?: unknown; message?: { content?: string } } | null;
         try {
             data = await res.json();
         } catch {
             return "ERROR";
         }
 
-        if (opts?.requireCompleteResponse && (data?.done !== true || data.error !== undefined
-            || (data.done_reason !== undefined && data.done_reason !== "stop") || typeof data.message?.content !== "string")) {
+        if (opts?.requireCompleteResponse && !isCompleteOllamaChatResponse(data, model)) {
             return "ERROR";
         }
         if (data?.error) return "ERROR";

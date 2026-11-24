@@ -10,6 +10,7 @@ import { getSynaluxJwt } from "../../src/utils/synaluxJwt.js";
 
 const { storage, generateText } = vi.hoisted(() => ({
     storage: {
+        getCompactionCandidates: vi.fn(),
         getLedgerEntries: vi.fn(),
         saveLedger: vi.fn(),
         patchLedger: vi.fn(),
@@ -77,7 +78,7 @@ let installed: string[];
 let freeMemory: number;
 let respond: (path: string) => Response | undefined;
 
-function compactFixture(count = 1) {
+function compactFixture(count = 1, signal?: AbortSignal) {
     const entries = Array.from({ length: count + 1 }, (_, index) => ({
         id: `entry-${index}`,
         summary: "Routine project maintenance.",
@@ -87,7 +88,7 @@ function compactFixture(count = 1) {
         session_date: "2026-11-20",
     }));
     storage.getLedgerEntries.mockResolvedValueOnce(entries).mockResolvedValueOnce(entries.slice(0, count));
-    return compactLedgerHandler({ project: "fixture", threshold: 1, keep_recent: 1 });
+    return compactLedgerHandler({ project: "fixture", threshold: 1, keep_recent: 1 }, signal);
 }
 
 function expectNoFallbackOrWrites() {
@@ -180,7 +181,11 @@ describe("Compaction inference failure boundary", () => {
         { label: "blank model name", path: "/api/tags", status: 200, body: '{"models":[{"name":" "}]}' },
         { label: "inventory contains a provider error", path: "/api/tags", status: 200, body: '{"models":[],"error":"denied"}' },
         { label: "model ID with spaces", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture bad:latest"}]}' },
+        { label: "empty model name components", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture//:"}]}' },
+        { label: "empty model tag", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture:"}]}' },
+        { label: "conflicting inventory aliases", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture:latest","model":"different:latest"}]}' },
         { label: "duplicate catalog model IDs", path: "/api/tags", status: 200, body: '{"models":[{"name":"other:latest"},{"name":"other:latest"}]}' },
+        { label: "duplicate default-registry catalog aliases", path: "/api/tags", status: 200, body: '{"models":[{"name":"other"},{"name":"registry.ollama.ai/library/Other:Latest"}]}' },
         { label: "loaded model lookup denied", path: "/api/ps", status: 403, body: "{}" },
         { label: "invalid loaded model ID", path: "/api/ps", status: 200, body: '{"models":[{"name":"other model"}]}' },
         { label: "duplicate loaded model IDs", path: "/api/ps", status: 200, body: '{"models":[{"name":"other:latest"},{"name":"other:latest"}]}' },
@@ -255,6 +260,8 @@ describe("Compaction inference failure boundary", () => {
             { label: "partial HTTP response", status: 206, envelope: { done: true } },
             { label: "explicit provider error", status: 200, envelope: { done: true, error: "" } },
             { label: "nontext content", status: 200, envelope: { done: true, message: { content: 7 } } },
+            { label: "non-assistant role", status: 200, envelope: { done: true, message: { role: "user" } } },
+            { label: "wrong reported model", status: 200, envelope: { done: true, model: "other:latest" } },
         ])("refuses $label before fallback or ledger writes", async ({ status, envelope }) => {
             const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
             vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
@@ -269,7 +276,7 @@ describe("Compaction inference failure boundary", () => {
                 if (!classification && requests === 1) {
                     return Response.json({ done: true, done_reason: "stop", message: { content: "OBVIOUS_NOT_RESERVED" } });
                 }
-                return Response.json({ message: { content: validText }, ...envelope }, { status });
+                return Response.json({ ...envelope, message: { content: validText, ...("message" in envelope ? envelope.message : {}) } }, { status });
             };
             const failure = classification ? /classification could not be confirmed/ : /local generation did not complete/;
             await expect(compactFixture()).rejects.toThrow(failure);
@@ -342,6 +349,76 @@ describe("Compaction inference failure boundary", () => {
         expect(localResponses).toBe(1);
         expect(generateText).not.toHaveBeenCalled();
         expect(storage.saveLedger).toHaveBeenCalledOnce();
+    });
+
+    it("matches a loaded tier across canonical Ollama aliases before using the RAM estimate", async () => {
+        freeMemory = 0;
+        installed = ["registry.ollama.ai/library/Prism-Coder:4B"];
+        vi.mocked(callLayer1).mockResolvedValue("OBVIOUS_NOT_RESERVED");
+        respond = path => {
+            if (path === "/api/ps") return Response.json({ models: [{ name: "prism-coder:4b" }] });
+            if (path === "/api/chat") return Response.json({
+                model: installed[0], done: true, message: { role: "assistant", content: '{"summary":"Routine maintenance."}' },
+            });
+        };
+        expect((await compactFixture()).isError).toBe(false);
+        expect(generateText).not.toHaveBeenCalled();
+        expect(storage.saveLedger).toHaveBeenCalledOnce();
+        expect(storage.patchLedger).toHaveBeenCalledOnce();
+    });
+
+    it("stops after an inventory read that settles after caller cancellation", async () => {
+        const controller = new AbortController();
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        respond = path => {
+            if (path === "/api/tags") {
+                controller.abort();
+                return Response.json({ models: [{ name: "prism-coder:4b" }] });
+            }
+        };
+        await expect(compactFixture(1, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+        expect(vi.mocked(fetch).mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(["/api/tags"]);
+        expect(callLayer1).not.toHaveBeenCalled();
+        expectNoFallbackOrWrites();
+    });
+
+    it("discards a configured reply that settles after caller cancellation", async () => {
+        const controller = new AbortController();
+        installed = [];
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        generateText.mockImplementationOnce(async () => {
+            controller.abort();
+            return '{"summary":"Routine maintenance."}';
+        });
+        await expect(compactFixture(1, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+        expect(generateText).toHaveBeenCalledOnce();
+        expect(storage.saveLedger).not.toHaveBeenCalled();
+        expect(storage.patchLedger).not.toHaveBeenCalled();
+    });
+
+    it("finishes an already-started rollup and stops before the next project", async () => {
+        const controller = new AbortController();
+        installed = [];
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        storage.getCompactionCandidates.mockResolvedValueOnce([
+            { project: "first", total_entries: 2, to_compact: 1 },
+            { project: "second", total_entries: 2, to_compact: 1 },
+        ]);
+        storage.getLedgerEntries.mockResolvedValueOnce([{
+            id: "first-original", summary: "Routine maintenance.", keywords: [],
+            decisions: [], files_changed: [], session_date: "2026-11-20",
+        }]);
+        storage.saveLedger.mockImplementationOnce(async () => {
+            controller.abort();
+            return [{ id: "first-rollup" }];
+        });
+        await expect(compactLedgerHandler({ threshold: 1, keep_recent: 1 }, controller.signal))
+            .rejects.toMatchObject({ name: "AbortError" });
+        expect(storage.getLedgerEntries).toHaveBeenCalledOnce();
+        expect(storage.saveLedger).toHaveBeenCalledWith(expect.objectContaining({ project: "first" }));
+        expect(storage.patchLedger).toHaveBeenCalledExactlyOnceWith("first-original", expect.objectContaining({
+            archived_at: expect.any(String),
+        }));
     });
 
     it("writes a local rollup after complete classifier and generator replies", async () => {

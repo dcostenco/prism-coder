@@ -47,6 +47,7 @@ import { getEntitlements, clampCeiling, type PrismEntitlements, FREE_ENTITLEMENT
 import { ddLog } from "../utils/ddLogger.js";
 import { stripThink } from "../utils/thinkStrip.js";
 import { leadingSystemMessages } from "../utils/ollamaSystemPrompt.js";
+import { canonicalOllamaName, isCompleteOllamaChatResponse } from "../utils/ollamaResponses.js";
 import { passesQualityGate } from "../utils/qualityGate.js";
 import {
     passesClinicalQualityGate,
@@ -1298,7 +1299,7 @@ export function isOllamaConnectionRefused(error: unknown): boolean {
 }
 
 async function readOllamaModelNames(
-    url: string, path: "/api/tags" | "/api/ps", fetchImpl: typeof fetch = fetch,
+    url: string, path: "/api/tags" | "/api/ps", fetchImpl: typeof fetch = fetch, canonicalize = false,
 ): Promise<Set<string> | null> {
     let response: Response;
     try {
@@ -1309,23 +1310,26 @@ async function readOllamaModelNames(
         throw error;
     }
     if (response.status !== 200) throw new Error(`prism_infer: Ollama inventory request failed with HTTP ${response.status}`);
-    const data = await response.json().catch(() => null) as { models?: { name?: unknown }[]; error?: unknown } | null;
+    const data = await response.json().catch(() => null) as { models?: { name?: unknown; model?: unknown }[]; error?: unknown } | null;
     if (data?.error !== undefined || !Array.isArray(data?.models)) {
         throw new Error("prism_infer: invalid Ollama model inventory");
     }
-    const names = new Set<string>();
-    for (const model of data.models) {
-        if (!isLocalCodingModelId(model?.name) || names.has(model.name)) {
+    const names = new Map<string, string>();
+    for (const entry of data.models) {
+        const name = entry?.name;
+        const canonical = canonicalOllamaName(name);
+        if (typeof name !== "string" || canonical === null || names.has(canonical)
+            || (entry.model !== undefined && canonicalOllamaName(entry.model) !== canonical)) {
             throw new Error("prism_infer: invalid Ollama model inventory");
         }
-        names.add(model.name);
+        names.set(canonical, canonicalize ? canonical : name);
     }
-    return names;
+    return new Set(names.values());
 }
 
-export async function strictLoaded(url: string, fetchImpl: typeof fetch = fetch): Promise<Set<string>> {
+export async function strictLoaded(url: string, fetchImpl: typeof fetch = fetch, canonicalize = false): Promise<Set<string>> {
     try {
-        return await readOllamaModelNames(url, "/api/ps", fetchImpl) ?? new Set();
+        return await readOllamaModelNames(url, "/api/ps", fetchImpl, canonicalize) ?? new Set();
     } catch { throw new OmlxError("omlx_ollama_state_unavailable"); }
 }
 interface OllamaChatResp {
@@ -1664,9 +1668,9 @@ export async function groundAnswer(o: {
 /** The context a LOADED model is running with (/api/ps context_length), or null.
  *  The grounding check is sized against it: the Modelfile or tier table can
  *  say more than the runner was loaded with. */
-export async function probeLoadedContext(url: string, model: string): Promise<number | null> {
+export async function probeLoadedContext(url: string, model: string, fetchImpl: typeof fetch = fetch): Promise<number | null> {
     try {
-        const ps = await fetch(`${url}/api/ps`, { signal: AbortSignal.timeout(5_000), redirect: "error" });
+        const ps = await fetchImpl(`${url}/api/ps`, { signal: AbortSignal.timeout(5_000), redirect: "error" });
         if (!ps.ok) return null;
         const loaded = ((await ps.json()) as { models?: Array<{ name?: string; model?: string; context_length?: number }> }).models ?? [];
         const hit = loaded.find(m => m.name === model || m.model === model);
@@ -1730,7 +1734,9 @@ export async function callOllamaGenerate(
     try {
         const requestFetch = execution && (execution.deadlineMs !== undefined || execution.signal) ? (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
             execution.signal?.throwIfAborted();
-            const remaining = execution.deadlineMs === undefined ? timeoutMs : execution.deadlineMs - Date.now();
+            // For compaction, preserve ownership of an already dispatched exchange until it settles.
+            if (execution.deadlineMs === undefined) return fetch(input, init);
+            const remaining = execution.deadlineMs - Date.now();
             if (remaining <= 0) throw new DOMException("Request deadline expired", "TimeoutError");
             return fetch(input, { ...init, signal: AbortSignal.any([AbortSignal.timeout(Math.min(timeoutMs, remaining)),
                 ...(execution.signal ? [execution.signal] : []), ...(init?.signal ? [init.signal] : [])]) });
@@ -1763,8 +1769,7 @@ export async function callOllamaGenerate(
         });
         if (!res.ok || (execution?.requireCompleteResponse && res.status !== 200)) return { ok: false, reason: `ollama_http_${res.status}` };
         const data = (await res.json()) as OllamaChatResp;
-        if (execution?.requireCompleteResponse && (data?.done !== true || data.error !== undefined
-            || (data.done_reason !== undefined && data.done_reason !== "stop") || typeof data.message?.content !== "string")) {
+        if (execution?.requireCompleteResponse && !isCompleteOllamaChatResponse(data, model)) {
             return { ok: false, reason: "ollama_incomplete_response" };
         }
         if (data.error) return { ok: false, reason: `ollama_err:${data.error}` };
@@ -2251,7 +2256,7 @@ export interface InferDeps {
     /** Injectable vision probe for testing. Defaults to probeVision (/api/show). */
     probeVision?: (url: string, model: string) => Promise<boolean>;
     /** Injectable context probe for testing. Defaults to probeNumCtx (/api/show). */
-    probeNumCtx?: (url: string, model: string) => Promise<number | null>;
+    probeNumCtx?: typeof probeNumCtx;
     /** Injectable template-overhead probe; defaults to probeTemplateOverhead. */
     probeTemplateOverhead?: typeof probeTemplateOverhead;
     /** Injectable classifier-limits lookup for the hedge second read; defaults to probeClassifierLimits. */
@@ -2261,7 +2266,7 @@ export interface InferDeps {
     /** Injectable local answer check for testing. Defaults to groundAnswer (the 9b on this device). */
     groundAnswer?: (o: Parameters<typeof groundAnswer>[0]) => Promise<{ verdict: AnswerGroundingVerdict; reply?: string; ms?: number }>;
     /** Injectable runtime-context lookup for the local check. Defaults to probeLoadedContext (/api/ps). */
-    probeLoadedContext?: (url: string, model: string) => Promise<number | null>;
+    probeLoadedContext?: typeof probeLoadedContext;
     /** Injectable answer-check rules for testing. Defaults to getAnswerCheckPolicy. */
     answerCheckPolicy?: () => Promise<AnswerCheckPolicy | null>;
     /** Injectable second-read exclusion policy for testing. Defaults to getSecondReadPolicy. */
@@ -2401,9 +2406,11 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
     };
     // Each HTTP exchange (classifier and answer-check retries included) gets
     // only the remaining request time. No race abandons an owned provider job.
+    const guardOllamaRequests = localDeadline !== undefined || (deps.requireConfirmedLocalExhaustion && !!context?.signal);
     const budgetFetch = (async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
         requireBudget();
-        const remaining = localDeadline! - Date.now();
+        if (localDeadline === undefined) return fetch(url, init);
+        const remaining = localDeadline - Date.now();
         if (remaining <= 0) throw new Error("prism_infer: timeout");
         const signals = [AbortSignal.timeout(remaining),
             ...(context?.signal ? [context.signal] : []), ...(init?.signal ? [init.signal] : [])];
@@ -2647,8 +2654,8 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
                 const remaining = localDeadline - Date.now();
                 if (remaining <= 0) throw new Error("prism_infer: timeout");
                 callArgs[6] = Math.min(callArgs[6], remaining);
-                callArgs[11] = { deadlineMs: localDeadline, signal: context?.signal };
             }
+            if (guardOllamaRequests) callArgs[11] = { ...callArgs[11], deadlineMs: localDeadline, signal: context?.signal };
             const generation = deps.callLocal(...callArgs);
             generations.add(generation.catch(() => undefined));
             const result = await generation;
@@ -2658,13 +2665,13 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
         try {
             const boundDeps = !usesOmlx || context?.signal || localDeadline !== undefined ? { ...scopedDeps, trackPromise: (promise: Promise<unknown>) => generations.add(promise.catch(() => undefined)), callLayer1: async (...classifierArgs: Parameters<NonNullable<InferDeps["callLayer1"]>>) => {
                 requireBudget();
-                if (localDeadline !== undefined) classifierArgs[3] = budgetFetch;
+                if (guardOllamaRequests) classifierArgs[3] = budgetFetch;
                 const classification = (deps.callLayer1 ?? defaultCallLayer1)(...classifierArgs);
                 generations.add(classification.catch(() => undefined));
                 const verdict = await classification;
                 requireBudget();
                 return verdict;
-            }, ...(localDeadline === undefined ? {} : {
+            }, ...(guardOllamaRequests ? {
                 listTags: async () => {
                     requireBudget();
                     const probe = deps.listTags(budgetFetch);
@@ -2677,6 +2684,22 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
                     requireBudget();
                     const probe = deps.listLoaded(budgetFetch);
                     generations.add(probe.catch(() => undefined));
+                    const result = await probe;
+                    requireBudget();
+                    return result;
+                },
+                probeNumCtx: async (url: string, model: string) => {
+                    requireBudget();
+                    const probe = (deps.probeNumCtx ?? probeNumCtx)(url, model, budgetFetch);
+                    generations.add(probe.catch(() => null));
+                    const result = await probe;
+                    requireBudget();
+                    return result;
+                },
+                probeLoadedContext: async (url: string, model: string) => {
+                    requireBudget();
+                    const probe = (deps.probeLoadedContext ?? probeLoadedContext)(url, model, budgetFetch);
+                    generations.add(probe.catch(() => null));
                     const result = await probe;
                     requireBudget();
                     return result;
@@ -2700,10 +2723,12 @@ export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: 
                 groundAnswer: async (o: Parameters<typeof groundAnswer>[0]) => {
                 requireBudget();
                 const result = await (deps.groundAnswer ?? groundAnswer)({ ...o,
-                    timeoutMs: Math.min(o.timeoutMs ?? ANSWER_GROUNDING_TIMEOUT_MS, localDeadline - Date.now()), fetchImpl: budgetFetch });
+                        timeoutMs: localDeadline === undefined ? o.timeoutMs
+                            : Math.min(o.timeoutMs ?? ANSWER_GROUNDING_TIMEOUT_MS, localDeadline - Date.now()),
+                        fetchImpl: budgetFetch });
                 requireBudget();
                 return result;
-                } }) } : scopedDeps;
+                } } : {}) } : scopedDeps;
             const result = await runInferWithResources(args, boundDeps,
                 imageSelection?.backend === "omlx" ? { model: imageSelection.model, deadline: imageDeadline } : undefined);
             if (!usesOmlx || result.output) requireBudget();
@@ -2775,10 +2800,13 @@ async function runInferWithResources(args: PrismInferArgs, deps: InferDeps, imag
 }
 
 async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t0: number, temperature: number, image?: { model: string; deadline: number }, cloudOnly = false): Promise<PrismInferResult> {
+    const compactionSignal = deps.requireConfirmedLocalExhaustion ? deps.executionSignal : undefined;
+    compactionSignal?.throwIfAborted();
     // ── Entitlement enforcement ──────────────────────────────────
     // Resolved per call (§5.5) — getEntitlements dedupes via a 5-min cache.
     // Free users without auth get 4b ceiling, 50 calls/day, 512 max tokens.
     const ent = deps.entitlements ?? await getEntitlements();
+    compactionSignal?.throwIfAborted();
     const entSource = ent.source ?? "portal";
 
     // §5.5 fail-loud: "fallback_free" means auth IS configured but the
@@ -3747,12 +3775,14 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                     // that another in-flight inference is actively using.
                     const released = await _evictionMutex.acquire();
                     try {
+                        compactionSignal?.throwIfAborted();
                         // F2 fix: await each evict call; log failures; don't proceed blind.
                         const evictResults = await Promise.allSettled(
                             tierModelsToEvict.map(m =>
                                 unloadOllamaModel(deps.ollamaUrl, m)
                             )
                         );
+                        compactionSignal?.throwIfAborted();
                         const failed = evictResults.filter(r => r.status === "rejected").length;
                         if (failed > 0) {
                             if (requireConfirmedExhaustion) {
@@ -4584,10 +4614,10 @@ export function productionInferDeps(requireConfirmedLocalExhaustion = false): In
         }, PRISM_LOCAL_LLM_URL),
         freemem: () => getAvailableMemoryBytes(),
         listTags: async fetchImpl => requireConfirmedLocalExhaustion
-            ? await readOllamaModelNames(PRISM_LOCAL_LLM_URL, "/api/tags", fetchImpl) ?? new Set()
+            ? await readOllamaModelNames(PRISM_LOCAL_LLM_URL, "/api/tags", fetchImpl, true) ?? new Set()
             : listOllamaTags(PRISM_LOCAL_LLM_URL, fetchImpl),
         listLoaded: fetchImpl => requireConfirmedLocalExhaustion
-            ? strictLoaded(PRISM_LOCAL_LLM_URL, fetchImpl)
+            ? strictLoaded(PRISM_LOCAL_LLM_URL, fetchImpl, true)
             : listOllamaLoaded(PRISM_LOCAL_LLM_URL, fetchImpl),
         callLocal: requireConfirmedLocalExhaustion
             ? (url, model, prompt, system, maxTokens, temperature, timeoutMs, think, images, history, contextTokens, execution) =>
@@ -4617,6 +4647,7 @@ export async function inferText(
         maxTokens?: number;
         localOnly?: boolean;
         callerHandlesFallback?: boolean;
+        signal?: AbortSignal;
     } = {},
 ): Promise<string | null> {
     try {
@@ -4630,8 +4661,9 @@ export async function inferText(
                 ...(opts.callerHandlesFallback ? { cloud_fallback: false } : {}),
             },
             productionInferDeps(opts.callerHandlesFallback),
-            { localOnly },
+            { localOnly, signal: opts.signal },
         );
+        opts.signal?.throwIfAborted();
         const text = (result.output ?? "").trim();
         if (opts.callerHandlesFallback &&
             (!text || result.backend === "safety_gate" || result.gate_outcome?.status === "refused")) {
@@ -4639,6 +4671,7 @@ export async function inferText(
         }
         return text.length > 0 ? text : null;
     } catch (err) {
+        opts.signal?.throwIfAborted();
         // A caller that can send this prompt elsewhere needs an explicit
         // exhaustion signal. Safety, authorization and unknown failures stop it.
         if (err instanceof InferenceRefusalError || err instanceof HostAuthorizationError ||
