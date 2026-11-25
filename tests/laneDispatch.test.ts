@@ -10,7 +10,16 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const holder = vi.hoisted(() => ({ storage: null as unknown }));
+const holder = vi.hoisted(() => ({ storage: null as unknown, settings: new Map<string, string>() }));
+// The settings store is in memory here: autoload_projects never touches the user's real settings.
+vi.mock("../src/storage/configStorage.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../src/storage/configStorage.js")>();
+  return {
+    ...actual,
+    getSetting: vi.fn(async (key: string, fallback: string) => holder.settings.get(key) ?? fallback),
+    setSetting: vi.fn(async (key: string, value: string) => { holder.settings.set(key, value); }),
+  };
+});
 vi.mock("../src/storage/index.js", async importOriginal => {
   const actual = await importOriginal<typeof import("../src/storage/index.js")>();
   return { ...actual, getStorage: vi.fn(async () => holder.storage) };
@@ -44,12 +53,13 @@ beforeEach(() => {
   portal(portalBody);
   vi.stubGlobal("fetch", fetchMock);
   holder.storage = new SynaluxStorage();
+  holder.settings.clear();
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-async function callTool(name: string, args: Record<string, unknown>) {
+async function callTool(name: string, args: Record<string, unknown>, clientName = "lane-dispatch") {
   const server = createServer();
-  const client = new Client({ name: "lane-dispatch", version: "1.0.0" }, { capabilities: {} });
+  const client = new Client({ name: clientName, version: "1.0.0" }, { capabilities: {} });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   try {
     await server.connect(serverTransport);
@@ -66,7 +76,7 @@ describe("session_load_context through the real server", () => {
     expect(reply.isError, firstText(reply)).not.toBe(true);
     expect(firstText(reply).startsWith(BOUND_BLOCK)).toBe(true);
     const load = portalRequests().find(body => body.action === "load_context");
-    expect(load).toMatchObject({ project: "proj", conversation_id: "conv-wire", program: "alpha", host: "prism-mcp" });
+    expect(load).toMatchObject({ project: "proj", conversation_id: "conv-wire", program: "alpha", host: "lane-dispatch" });
   });
 
   it("a load that names no program and no conversation sends neither", async () => {
@@ -81,6 +91,41 @@ describe("session_load_context through the real server", () => {
     const reply = await callTool("session_load_context", { project: "proj", level: "quick", conversation_id: "conv-1" });
     expect(firstText(reply)).not.toContain("Lane status");
     expect(firstText(reply)).not.toContain("Lane register unavailable");
+  });
+});
+
+describe("the conversation id is sent verbatim", () => {
+  it("a padded id is not trimmed: the portal looks it up exactly as save_ledger stored it", async () => {
+    await callTool("session_load_context", { project: "proj", level: "quick", conversation_id: " conv-pad " });
+    expect(portalRequests().find(body => body.action === "load_context")).toMatchObject({ conversation_id: " conv-pad " });
+  });
+  it("an id the portal would reject (over 255 characters) is left off the request", async () => {
+    await callTool("session_load_context", { project: "proj", level: "quick", conversation_id: "x".repeat(256) });
+    expect(portalRequests().find(body => body.action === "load_context")).not.toHaveProperty("conversation_id");
+  });
+});
+
+describe("the host sent with a lane request", () => {
+  it("is the MCP client's own name", async () => {
+    await callTool("session_load_context", { project: "proj", level: "quick", conversation_id: "c" }, "claude-code");
+    expect(portalRequests().find(body => body.action === "load_context")).toMatchObject({ host: "claude-code" });
+  });
+  it("falls back to prism-mcp for a name that is not a plain label", async () => {
+    await callTool("session_load_context", { project: "proj", level: "quick", conversation_id: "c" }, "x".repeat(60));
+    expect(portalRequests().find(body => body.action === "load_context")).toMatchObject({ host: "prism-mcp" });
+  });
+});
+
+describe("session_bootstrap", () => {
+  it("sends its own conversation id on the lane requests it makes, the same one it prints", async () => {
+    holder.settings.set("autoload_projects", "proj");
+    const reply = await callTool("session_bootstrap", { prompt: "hello" });
+    const text = firstText(reply);
+    const printed = /conversation_id="?([A-Za-z0-9_-]+)/.exec(text)?.[1];
+    expect(printed, text.slice(0, 300)).toBeTruthy();
+    const loads = portalRequests().filter(body => body.action === "load_context");
+    expect(loads.length).toBeGreaterThan(0);
+    for (const load of loads) expect(load.conversation_id).toBe(printed);
   });
 });
 
@@ -102,6 +147,8 @@ describe("through dispatch, another tool that saves to the ledger sends no lane 
     for (const body of portalRequests()) {
       expect(body, JSON.stringify(body).slice(0, 80)).not.toHaveProperty("host");
     }
+    // The save really went to the portal (otherwise the loop above checks nothing).
+    expect(portalRequests().some(body => body.action === "save_ledger")).toBe(true);
   });
 });
 

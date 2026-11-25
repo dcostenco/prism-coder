@@ -883,7 +883,7 @@ export function createServer() {
     // through await chains — including fire-and-forget workers launched
     // within the handler body (e.g. imageCaptioner, embeddings backfill).
     // Drift-fix D-2a: this call's lane context (conversation, program, recorded blocks).
-    const laneCtx = newLaneContext(args, name);
+    const laneCtx = newLaneContext(args, name, server.getClientVersion?.()?.name);
     return laneCallContext.run(laneCtx, () => otelContext.with(trace.setSpan(otelContext.active(), rootSpan), async () => {
       const _ddStart = Date.now();
       try {

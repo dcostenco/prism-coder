@@ -34,6 +34,8 @@ export interface LaneCallContext {
   enabled?: boolean;
   /** The conversation this call belongs to, from the tool's arguments (a bootstrap sets it once it has one). */
   conversationId?: string;
+  /** The MCP client's own name (for example "claude-code"), sent as the request's host; unset means "prism-mcp". */
+  host?: string;
   /** The program a load names (optional; the portal binds the conversation to it). */
   program?: string;
   /** Blocks recorded by this call's portal requests, by project, in order. */
@@ -42,11 +44,14 @@ export interface LaneCallContext {
 
 export const laneCallContext = new AsyncLocalStorage<LaneCallContext>();
 
-export function newLaneContext(args: unknown, tool?: string): LaneCallContext {
+const HOST_RE = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,39}$/;
+export function newLaneContext(args: unknown, tool?: string, clientName?: unknown): LaneCallContext {
   const a = (args ?? {}) as Record<string, unknown>;
-  const conversationId = typeof a.conversation_id === "string" && a.conversation_id.trim() ? a.conversation_id.trim() : undefined;
+  // Verbatim: the portal looks the id up exactly as save_ledger stored it, so trimming would find another conversation.
+  const conversationId = typeof a.conversation_id === "string" && a.conversation_id.trim() && a.conversation_id.length <= 255 ? a.conversation_id : undefined;
   const program = typeof a.program === "string" && PROGRAM_RE.test(a.program) ? a.program : undefined;
-  return { enabled: tool === undefined || LANE_TOOLS.has(tool), conversationId, program, blocks: [] };
+  const host = typeof clientName === "string" && HOST_RE.test(clientName.trim()) ? clientName.trim() : undefined;
+  return { enabled: tool === undefined || LANE_TOOLS.has(tool), conversationId, program, host, blocks: [] };
 }
 
 /** Adds the lane request fields to a portal request body, for the four lane actions only. */
@@ -54,7 +59,7 @@ export function decorateLaneRequest(body: Record<string, unknown>): Record<strin
   const ctx = laneCallContext.getStore();
   if (!ctx || ctx.enabled === false || typeof body.action !== "string" || !LANE_ACTIONS.has(body.action)) return body;
   const out = { ...body };
-  if (out.host === undefined) out.host = HOST;
+  if (out.host === undefined) out.host = ctx.host ?? HOST;
   if (out.conversation_id === undefined && ctx.conversationId) out.conversation_id = ctx.conversationId;
   if (body.action === "load_context" && out.program === undefined && ctx.program) out.program = ctx.program;
   return out;
