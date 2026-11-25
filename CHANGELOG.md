@@ -14,10 +14,11 @@ All notable changes to this project will be documented in this file.
 - Add `session_set_program_register` to create or edit a program's lanes
   (Standard plan or higher).
 - `session_load_context` and `session_bootstrap` accept `program` to bind the
-  conversation to a program. Lane requests carry the conversation id as given
-  (`session_bootstrap` sends the trimmed id it prints, and leaves one over 255
-  characters off its loads) and the MCP client's name as `host` (`prism-mcp`
-  when the name is not a plain label of up to 40 characters).
+  conversation to a program. Lane requests carry the conversation id untrimmed
+  and the MCP client's name as `host` (`prism-mcp` when the name is not a plain
+  label of up to 40 characters). An id over 255 characters is left off loads,
+  handoffs and drift checks; `session_save_ledger` sends the id it is given, as
+  before. `session_bootstrap` sends the trimmed id it prints.
 - `session_detect_drift` now sends the conversation id, so the check can be
   scoped to one conversation. Without the merge-fact reader, which is not in
   this release, active lanes read "unknown (no merge data)".
