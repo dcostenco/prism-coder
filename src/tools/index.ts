@@ -116,6 +116,8 @@ export {
 // ── Session Drift Detection ──
 export { SESSION_DETECT_DRIFT_TOOL, isSessionDetectDriftArgs } from "./sessionMemoryDefinitions.js";
 export { sessionDetectDriftHandler } from "./sessionDriftHandler.js";
+export { SESSION_SET_PROGRAM_REGISTER_TOOL, isSetProgramRegisterArgs } from "./sessionMemoryDefinitions.js";
+export { sessionSetProgramRegisterHandler } from "./registerHandler.js";
 export { VERIFY_BEHAVIOR_TOOL, isVerifyBehaviorArgs } from "./sessionMemoryDefinitions.js";
 export { verifyBehaviorHandler } from "./behavioralVerifierHandler.js";
 

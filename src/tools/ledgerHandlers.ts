@@ -1,3 +1,4 @@
+import { laneCallContext } from "../session/laneStatus.js";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import * as os from "node:os";
@@ -2662,6 +2663,9 @@ export async function sessionBootstrapHandler(
     ? input.conversation_id.trim()
     : "";
   const conversationId = suppliedConversationId || randomUUID();
+  // Drift-fix D-2a: the loads below belong to this conversation, so the portal can bind and show its lanes.
+  const laneCtx = laneCallContext.getStore();
+  if (laneCtx && !laneCtx.conversationId) laneCtx.conversationId = conversationId;
 
   const { awaitSkillManifestSync } = await import("../skillManifestSync.js");
   const skillSyncResult = await awaitSkillManifestSync();

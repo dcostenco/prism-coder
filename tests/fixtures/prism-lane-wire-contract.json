@@ -1,0 +1,260 @@
+{
+  "contract": "set_program_register request and response, as a client and the server agree them. Neutral names only: this file is copied unchanged into the client repository, and both test suites assert its SHA-256.",
+  "clock": "2026-11-24T12:00:00.000Z",
+  "exchanges": [
+    {
+      "name": "create a program with two lanes",
+      "request": {
+        "action": "set_program_register",
+        "project": "proj",
+        "program": "alpha",
+        "host": "host-x",
+        "conversation_id": "conv-1",
+        "lanes": [
+          {
+            "id": "a",
+            "title": "Lane A",
+            "merge_paths": [
+              "src/a"
+            ],
+            "next_slice": "next a"
+          },
+          {
+            "id": "b",
+            "title": "Lane B",
+            "state": "parked",
+            "reason": "waits for a"
+          }
+        ]
+      },
+      "http_status": 200,
+      "response": {
+        "status": "success",
+        "action": "set_program_register",
+        "project": "proj",
+        "program": "alpha",
+        "version": 1,
+        "lane_status": {
+          "program": "alpha",
+          "version": 1,
+          "lanes": [
+            {
+              "id": "a",
+              "title": "Lane A",
+              "state": "active",
+              "status": "unknown",
+              "idle_hours": null,
+              "state_age_hours": null,
+              "state_since": "2026-11-24T12:00:00.000Z",
+              "last_merge": null,
+              "active_since": "2026-11-24T12:00:00.000Z",
+              "stall_after_hours": 48,
+              "reason": "",
+              "next_slice": "next a",
+              "flags": [
+                {
+                  "field": "merge_paths",
+                  "at": "2026-11-24T12:00:00.000Z",
+                  "host": "host-x"
+                }
+              ],
+              "flagged_fields": [
+                "merge_paths"
+              ],
+              "flagged_at": "2026-11-24T12:00:00.000Z",
+              "flag_host": "host-x",
+              "owner_confirmed_at": null,
+              "provenance": "merge_paths edited by tool 11-24, unconfirmed",
+              "line": "a unknown (no merge data) · merge_paths edited by tool 11-24, unconfirmed · \"Lane A\" · next: next a"
+            },
+            {
+              "id": "b",
+              "title": "Lane B",
+              "state": "parked",
+              "status": "parked",
+              "idle_hours": null,
+              "state_age_hours": 0,
+              "state_since": "2026-11-24T12:00:00.000Z",
+              "last_merge": null,
+              "active_since": null,
+              "stall_after_hours": 48,
+              "reason": "waits for a",
+              "next_slice": "",
+              "flags": [
+                {
+                  "field": "state",
+                  "at": "2026-11-24T12:00:00.000Z",
+                  "host": "host-x"
+                }
+              ],
+              "flagged_fields": [
+                "state"
+              ],
+              "flagged_at": "2026-11-24T12:00:00.000Z",
+              "flag_host": "host-x",
+              "owner_confirmed_at": null,
+              "provenance": "state edited by tool 11-24, unconfirmed",
+              "line": "b parked 0h · state edited by tool 11-24, unconfirmed · \"Lane B\" · why: waits for a"
+            }
+          ]
+        },
+        "lane_block": "Lane status (alpha, register v1):\na unknown (no merge data) · merge_paths edited by tool 11-24, unconfirmed · \"Lane A\" · next: next a\nb parked 0h · state edited by tool 11-24, unconfirmed · \"Lane B\" · why: waits for a\nno merge data on 1 lane; set repo_path:proj\nThis list outranks summaries and memory notes.",
+        "lane_paths": [
+          {
+            "program": "alpha",
+            "version": 1,
+            "lanes": [
+              {
+                "id": "a",
+                "merge_paths": [
+                  "src/a"
+                ]
+              },
+              {
+                "id": "b",
+                "merge_paths": []
+              }
+            ]
+          }
+        ],
+        "changed": true
+      }
+    },
+    {
+      "name": "the identical request again changes nothing",
+      "request": {
+        "action": "set_program_register",
+        "project": "proj",
+        "program": "alpha",
+        "host": "host-x",
+        "conversation_id": "conv-1",
+        "lanes": [
+          {
+            "id": "a",
+            "title": "Lane A",
+            "merge_paths": [
+              "src/a"
+            ],
+            "next_slice": "next a"
+          },
+          {
+            "id": "b",
+            "title": "Lane B",
+            "state": "parked",
+            "reason": "waits for a"
+          }
+        ]
+      },
+      "http_status": 200,
+      "response": {
+        "status": "success",
+        "action": "set_program_register",
+        "project": "proj",
+        "program": "alpha",
+        "version": 1,
+        "lane_status": {
+          "program": "alpha",
+          "version": 1,
+          "lanes": [
+            {
+              "id": "a",
+              "title": "Lane A",
+              "state": "active",
+              "status": "unknown",
+              "idle_hours": null,
+              "state_age_hours": null,
+              "state_since": "2026-11-24T12:00:00.000Z",
+              "last_merge": null,
+              "active_since": "2026-11-24T12:00:00.000Z",
+              "stall_after_hours": 48,
+              "reason": "",
+              "next_slice": "next a",
+              "flags": [
+                {
+                  "field": "merge_paths",
+                  "at": "2026-11-24T12:00:00.000Z",
+                  "host": "host-x"
+                }
+              ],
+              "flagged_fields": [
+                "merge_paths"
+              ],
+              "flagged_at": "2026-11-24T12:00:00.000Z",
+              "flag_host": "host-x",
+              "owner_confirmed_at": null,
+              "provenance": "merge_paths edited by tool 11-24, unconfirmed",
+              "line": "a unknown (no merge data) · merge_paths edited by tool 11-24, unconfirmed · \"Lane A\" · next: next a"
+            },
+            {
+              "id": "b",
+              "title": "Lane B",
+              "state": "parked",
+              "status": "parked",
+              "idle_hours": null,
+              "state_age_hours": 0,
+              "state_since": "2026-11-24T12:00:00.000Z",
+              "last_merge": null,
+              "active_since": null,
+              "stall_after_hours": 48,
+              "reason": "waits for a",
+              "next_slice": "",
+              "flags": [
+                {
+                  "field": "state",
+                  "at": "2026-11-24T12:00:00.000Z",
+                  "host": "host-x"
+                }
+              ],
+              "flagged_fields": [
+                "state"
+              ],
+              "flagged_at": "2026-11-24T12:00:00.000Z",
+              "flag_host": "host-x",
+              "owner_confirmed_at": null,
+              "provenance": "state edited by tool 11-24, unconfirmed",
+              "line": "b parked 0h · state edited by tool 11-24, unconfirmed · \"Lane B\" · why: waits for a"
+            }
+          ]
+        },
+        "lane_block": "Lane status (alpha, register v1):\na unknown (no merge data) · merge_paths edited by tool 11-24, unconfirmed · \"Lane A\" · next: next a\nb parked 0h · state edited by tool 11-24, unconfirmed · \"Lane B\" · why: waits for a\nno merge data on 1 lane; set repo_path:proj\nThis list outranks summaries and memory notes.",
+        "lane_paths": [
+          {
+            "program": "alpha",
+            "version": 1,
+            "lanes": [
+              {
+                "id": "a",
+                "merge_paths": [
+                  "src/a"
+                ]
+              },
+              {
+                "id": "b",
+                "merge_paths": []
+              }
+            ]
+          }
+        ],
+        "changed": false
+      }
+    },
+    {
+      "name": "an invalid program name is refused",
+      "request": {
+        "action": "set_program_register",
+        "project": "proj",
+        "program": "not valid",
+        "lanes": [
+          {
+            "id": "a"
+          }
+        ]
+      },
+      "http_status": 400,
+      "response": {
+        "status": "error",
+        "error": "Invalid program name: use 1-24 letters, digits or hyphens"
+      }
+    }
+  ]
+}

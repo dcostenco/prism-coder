@@ -166,6 +166,10 @@ export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
         type: "string",
         description: "Brief 2-5 word noun phrase describing what this tool call is about.",
       },
+      program: {
+        type: "string",
+        description: "Optional. The program this conversation works on (1-24 letters, digits or hyphens), when the project has several. The first load that names one binds the conversation to it; later calls with this conversation_id keep it. Without it, a project with programs shows every program's stalled lanes and asks you to name one.",
+      },
       conversation_id: {
         type: "string",
         description: "Optional for a plain read. Pass it whenever this load is meant to unlock saves (startup fallback, or recovery from context_not_loaded), using the same conversation_id as the refused or upcoming save. When provided, marks this project as context-loaded server-side so project-scoped saves are accepted; without it nothing is registered.",
@@ -265,6 +269,10 @@ export const SESSION_BOOTSTRAP_TOOL: Tool = {
       conversation_id: {
         type: "string",
         description: "Optional stable key for this conversation. When omitted, Prism generates one and returns it on the trailing <prism_session /> line.",
+      },
+      program: {
+        type: "string",
+        description: "Optional. The program this conversation works on (1-24 letters, digits or hyphens), when the project has several; binds the conversation to it. Without it, a project with programs shows every program's stalled lanes and asks you to name one.",
       },
       prompt: {
         type: "string",
@@ -730,10 +738,11 @@ export function isBackfillLinksArgs(
 
 export function isSessionLoadContextArgs(
   args: unknown
-): args is { project: string; level?: "quick" | "standard" | "deep"; role?: string; max_tokens?: number; toolAction?: string; toolSummary?: string; conversation_id?: string; prompt?: string } {
+): args is { project: string; level?: "quick" | "standard" | "deep"; role?: string; max_tokens?: number; toolAction?: string; toolSummary?: string; conversation_id?: string; prompt?: string; program?: string } {
   if (typeof args !== "object" || args === null) return false;
   const a = args as Record<string, unknown>;
   if (typeof a.project !== "string") return false;
+  if (a.program !== undefined && typeof a.program !== "string") return false;
   if (a.level !== undefined && a.level !== "quick" && a.level !== "standard" && a.level !== "deep") return false;
   if (a.role !== undefined && typeof a.role !== "string") return false;
   if (a.max_tokens !== undefined && typeof a.max_tokens !== "number") return false;
@@ -2083,7 +2092,9 @@ export const SESSION_DETECT_DRIFT_TOOL: Tool = {
     "**Pre-warning:**\n" +
     "- `quality-degrading` — quality slope steeply negative before collapse\n\n" +
     "**Returns:** drifted, reason, warning, drift_score (0..1), goal_alignment, " +
-    "quality_avg, sample_count, adaptive_threshold, recommendation.\n\n" +
+    "quality_avg, sample_count, adaptive_threshold, recommendation. When the account has a program register, the " +
+    "output may begin with a lane-status text line or block before the JSON, and the JSON may carry lane_status, " +
+    "lane_block and lane_paths: read the stalled lanes first.\n\n" +
     "Use alongside GATE 5 (60-minute drift check): call this tool instead of " +
     "session_cognitive_route for goal-alignment drift detection.",
   inputSchema: {
@@ -2304,3 +2315,56 @@ export const SAVINGS_TOOL: Tool = {
     },
   },
 };
+
+
+// ─── Drift-fix D-2a: program register ─────────────────────────
+
+export const SESSION_SET_PROGRAM_REGISTER_TOOL: Tool = {
+  name: "session_set_program_register",
+  description:
+    "Record a program's lanes (the parallel streams of work, each with a state: active, parked or blocked) in the " +
+    "account's register, so a stalled lane is named at the top of every session load. Sends a patch by lane id: " +
+    "an omitted lane or field stays as it is, no lane is ever removed, and resubmitting identical values changes " +
+    "nothing. Every change to a state, merge_paths or stall_after_hours is shown as a tool edit, unconfirmed, until " +
+    "the account owner confirms it in the dashboard, once that exists (this tool cannot confirm; until then they stay flagged). " +
+    "Use only when the owner asked you to record or change lanes.",
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  inputSchema: {
+    type: "object",
+    properties: {
+      project: { type: "string", description: "Project the program belongs to." },
+      program: { type: "string", description: "Program name: 1-24 letters, digits or hyphens. Unique per project, ignoring case." },
+      lanes: {
+        type: "array",
+        description: "Lane patches, at most 12 per program.",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Lane id: 1-24 letters, digits or hyphens." },
+            title: { type: "string" },
+            state: { type: "string", enum: ["active", "parked", "blocked"] },
+            reason: { type: "string", description: "Why the lane is parked or blocked." },
+            next_slice: { type: "string" },
+            merge_paths: { type: "array", items: { type: "string" }, description: "Repo-relative paths whose merges count as this lane's work." },
+            stall_after_hours: { type: "integer", description: "Hours without a merge before an active lane counts as stalled (default 48)." },
+          },
+          required: ["id"],
+        },
+      },
+      conversation_id: { type: "string", description: "Optional. The conversation making the change, for the audit." },
+    },
+    required: ["project", "program", "lanes"],
+  },
+};
+
+export function isSetProgramRegisterArgs(
+  args: unknown,
+): args is { project: string; program: string; lanes: unknown[]; conversation_id?: string } {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+  return typeof a.project === "string" && a.project.length > 0
+    && typeof a.program === "string" && /^[A-Za-z0-9-]{1,24}$/.test(a.program)
+    && Array.isArray(a.lanes) && a.lanes.length > 0 && a.lanes.length <= 12
+    && a.lanes.every(lane => typeof lane === "object" && lane !== null && typeof (lane as Record<string, unknown>).id === "string")
+    && (a.conversation_id === undefined || typeof a.conversation_id === "string");
+}

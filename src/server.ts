@@ -38,6 +38,7 @@
  * ═══════════════════════════════════════════════════════════════════════
  */
 
+import { LANE_TOOLS, laneCallContext, newLaneContext, prependLaneBlock } from "./session/laneStatus.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { monitorMcpTransport } from "./mcpTransportHealth.js";
@@ -175,6 +176,7 @@ import {
   SESSION_TASK_ROUTE_TOOL,
   // Session Drift Detection
   SESSION_DETECT_DRIFT_TOOL,
+  SESSION_SET_PROGRAM_REGISTER_TOOL,
   isSessionDetectDriftArgs,
   // Behavioral Verifier
   VERIFY_BEHAVIOR_TOOL,
@@ -243,6 +245,7 @@ import {
   sessionTaskRouteHandler,
   // Session Drift Detection
   sessionDetectDriftHandler,
+  sessionSetProgramRegisterHandler,
   // v7.3: Dark Factory Pipeline tools
   SESSION_START_PIPELINE_TOOL,
   SESSION_CHECK_PIPELINE_STATUS_TOOL,
@@ -334,6 +337,7 @@ function buildSessionMemoryTools(): Tool[] {
     SESSION_SYNTHESIZE_EDGES_TOOL, // session_synthesize_edges — inferred semantic graph enrichment
     SESSION_COGNITIVE_ROUTE_TOOL,  // session_cognitive_route — HDC policy-gated concept routing (v6.5)
     SESSION_DETECT_DRIFT_TOOL,     // session_detect_drift — semantic goal drift detection (synalux)
+    SESSION_SET_PROGRAM_REGISTER_TOOL, // session_set_program_register — lanes of a program (drift-fix D-2a)
     VERIFY_BEHAVIOR_TOOL,          // verify_behavior — behavioral verification via Synalux portal
     // ─── v6.1: Storage Hygiene tool ───
     MAINTENANCE_VACUUM_TOOL,       // maintenance_vacuum — reclaim SQLite disk space post-purge
@@ -878,7 +882,9 @@ export function createServer() {
     // of this async operation. AsyncLocalStorage ensures the context flows
     // through await chains — including fire-and-forget workers launched
     // within the handler body (e.g. imageCaptioner, embeddings backfill).
-    return otelContext.with(trace.setSpan(otelContext.active(), rootSpan), async () => {
+    // Drift-fix D-2a: this call's lane context (conversation, program, recorded blocks).
+    const laneCtx = newLaneContext(args, name);
+    return laneCallContext.run(laneCtx, () => otelContext.with(trace.setSpan(otelContext.active(), rootSpan), async () => {
       const _ddStart = Date.now();
       try {
         if (!args) {
@@ -1112,6 +1118,10 @@ export function createServer() {
               if (cid) { const { noteDriftCheck } = await import("./session/sessionContext.js"); noteDriftCheck(cid); } }
             break;
 
+          case "session_set_program_register":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
+            result = await sessionSetProgramRegisterHandler(args); break;
+
           case "verify_behavior":
             if (!isVerifyBehaviorArgs(args)) throw new Error("file_path and change_summary required.");
             result = await verifyBehaviorHandler(args); break;
@@ -1248,6 +1258,9 @@ export function createServer() {
           }
         }
 
+        // Drift-fix D-2a: the lane block goes at character 0 of the first text, never on an error result.
+        if (result && !result.isError && LANE_TOOLS.has(name)) prependLaneBlock(result, laneCtx);
+
         // Sanitize all text content returning from MCP tools to prevent prompt injection
         if (result && Array.isArray(result.content)) {
           result.content.forEach((c: any) => {
@@ -1294,7 +1307,7 @@ export function createServer() {
         // in the BatchSpanProcessor's in-memory queue.
         rootSpan.end();
       }
-    });
+    }));
   });
 
   return server;

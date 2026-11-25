@@ -55,6 +55,7 @@
  * ═══════════════════════════════════════════════════════════════════
  */
 
+import { decorateLaneRequest, laneCallContext, recordLaneBlock } from "../session/laneStatus.js";
 import { SupabaseStorage } from "./supabase.js";
 import { createHmac } from "node:crypto";
 import { debugLog } from "../utils/logger.js";
@@ -328,7 +329,9 @@ export class SynaluxStorage extends SupabaseStorage {
    * cached JWT was just invalidated (e.g. token revoked, leeway too
    * tight). Returns parsed JSON or throws on non-2xx / malformed.
    */
-  private async portalPost(path: string, body: Record<string, unknown>): Promise<PortalResponse> {
+  private async portalPost(path: string, requestBody: Record<string, unknown>): Promise<PortalResponse> {
+    // Lane status (drift-fix D-2a): the four lane actions carry this call's conversation, program and host.
+    const body = decorateLaneRequest(requestBody);
     const url = `${this.baseUrl}${path}`;
     const send = async (jwt: string): Promise<Response> => {
       this.assertUsable();
@@ -377,6 +380,7 @@ export class SynaluxStorage extends SupabaseStorage {
       throw new Error(`[SynaluxStorage] ${path} failed: ${msg}`);
     }
 
+    recordLaneBlock(body.project, body.action, data);
     return data;
   }
 
@@ -564,7 +568,9 @@ export class SynaluxStorage extends SupabaseStorage {
   // ─── Context ─────────────────────────────────────────────────
 
   async loadContext(project: string, level: string, userId: string, role?: string): Promise<ContextResult> {
-    const key = buildContextLoadKey(project, level, userId, role);
+    // Two conversations (or two programs) loading the same project never share one request: each gets its own lane block.
+    const lane = laneCallContext.getStore();
+    const key = `${buildContextLoadKey(project, level, userId, role)}|${lane?.conversationId ?? ""}|${lane?.program ?? ""}${lane?.enabled === false ? "|off" : ""}`;
     const existing = this.inflightContextLoads.get(key);
     if (existing) return existing;
 
@@ -1188,6 +1194,18 @@ export class SynaluxStorage extends SupabaseStorage {
     if (typeof minDirectionalRatio === "number") body.min_directional_ratio = minDirectionalRatio;
     if (extraParams) Object.assign(body, extraParams);
     const result = await this.portalPost("/api/v1/prism/memory", body);
+    return result as Record<string, unknown>;
+  }
+
+  /**
+   * Writes a program's lane patches to the portal's register (drift-fix D-2a). The portal answers the
+   * read-back: version, lane_status, lane_block and lane_paths. An older portal answers 400.
+   */
+  async setProgramRegister(project: string, program: string, lanes: unknown[], conversationId?: string): Promise<Record<string, unknown>> {
+    const result = await this.portalPost("/api/v1/prism/memory", {
+      action: "set_program_register", project, program, lanes, host: "prism-mcp",
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+    });
     return result as Record<string, unknown>;
   }
 
