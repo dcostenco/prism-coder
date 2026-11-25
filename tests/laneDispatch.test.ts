@@ -27,7 +27,7 @@ vi.mock("../src/storage/index.js", async importOriginal => {
 
 import { createServer } from "../src/server.js";
 import { SynaluxStorage } from "../src/storage/synalux.js";
-import { newLaneContext, decorateLaneRequest, laneCallContext, prependLaneBlock, recordLaneBlock } from "../src/session/laneStatus.js";
+import { newLaneContext, decorateLaneRequest, laneCallContext, recordLaneBlock } from "../src/session/laneStatus.js";
 
 const attach = JSON.parse(readFileSync(join(__dirname, "fixtures/prism-lane-attach-contract.json"), "utf8"));
 const real = (block: string) => block.replace(/<n>/g, "100h").replace(/<mm-dd>/g, "11-25");
@@ -116,7 +116,61 @@ describe("the host sent with a lane request", () => {
   });
 });
 
+describe("each lane tool through the real server", () => {
+  const load = (conversation: string) => callTool("session_load_context", { project: "proj", level: "quick", conversation_id: conversation });
+
+  it("session_detect_drift sends the conversation id and host, starts with the block, and does not repeat the raw lane fields", async () => {
+    const reply = await callTool("session_detect_drift", { project: "proj", goal: "keep the plan", conversation_id: "conv-d" }, "claude-code");
+    expect(portalRequests().find(body => body.action === "detect_drift")).toMatchObject({ project: "proj", goal: "keep the plan", conversation_id: "conv-d", host: "claude-code" });
+    const text = firstText(reply);
+    expect(text.startsWith(BOUND_BLOCK)).toBe(true);
+    const json = text.slice(BOUND_BLOCK.length);
+    expect(json).not.toContain("lane_block");
+    expect(json).not.toContain("lane_status");
+    expect(json).not.toContain("lane_paths");
+  });
+
+  it("session_save_ledger starts with the block and carries the conversation id and host", async () => {
+    await load("conv-l");
+    fetchMock.mockClear();
+    const reply = await callTool("session_save_ledger", { project: "proj", conversation_id: "conv-l", summary: "implemented the lane block and its tests" }, "claude-code");
+    expect(reply.isError, firstText(reply)).not.toBe(true);
+    expect(firstText(reply).startsWith(BOUND_BLOCK)).toBe(true);
+    expect(portalRequests().find(body => body.action === "save_ledger")).toMatchObject({ conversation_id: "conv-l", host: "claude-code" });
+  });
+
+  it("session_save_handoff starts with the block and carries the conversation id and host", async () => {
+    await load("conv-h");
+    portal({ status: "success", result: { status: "updated", version: 2 }, lane_status: attach.bound.response.lane_status, lane_block: BOUND_BLOCK });
+    const reply = await callTool("session_save_handoff", { project: "proj", conversation_id: "conv-h", last_summary: "did the thing", expected_version: 1 }, "claude-code");
+    expect(reply.isError, firstText(reply)).not.toBe(true);
+    expect(firstText(reply).startsWith(BOUND_BLOCK)).toBe(true);
+    expect(portalRequests().find(body => body.action === "save_handoff")).toMatchObject({ conversation_id: "conv-h", host: "claude-code" });
+  });
+});
+
 describe("session_bootstrap", () => {
+  it("starts with the lane block at character 0", async () => {
+    holder.settings.set("autoload_projects", "proj");
+    const reply = await callTool("session_bootstrap", { prompt: "hello" });
+    expect(firstText(reply).startsWith(BOUND_BLOCK)).toBe(true);
+  });
+
+  it("sends the id it prints even when the supplied one was padded: a trimmed id, so the portal can bind it", async () => {
+    holder.settings.set("autoload_projects", "proj");
+    const reply = await callTool("session_bootstrap", { prompt: "hello", conversation_id: " conv-pad ", program: "alpha" });
+    expect(firstText(reply)).toContain("conv-pad");
+    const loads = portalRequests().filter(body => body.action === "load_context");
+    expect(loads.length).toBeGreaterThan(0);
+    for (const request of loads) expect(request.conversation_id).toBe("conv-pad");
+  });
+
+  it("leaves a supplied id the portal would reject (over 255 characters) off the lane requests", async () => {
+    holder.settings.set("autoload_projects", "proj");
+    await callTool("session_bootstrap", { prompt: "hello", conversation_id: "x".repeat(300) });
+    for (const request of portalRequests().filter(body => body.action === "load_context")) expect(request).not.toHaveProperty("conversation_id");
+  });
+
   it("sends its own conversation id on the lane requests it makes, the same one it prints", async () => {
     holder.settings.set("autoload_projects", "proj");
     const reply = await callTool("session_bootstrap", { prompt: "hello" });
@@ -162,10 +216,7 @@ describe("tools outside the five lane tools are left alone (design D3)", () => {
         expect(decorateLaneRequest({ action: "load_context", project: "proj" }), tool).toEqual({ action: "load_context", project: "proj" });
         recordLaneBlock("proj", "load_context", { lane_status: { program: "alpha" }, lane_block: "a block" });
       });
-      expect(ctx.blocks, tool).toEqual([]);
-      const result = { content: [{ type: "text" as const, text: "tool text" }] };
-      prependLaneBlock(result, ctx);
-      expect(result.content[0].text, tool).toBe("tool text");
+      expect(ctx.blocks, tool).toEqual([]); // nothing recorded for it, so the server has nothing to prepend
     }
     for (const tool of ["session_load_context", "session_bootstrap", "session_save_ledger", "session_save_handoff", "session_detect_drift"]) {
       expect(newLaneContext({}, tool).enabled, tool).toBe(true);

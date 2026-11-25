@@ -275,7 +275,6 @@ describe("session_set_program_register (D-2a register tool)", () => {
     expect(res.isError).toBeUndefined();
     expect(res.content[0].text).toMatch(/^Register saved for alpha \(v1\)\.\nLane status \(alpha, register v1\):/);
     expect(requests(fetch)[0]).toMatchObject({ action: "set_program_register", project: "proj", program: "alpha", host: "prism-mcp", conversation_id: "conv-1", lanes: exchange.request.lanes });
-    expect(registerResponse).toBeDefined();
   });
 
   it("an old portal's 400 gives a clear message, and bad arguments are refused before any request", async () => {

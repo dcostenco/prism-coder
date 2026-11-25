@@ -2,7 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
-## 20.22.5 — 2026-10-27
+## 20.22.5 — 2026-11-25
+
+- Show the account's program and lane status at the very start of the results of
+  `session_load_context`, `session_bootstrap`, `session_save_ledger`,
+  `session_save_handoff` and `session_detect_drift`, when the portal returns it:
+  which lanes of a program are stalled comes first, before summaries and notes.
+  Nothing changes for a project without programs or for an older portal.
+- Add `session_set_program_register` to create or edit a program's lanes
+  (Standard plan or higher).
+- `session_load_context` and `session_bootstrap` accept `program` to bind the
+  conversation to a program. Lane requests carry the conversation id exactly as
+  given, and the MCP client's own name as `host`.
+- `session_detect_drift` now sends the conversation id, so the check can be
+  scoped to one conversation. Without the merge-fact reader, which is not in
+  this release, lanes read "unknown (no merge data)".
+- Cloud memory embeddings are truthful and bounded (#286).
 
 - Add an independent Image model section with discovered oMLX and Ollama
   inventory. Image preferences remain separate from coder/reviewer roles;

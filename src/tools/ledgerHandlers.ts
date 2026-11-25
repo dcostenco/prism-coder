@@ -2665,7 +2665,8 @@ export async function sessionBootstrapHandler(
   const conversationId = suppliedConversationId || randomUUID();
   // Drift-fix D-2a: the loads below belong to this conversation, so the portal can bind and show its lanes.
   const laneCtx = laneCallContext.getStore();
-  if (laneCtx && !laneCtx.conversationId) laneCtx.conversationId = conversationId;
+  // The id it prints is the id every later call uses, so it is the id these loads send (a padded id is trimmed here; one the portal would reject is left off).
+  if (laneCtx) laneCtx.conversationId = conversationId.length <= 255 ? conversationId : undefined;
 
   const { awaitSkillManifestSync } = await import("../skillManifestSync.js");
   const skillSyncResult = await awaitSkillManifestSync();

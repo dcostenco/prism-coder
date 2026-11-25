@@ -2093,8 +2093,7 @@ export const SESSION_DETECT_DRIFT_TOOL: Tool = {
     "- `quality-degrading` — quality slope steeply negative before collapse\n\n" +
     "**Returns:** drifted, reason, warning, drift_score (0..1), goal_alignment, " +
     "quality_avg, sample_count, adaptive_threshold, recommendation. When the account has a program register, the " +
-    "output may begin with a lane-status text line or block before the JSON, and the JSON may carry lane_status, " +
-    "lane_block and lane_paths: read the stalled lanes first. When there is too little evidence to judge, the answer may carry " +
+    "output may begin with a lane-status text line or block before the JSON: read the stalled lanes first. When there is too little evidence to judge, the answer may carry " +
     "alignment_status \"not_evaluated\" with drifted, drift_score and goal_alignment null: that means not evaluated, never \"no drift\".\n\n" +
     "Use alongside GATE 5 (60-minute drift check): call this tool instead of " +
     "session_cognitive_route for goal-alignment drift detection.",
