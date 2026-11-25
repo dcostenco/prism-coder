@@ -88,7 +88,13 @@ export class GeminiAdapter implements LLMProvider {
       ...(options?.json || options?.maxOutputTokens ? { generationConfig: { ...(options?.json ? { responseMimeType: "application/json" } : {}), ...(options?.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}) } } : {}),
     });
 
-    const result = await model.generateContent(prompt);
+    const result = options?.signal
+      ? await model.generateContent(prompt, { signal: options.signal })
+      : await model.generateContent(prompt);
+
+    if (options?.requireCompleteResponse && result.response.candidates?.[0]?.finishReason !== "STOP") {
+      throw new Error("[GeminiAdapter] Text generation did not complete.");
+    }
 
     // result.response.text() extracts the first candidate's text content.
     // This matches the prior behavior in all 6 migrated call sites.

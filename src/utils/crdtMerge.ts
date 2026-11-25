@@ -244,6 +244,8 @@ export function mergeHandoff(
 
 export function dbToHandoffSchema(dbState: Record<string, unknown> | null): HandoffSchema | null {
   if (!dbState) return null;
+  const metadata = dbState.metadata && typeof dbState.metadata === "object" && !Array.isArray(dbState.metadata)
+    ? dbState.metadata as Record<string, unknown> : {};
 
   const toStringArray = (v: unknown): string[] | null => {
     if (Array.isArray(v)) return v as string[];
@@ -258,8 +260,8 @@ export function dbToHandoffSchema(dbState: Record<string, unknown> | null): Hand
 
   return {
     summary: (dbState.last_summary as string) || (dbState.summary as string) || "",
-    active_branch: (dbState.active_branch as string | null) ?? null,
-    key_context: (dbState.key_context as string | null) ?? null,
+    active_branch: (dbState.active_branch as string | null) ?? (metadata.active_branch as string | null) ?? null,
+    key_context: (dbState.key_context as string | null) ?? (metadata.key_context as string | null) ?? null,
     pending_todo: toStringArray(dbState.pending_todo),
     active_decisions: toStringArray(dbState.active_decisions),
     keywords: toStringArray(dbState.keywords),

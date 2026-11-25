@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+const residency = vi.hoisted(() => ({ force: false, strict: false }));
+vi.mock("../../src/config.js", async original => ({
+    ...await original<typeof import("../../src/config.js")>(),
+    get PRISM_FORCE_LOCAL() { return residency.force; },
+    get PRISM_STRICT_LOCAL_MODE() { return residency.strict; },
+}));
 import {
     buildAuthorityScopedQuery,
     quickWebSearch,
@@ -117,7 +123,85 @@ describe("query_memory_natural grounded fallback", () => {
     let deps: QueryMemoryNaturalDeps;
 
     beforeEach(() => {
+        residency.force = false;
+        residency.strict = false;
         deps = makeDeps();
+    });
+
+    it.each(["force", "strict"] as const)("restricts memory synthesis to the device in %s mode", async policy => {
+        residency[policy] = true;
+        vi.mocked(deps.searchMemory).mockResolvedValue(memoryResult("fixture-memory", "Stored on-device evidence"));
+
+        const result = await queryMemoryNaturalHandler({ question: "What did I decide?", project: "fixture",
+            verify: true, cloud_fallback: true }, deps);
+
+        expect(parseResult(result).retrieval).toBe("memory");
+        expect(deps.infer).toHaveBeenCalledWith(expect.objectContaining({
+            evidence: [{ source: "fixture-memory", content: "Stored on-device evidence" }],
+        }), { localOnly: true });
+        expect(deps.searchWeb).not.toHaveBeenCalled();
+    });
+
+    it.each(["What did we decide about draft notes?", "What files did we change about draft notes?"])("reports the executed memory query for %s", async question => {
+        vi.mocked(deps.searchMemory).mockResolvedValue(memoryResult("fixture-source", "Draft notes remain in local SQLite."));
+        const result = parseResult(await queryMemoryNaturalHandler({ question, web_fallback: false }, deps));
+        const executed = vi.mocked(deps.searchMemory).mock.calls[0][0].query;
+        if (question.includes("decide")) expect(executed).toBe("draft notes");
+        expect(result.searchQuery).toBe(executed);
+        expect(result.suggestedArgs.query).toBe(executed);
+        expect(vi.mocked(deps.infer).mock.calls[0][0].prompt).toBe(question);
+    });
+
+    it("keeps a context-tool suggestion valid while reporting the actual memory phrase", async () => {
+        const result = parseResult(await queryMemoryNaturalHandler({ question: "What is still open on draft notes?", web_fallback: false }, deps));
+        expect(result.searchQuery).toBe(vi.mocked(deps.searchMemory).mock.calls[0][0].query);
+        expect(result.suggestedTool).toBe("session_load_context");
+        expect(result.suggestedArgs).not.toHaveProperty("query");
+        expect(result.suggestedArgs.level).toBe("standard");
+    });
+
+    it("reports the executed phrase in no-result diagnostics", async () => {
+        const result = parseResult(await queryMemoryNaturalHandler({ question: "What did we decide about draft notes?", web_fallback: false }, deps));
+        expect(result.status).toBe("no_results");
+        expect(result.searchQuery).toBe("draft notes");
+        expect(result.suggestedArgs.query).toBe("draft notes");
+        expect(deps.infer).not.toHaveBeenCalled();
+    });
+
+    it("publishes and validates the caller's inference privacy controls", () => {
+        const properties = QUERY_MEMORY_NATURAL_TOOL.inputSchema.properties as Record<string, any>;
+        expect(properties.cloud_fallback.type).toBe("boolean");
+        expect(properties.verify.type).toBe("boolean");
+        expect(properties.route_guard.enum).toEqual(["auto", "local"]);
+        expect(isQueryMemoryNaturalArgs({ question: "Read routine memory.", cloud_fallback: false, verify: false, route_guard: "local" })).toBe(true);
+        for (const invalid of [{ cloud_fallback: "false" }, { verify: "false" }, { route_guard: "disabled" }]) {
+            expect(isQueryMemoryNaturalArgs({ question: "Read routine memory.", ...invalid })).toBe(false);
+        }
+    });
+
+    it("keeps optional Portal processing disabled for an explicitly local memory draft", async () => {
+        vi.mocked(deps.searchMemory).mockResolvedValue(memoryResult("fixture-source", "The helper sorts ascending."));
+        await queryMemoryNaturalHandler({ question: "How does the routine helper sort?", web_fallback: false,
+            cloud_fallback: false, verify: false, route_guard: "local" }, deps);
+        expect(deps.infer).toHaveBeenCalledWith(expect.objectContaining({ cloud_fallback: false, verify: false,
+            route_guard: "local", evidence: [{ source: "fixture-source", content: "The helper sorts ascending." }] }));
+        expect(deps.searchWeb).not.toHaveBeenCalled();
+    });
+
+    it("forwards the same restrictions after permitted web retrieval without changing its opt-in", async () => {
+        await queryMemoryNaturalHandler({ question: "Show TypeScript code using the current Example SDK client API",
+            web_fallback: true, cloud_fallback: false, verify: false, route_guard: "local" }, deps);
+        expect(deps.searchWeb).toHaveBeenCalledTimes(1);
+        expect(deps.infer).toHaveBeenCalledWith(expect.objectContaining({ cloud_fallback: false, verify: false, route_guard: "local" }));
+    });
+
+    it.each(["OBVIOUS_RESERVED", "UNCERTAIN"])("retains local-only restrictions for the %s refusal/escalation path", async verdict => {
+        vi.mocked(deps.classifyBoundary).mockResolvedValue(verdict as "OBVIOUS_RESERVED" | "UNCERTAIN");
+        await queryMemoryNaturalHandler({ question: "Is it safe to release this auth change?",
+            cloud_fallback: false, verify: false, route_guard: "local" }, deps);
+        expect(deps.infer).toHaveBeenCalledWith(expect.objectContaining({ cloud_fallback: false, verify: false, route_guard: "local" }));
+        expect(deps.searchWeb).not.toHaveBeenCalled();
+        expect(deps.fetchPage).not.toHaveBeenCalled();
     });
 
     it("prioritizes an exact authority domain without trusting spoofed subdomains", () => {

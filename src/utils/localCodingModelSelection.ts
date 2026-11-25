@@ -10,6 +10,8 @@ export interface LocalCodingSelection {
     ceiling: string;
     ollamaUrl: string;
     deadlineMs: number;
+    signal?: AbortSignal;
+    track?: (promise: Promise<unknown>) => void;
 }
 interface SelectionDependencies {
     recommend: typeof localCodingRecommendation;
@@ -32,6 +34,9 @@ export async function selectUnassignedCodingModel(options: LocalCodingSelection,
     const deadline = Math.min(options.deadlineMs, Date.now() + LOCAL_CODING_SELECTION_MS);
     if (!Number.isFinite(deadline) || deadline <= Date.now()) throw new Error("local_coding_selection_timeout");
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    options.signal?.addEventListener("abort", abort, { once: true });
+    if (options.signal?.aborted) abort();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const check = () => {
         if (controller.signal.aborted || Date.now() >= deadline) throw new Error("local_coding_selection_timeout");
@@ -39,7 +44,7 @@ export async function selectUnassignedCodingModel(options: LocalCodingSelection,
     const work = async () => {
         check();
         let models: LocalCodingModelObservation[];
-        const probe = { deadlineMs: deadline, signal: controller.signal };
+        const probe = { deadlineMs: deadline, signal: controller.signal, track: options.track };
         if (options.backend === "omlx") {
             const configured = await deps.omlxDefault();
             check();
@@ -77,8 +82,10 @@ export async function selectUnassignedCodingModel(options: LocalCodingSelection,
         throw new Error("local_coding_model_unavailable");
     };
     try {
-        return await Promise.race([work(), new Promise<never>((_resolve, reject) => {
+        const pending = work();
+        options.track?.(pending.catch(() => undefined));
+        return await Promise.race([pending, new Promise<never>((_resolve, reject) => {
             timer = setTimeout(() => { controller.abort(); reject(new Error("local_coding_selection_timeout")); }, deadline - Date.now());
         })]);
-    } finally { clearTimeout(timer); controller.abort(); }
+    } finally { clearTimeout(timer); options.signal?.removeEventListener("abort", abort); controller.abort(); }
 }

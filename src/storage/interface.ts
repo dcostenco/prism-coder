@@ -28,6 +28,8 @@ import { VerificationHarness, ValidationResult } from "../verification/schema.js
  * These are append-only — once created, they are never modified
  * (except for adding embeddings or archiving during compaction).
  */
+export class LinkedLedgerProjectionUnavailableError extends Error {}
+
 export interface LedgerEntry {
   // Identity
   id?: string;
@@ -129,6 +131,40 @@ export interface SaveHandoffResult {
   status: "created" | "updated" | "conflict";
   version?: number;
   current_version?: number; // Only present on conflict
+  /** The writer committed canonical history in the same transaction. */
+  history_saved?: boolean;
+}
+
+export interface SaveHandoffOptions {
+  /** Exact-role history restoration with positive OCC; null clears newer context. */
+  restoreContextFields?: boolean;
+}
+
+export function contextRestoreRequested(handoff: HandoffEntry, expectedVersion?: number | null, options?: SaveHandoffOptions): boolean {
+  if (options?.restoreContextFields !== undefined && typeof options.restoreContextFields !== "boolean") {
+    throw new Error("restoreContextFields must be boolean");
+  }
+  if (options?.restoreContextFields !== true) return false;
+  if (!Number.isSafeInteger(expectedVersion) || (expectedVersion as number) < 1) {
+    throw new Error("Context restoration requires a positive current version");
+  }
+  if (typeof handoff.role !== "string" || handoff.role.trim().length === 0) {
+    throw new Error("Context restoration requires an explicit memory role");
+  }
+  for (const value of [handoff.key_context, handoff.active_branch]) {
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      throw new Error("Historical context fields must be text or null");
+    }
+  }
+  return true;
+}
+
+export function assertContextRestoreResult(result: unknown, expectedVersion: number): void {
+  const value = result && typeof result === "object" && !Array.isArray(result)
+    ? result as Record<string, unknown> : undefined;
+  if (value?.status === "conflict" && Number.isSafeInteger(value.current_version) && (value.current_version as number) >= 0) return;
+  if (value?.status === "updated" && value.version === expectedVersion + 1 && value.history_saved === true) return;
+  throw new Error("Context restoration was not confirmed; reload context before taking further action");
 }
 
 /**
@@ -432,7 +468,7 @@ export interface StorageBackend {
    * Upsert handoff state with optimistic concurrency control.
    * Returns status (created/updated/conflict) + new version.
    */
-  saveHandoff(handoff: HandoffEntry, expectedVersion?: number | null): Promise<SaveHandoffResult>;
+  saveHandoff(handoff: HandoffEntry, expectedVersion?: number | null, options?: SaveHandoffOptions): Promise<SaveHandoffResult>;
 
   /**
    * Retrieve a historical handoff snapshot by version number.
@@ -444,7 +480,7 @@ export interface StorageBackend {
    * @param userId - User who owns the handoff (default: 'default')
    * @returns The snapshot at that version, or null if not found
    */
-  getHandoffAtVersion(project: string, version: number, userId?: string): Promise<Record<string, unknown> | null>;
+  getHandoffAtVersion(project: string, version: number, userId?: string, role?: string): Promise<Record<string, unknown> | null>;
 
   /**
    * Patch handoff fields by project + userId (used for embedding backfill).
@@ -502,6 +538,9 @@ export interface StorageBackend {
   }): Promise<SemanticSearchResult[]>;
 
   // ─── Compaction ────────────────────────────────────────────
+
+  /** False if the backend cannot persist the rollup and archive its sources. */
+  readonly supportsLedgerCompaction?: boolean;
 
   /**
    * Find projects that exceed the compaction threshold.
@@ -796,6 +835,9 @@ export interface StorageBackend {
    * Used for 1-hop expansion during search result enrichment.
    */
   getLinksFrom(sourceId: string, userId: string, minStrength?: number, limit?: number): Promise<MemoryLink[]>;
+
+  /** Portal-backed projection of caller-visible targets for graph recall. */
+  getLinkedLedgerSummaries?(sourceId: string, limit: number): Promise<Array<{ id: string; summary: string }>>;
 
   /**
    * Get all inbound links pointing to a target entry.

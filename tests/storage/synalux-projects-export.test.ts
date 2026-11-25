@@ -403,6 +403,34 @@ describe("SynaluxStorage — memory graph and link transport", () => {
     expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({ edges: links });
   });
 
+  it("requests only the authenticated Portal projection for linked summaries", async () => {
+    const source = "11111111-1111-4111-8111-111111111111";
+    const target = { id: "22222222-2222-4222-8222-222222222222", summary: "Linked memo" };
+    fetchMock.mockResolvedValueOnce(freshJwtResp()).mockResolvedValueOnce(jsonResponse(200, {
+      status: "success", target_summaries: [target],
+    }));
+
+    const storage = new SynaluxStorage();
+    await expect(storage.getLinkedLedgerSummaries(source, 5)).resolves.toEqual([target]);
+
+    const url = new URL(fetchMock.mock.calls[1][0]);
+    expect(url.pathname).toEqual("/api/v1/prism/graph/edge");
+    expect(url.searchParams.get("source_id")).toEqual(source);
+    expect(url.searchParams.get("limit")).toEqual("5");
+    expect(url.searchParams.get("include_target_summaries")).toEqual("true");
+  });
+
+  it("fails closed when an older Portal does not return linked summaries", async () => {
+    fetchMock.mockResolvedValueOnce(freshJwtResp()).mockResolvedValueOnce(jsonResponse(200, {
+      status: "success", links: [],
+    }));
+
+    const storage = new SynaluxStorage();
+    await expect(storage.getLinkedLedgerSummaries("11111111-1111-4111-8111-111111111111", 5))
+      .rejects.toThrow("Portal graph response does not contain the requested linked summaries");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("reads outbound links through the caller-scoped Portal route", async () => {
     fetchMock.mockResolvedValueOnce(freshJwtResp()).mockResolvedValueOnce(jsonResponse(200, {
       status: "success",

@@ -525,11 +525,7 @@ export async function runSchedulerSweep(
   }
 
   // ── Task 3: Compaction ─────────────────────────────────────
-  // NOTE: Compaction uses LLM summarization which is expensive.
-  // We only trigger the candidate detection here — actual compaction
-  // is deferred to avoid blocking the sweep with long LLM calls.
-  // Instead, we log which projects need compaction for dashboard visibility.
-  if (cfg.enableCompaction) {
+  if (cfg.enableCompaction && storage.supportsLedgerCompaction !== false) {
     try {
       result.tasks.compaction.ran = true;
       const candidates = await storage.getCompactionCandidates(
@@ -546,15 +542,17 @@ export async function runSchedulerSweep(
               `[Scheduler] Compacting "${candidate.project}": ` +
               `${candidate.total_entries} entries (${candidate.to_compact} to compact)`
             );
-            await compactLedgerHandler({
+            const compaction = await compactLedgerHandler({
               project: candidate.project,
               threshold: cfg.compactionThreshold,
               keep_recent: cfg.compactionKeepRecent,
               dry_run: false,
             });
-            result.tasks.compaction.projectsCompacted++;
+            if (compaction.isError) throw new Error(compaction.content[0]?.text || "Ledger compaction failed");
+            result.tasks.compaction.projectsCompacted += compaction.structuredContent?.projects_compacted ?? 0;
           } catch (err) {
-            debugLog(`[Scheduler] Compaction failed for "${candidate.project}": ${err instanceof Error ? err.message : String(err)}`);
+            result.tasks.compaction.error = err instanceof Error ? err.message : String(err);
+            debugLog(`[Scheduler] Compaction failed for "${candidate.project}": ${result.tasks.compaction.error}`);
           }
         }
       }

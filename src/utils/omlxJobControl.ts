@@ -13,7 +13,7 @@ const LEGACY_FIELDS = ["version", "provider_hash", "job_id", "operation_id", "pr
 const FIELDS = [...LEGACY_FIELDS, "provider_request_id"] as const;
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
-type Marker = { version: 2; provider_hash: string; job_id: string; operation_id: string | null; provider_request_id: string | null; provider_started: boolean; active: boolean };
+type Marker = { version: 2 | 3; provider_hash: string; job_id: string; operation_id: string | null; provider_request_id: string | null; provider_started: boolean; active: boolean };
 export interface OwnedAcknowledgement { provider_id: string; job_id: string; operation_id: string; provider_request_id?: string }
 export interface OwnedObservation { idle_verified: boolean; acknowledgement?: OwnedAcknowledgement }
 export interface OwnedAction<T> { value: T; acknowledgement?: OwnedAcknowledgement }
@@ -25,6 +25,8 @@ export interface OwnedProviderRequest {
 }
 export interface OwnedJobOptions {
     providerId: string; stateDirectory: string; budgetMs: number; signal?: AbortSignal;
+    /** The adapter durably binds a request ID before it can dispatch execution. */
+    bindBeforeDispatch?: true;
     /** Trusted controller only. Polling may outlast the caller deadline and
      * never authorizes a new provider action or substitutes for completion. */
     drain?: { budgetMs: number; pollIntervalMs: number };
@@ -72,12 +74,12 @@ function readMarker(path: string, providerHash: string): Marker | undefined {
         const v = JSON.parse(bytes.subarray(0, count).toString("utf8"));
         const fields = v?.version === 1 ? LEGACY_FIELDS : FIELDS;
         if (!v || Object.keys(v).length !== fields.length || !fields.every(key => Object.hasOwn(v, key))
-            || ![1, 2].includes(v.version) || v.provider_hash !== providerHash || typeof v.job_id !== "string" || !UUID.test(v.job_id)
+            || ![1, 2, 3].includes(v.version) || v.provider_hash !== providerHash || typeof v.job_id !== "string" || !UUID.test(v.job_id)
             || typeof v.active !== "boolean" || typeof v.provider_started !== "boolean"
             || (v.provider_started ? typeof v.operation_id !== "string" || !UUID.test(v.operation_id) : v.operation_id !== null)
-            || (v.version === 2 && (v.provider_request_id !== null && (typeof v.provider_request_id !== "string" || !REQUEST_ID.test(v.provider_request_id))
+            || (v.version >= 2 && (v.provider_request_id !== null && (typeof v.provider_request_id !== "string" || !REQUEST_ID.test(v.provider_request_id))
                 || (!v.provider_started && v.provider_request_id !== null)))) throw new Error();
-        return { ...v, version: 2, provider_request_id: v.version === 1 ? null : v.provider_request_id } as Marker;
+        return { ...v, version: v.version === 1 ? 2 : v.version, provider_request_id: v.version === 1 ? null : v.provider_request_id } as Marker;
     } catch { throw new Error("owned_job_marker_invalid"); }
     finally { closeSync(fd); }
 }
@@ -124,6 +126,7 @@ function snapshotObservation(observation: OwnedObservation): OwnedObservation {
 export async function runOwnedJob<T>(options: OwnedJobOptions, work: (context: OwnedJobContext) => Promise<T>): Promise<OwnedJobResult<T>> {
     const admitted = performance.now();
     const jobId = randomUUID();
+    const version = options.bindBeforeDispatch ? 3 : 2;
     if (!Number.isInteger(options.budgetMs) || options.budgetMs < 1 || options.budgetMs > MAX_BUDGET_MS
         || typeof options.providerId !== "string" || !options.providerId.trim()) throw new Error("owned_job_options_invalid");
     const requestedDrain = options.drain;
@@ -166,10 +169,14 @@ export async function runOwnedJob<T>(options: OwnedJobOptions, work: (context: O
         cleanupRunning = (async () => {
             if (!marker || !path) { await releaseOwned(); return true; }
             try {
+                // The admitted PUT may still acknowledge a registration. Keep
+                // its marker writable until it binds or fails.
+                if (providerPending && marker.version === 3 && marker.provider_request_id === null) return false;
                 const observation = snapshotObservation(await options.observe(Object.freeze({ ...marker })));
                 const acknowledged = !marker.provider_started || lastAcknowledged || matches(observation.acknowledgement, marker, options.providerId);
                 if (observation.idle_verified !== true || !acknowledged) return false;
-                const finished = { ...marker, active: false };
+                // Keep completed markers readable by an older Prism build after rollback.
+                const finished = { ...marker, version: 2 as const, active: false };
                 // A later job (after recovery) may own the file now: never overwrite it.
                 if (holds(path, marker)) persist(path, finished);
                 marker = finished;
@@ -256,10 +263,10 @@ export async function runOwnedJob<T>(options: OwnedJobOptions, work: (context: O
                     return { status: "provider_busy", job_id: jobId, quarantined: true };
                 }
             }
-            const observed = snapshotObservation(await options.observe(Object.freeze({version: 2, provider_hash: providerHash,
+            const observed = snapshotObservation(await options.observe(Object.freeze({version, provider_hash: providerHash,
                 job_id: jobId, operation_id: null, provider_request_id: null, provider_started: false, active: false}))); check();
             if (observed.idle_verified !== true) { await releaseOwned(); return { status: "provider_busy", job_id: jobId, quarantined: false }; }
-            marker = {version: 2, provider_hash: providerHash, job_id: jobId, operation_id: null, provider_request_id: null, provider_started: false, active: true};
+            marker = {version, provider_hash: providerHash, job_id: jobId, operation_id: null, provider_request_id: null, provider_started: false, active: true};
             persist(path, marker); check();
             const value = await work(context); check();
             closed = true;
@@ -313,5 +320,5 @@ export async function recoverOwnedJob(options: Pick<OwnedJobOptions, "providerId
     const observed = snapshotObservation(await options.observe(Object.freeze({ ...previous })));
     if (observed.idle_verified !== true || (previous.provider_started && !matches(observed.acknowledgement, previous, options.providerId)))
         throw new Error("owned_job_provider_quarantined");
-    if (holds(path, previous)) persist(path, { ...previous, active: false });
+    if (holds(path, previous)) persist(path, { ...previous, version: 2, active: false });
 }

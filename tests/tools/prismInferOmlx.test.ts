@@ -1,19 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { PRISM_INFER_TOOL, runInfer, prismInferHandler, productionInferDeps, isPrismInferArgs, _resetLayer1HistoryCacheForTest, type InferDeps, type PrismInferArgs } from "../../src/tools/prismInferHandler.js";
+import { createServer } from "../../src/server.js";
+import * as inferHandler from "../../src/tools/prismInferHandler.js";
+import { PRISM_INFER_TOOL, runInfer, prismInferHandler, productionInferDeps, isPrismInferArgs, _resetLayer1HistoryCacheForTest, _resetClassifierLimitsForTest, callOllamaGenerate, type InferDeps, type PrismInferArgs } from "../../src/tools/prismInferHandler.js";
 import { selectUnassignedCodingModel } from "../../src/utils/localCodingModelSelection.js";
+import { selectedOllamaCodingModel } from "../../src/utils/ollamaCodingModels.js";
 import { FREE_ENTITLEMENTS, type PrismEntitlements } from "../../src/utils/entitlements.js";
 import { parseAnswerCheckPolicy, parseSecondReadPolicy } from "../../src/utils/inferencePolicy.js";
-import { callLayer1 } from "../../src/utils/layer1.js";
+import { callLayer1, LAYER1_PROMPT } from "../../src/utils/layer1.js";
 import { ANSWER_GROUNDING_THINK } from "../../src/utils/answerGrounding.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OmlxError, createOmlxTarget, type OmlxRequest, type OmlxRuntime, type OmlxTarget } from "../../src/utils/omlxProvider.js";
+import { _setOrdinaryLeaseForTest, withInferenceResourceLease } from "../../src/utils/omlxProvider.js";
 import { ownedOmlxGenerate } from "../../src/utils/omlxOwned.js";
 import { OMLX_LAYER1_MODEL } from "../../src/utils/omlxLayer1.js";
-import { completes, endsWithoutTerminal, fakeControl, record } from "./omlxControlFake.js";
+import { completes, endsWithoutTerminal, fakeControl, record, sse, terminal } from "./omlxControlFake.js";
+import { CRISIS_RESPONSE } from "../../src/utils/safetyGate.js";
+import * as storage from "../../src/storage/index.js";
 
 const MODEL = "Qwen3.8-Flash-Next-oQ8e-mtp";
 // As detection returns it: carrying the provider credential.
@@ -51,7 +59,732 @@ function fixture() {
     return { deps, omlx, events, loaded };
 }
 
+describe("trusted bridge execution context", () => {
+    it.each(["classification", "drafting"])("stops the owned %s operation on MCP Cancel without registering again", async phase => {
+        const f = fixture();
+        f.deps.callLayer1 = undefined;
+        let claimed!: () => void, released!: () => void;
+        const started = new Promise<void>(resolve => { claimed = resolve; });
+        const finished = new Promise<void>(resolve => { released = resolve; });
+        f.omlx.acquire = async () => async () => { released(); };
+        const provider = fakeControl({ script: async function* (ids, control) {
+            if (phase === "drafting" && ids.model === OMLX_LAYER1_MODEL) {
+                yield* completes("OBVIOUS_NOT_RESERVED")(ids, control);
+                return;
+            }
+            yield sse("claimed", { state: "claimed" });
+            claimed();
+            await control.cancelled;
+            yield sse("terminal", terminal(ids, "cancelled"));
+        } });
+        const stateDirectory = mkdtempSync(join(tmpdir(), "prism-owned-mcp-stop-"));
+        f.omlx.generate = (target, request, signal) => ownedOmlxGenerate(target, request, signal,
+            { fetchImpl: provider.fetchImpl, stateDirectory, drainBudgetMs: 300, cancelReadMs: 120 });
+        const realHandler = inferHandler.prismInferHandler;
+        const inject = vi.spyOn(inferHandler, "prismInferHandler").mockImplementation((args, _deps, context) => realHandler(args, f.deps, context));
+        const server = createServer();
+        const client = new Client({ name: "owned-cancellation-fixture", version: "1" });
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+        const stop = new AbortController();
+        try {
+            await server.connect(serverTransport);
+            await client.connect(clientTransport);
+            const call = client.callTool({ name: "prism_infer", arguments: { ...ask({ local_model: MODEL }) } }, undefined, { signal: stop.signal })
+                .catch(error => error as Error);
+            await Promise.race([started, call.then(() => { throw new Error("MCP replied before claiming the target operation"); })]);
+            const registrations = provider.calls.filter(item => item.method === "PUT");
+            expect(registrations).toHaveLength(phase === "classification" ? 1 : 2);
+            stop.abort();
+            await call;
+            await finished;
+            expect(provider.calls.filter(item => item.method === "PUT")).toEqual(registrations);
+            expect(provider.calls.filter(item => item.path.endsWith("/cancel")).map(item => item.path)).toEqual([`${registrations.at(-1)!.path}/cancel`]);
+            const marker = join(stateDirectory, createHash("sha256").update(TARGET.url).digest("hex") + ".json");
+            expect(JSON.parse(readFileSync(marker, "utf8"))).toMatchObject({ active: false });
+            expect(f.deps.callLocal).not.toHaveBeenCalled();
+            expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally { stop.abort(); await client.close(); await server.close(); inject.mockRestore(); }
+    });
+    it.each(["deadline", "cancel"])("removes a queued oMLX request on %s before any provider call", async trigger => {
+        const f = fixture();
+        let release!: () => void;
+        const held = new Promise<void>(resolve => { release = resolve; });
+        let entered!: () => void;
+        const occupied = new Promise<void>(resolve => { entered = resolve; });
+        const lease = withInferenceResourceLease(true, async () => { entered(); await held; });
+        await occupied;
+        const stop = new AbortController();
+        vi.useFakeTimers();
+        const pending = runInfer(ask({ timeout_ms: 100 }), f.deps, { signal: stop.signal });
+        let settled = false;
+        const outcome = pending.then(result => { settled = true; return result; }, error => { settled = true; return error as Error; });
+        try {
+            await vi.advanceTimersByTimeAsync(0);
+            if (trigger === "cancel") stop.abort();
+            await vi.advanceTimersByTimeAsync(trigger === "deadline" ? 101 : 1);
+            expect(settled).toBe(true);
+            if (trigger === "deadline") expect(await outcome).toMatchObject({ backend: "refused", gate_outcome: { reason: "timeout" } });
+            else expect(await outcome).toMatchObject({ message: "prism_infer: caller_cancelled" });
+            expect(f.omlx.detect).not.toHaveBeenCalled();
+        } finally {
+            release();
+            await lease;
+            await outcome;
+            vi.useRealTimers();
+        }
+        expect(f.omlx.generate).not.toHaveBeenCalled();
+        const next = fixture();
+        await runInfer(ask(), next.deps);
+        expect(next.omlx.generate).toHaveBeenCalled();
+    });
+    it("keeps the ingress deadline after discovering an unassigned oMLX model", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null });
+        const started = Date.now();
+        const date = vi.spyOn(Date, "now").mockReturnValue(started);
+        f.deps.codingModel = vi.fn(async () => { date.mockReturnValue(started + 600); return MODEL; });
+        try {
+            expect(await runInfer(ask({ timeout_ms: 1000 }), f.deps)).toMatchObject({ backend: "omlx", output: OUTPUT });
+            expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, { deadlineMs: started + 1000, signal: undefined });
+        } finally { date.mockRestore(); }
+    });
+    it("charges project-memory preparation against the public handler deadline", async () => {
+        const f = fixture();
+        const started = Date.now();
+        const date = vi.spyOn(Date, "now").mockReturnValue(started);
+        const context = { loadContext: vi.fn(async () => { date.mockReturnValue(started + 101); return {}; }) };
+        const backend = vi.spyOn(storage, "getStorage").mockResolvedValue(context as unknown as Awaited<ReturnType<typeof storage.getStorage>>);
+        try {
+            const reply = await prismInferHandler(ask({ project: "fixture-project", context_depth: "quick", timeout_ms: 100 }), f.deps);
+            expect(reply.structuredContent).toMatchObject({ backend: "refused", gate_outcome: { reason: "timeout" } });
+            expect(context.loadContext).toHaveBeenCalledOnce();
+            expect(f.omlx.detect).not.toHaveBeenCalled();
+            expect(f.omlx.generate).not.toHaveBeenCalled();
+        } finally { backend.mockRestore(); date.mockRestore(); }
+    });
+    it("serves deterministic safety while another request holds the device queue", async () => {
+        const f = fixture();
+        let release!: () => void, entered!: () => void;
+        const held = new Promise<void>(resolve => { release = resolve; });
+        const occupied = new Promise<void>(resolve => { entered = resolve; });
+        const lease = withInferenceResourceLease(true, async () => { entered(); await held; });
+        await occupied;
+        const result = runInfer(ask({ prompt: "I want to kill myself", timeout_ms: 10 }), f.deps);
+        try {
+            const beforeRelease = await Promise.race([result, new Promise<void>(resolve => setImmediate(resolve))]);
+            expect(beforeRelease).toMatchObject({ backend: "safety_gate", output: CRISIS_RESPONSE });
+            expect(f.omlx.detect).not.toHaveBeenCalled();
+        } finally { release(); await lease; await result; }
+    });
+    it.each(['bounded', 'signal-only'])('OR retains the device lease while a timed-out limits probe settles (%s)', async contextKind => {
+        _resetClassifierLimitsForTest();
+        const f = fixture(), id = 'vendor/worker:lease-proof';
+        f.deps.ollamaUrl = `http://fixture.invalid/${contextKind}`;
+        const events: string[] = [];
+        let mono = 0, finish!: () => void, began!: () => void, pending: Promise<unknown> | undefined;
+        const clock = vi.spyOn(performance, 'now').mockImplementation(() => mono), originalFetch = globalThis.fetch;
+        const running = new Promise<void>(resolve => { finish = resolve; });
+        const started = new Promise<void>(resolve => { began = resolve; });
+        _setOrdinaryLeaseForTest(async () => { events.push('acquired'); return async () => { events.push('released'); }; });
+        f.deps.listTags = async () => new Set([id, 'prism-coder:4b', 'prism-coder:9b']);
+        f.deps.selectedOllamaModel = async () => ({ tag: id, ctxTokens: 32768, weightsGb: 1, minFreeGb: 3 });
+        f.deps.secondReadPolicy = async () => parseSecondReadPolicy(SECOND_READ_TEXT, createHash('sha256').update(SECOND_READ_TEXT).digest('hex'));
+        f.deps.callLayer1 = vi.fn(async (text) => text === 'Which shade is darker?' ? 'UNCERTAIN' as const : 'OBVIOUS_NOT_RESERVED' as const);
+        // Exercise the actual limits probe and its HTTP path, not an injected probe.
+        f.deps.probeClassifierLimits = undefined;
+        globalThis.fetch = (async (url: Parameters<typeof fetch>[0]) => {
+            if (String(url).endsWith('/api/show')) { mono = 31000; return new Response(JSON.stringify({ system: '', parameters: 'num_ctx 32768' })); }
+            if (String(url).endsWith('/api/chat')) {
+                events.push('probe-started'); began(); await running; events.push('probe-settled');
+                return new Response(JSON.stringify({ prompt_eval_count: 64 }));
+            }
+            return new Response(JSON.stringify({ models: [{ name: 'prism-coder:9b', context_length: 32768 }, { name: 'prism-coder:4b', context_length: 32768 }] }));
+        }) as typeof fetch;
+        try {
+            pending = runInfer(ask({ local_backend: 'ollama', local_model: id, prompt: 'Which shade is darker?',
+                messages: [{ role: 'user', content: 'The shades are Sky Blue and Moss Green.' }, { role: 'assistant', content: 'Noted.' }] }), f.deps,
+                contextKind === 'bounded' ? { requiredLocalBackend: 'ollama' } : { signal: new AbortController().signal });
+            await started; await new Promise(resolve => setImmediate(resolve));
+            expect(events).not.toContain('released');
+            finish(); await pending;
+            expect(events.indexOf('released')).toBeGreaterThan(events.lastIndexOf('probe-settled'));
+            expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally {
+            finish?.(); await pending?.catch(() => undefined); clock.mockRestore(); globalThis.fetch = originalFetch;
+            _setOrdinaryLeaseForTest(async () => async () => {});
+        }
+    });
+    it.each([
+        ['busy', new OmlxError('omlx_resource_busy')], ['quarantined', new OmlxError('omlx_provider_quarantined')],
+        ['maintenance', new Error('Synthetic maintenance requires operator recovery')],
+        ['filesystem', Object.assign(new Error('Synthetic maintenance file is unreadable'), { code: 'EACCES' })],
+    ] as const)('LC Auto preserves the device error %s', async (_reason, error) => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: 'ollama', effective: 'ollama', configured: true, envOverride: null });
+        f.deps.codingModel = vi.fn(async () => 'vendor/worker:queued');
+        _setOrdinaryLeaseForTest(async () => { throw error; });
+        try {
+            await expect(runInfer(ask({ local_backend: 'ollama' }), f.deps)).rejects.toBe(error);
+            expect(f.deps.codingModel).not.toHaveBeenCalled();
+        } finally { _setOrdinaryLeaseForTest(async () => async () => {}); }
+    });
+    it.each(['lookup window', 'request timeout', 'Stop'])('LC Auto admission preserves %s after an exclusive wait', async outcome => {
+        const f = fixture(), id = 'vendor/worker:queued', controller = new AbortController();
+        let now = 1000, release!: () => void, began!: () => void, pending: Promise<unknown> | undefined;
+        const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+        const ready = new Promise<void>(resolve => { began = resolve; });
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const blocking = withInferenceResourceLease(true, async () => { began(); await gate; });
+        f.deps.codingPreference = async () => ({ saved: 'ollama', effective: 'ollama', configured: true, envOverride: null });
+        f.deps.codingModel = vi.fn(async () => id);
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => ({ tag: id, ctxTokens: 4096, weightsGb: 1, minFreeGb: 3 });
+        try {
+            await ready;
+            pending = runInfer(ask({ local_backend: 'ollama', timeout_ms: outcome === 'request timeout' ? 1000 : undefined }), f.deps,
+                outcome === 'lookup window' ? undefined : { requiredLocalBackend: 'ollama', signal: controller.signal }).catch(error => error);
+            await new Promise(resolve => setImmediate(resolve));
+            now += 3000; if (outcome === 'Stop') controller.abort();
+            release(); await blocking;
+            const result = await pending;
+            if (outcome === 'lookup window') {
+                expect(result).toMatchObject({ output: OUTPUT });
+                expect(vi.mocked(f.deps.codingModel).mock.calls[0][0].deadlineMs).toBe(now + 2000);
+            } else {
+                expect((result as Error).message).toBe(outcome === 'Stop' ? 'prism_infer: caller_cancelled' : 'prism_infer: timeout');
+                expect(f.deps.codingModel).not.toHaveBeenCalled();
+            }
+        } finally { release?.(); await blocking; await pending?.catch(() => undefined); clock.mockRestore(); }
+    });
+    it.each(['selected', 'Auto'])('LC drains metadata registered while its %s owner is settling', async route => {
+        const f = fixture(), id = 'vendor/worker:late', events: string[] = [];
+        let began!: () => void, reject!: (error: Error) => void, register!: () => void, finish!: () => void;
+        let pending: Promise<unknown> | undefined;
+        const ready = new Promise<void>(resolve => { began = resolve; });
+        const parent = new Promise<void>(resolve => { register = resolve; });
+        const late = new Promise<void>(resolve => { finish = () => { events.push('late-settled'); resolve(); }; });
+        const work = (track?: (promise: Promise<unknown>) => void) => {
+            track?.(parent.then(() => { track?.(late); })); began();
+            return new Promise<never>((_resolve, fail) => { reject = fail; });
+        };
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = (_url, _model, _ceiling, _fetch, options) => work(options?.track);
+        if (route === 'Auto') {
+            f.deps.codingPreference = async () => ({ saved: 'ollama', effective: 'ollama', configured: true, envOverride: null });
+            f.deps.codingModel = options => work(options.track);
+        }
+        _setOrdinaryLeaseForTest(async () => { events.push('acquired'); return async () => { events.push('released'); }; });
+        try {
+            pending = runInfer(ask({ local_backend: 'ollama', local_model: route === 'selected' ? id : undefined }), f.deps).catch(error => error);
+            await ready; reject(new Error(route === 'Auto' ? 'local_coding_selection_timeout' : 'ollama_model_metadata_unavailable'));
+            await new Promise(resolve => setImmediate(resolve)); register();
+            await new Promise(resolve => setImmediate(resolve)); expect(events).not.toContain('released');
+            finish(); await pending; expect(events.indexOf('released')).toBeGreaterThan(events.indexOf('late-settled'));
+        } finally {
+            reject?.(new Error('fixture finished')); register?.(); finish?.(); await pending?.catch(() => undefined);
+            _setOrdinaryLeaseForTest(async () => async () => {});
+        }
+    });
+    it.each([
+        ['sibling failure', 'selected', 'bounded'], ['timeout', 'selected', 'bounded'], ['Stop', 'selected', 'bounded'],
+        ['sibling failure', 'selected', 'context-free'], ['timeout', 'selected', 'context-free'],
+        ['sibling failure', 'Auto', 'context-free'], ['timeout', 'Auto', 'context-free'],
+        ['Stop', 'Auto', 'bounded'], ['Stop', 'Auto', 'signal-only'],
+    ] as const)('inventory ownership waits after %s (%s, %s)', async (failure, route, contextKind) => {
+        const f = fixture(), id = 'vendor/worker:inventory-proof', controller = new AbortController();
+        const events: string[] = [];
+        let finish!: () => void, began!: () => void, pending: Promise<unknown> | undefined;
+        const waiting = new Promise<void>(resolve => { finish = resolve; });
+        const started = new Promise<void>(resolve => { began = resolve; });
+        const originalFetch = globalThis.fetch;
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.listLoaded = async () => new Set();
+        // No injected selection: exercise its actual concurrent metadata work.
+        f.deps.selectedOllamaModel = undefined;
+        if (route === 'Auto') {
+            f.deps.codingPreference = async () => ({ saved: 'ollama', effective: 'ollama', configured: true, envOverride: null });
+            f.deps.codingModel = options => selectUnassignedCodingModel(options, { recommend: async () => undefined });
+        }
+        _setOrdinaryLeaseForTest(async () => { events.push('acquired'); return async () => { events.push('released'); }; });
+        globalThis.fetch = (async (url: Parameters<typeof fetch>[0]) => {
+            if (String(url).endsWith('/api/tags')) return failure === 'sibling failure'
+                ? new Response('', { status: 503 })
+                : new Response(JSON.stringify({ models: [{ name: id, size: 1024 ** 3 }] }));
+            expect(String(url)).toMatch(/\/api\/ps$/);
+            events.push('inventory-started'); began(); await waiting;
+            events.push('inventory-settled');
+            return new Response(JSON.stringify({ models: [] }));
+        }) as typeof fetch;
+        if (failure === 'timeout') vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        try {
+            pending = runInfer(ask({ local_backend: 'ollama', local_model: route === 'Auto' ? undefined : id }), f.deps,
+                contextKind === 'context-free' ? undefined : contextKind === 'signal-only' ? { signal: controller.signal }
+                    : { requiredLocalBackend: 'ollama', signal: controller.signal }).catch(error => error);
+            await started;
+            if (failure === 'Stop') controller.abort();
+            if (failure === 'timeout') await vi.advanceTimersByTimeAsync(3001);
+            await new Promise(resolve => setImmediate(resolve));
+            expect(events).toContain('acquired');
+            expect(events).not.toContain('released');
+            finish(); const outcome = await pending;
+            if (failure === 'Stop') expect((outcome as Error).message).toContain('caller_cancelled');
+            expect(events.indexOf('released')).toBeGreaterThan(events.indexOf('inventory-settled'));
+            expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally {
+            finish?.(); await pending?.catch(() => undefined); globalThis.fetch = originalFetch;
+            if (failure === 'timeout') vi.useRealTimers();
+            _setOrdinaryLeaseForTest(async () => async () => {});
+        }
+    });
+    it.each(['/api/ps', '/api/show'])('inventory ownership waits for response-body cancellation at %s', async bodyPath => {
+        const f = fixture(), id = 'vendor/worker:body-proof', controller = new AbortController(), events: string[] = [];
+        const originalFetch = globalThis.fetch;
+        let began!: () => void, finish!: () => void, pending: Promise<unknown> | undefined;
+        const started = new Promise<void>(resolve => { began = resolve; });
+        const cancellation = new Promise<void>(resolve => { finish = resolve; });
+        const body = new ReadableStream<Uint8Array>({
+            pull() { began(); },
+            async cancel() { events.push('cancel-started'); await cancellation; events.push('cancel-settled'); },
+        }, { highWaterMark: 0 });
+        f.deps.listTags = async () => new Set([id]); f.deps.listLoaded = async () => new Set();
+        f.deps.selectedOllamaModel = undefined;
+        _setOrdinaryLeaseForTest(async () => { events.push('acquired'); return async () => { events.push('released'); }; });
+        globalThis.fetch = (async (url: Parameters<typeof fetch>[0]) => String(url).endsWith(bodyPath) ? new Response(body)
+            : new Response(JSON.stringify(String(url).endsWith('/api/tags')
+                ? { models: [{ name: id, size: 1024 ** 3 }] } : { models: [] }))) as typeof fetch;
+        try {
+            pending = runInfer(ask({ local_backend: 'ollama', local_model: id }), f.deps,
+                { requiredLocalBackend: 'ollama', signal: controller.signal }).catch(error => error);
+            await started; controller.abort(); await new Promise(resolve => setImmediate(resolve));
+            expect(events).toContain('cancel-started'); expect(events).not.toContain('released');
+            finish(); await pending;
+            expect(events.indexOf('released')).toBeGreaterThan(events.indexOf('cancel-settled'));
+            expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally {
+            finish?.(); await pending?.catch(() => undefined); globalThis.fetch = originalFetch;
+            _setOrdinaryLeaseForTest(async () => async () => {});
+        }
+    });
+    it.each(['expiry', 'stop'])('OR production inventory cannot start another exchange after %s', async how => {
+        const f = fixture(), live = productionInferDeps(), controller = new AbortController();
+        let now = 1000;
+        const clock = vi.spyOn(Date, 'now').mockImplementation(() => now), originalFetch = globalThis.fetch;
+        f.deps.listTags = live.listTags; f.deps.listLoaded = live.listLoaded;
+        const fetcher = vi.fn(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+            expect(String(url)).toMatch(/\/api\/tags$/); expect(init?.signal).toBeInstanceOf(AbortSignal);
+            if (how === 'expiry') now += 180000; else controller.abort();
+            return new Response(JSON.stringify({ models: [{ name: 'vendor/worker:exact' }] }));
+        });
+        globalThis.fetch = fetcher as unknown as typeof fetch;
+        try {
+            await expect(runInfer(ask({ local_backend: 'ollama', local_model: 'vendor/worker:exact', timeout_ms: 180000 }), f.deps,
+                { requiredLocalBackend: 'ollama', signal: controller.signal })).rejects.toThrow(how === 'expiry' ? 'timeout' : 'caller_cancelled');
+            expect(fetcher).toHaveBeenCalledOnce(); expect(f.deps.callLayer1).not.toHaveBeenCalled();
+            expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally { clock.mockRestore(); globalThis.fetch = originalFetch; }
+    });
+    it("ownership repair keeps the whole request pending after a second-read timeout until its classifier settles", async () => {
+        const f = fixture(), id = 'vendor/worker:exact';
+        let monotonic = 0, finish!: () => void, began!: () => void, settled = false;
+        const clock = vi.spyOn(performance, 'now').mockImplementation(() => monotonic);
+        const started = new Promise<void>(resolve => { began = resolve; });
+        const stopped = new Promise<void>(resolve => { finish = resolve; });
+        f.deps.listTags = async () => new Set([id, 'prism-coder:4b', 'prism-coder:9b']);
+        f.deps.selectedOllamaModel = async () => ({ tag: id, ctxTokens: 32768, weightsGb: 1, minFreeGb: 3 });
+        f.deps.secondReadPolicy = async () => parseSecondReadPolicy(SECOND_READ_TEXT, createHash('sha256').update(SECOND_READ_TEXT).digest('hex'));
+        f.deps.probeClassifierLimits = async () => ({ numCtx: 32768, overheadBound: 100 });
+        f.deps.callLayer1 = vi.fn(async (text, _url, model) => {
+            if (model === 'prism-coder:9b') { monotonic = 31000; began(); await stopped; return 'OBVIOUS_NOT_RESERVED' as const; }
+            return text === 'Which option is darkest?' ? 'UNCERTAIN' as const : 'OBVIOUS_NOT_RESERVED' as const;
+        });
+        try {
+            const pending = runInfer(ask({ local_backend: 'ollama', local_model: id, prompt: 'Which option is darkest?',
+                messages: [{ role: 'user', content: 'The options are Sky Blue and Moss Green.' }, { role: 'assistant', content: 'Noted.' }] }), f.deps,
+                { requiredLocalBackend: 'ollama' }).finally(() => { settled = true; });
+            await started; await new Promise(resolve => setImmediate(resolve));
+            expect(settled).toBe(false); expect(f.deps.callLocal).not.toHaveBeenCalled();
+            finish(); const result = await pending;
+            expect(result.gate_outcome?.status).toBe('refused'); expect(settled).toBe(true);
+            expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally { finish?.(); clock.mockRestore(); }
+    });
+    it("ownership repair stops the real template probe before its generation after deadline expiry", async () => {
+        const f = fixture(), id = 'vendor/worker:template-deadline';
+        let now = 1000;
+        const clock = vi.spyOn(Date, 'now').mockImplementation(() => now), originalFetch = globalThis.fetch;
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => ({ tag: id, ctxTokens: 32768, weightsGb: 1, minFreeGb: 3 });
+        f.deps.probeTemplateOverhead = undefined;
+        const fetcher = vi.fn(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+            expect(init?.signal).toBeInstanceOf(AbortSignal);
+            expect(String(url)).toMatch(/\/api\/chat$/);
+            now += 180000;
+            return new Response(JSON.stringify({ prompt_eval_count: 100 }));
+        });
+        globalThis.fetch = fetcher as unknown as typeof fetch;
+        try {
+            await expect(runInfer(ask({ local_backend: 'ollama', local_model: id, timeout_ms: 180000, system: 'Use the supplied module.',
+                messages: [{ role: 'user', content: 'Review the input helper.' }, { role: 'assistant', content: 'I can review it.' }] }), f.deps,
+                { requiredLocalBackend: 'ollama' })).rejects.toThrow('timeout');
+            expect(fetcher).toHaveBeenCalledOnce(); expect(f.deps.callLocal).toHaveBeenCalledOnce();
+            expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally { clock.mockRestore(); globalThis.fetch = originalFetch; }
+    });
+    it("RH generation rechecks its deadline after Modelfile metadata before HTTP dispatch", async () => {
+        let now = 1000;
+        const clock = vi.spyOn(Date, "now").mockImplementation(() => now), originalFetch = globalThis.fetch;
+        const fetcher = vi.fn(async () => { now = 2000; return new Response(JSON.stringify({ system: '' })); });
+        globalThis.fetch = fetcher as unknown as typeof fetch;
+        try {
+            expect(await callOllamaGenerate('http://fixture.invalid', 'rh-deadline:model', 'Explain code', undefined, 512, 0, 1000,
+                false, undefined, undefined, 4096, { deadlineMs: 2000 })).toEqual({ ok: false, reason: 'timeout' });
+            expect(fetcher).toHaveBeenCalledOnce(); expect(fetcher.mock.calls[0][0]).toMatch(/\/api\/show$/);
+        } finally { clock.mockRestore(); globalThis.fetch = originalFetch; }
+    });
+    it("RH expired history classifier cannot issue a second read or generation", async () => {
+        const f = fixture(), id = "vendor/worker:exact";
+        let now = 1000;
+        const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => ({ tag: id, ctxTokens: 32768, weightsGb: 1, minFreeGb: 3 });
+        f.deps.callLayer1 = vi.fn(async () => { now += 180000; return "UNCERTAIN" as const; });
+        try {
+            await expect(runInfer(ask({ local_backend: 'ollama', local_model: id, timeout_ms: 180000,
+                messages: [{ role: 'user', content: 'Review the value helper.' }, { role: 'assistant', content: 'I can review it.' }] }), f.deps,
+                { requiredLocalBackend: 'ollama' })).rejects.toThrow('timeout');
+            expect(f.deps.callLayer1).toHaveBeenCalledOnce(); expect(f.deps.callLocal).not.toHaveBeenCalled();
+            expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally { clock.mockRestore(); }
+    });
+    it("RH Ollama retries consume one deadline including metadata and classification", async () => {
+        const f = fixture(), id = "vendor/worker:exact";
+        let now = 1000;
+        const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => { now += 1000; return { tag: id, ctxTokens: 32768, weightsGb: 1, minFreeGb: 3 }; };
+        f.deps.callLayer1 = vi.fn(async () => { now += 4000; return "OBVIOUS_NOT_RESERVED" as const; });
+        const timeouts: number[] = [];
+        f.deps.callLocal = vi.fn(async (...args) => {
+            timeouts.push(args[6]); now += 60000;
+            return timeouts.length === 1 ? { ok: false as const, reason: "think_only" }
+                : { ok: true as const, text: OUTPUT, doneReason: "stop" };
+        });
+        try {
+            const result = await runInfer(ask({ local_backend: "ollama", local_model: id, timeout_ms: 180000, think: true }), f.deps,
+                { requiredLocalBackend: "ollama" });
+            expect(result.output).toBe(OUTPUT); expect(timeouts).toEqual([175000, 115000]);
+            expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally { clock.mockRestore(); }
+    });
+    it("RH Ollama expiration cannot dispatch another worker attempt", async () => {
+        const f = fixture(), id = "vendor/worker:exact";
+        let now = 1000;
+        const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => ({ tag: id, ctxTokens: 32768, weightsGb: 1, minFreeGb: 3 });
+        f.deps.callLocal = vi.fn(async () => { now += 180000; return { ok: false as const, reason: "think_only" }; });
+        try {
+            await expect(runInfer(ask({ local_backend: "ollama", local_model: id, timeout_ms: 180000, think: true }), f.deps,
+                { requiredLocalBackend: "ollama" })).rejects.toThrow("timeout");
+            expect(f.deps.callLocal).toHaveBeenCalledOnce(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally { clock.mockRestore(); }
+    });
+    it("RH expired answer check cannot refresh its retry deadline or serve a draft", async () => {
+        const f = fixture(), id = "vendor/worker:exact";
+        let now = 1000;
+        const clock = vi.spyOn(Date, "now").mockImplementation(() => now), originalFetch = globalThis.fetch;
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => ({ tag: id, ctxTokens: 32768, weightsGb: 1, minFreeGb: 3 });
+        f.deps.probeTemplateOverhead = async () => 0;
+        f.deps.callLocal = vi.fn(async () => { now += 179500; return { ok: true as const, text: OUTPUT, doneReason: "stop" }; });
+        const fetcher = vi.fn(async () => { now += 500; return new Response(JSON.stringify({ done: true, done_reason: "stop", message: { content: "invalid verdict" } })); });
+        globalThis.fetch = fetcher as unknown as typeof fetch;
+        try {
+            await expect(runInfer(ask({ local_backend: "ollama", local_model: id, timeout_ms: 180000,
+                messages: [{ role: "user", content: "A helper should return its input." }, { role: "assistant", content: "I can review that helper." }] }), f.deps,
+                { requiredLocalBackend: "ollama" })).rejects.toThrow("timeout");
+            expect(fetcher).toHaveBeenCalledOnce(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+        } finally { clock.mockRestore(); globalThis.fetch = originalFetch; }
+    });
+    it("RH realistic file continuation sizes the selected model and checks the full answer", async () => {
+        const f = fixture(), id = "vendor/worker:exact", file = "export const fixtureValue = 1;\n".repeat(400);
+        const metadata = vi.fn(async (url: Parameters<typeof fetch>[0]) => new Response(JSON.stringify(String(url).endsWith('/api/tags')
+            ? { models: [{ name: id, size: 1024 ** 3 }] } : String(url).endsWith('/api/ps') ? { models: [] }
+                : { model_info: { 'general.architecture': 'fixture', 'general.parameter_count': 9e9, 'fixture.context_length': 65536,
+                    'fixture.block_count': 32, 'fixture.embedding_length': 4096, 'fixture.attention.head_count': 32, 'fixture.attention.head_count_kv': 8 }, capabilities: ['completion'] })));
+        f.deps.listTags = async () => new Set([id]);
+        let choice: any;
+        f.deps.selectedOllamaModel = async (url, model, ceiling, _fetch, options) =>
+            choice = await selectedOllamaCodingModel(url, model, ceiling, metadata as unknown as typeof fetch, options);
+        f.deps.probeTemplateOverhead = async () => 1300;
+        f.deps.groundAnswer = vi.fn(async () => ({ verdict: "GROUNDED" as const }));
+        const result = await runInfer(ask({ local_backend: "ollama", local_model: id, max_tokens: 1024, timeout_ms: 180000,
+            messages: [{ role: "user", content: "Read the fixture module." }, { role: "assistant", content: "I read it." }],
+            prompt: "Explain this module:\n" + file }), f.deps, { requiredLocalBackend: "ollama" });
+        expect(choice.ctxTokens).toBeGreaterThan(16000); expect(choice.minFreeGb).toBeGreaterThan(3);
+        expect(result.output).toBe(OUTPUT);
+        const call = vi.mocked(f.deps.callLocal).mock.calls[0];
+        expect(call[1]).toBe(id); expect(call[2]).toContain(file); expect(call[10]).toBe(choice.ctxTokens);
+        expect(call[11]).toMatchObject({ deadlineMs: expect.any(Number) });
+        expect(f.deps.groundAnswer).toHaveBeenCalledOnce(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+        expect(metadata.mock.calls.every(([url]) => !String(url).endsWith('/api/chat'))).toBe(true);
+    });
+    it("refuses a changed dashboard backend before any generation", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "ollama", effective: "ollama", configured: false, envOverride: null });
+        expect(await runInfer(ask({ local_backend: undefined }), f.deps, { requiredLocalBackend: "omlx" }))
+            .toMatchObject({ backend: "refused", gate_outcome: { reason: "bridge_requires_omlx" } });
+        expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it("does not start detection for a cancelled request", async () => {
+        const f = fixture(), controller = new AbortController(); controller.abort();
+        await expect(runInfer(ask(), f.deps, { signal: controller.signal })).rejects.toThrow("caller_cancelled");
+        expect(f.omlx.detect).not.toHaveBeenCalled(); expect(f.omlx.generate).not.toHaveBeenCalled();
+    });
+    it("passes cancellation to the owner and waits for its stop before releasing the device", async () => {
+        const f = fixture(), controller = new AbortController();
+        let began!: () => void, stop!: () => void, settled = false;
+        const started = new Promise<void>(resolve => { began = resolve; });
+        const stopped = new Promise<void>(resolve => { stop = resolve; });
+        f.omlx.acquire = vi.fn(async () => async () => { f.events.push("release"); });
+        f.omlx.generate = vi.fn(async (_target, _request, signal) => {
+            began(); await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+            f.events.push("abort"); await stopped; f.events.push("stop-proved");
+            return { ok: false as const, reason: "caller_cancelled" };
+        });
+        const pending = runInfer(ask({ local_model: MODEL }), f.deps, { signal: controller.signal })
+            .catch(error => error).finally(() => { settled = true; });
+        await started; controller.abort(); await new Promise(resolve => setTimeout(resolve, 10));
+        expect(settled).toBe(false); expect(f.events).not.toContain("release");
+        stop(); await pending;
+        expect(f.events.indexOf("stop-proved")).toBeLessThan(f.events.indexOf("release"));
+        expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.deps.callLocal).not.toHaveBeenCalled();
+    });
+});
+
+describe("saved execution roles", () => {
+    it("trusted Ollama bridge refuses an oMLX role before acquiring a device", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
+            assignment: { runtime: "omlx", model: MODEL } });
+        const result = await runInfer(ask({ local_backend: undefined }), f.deps, { requiredLocalBackend: "ollama" });
+        expect(result).toMatchObject({ backend: "refused", output: "", used_cloud: false,
+            gate_outcome: { reason: "bridge_requires_ollama" } });
+        expect(f.omlx.acquire).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it("Ollama bridge cancellation during metadata starts no generation", async () => {
+        const f = fixture(), controller = new AbortController(), id = "vendor/worker:exact";
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => {
+            controller.abort();
+            return { tag: id, ctxTokens: 4096, weightsGb: 1, minFreeGb: 3 };
+        };
+        await expect(runInfer(ask({ local_backend: "ollama", local_model: id }), f.deps,
+            { signal: controller.signal, requiredLocalBackend: "ollama" })).rejects.toThrow("caller_cancelled");
+        expect(f.deps.callLayer1).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it("Ollama bridge cancellation during classification dispatches no worker or second read", async () => {
+        const f = fixture(), controller = new AbortController(), id = "vendor/worker:exact";
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => ({ tag: id, ctxTokens: 4096, weightsGb: 1, minFreeGb: 3 });
+        f.deps.callLayer1 = vi.fn(async () => { controller.abort(); return "OBVIOUS_NOT_RESERVED" as const; });
+        await expect(runInfer(ask({ local_backend: "ollama", local_model: id }), f.deps,
+            { signal: controller.signal, requiredLocalBackend: "ollama" })).rejects.toThrow("caller_cancelled");
+        expect(f.deps.callLayer1).toHaveBeenCalledOnce();
+        expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it("Ollama bridge cancellation waits for its in-flight call and withholds output", async () => {
+        const f = fixture(), controller = new AbortController(), id = "vendor/worker:exact";
+        f.deps.listTags = async () => new Set([id]);
+        f.deps.selectedOllamaModel = async () => ({ tag: id, ctxTokens: 4096, weightsGb: 1, minFreeGb: 3 });
+        let started!: () => void, complete!: () => void, settled = false;
+        const began = new Promise<void>(resolve => { started = resolve; });
+        f.deps.callLocal = vi.fn(async () => {
+            started(); await new Promise<void>(resolve => { complete = resolve; });
+            return { ok: true as const, text: OUTPUT };
+        });
+        const result = runInfer(ask({ local_backend: "ollama", local_model: id }), f.deps,
+            { signal: controller.signal, requiredLocalBackend: "ollama" }).catch(error => error).finally(() => { settled = true; });
+        await began; controller.abort(); await new Promise(resolve => setTimeout(resolve, 10));
+        expect(settled).toBe(false); complete();
+        expect((await result).message).toContain("caller_cancelled");
+        expect(f.deps.callLocal).toHaveBeenCalledOnce(); expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it.each([undefined,'route','chat'] as const)('coding assignments do not retarget non-code mode %s', async mode => {
+        for (const runtime of ['host','synalux','omlx','ollama'] as const) {
+            const f = fixture();
+            const profile = {id:'a'.repeat(64),provider:'fixture',model:'fixture-host',effort:'high',status:'configured' as const};
+            f.deps.hostProfiles = vi.fn(async () => [profile]);
+            f.deps.codingPreference = vi.fn(async (...args: any[]) => {
+                const plain = {saved:'auto',effective:'auto',configured:false,envOverride:null};
+                if (args[4] === false) return plain as any;
+                return {...plain,effective:runtime === 'omlx' || runtime === 'ollama' ? runtime : 'auto',
+                    assignment:runtime === 'host' ? {runtime,profile:profile.id} : runtime === 'synalux' ? {runtime} : {runtime,model:'saved:code'}} as any;
+            });
+            await runInfer(ask({mode,local_backend:undefined}),f.deps).catch(() => undefined);
+            expect(f.deps.callLocal, runtime).toHaveBeenCalled();
+            expect(f.deps.callCloud, runtime).not.toHaveBeenCalled();
+            expect(f.deps.hostProfiles, runtime).not.toHaveBeenCalled();
+            expect(f.omlx.generate, runtime).not.toHaveBeenCalled();
+            expect((f.deps.callLocal as any).mock.calls.every((call: any[]) => call[0].model !== 'saved:code')).toBe(true);
+        }
+    });
+    it("an exact local pin cannot exhaust RAM and silently spend cloud credits", async () => {
+        const f = fixture(); f.deps.freemem = () => 0;
+        f.deps.listTags = async () => new Set(["exact:model"]);
+        f.deps.selectedOllamaModel = async () => ({ tag: "exact:model", ctxTokens: 4096, weightsGb: 9, minFreeGb: 11 });
+        await runInfer(ask({ local_backend: "ollama", local_model: "exact:model", cloud_fallback: true }), f.deps).catch(() => undefined);
+        expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.deps.callLocal).not.toHaveBeenCalled();
+    });
+    it("uses a saved reviewer model with requested/actual provenance", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "omlx", configured: true, envOverride: null,
+            assignment: { runtime: "omlx", model: MODEL } });
+        const result = await runInfer(ask({ local_backend: undefined, local_role: "reviewer" }), f.deps);
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, expect.objectContaining({ deadlineMs: expect.any(Number) }));
+        expect(result.selection).toMatchObject({ source: "role_assignment", requested_model: MODEL, actual_model: MODEL, actual_runtime: "omlx", actual_effort: null });
+    });
+    it("uses entitled Synalux cloud directly, leaving device providers unused", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", configured: false, envOverride: null, assignment: { runtime: "synalux" } });
+        const result = await runInfer(ask({ local_backend: undefined, cloud_fallback: undefined }), f.deps);
+        expect(result).toMatchObject({ used_cloud: true, selection: { source: "role_assignment", requested_runtime: "synalux", requested_model: null, actual_model: null } });
+        expect(f.deps.callCloud).toHaveBeenCalledOnce(); expect(f.deps.listTags).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it("keeps reserved signaling and output safety on a direct Synalux role", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", configured: false, envOverride: null,
+            assignment: { runtime: "synalux" } });
+        f.deps.callCloud = vi.fn(async () => ({ ok: true, output: "Here is how to overdose on pills", backend: "synalux" }));
+        const result = await runInfer(ask({ prompt: "Draft a physical restraint protocol for a client.", local_backend: undefined,
+            cloud_fallback: undefined }), f.deps);
+        expect(f.deps.callCloud).toHaveBeenCalledWith(expect.any(String), expect.any(Number), expect.any(Number),
+            expect.objectContaining({ reserved: true }));
+        expect(result.output).toBe(CRISIS_RESPONSE);
+        expect(f.deps.callLayer1).not.toHaveBeenCalled();
+        expect(f.deps.listTags).not.toHaveBeenCalled();
+        expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it("refuses a weak backend returned for reserved direct Synalux work", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", configured: false, envOverride: null,
+            assignment: { runtime: "synalux" } });
+        f.deps.callCloud = vi.fn(async () => ({ ok: true, output: "unsafe weak answer", backend: "ollama-prism-coder:9b" }));
+        const result = await runInfer(ask({ prompt: "Draft a physical restraint protocol for a client.", local_backend: undefined,
+            cloud_fallback: undefined }), f.deps);
+        expect(result).toMatchObject({ backend: "refused", output: "", used_cloud: false,
+            gate_outcome: { status: "refused", reason: "layer1_reserved", served_anyway: false } });
+        expect(result.attempts).toEqual(expect.arrayContaining([{ tier: "synalux", reason: "reserved_weak_backend:ollama-prism-coder:9b" }]));
+    });
+    it("does not reinterpret a local-only caller or a free plan as cloud consent", async () => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", configured: false, envOverride: null, assignment: { runtime: "synalux" } });
+        await expect(runInfer(ask({ local_backend: undefined }), f.deps)).rejects.toThrow("cloud_explicitly_forbidden");
+        f.deps.entitlements = FREE_ENTITLEMENTS;
+        expect(await runInfer(ask({ local_backend: undefined, cloud_fallback: undefined }), f.deps)).toMatchObject({ backend: "refused", gate_outcome: { reason: "cloud_not_in_plan" } });
+        expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.deps.listTags).not.toHaveBeenCalled();
+    });
+    it("creates a request-bound host handoff without claiming execution", async () => {
+        const f = fixture(), profile = { id: "a".repeat(64), provider: "claude", model: "example-model", effort: "high", status: "configured" as const };
+        f.deps.codingPreference = async () => ({ saved: "auto", effective: "auto", configured: false, envOverride: null, assignment: { runtime: "host", profile: profile.id } });
+        f.deps.hostProfiles = async () => [profile];
+        const result = await runInfer(ask({ local_backend: undefined, local_role: "reviewer" }), f.deps);
+        expect(result).toMatchObject({ backend: "host_handoff_required", output: "", used_cloud: false,
+            host_handoff: { executed: false, request: { role: "reviewer", model: "example-model", effort: "high" } },
+            selection: { actual_model: null, actual_runtime: null } });
+        expect(f.deps.callCloud).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+        f.deps.hostProfiles = async () => [];
+        await expect(runInfer(ask({ local_backend: undefined }), f.deps)).rejects.toThrow("execution_host_unavailable");
+    });
+});
+
 describe("explicit oMLX through the centralized prism_infer pipeline", () => {
+    it.each([undefined, "route", "chat", "code"] as const)("keeps saved Ollama for mode %s despite a healthy oMLX provider", async mode => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "ollama", effective: "ollama", configured: true, envOverride: null });
+        const result = await runInfer(ask({ mode, local_backend: undefined }), f.deps);
+        expect(result.backend).toMatch(/^ollama-/);
+        expect(f.deps.callLocal).toHaveBeenCalled();
+        expect(f.omlx.detect).not.toHaveBeenCalled();
+        expect(f.omlx.acquire).not.toHaveBeenCalled();
+        expect(f.omlx.generate).not.toHaveBeenCalled();
+    });
+    it.each([undefined, "route", "chat", "code"] as const)("does not substitute oMLX when Ollama fails in mode %s", async mode => {
+        for (const failure of ["inventory", "missing_model", "generation"] as const) {
+            const f = fixture();
+            f.deps.codingPreference = async () => ({ saved: "ollama", effective: "ollama", configured: true, envOverride: null });
+            if (failure === "inventory") f.deps.listTags = vi.fn(async () => null);
+            if (failure === "missing_model") f.deps.listTags = vi.fn(async () => new Set<string>());
+            if (failure === "generation") f.deps.callLocal = vi.fn(async () => ({ ok: false, reason: "provider_unavailable" }));
+            const result = await runInfer(ask({ mode, local_backend: undefined }), f.deps)
+                .catch(error => ({ backend: "exception", error }));
+            expect(["refused", "exception"]).toContain(result.backend);
+            expect(f.omlx.detect, failure).not.toHaveBeenCalled();
+            expect(f.omlx.acquire, failure).not.toHaveBeenCalled();
+            expect(f.omlx.generate, failure).not.toHaveBeenCalled();
+            expect(f.deps.callCloud, failure).not.toHaveBeenCalled();
+        }
+    });
+    it.each([undefined, "route", "chat"] as const)("honors saved oMLX for text mode %s without Ollama inference", async mode => {
+        const f = fixture();
+        const output = mode === "chat" ? "The saved local notes describe the project." : '<tool_call>{"name":"knowledge_search","arguments":{"query":"project"}}</tool_call>';
+        f.deps.codingPreference = vi.fn(async () => ({ saved: "omlx" as const, effective: "omlx" as const, configured: true, envOverride: null,
+            models: { omlx: { coder: MODEL } } }));
+        f.deps.callRouteGuard = vi.fn(async () => { throw new Error("must stay local"); });
+        f.omlx.generate = vi.fn(async () => ({ ok: true as const, text: output, doneReason: "stop" }));
+        const result = await runInfer(ask({ mode, local_backend: undefined, prompt: "Look up my saved project notes." }), f.deps);
+        expect(result).toMatchObject({ backend: "omlx", model_picked: MODEL, used_cloud: false, output });
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, expect.objectContaining({ deadlineMs: expect.any(Number) }));
+        expect(f.deps.listTags).not.toHaveBeenCalled();
+        expect(f.deps.listLoaded).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+        expect(f.deps.callRouteGuard).not.toHaveBeenCalled();
+    });
+    it.each(["route", "chat"] as const)("never substitutes Ollama when the saved oMLX %s model is unavailable", async mode => {
+        const f = fixture();
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
+            models: { omlx: { coder: MODEL } } });
+        f.omlx.detect = vi.fn(async () => { throw new OmlxError("omlx_model_not_advertised"); });
+        expect(await runInfer(ask({ mode, local_backend: undefined, cloud_fallback: true }), f.deps))
+            .toMatchObject({ backend: "refused", gate_outcome: { reason: "omlx_model_not_advertised" } });
+        expect(f.deps.listTags).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it("retains the advertised-tool boundary for oMLX routing without a portal call", async () => {
+        const f = fixture();
+        const draft = '<tool_call>{"name":"brave_web_search","arguments":{"query":"project"}}</tool_call>';
+        f.omlx.generate = vi.fn(async () => ({ ok: true as const, text: draft, doneReason: "stop" }));
+        f.deps.callRouteGuard = vi.fn(async () => { throw new Error("must stay local"); });
+        const result = await runInfer(ask({ mode: "route", allowed_tools: ["knowledge_search"] }), f.deps);
+        expect(result.route_guard).toMatchObject({ action: "suppressed", source: "local" });
+        expect(result.output).not.toBe(draft);
+        expect(f.deps.callRouteGuard).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+    });
+    it.each([undefined, "route", "chat"] as const)("retains the plan ceiling without switching provider for mode %s", async mode => {
+        const f = fixture();
+        f.deps.entitlements = { ...ENT, model_ceiling: "9b" };
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
+            models: { omlx: { coder: MODEL } } });
+        expect(await runInfer(ask({ mode, local_backend: undefined }), f.deps))
+            .toMatchObject({ backend: "refused", gate_outcome: { reason: "omlx_model_ceiling" } });
+        expect(f.omlx.detect).not.toHaveBeenCalled();
+        expect(f.deps.listTags).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+    it.each(["route", "chat"] as const)("accepts explicit oMLX %s through the MCP envelope", async mode => {
+        const f = fixture();
+        const response = await prismInferHandler(ask({ mode, local_model: MODEL, route_guard: "local" }), f.deps);
+        expect(response.isError).not.toBe(true);
+        expect(response.structuredContent).toMatchObject({ backend: "omlx", model_picked: MODEL });
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+    });
     it("binds automatic coding selection in production dependencies", () => {
         expect(productionInferDeps().codingModel).toBe(selectUnassignedCodingModel);
     });
@@ -67,7 +800,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         const result = await runInfer(ask({ local_role }), f.deps);
         expect(result).toMatchObject({ backend: "omlx", model_picked: id, used_cloud: false, output: OUTPUT });
         expect(recommend.mock.calls[0].slice(0, 2)).toEqual(["omlx", local_role]);
-        expect(f.omlx.detect).toHaveBeenCalledWith(id);
+        expect(f.omlx.detect).toHaveBeenCalledWith(id, expect.objectContaining({ deadlineMs: expect.any(Number) }));
         expect(f.deps.listTags).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
     });
     it.each(["coder", "reviewer"] as const)("keeps discovered Ollama %s selection on its exact-model path", async local_role => {
@@ -81,7 +814,8 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         f.deps.selectedOllamaModel = vi.fn(async () => ({ tag: id, ctxTokens: 4096, weightsGb: 1, minFreeGb: 3 }));
         const result = await runInfer(ask({ local_backend: "ollama", local_role }), f.deps);
         expect(result).toMatchObject({ backend: "ollama-" + id, model_picked: id, used_cloud: false, output: OUTPUT });
-        expect(f.deps.selectedOllamaModel).toHaveBeenCalledWith(f.deps.ollamaUrl, id, "27b");
+        expect(f.deps.selectedOllamaModel).toHaveBeenCalledWith(f.deps.ollamaUrl, id, "27b", undefined,
+            { deadlineMs: undefined, signal: undefined, requestedContextTokens: undefined, track: expect.any(Function) });
         expect(vi.mocked(f.deps.callLocal).mock.calls[0][1]).toBe(id);
         expect(f.omlx.detect).not.toHaveBeenCalled(); expect(f.deps.callCloud).not.toHaveBeenCalled();
     });
@@ -105,7 +839,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         });
         f.omlx.detect = vi.fn(async model => createOmlxTarget("http://127.0.0.1:8000/v1", model!, 65536, "synthetic-provider-key"));
         expect(await runInfer(ask(), f.deps)).toMatchObject({ backend: "omlx", model_picked: id, output: OUTPUT });
-        expect(f.omlx.detect).toHaveBeenCalledWith(id);
+        expect(f.omlx.detect).toHaveBeenCalledWith(id, expect.objectContaining({ deadlineMs: expect.any(Number) }));
         expect(recommend).not.toHaveBeenCalled(); expect(inventory).not.toHaveBeenCalled();
     });
     it("refuses a lower oMLX ceiling before automatic discovery", async () => {
@@ -158,7 +892,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         const f = fixture();
         f.deps.codingPreference = vi.fn(async () => ({ saved: "auto", effective: "auto", envOverride: null, configured: true, model: MODEL }));
         expect(await runInfer(ask({ local_backend: undefined }), f.deps)).toMatchObject({ backend: "omlx", model_picked: MODEL });
-        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, expect.objectContaining({ deadlineMs: expect.any(Number) }));
         expect(f.deps.listTags).not.toHaveBeenCalled();
     });
     it("does not consult preferences when a task explicitly names backend and model", async () => {
@@ -171,7 +905,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         f.deps.codingPreference = async () => ({ saved: "ollama", effective: "ollama", configured: false, envOverride: null,
             models: { omlx: { coder: MODEL, reviewer: MODEL } } });
         expect(await runInfer(ask({ local_role }), f.deps)).toMatchObject({ backend: "omlx", model_picked: MODEL });
-        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, expect.objectContaining({ deadlineMs: expect.any(Number) }));
     });
     it.each(["coder", "reviewer"] as const)("uses the selected Ollama %s model without a named-tier fallback", async local_role => {
         const f = fixture(); const id = "org/next-build:tag";
@@ -180,7 +914,8 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
             models: { ollama: { coder: id, reviewer: id } } });
         f.deps.selectedOllamaModel = vi.fn(async () => ({ tag: id, ctxTokens: 4096, weightsGb: 10, minFreeGb: 15 }));
         expect(await runInfer(ask({ local_backend: "ollama", local_role }), f.deps)).toMatchObject({ backend: "ollama-" + id, model_picked: id });
-        expect(f.deps.selectedOllamaModel).toHaveBeenCalledWith(f.deps.ollamaUrl, id, "27b");
+        expect(f.deps.selectedOllamaModel).toHaveBeenCalledWith(f.deps.ollamaUrl, id, "27b", undefined,
+            { deadlineMs: undefined, signal: undefined, requestedContextTokens: undefined, track: expect.any(Function) });
         const call = vi.mocked(f.deps.callLocal).mock.calls[0];
         expect(call[1]).toBe(id); expect(call[10]).toBe(4096);
         expect(call[4]).toBe(1024); expect(call[6]).toBe(300_000);
@@ -215,12 +950,25 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         f.deps.listTags = async () => new Set([id, 'prism-coder:4b']);
         f.deps.selectedOllamaModel = vi.fn(async () => ({ tag: id, ctxTokens: 4096, weightsGb: 10, minFreeGb: 15 }));
         await runInfer(ask({ local_backend: 'ollama', local_model: id, task_complexity: 2, model_ceiling }), f.deps);
-        expect(f.deps.selectedOllamaModel).toHaveBeenCalledWith(f.deps.ollamaUrl, id, model_ceiling ?? '27b');
+        expect(f.deps.selectedOllamaModel).toHaveBeenCalledWith(f.deps.ollamaUrl, id, model_ceiling ?? '27b', undefined,
+            { deadlineMs: undefined, signal: undefined, requestedContextTokens: undefined, track: expect.any(Function) });
     });
     it('returns a structured refusal for unreadable preferences without substituting a backend default', async () => {
         const f = fixture(); f.deps.codingPreference = async () => { throw new Error('synthetic-secret'); };
         expect(await runInfer(ask({ local_backend: 'ollama' }), f.deps)).toMatchObject({ backend: 'refused', output: '', gate_outcome: { reason: 'local_coding_preference_invalid' } });
         expect(f.deps.callLocal).not.toHaveBeenCalled(); expect(f.omlx.detect).not.toHaveBeenCalled();
+    });
+    it('reports a safe exact assignment conflict without exposing unknown preference errors', async () => {
+        const conflict = fixture();
+        conflict.deps.codingPreference = async () => { throw new Error('execution_assignment_override_conflict'); };
+        expect(await runInfer(ask({ local_backend: 'ollama' }), conflict.deps)).toMatchObject({
+            backend: 'refused', output: '', gate_outcome: { reason: 'execution_assignment_override_conflict' },
+        });
+        const unknown = fixture();
+        unknown.deps.codingPreference = async () => { throw new Error('private-path-or-secret'); };
+        expect(await runInfer(ask({ local_backend: 'ollama' }), unknown.deps)).toMatchObject({
+            backend: 'refused', output: '', gate_outcome: { reason: 'local_coding_preference_invalid' },
+        });
     });
     it('does not call an unreachable inventory proof that a model is missing', async () => {
         const f = fixture(); f.deps.listTags = async () => null;
@@ -230,7 +978,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
     it("detects first, classifies with the oMLX classifier without touching Ollama, and reports actual metadata", async () => {
         const f = fixture(); const result = await runInfer(ask({ local_model: MODEL }), f.deps);
         expect(f.events).toEqual(["detect", "classify", "generate"]);
-        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL);
+        expect(f.omlx.detect).toHaveBeenCalledWith(MODEL, expect.objectContaining({ deadlineMs: expect.any(Number) }));
         // The classifier reads with the oMLX model and the owned-path adapter, never Ollama's 4b.
         expect(vi.mocked(f.deps.callLayer1!).mock.calls[0][2]).toBe(OMLX_LAYER1_MODEL);
         expect(typeof vi.mocked(f.deps.callLayer1!).mock.calls[0][3]).toBe("function");
@@ -276,7 +1024,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         f.omlx.generate = vi.fn(() => new Promise(resolve => setTimeout(() => {
             f.events.push("generation-settled"); resolve({ ok: false as const, reason: "timeout" });
         }, 300)));
-        await expect(runInfer(ask({ timeout_ms: 50 }), f.deps)).rejects.toThrow("no backend produced output");
+        expect(await runInfer(ask({ timeout_ms: 50 }), f.deps)).toMatchObject({ backend: "refused", gate_outcome: { reason: "timeout" } });
         expect(f.events.indexOf("generation-settled")).toBeGreaterThan(-1);
         expect(f.events.indexOf("generation-settled")).toBeLessThan(f.events.indexOf("release"));
     });
@@ -593,13 +1341,23 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         });
         const first = runInfer(ask(), f.deps); await started;
         const second = runInfer(ask(), f.deps);
-        let classified = false;
-        const standalone = callLayer1("Write a Python identity function.", "http://unused", "prism-coder:4b")
-            .then(() => { classified = true; });
-        await new Promise(resolve => setTimeout(resolve, 5));
-        expect(f.omlx.detect).toHaveBeenCalledTimes(1); expect(classified).toBe(false);
-        release(); await Promise.all([first, second, standalone]);
-        expect(f.omlx.generate).toHaveBeenCalledTimes(2); expect(classified).toBe(true);
+        const classificationFetch = vi.fn<typeof fetch>(async input => {
+            const path = new URL(String(input)).pathname;
+            if (path === "/api/show") return Response.json({ modelfile: "" });
+            if (path === "/api/chat") return Response.json({ message: { content: "OBVIOUS_NOT_RESERVED" } });
+            throw new Error("Unexpected classification fixture request");
+        });
+        const standalone = callLayer1("Write a Python identity function.", "http://fixture.invalid", "prism-coder:4b", classificationFetch);
+        try {
+            await new Promise(resolve => setTimeout(resolve, 5));
+            expect(f.omlx.detect).toHaveBeenCalledTimes(1);
+            expect(classificationFetch).not.toHaveBeenCalled();
+        } finally {
+            release();
+            await Promise.all([first, second, standalone]);
+        }
+        expect(f.omlx.generate).toHaveBeenCalledTimes(2);
+        expect(await standalone).toBe("OBVIOUS_NOT_RESERVED");
     });
     it("preserves configured oMLX thinking unless explicitly overridden", async () => {
         const f = fixture(); await runInfer(ask(), f.deps);
@@ -623,7 +1381,7 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
     it("validates the explicit selector and bounded text-only scope", () => {
         expect(isPrismInferArgs(ask({ local_model: MODEL }))).toBe(true);
         for (const args of [{ prompt: "task", local_backend: "other" }, { prompt: "task", local_model: MODEL },
-            ask({ mode: "chat" }), ask({ images: ["abc"] }), ask({ local_model: " " })]) expect(isPrismInferArgs(args)).toBe(false);
+            ask({ images: ["abc"] }), ask({ local_model: " " })]) expect(isPrismInferArgs(args)).toBe(false);
     });
 });
 
@@ -645,6 +1403,21 @@ describe("explicit oMLX classification through the real callLayer1 and the owned
     const ollamaChat = (spy: { mock: { calls: unknown[][] } }) =>
         spy.mock.calls.filter(([input]) => /\/api\/(chat|show)\b/.test(String(input instanceof Request ? input.url : input)));
 
+    it.each([undefined, "route", "chat"] as const)("keeps the real classifier on oMLX for text mode %s", async mode => {
+        const f = owned(() => ({ ok: true, text: "OBVIOUS_NOT_RESERVED", doneReason: "stop" }));
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
+            models: { omlx: { coder: MODEL } } });
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        try {
+            expect(await runInfer(ask({ mode, local_backend: undefined }), f.deps)).toMatchObject({ backend: "omlx" });
+            expect(ollamaChat(fetchSpy)).toEqual([]);
+        } finally { fetchSpy.mockRestore(); }
+        expect(f.classifierRequests.length).toBeGreaterThan(0);
+        expect(vi.mocked(f.omlx.generate).mock.calls.map(call => call[0].model)).toContain(OMLX_LAYER1_MODEL);
+        expect(f.deps.listTags).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+    });
+
     it("sends the read to the oMLX classifier on the same server, asks for no cache store, and never asks Ollama", async () => {
         const f = owned(() => ({ ok: true, text: "OBVIOUS_NOT_RESERVED", doneReason: "stop" }));
         const fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -655,7 +1428,61 @@ describe("explicit oMLX classification through the real callLayer1 and the owned
         expect(f.events).toEqual(["detect", "classify", "generate"]);
         expect(vi.mocked(f.omlx.generate).mock.calls[0][0]).toEqual({ url: TARGET.url, model: OMLX_LAYER1_MODEL, contextTokens: TARGET.contextTokens });
         expect(f.classifierRequests[0]).toMatchObject({ maxTokens: 16, temperature: 0, think: false, cacheStore: false });
-        expect(f.classifierRequests[0].messages[0]).toEqual({ role: "system", content: "" });
+        expect(f.classifierRequests[0].messages[0]).toEqual({
+            role: "system", content: LAYER1_PROMPT.slice(0, LAYER1_PROMPT.indexOf('\n\nRequest:')),
+        });
+        expect(JSON.parse(f.classifierRequests[0].messages[1].content.split('\n')[0])).toEqual({ request: ask().prompt });
+    });
+
+    it("keeps cancellable ledger compaction on its saved oMLX classifier and worker", async () => {
+        const f = owned(() => ({ ok: true, text: "OBVIOUS_NOT_RESERVED", doneReason: "stop" }));
+        f.deps.requireConfirmedLocalExhaustion = true;
+        f.deps.codingPreference = async () => ({ saved: "omlx", effective: "omlx", configured: true, envOverride: null,
+            models: { omlx: { coder: MODEL } } });
+        const controller = new AbortController();
+        f.deps.listLoaded = vi.fn(async () => {
+            controller.abort();
+            return new Set<string>();
+        });
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected Ollama request"));
+        try {
+            const result = await runInfer(ask({ mode: "chat", local_backend: undefined, escalation: undefined,
+                prompt: "Summarize the maintenance ledger." }), f.deps, { signal: controller.signal });
+            expect(result).toMatchObject({ backend: "omlx", model_picked: MODEL });
+            expect(ollamaChat(fetchSpy)).toEqual([]);
+        } finally { fetchSpy.mockRestore(); }
+        expect(vi.mocked(f.omlx.generate).mock.calls.map(call => call[0].model)).toEqual([OMLX_LAYER1_MODEL, MODEL]);
+        expect(f.deps.listLoaded).not.toHaveBeenCalled();
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+
+    it("refuses conflicting owned oMLX classifier labels during ledger compaction", async () => {
+        const f = owned(() => ({ ok: true, text: "OBVIOUS_NOT_RESERVED\nOBVIOUS_RESERVED", doneReason: "stop" }));
+        f.deps.requireConfirmedLocalExhaustion = true;
+        await expect(runInfer(ask({ mode: "chat", escalation: undefined, prompt: "Summarize this maintenance ledger." }),
+            f.deps, { signal: new AbortController().signal })).rejects.toThrow(/omlx_classifier_error/);
+        expect(vi.mocked(f.omlx.generate).mock.calls.map(call => call[0].model)).toEqual([OMLX_LAYER1_MODEL]);
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+
+    it.each(["classifier", "worker"] as const)("refuses a token-limited oMLX %s reply during ledger compaction", async phase => {
+        const f = fixture();
+        f.deps.callLayer1 = undefined;
+        f.deps.requireConfirmedLocalExhaustion = true;
+        f.omlx.generate = vi.fn(async (target: OmlxTarget) => {
+            const classifier = target.model === OMLX_LAYER1_MODEL;
+            const limited = phase === (classifier ? "classifier" : "worker");
+            return { ok: true as const, text: classifier ? "OBVIOUS_NOT_RESERVED" : OUTPUT, doneReason: limited ? "length" : "stop" };
+        });
+
+        const refusal = phase === "classifier" ? /omlx_classifier_error/ : /local generation did not complete/;
+        await expect(runInfer(ask({ mode: "chat", escalation: undefined, prompt: "Summarize this maintenance ledger." }),
+            f.deps, { signal: new AbortController().signal })).rejects.toThrow(refusal);
+        expect(vi.mocked(f.omlx.generate).mock.calls.map(call => call[0].model))
+            .toEqual(phase === "classifier" ? [OMLX_LAYER1_MODEL] : [OMLX_LAYER1_MODEL, MODEL]);
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
     });
 
     it("sends the history and context windows of a multi-turn call through the adapter too", async () => {

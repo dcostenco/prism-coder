@@ -16,8 +16,8 @@
  * request as written.
  */
 import { createHash } from "node:crypto";
-import { PRISM_SYNALUX_BASE_URL } from "../config.js";
 import { getSynaluxJwt, invalidateSynaluxJwt } from "./synaluxJwt.js";
+import { resolvePortalBaseUrl } from "./synaluxSearch.js";
 import type { ClassifierInputPolicy, SecondReadExclusionPolicy } from "./layer1.js";
 import { arithmeticExpressions, type AnswerCheckPolicy } from "./answerGrounding.js";
 
@@ -299,12 +299,13 @@ function pinned<T>(pinnedSha: string, parse: (bytes: string, sha: string) => T |
     let retryAt = 0;
     let generation = 0;
     const get = async (o: LoadOptions = {}): Promise<T | null> => {
-        if (!PRISM_SYNALUX_BASE_URL) return null;
+        const baseUrl = resolvePortalBaseUrl();
+        if (!baseUrl) return null;
         if (cached) return cached;
         if (inflight) return inflight;
         if (Date.now() < retryAt) return null;
         const started = generation;
-        const promise: Promise<T | null> = load(o, o.expectSha256 ?? pinnedSha, parse).then(policy => {
+        const promise: Promise<T | null> = load(o, baseUrl, o.expectSha256 ?? pinnedSha, parse).then(policy => {
             if (started !== generation) return policy;   // the account changed meanwhile: not kept
             if (policy) cached = policy;
             else retryAt = Date.now() + RETRY_AFTER_MS;
@@ -318,7 +319,7 @@ function pinned<T>(pinnedSha: string, parse: (bytes: string, sha: string) => T |
     return { get, reset };
 }
 
-async function load<T>(o: LoadOptions, sha: string, parse: (bytes: string, sha: string) => T | null): Promise<T | null> {
+async function load<T>(o: LoadOptions, baseUrl: string, sha: string, parse: (bytes: string, sha: string) => T | null): Promise<T | null> {
     const f = o.fetchImpl ?? fetch;
     const deadline = Date.now() + (o.deadlineMs ?? LOAD_DEADLINE_MS);
     const left = () => deadline - Date.now();
@@ -328,7 +329,7 @@ async function load<T>(o: LoadOptions, sha: string, parse: (bytes: string, sha: 
         try { return await Promise.race([getSynaluxJwt().catch(() => null), expired]); }
         finally { clearTimeout(timer); }
     };
-    const get = (jwt: string) => f(`${PRISM_SYNALUX_BASE_URL}/api/v1/prism/inference-policy/${sha}`, {
+    const get = (jwt: string) => f(`${baseUrl}/api/v1/prism/inference-policy/${sha}`, {
         method: "GET",
         headers: { "Authorization": `Bearer ${jwt}`, "Accept": "application/json" },
         signal: AbortSignal.timeout(Math.max(1, left())),

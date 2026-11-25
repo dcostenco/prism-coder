@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createOmlxTarget, OmlxError, omlxModelTarget, type OmlxRequest } from "../../src/utils/omlxProvider.js";
 import { ownedOmlxGenerate, recoverOwnedOmlx, splitThinking } from "../../src/utils/omlxOwned.js";
 import { assertControlRequestSize, registerOperation } from "../../src/utils/omlxControl.js";
-import { completes, endsWithoutTerminal, fakeControl, record, runsUntilCancel, sse, terminal } from "./omlxControlFake.js";
+import { cancellation, completes, endsWithoutTerminal, fakeControl, record, runsUntilCancel, sse, terminal } from "./omlxControlFake.js";
 
 const MODEL = "synthetic-model";
 const URL_ = "http://127.0.0.1:8000/v1";
@@ -18,6 +18,65 @@ const markerPath = (directory: string) => join(directory, createHash("sha256").u
 const marker = (directory: string) => JSON.parse(readFileSync(markerPath(directory), "utf8"));
 
 describe("owned oMLX generation through the control routes", () => {
+    it("keeps an acknowledged operation quarantined when its record disappears", async () => {
+        const directory = state();
+        const missing = fakeControl({ script: endsWithoutTerminal, status: () => ({ status: 404 }),
+            cancel: () => ({ status: 409 }) });
+        const result = await ownedOmlxGenerate(target(), REQUEST, new AbortController().signal,
+            { fetchImpl: missing.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 });
+        expect(result).toEqual({ ok: false, reason: "omlx_stop_unproved" });
+        expect(marker(directory).active).toBe(true);
+        await expect(recoverOwnedOmlx(target(), { fetchImpl: missing.fetchImpl, stateDirectory: directory }))
+            .rejects.toMatchObject({ reason: "omlx_provider_quarantined" });
+        expect(marker(directory).active).toBe(true);
+    });
+    it.each(["same", "replacement"])("uses a stored claimless tombstone only from the %s store", async store => {
+        const directory = state();
+        const unconfirmed = fakeControl({ script: endsWithoutTerminal, status: () => ({ status: 404 }) });
+        await ownedOmlxGenerate(target(), REQUEST, new AbortController().signal,
+            { fetchImpl: unconfirmed.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 });
+        expect(marker(directory).active).toBe(true);
+        const history = fakeControl({ status: ids => ({ status: 200,
+            body: cancellation(ids, false, store === "same" ? undefined : "11111111-1111-4111-8111-111111111111") }) });
+        const recovery = recoverOwnedOmlx(target(), { fetchImpl: history.fetchImpl, stateDirectory: directory });
+        if (store === "same") await recovery;
+        else await expect(recovery).rejects.toMatchObject({ reason: "omlx_provider_quarantined" });
+        expect(marker(directory)).toMatchObject(store === "same" ? { active: false, version: 2 } : { active: true, version: 3 });
+        expect(history.cancels()).toBe(0);
+    });
+    it("retains quarantine if the store changes between status and cancellation", async () => {
+        const directory = state();
+        const replacement = "11111111-1111-4111-8111-111111111111";
+        let switched = false;
+        const provider = fakeControl({
+            script: async function* () { yield sse("unresolved", {}); },
+            status: ids => ({ status: 200, body: switched ? cancellation(ids, false, replacement)
+                : record(ids, { state: "registered", claim_state: "none" }) }),
+            cancel: ids => { switched = true; return { status: 200, body: cancellation(ids, false, replacement) }; },
+        });
+        expect(await ownedOmlxGenerate(target(), REQUEST, new AbortController().signal,
+            { fetchImpl: provider.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 }))
+            .toEqual({ ok: false, reason: "omlx_stop_unproved" });
+        expect(provider.cancels()).toBe(1);
+        expect(marker(directory).active).toBe(true);
+        await expect(recoverOwnedOmlx(target(), { fetchImpl: provider.fetchImpl, stateDirectory: directory }))
+            .rejects.toMatchObject({ reason: "omlx_provider_quarantined" });
+    });
+    it.each([
+        { request_sha256: "f".repeat(64) }, { settings_sha256: "f".repeat(64) }, { model_id: "sibling-model" },
+        { store_generation_id: "11111111-1111-4111-8111-111111111111", claim_store_generation_id: "11111111-1111-4111-8111-111111111111" },
+        { claim_store_generation_id: "11111111-1111-4111-8111-111111111111" },
+    ])("requires the original registration and claim on terminal proof (%j)", async fields => {
+        const directory = state();
+        const mismatch = fakeControl({ script: async function* (ids) { yield sse("terminal", terminal(ids, "cancelled", fields)); } });
+        const result = await ownedOmlxGenerate(target(), REQUEST, new AbortController().signal,
+            { fetchImpl: mismatch.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 });
+        expect(result).toEqual({ ok: false, reason: "omlx_stop_unproved" });
+        expect(marker(directory).active).toBe(true);
+        const proven = fakeControl({ status: ids => ({ status: 200, body: terminal(ids, "cancelled") }) });
+        await recoverOwnedOmlx(target(), { fetchImpl: proven.fetchImpl, stateDirectory: directory });
+        expect(marker(directory).active).toBe(false);
+    });
     it.each([400,413])("reports image registration %s as input failure only after idle proof", async status => {
         const directory = state();
         const fake = fakeControl({ register: status, status: () => ({ status:404 }), cancel: () => ({ status:409 }) });
@@ -83,7 +142,6 @@ describe("owned oMLX generation through the control routes", () => {
                 response.text = async () => { throw Error("error_body_must_not_be_read"); };
                 return response;
             }
-            if ((init?.method ?? "GET") === "POST") return new Response("", { status: 409 });
             return base.fetchImpl(input, init);
         }) as typeof fetch;
         const result = await ownedOmlxGenerate(createOmlxTarget(URL_, MODEL, 65536, "synthetic-provider-key", undefined, digest), REQUEST,
@@ -188,8 +246,7 @@ describe("owned oMLX generation through the control routes", () => {
     });
 
     it("on abort sends one cancel, reads the cancelled terminal, and returns only after the marker is settled", async () => {
-        const directory = state(); const fake = fakeControl({ script: runsUntilCancel,
-            status: ids => ({ status: 200, body: terminal(ids, "cancelled") }) });
+        const directory = state(); const fake = fakeControl({ script: runsUntilCancel });
         const controller = new AbortController();
         const pending = ownedOmlxGenerate(target(), REQUEST, controller.signal, { fetchImpl: fake.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 });
         while (!fake.calls.some(call => call.path.endsWith("/execute"))) await new Promise(r => setTimeout(r, 5));
@@ -200,8 +257,7 @@ describe("owned oMLX generation through the control routes", () => {
     });
 
     it("cancels at the job deadline, so the provider can retire the operation", async () => {
-        const directory = state(); const fake = fakeControl({ script: runsUntilCancel,
-            status: ids => ({ status: 200, body: terminal(ids, "cancelled") }) });
+        const directory = state(); const fake = fakeControl({ script: runsUntilCancel });
         expect(await ownedOmlxGenerate(target(), { ...REQUEST, timeoutMs: 150 }, new AbortController().signal, { fetchImpl: fake.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 }))
             .toEqual({ ok: false, reason: "timeout" });
         expect(fake.cancels()).toBe(1);
@@ -212,6 +268,19 @@ describe("owned oMLX generation through the control routes", () => {
         const fake = fakeControl(); const controller = new AbortController(); controller.abort();
         await ownedOmlxGenerate(target(), REQUEST, controller.signal, { fetchImpl: fake.fetchImpl, stateDirectory: state(), drainBudgetMs: 300 });
         expect(fake.calls).toEqual([]);
+    });
+
+    it("shares one unclaimed cancel between Stop and drain", async () => {
+        const directory = state();
+        const fake = fakeControl({ script: async function* (_ids, control) { await control.cancelled; } });
+        const controller = new AbortController();
+        const pending = ownedOmlxGenerate(target(), REQUEST, controller.signal,
+            { fetchImpl: fake.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 });
+        while (!fake.calls.some(call => call.path.endsWith("/execute"))) await new Promise(resolve => setTimeout(resolve, 5));
+        controller.abort();
+        expect(await pending).toEqual({ ok: false, reason: "timeout" });
+        expect(fake.cancels()).toBe(1);
+        expect(marker(directory).active).toBe(false);
     });
 
     it("stops reading a stream that never ends after its cancel, at the read bound", async () => {
@@ -227,11 +296,31 @@ describe("owned oMLX generation through the control routes", () => {
         expect(Date.now() - started).toBeLessThan(3_000);
     });
 
-    it("never executes when the abort lands while registering", async () => {
+    it("binds and cancels an acknowledged registration even when Stop arrives during the PUT", async () => {
         const controller = new AbortController();
         const fake = fakeControl({ onRegister: () => controller.abort() });
-        await ownedOmlxGenerate(target(), REQUEST, controller.signal, { fetchImpl: fake.fetchImpl, stateDirectory: state(), drainBudgetMs: 300 });
+        const directory = state();
+        await ownedOmlxGenerate(target(), REQUEST, controller.signal, { fetchImpl: fake.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 });
         expect(fake.calls.some(call => call.path.endsWith("/execute"))).toBe(false);
+        expect(fake.cancels()).toBe(1);
+        expect(marker(directory)).toMatchObject({ active: false, provider_request_id: expect.any(String) });
+    });
+
+    it.each(["after registration", "at the final admission check"])("never executes when time expires %s before the timer fires", async phase => {
+        const directory = state();
+        const start = Date.now();
+        const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+        const fake = fakeControl({ onRegister: () => {
+            if (phase === "at the final admission check") clock.mockReturnValueOnce(start);
+            clock.mockReturnValue(start + 101);
+        } });
+        try {
+            expect(await ownedOmlxGenerate(target(), { ...REQUEST, deadlineMs: start + 100 }, new AbortController().signal,
+                { fetchImpl: fake.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 })).toEqual({ ok: false, reason: "timeout" });
+            expect(fake.calls.some(call => call.path.endsWith("/execute"))).toBe(false);
+            expect(fake.cancels()).toBe(1);
+            expect(marker(directory).active).toBe(false);
+        } finally { clock.mockRestore(); }
     });
 
     it("ends the read on an event name the coordinator never sends", async () => {
@@ -268,26 +357,23 @@ describe("recovery of a stale owned marker", () => {
         version: 2, provider_hash: createHash("sha256").update(URL_).digest("hex"), job_id: "11111111-1111-4111-8111-111111111111",
         operation_id: "01900000-0000-7000-8000-000000000001", provider_request_id: null, provider_started: true, active: true, ...fields }), { mode: 0o600 });
 
-    it.each([
-        ["a stopped terminal", { status: ids => ({ status: 200, body: terminal(ids, "completed") }) }],
-        ["a 404 cancelled into a claimless tombstone", { cancel: ids => ({ status: 200, body: record(ids, { state: "cancel_requested", claim_state: "none" }) }) }],
-        ["a 404 whose cancel is refused (no registration)", { cancel: () => ({ status: 409 }) }],
-        ["a registration that never ran", { status: ids => ({ status: 200, body: record(ids, { state: "registered", claim_state: "none" }) }),
-            cancel: ids => ({ status: 200, body: record(ids, { state: "cancel_requested", claim_state: "none" }) }) }],
-    ])("clears it on %s", async (_name, options) => {
+    it("clears a legacy marker when its operation has a stopped terminal", async () => {
         const directory = state(); stale(directory);
-        await recoverOwnedOmlx(target(), { fetchImpl: fakeControl(options as never).fetchImpl, stateDirectory: directory });
+        const fake = fakeControl({ status: ids => ({ status: 200, body: terminal(ids, "completed") }) });
+        await recoverOwnedOmlx(target(), { fetchImpl: fake.fetchImpl, stateDirectory: directory });
         expect(marker(directory).active).toBe(false);
     });
 
     it.each([
+        ["an absent registration", { status: () => ({ status: 404 }) }],
+        ["a current registration with no binding to the legacy marker", { status: (ids: never) => ({ status: 200, body: record(ids, { state: "registered", claim_state: "none" }) }) }],
         ["a live claim", { status: (ids: never) => ({ status: 200, body: record(ids, { state: "claimed", claim_state: "claimed" }) }) }],
         ["an unknown claim", { status: (ids: never) => ({ status: 200, body: record(ids, { state: "unknown", claim_state: "unknown" }) }) }],
-    ])("refuses on %s and keeps the marker", async (_name, options) => {
+    ])("retains an unbound legacy marker on %s", async (_name, options) => {
         const directory = state(); stale(directory); const fake = fakeControl(options as never);
         await expect(recoverOwnedOmlx(target(), { fetchImpl: fake.fetchImpl, stateDirectory: directory })).rejects.toThrow(OmlxError);
         expect(marker(directory).active).toBe(true);
-        expect(fake.cancels()).toBe(0); // live or unknown work is never cancelled by recovery
+        expect(fake.cancels()).toBe(0);
     });
 
     it("refuses when the provider cannot be reached, and keeps the marker", async () => {

@@ -264,6 +264,21 @@ describe("runInfer — L3 grounding verifier integration", () => {
         expect(r.verification).toBeUndefined();
     });
 
+    it("protects memory evidence even when a healthy local response could use the Portal verifier", async () => {
+        const callVerifier = verifierMock({ action: "served", finalText: "Hosted rewrite" });
+        const callCloud = vi.fn();
+        const result = await runInfer(args({ verify: true, cloud_fallback: true,
+            evidence: [{ source: "memory", content: "Synthetic on-device evidence" }] }),
+            makeDeps({ callVerifier: callVerifier as any, callCloud,
+                callLocal: async () => ({ ok: true as const, text: "Local answer" }) }),
+            { localOnly: true });
+
+        expect(result.output).toBe("Local answer");
+        expect(result.used_cloud).toBe(false);
+        expect(callVerifier).not.toHaveBeenCalled();
+        expect(callCloud).not.toHaveBeenCalled();
+    });
+
     it("calls the verifier when verify=true and substitutes a refusal for fabricated claims", async () => {
         const deps = makeDeps({
             callLocal: async () => ({ ok: true as const, text: "You have 8 patients." }),

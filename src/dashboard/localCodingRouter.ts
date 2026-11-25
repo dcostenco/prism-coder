@@ -3,14 +3,18 @@ import { createHash } from "node:crypto";
 import { configuredOmlxModel, detectOmlx, hasOmlxControl, inspectOmlx, inspectOmlxControl, inspectOmlxCodingModels, inspectOmlxImageModels, inspectOmlxImageInput, OmlxError } from "../utils/omlxProvider.js";
 import { localCodingPreference } from "../utils/localCodingPreference.js";
 import { readLocalCodingSettings, saveLocalCodingSettings, resolveLocalCodingModel } from "../utils/localCodingSettings.js";
-import { omlxSetup, OmlxSetupError, OMLX_SETUP_MODELS } from "../utils/omlxSetup.js";
+import { omlxSetup, OmlxSetupError } from "../utils/omlxSetup.js";
+import { omlxLayer1Model } from "../utils/omlxLayer1.js";
 import { inspectOllamaCodingModels, inspectOllamaImageModels } from "../utils/ollamaCodingModels.js";
 import { isLocalCodingModelId } from "../utils/localCodingSettings.js";
-import { getAvailableMemoryBytes } from "../utils/availableMemory.js";
-import { readLocalImageSettings, saveLocalImageSettings } from "../utils/localImageSettings.js";
-import { activateLocalAiSource, inspectLocalAiSource, localAiAssignments, localAiSnapshot, saveLocalAiModels, LocalAiConflict } from "./localAiActions.js";
+import { getReclaimableMemoryBytes } from "../utils/availableMemory.js";
+import { readLocalImageSettings } from "../utils/localImageSettings.js";
+import { activateLocalAiSource, inspectLocalAiSource, localAiAssignments, localAiSnapshot, saveLocalAiModels, saveLocalAiImages, saveExecutionRoles, LocalAiConflict, type LocalAiSaveRevision } from "./localAiActions.js";
+import { configuredHostProfiles } from "../utils/executionRoles.js";
+import { getEntitlements } from "../utils/entitlements.js";
 
 const MAX_BODY_BYTES = 4096;
+const CLASSIFIER_CONFIGURATION_ERROR = "Invalid oMLX safety model configuration. Check PRISM_OMLX_CLASSIFIER_MODEL.";
 // Public synthetic 32x32 red square. Contains no user image or metadata.
 const LOCAL_AI_TEST_PNG = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR4nO3NsQ0AAAzCMP5/un0CNkuZ41wybXsHAAAAAAAAAAAAxR4yw/wuPL6QkAAAAABJRU5ErkJggg==";
 const LOCAL_AI_TEST_REFERENCE = Object.freeze({ source: "builtin-diagnostic", description: "Solid red square", width: 32, height: 32,
@@ -21,6 +25,9 @@ export interface LocalCodingRouterDeps {
     inspectSource: typeof inspectLocalAiSource;
     activateSource: typeof activateLocalAiSource;
     saveModels: typeof saveLocalAiModels;
+    saveRoles: typeof saveExecutionRoles;
+    hostProfiles: typeof configuredHostProfiles;
+    cloudStatus: () => Promise<"entitled" | "not_in_plan" | "unknown">;
     infer: (args: unknown) => Promise<{ structuredContent?: Record<string, unknown>; isError?: boolean }>;
     settings: typeof readLocalCodingSettings;
     save: typeof saveLocalCodingSettings;
@@ -34,17 +41,19 @@ export interface LocalCodingRouterDeps {
     ollamaModels: typeof inspectOllamaCodingModels;
     availableMemory: () => number;
     imageSettings: typeof readLocalImageSettings;
-    saveImageSettings: typeof saveLocalImageSettings;
+    saveImageSettings: (value: unknown) => Promise<LocalAiSaveRevision | void>;
     omlxImageModels: typeof inspectOmlxImageModels;
     omlxImageInput: typeof inspectOmlxImageInput;
     ollamaImageModels: typeof inspectOllamaImageModels;
 }
 const defaults: LocalCodingRouterDeps = { setup: omlxSetup, settings: readLocalCodingSettings, save: saveLocalCodingSettings,
     preference: localCodingPreference, inspect: inspectOmlx, detect: detectOmlx, control: hasOmlxControl, connectionControl: inspectOmlxControl, configuredModel: configuredOmlxModel,
-    omlxModels: inspectOmlxCodingModels, ollamaModels: inspectOllamaCodingModels, availableMemory: getAvailableMemoryBytes,
+    omlxModels: inspectOmlxCodingModels, ollamaModels: inspectOllamaCodingModels, availableMemory: getReclaimableMemoryBytes,
     snapshot: localAiSnapshot, inspectSource: inspectLocalAiSource, activateSource: activateLocalAiSource, saveModels: saveLocalAiModels,
+    saveRoles: saveExecutionRoles, hostProfiles: configuredHostProfiles,
+    cloudStatus: async () => { const e = await getEntitlements(); return e.source === "fallback_free" ? "unknown" : e.features.cloud_fallback ? "entitled" : "not_in_plan"; },
     infer: async args => (await import("../tools/prismInferHandler.js")).prismInferHandler(args),
-    imageSettings: readLocalImageSettings, saveImageSettings: saveLocalImageSettings,
+    imageSettings: readLocalImageSettings, saveImageSettings: saveLocalAiImages,
     omlxImageModels: inspectOmlxImageModels, omlxImageInput: inspectOmlxImageInput, ollamaImageModels: inspectOllamaImageModels };
 function json(res: ServerResponse, status: number, value: unknown) {
     res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "private, no-store" });
@@ -52,6 +61,10 @@ function json(res: ServerResponse, status: number, value: unknown) {
 }
 function loopback(req: IncomingMessage) {
     return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress ?? "");
+}
+function dashboardClassifier(): string | null {
+    try { return omlxLayer1Model(); }
+    catch { return null; }
 }
 async function readBody(req: IncomingMessage, requireBody = false): Promise<unknown> {
     const chunks: Buffer[] = []; let size = 0;
@@ -107,6 +120,9 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
         }
         if (req.method === "GET" && url.pathname === "/api/local-coding") {
             const settings = await deps.settings();
+            const snapshot = await deps.snapshot();
+            const hosts = loopback(req) ? await deps.hostProfiles().catch(() => null) : [];
+            const cloud = await deps.cloudStatus().catch(() => "unknown");
             let preference, preferenceError: string | undefined;
             try { preference = await deps.preference(); }
             catch {
@@ -128,9 +144,13 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
                 const model = resolveLocalCodingModel(settings, "omlx", "coder") ?? await deps.configuredModel();
                 if (model) connection.model = model;
             } catch (error) { connection.error = error instanceof OmlxError ? error.reason : "Connection check unavailable."; }
+            const requiredClassifier = dashboardClassifier();
             json(res, 200, { settings, preference, preferenceError, managed, connection, discovered, discoveryErrors,
+                revision: snapshot.revision, assignments: snapshot.assignments,
+                executionCatalog: { schema: 1, hosts, cloud: { runtime: "synalux", status: cloud, model: null, effort: null,
+                    billing: "Synalux plan; developer subscriptions do not provide API credits" } },
                 availableMemoryBytes: deps.availableMemory(), canManage: loopback(req),
-                requiredClassifier: OMLX_SETUP_MODELS[0].id }); return true;
+                requiredClassifier, classifierError: requiredClassifier === null ? CLASSIFIER_CONFIGURATION_ERROR : undefined }); return true;
         }
         if (req.method !== "POST") { json(res, 405, { error: "Method not allowed" }); return true; }
         // Installing packages is a local operator action. A configured remote
@@ -143,13 +163,21 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
         }
         const body = await readBody(req, url.pathname === "/api/local-coding/image-preferences");
         if (url.pathname === "/api/local-coding/image-preferences") {
-            await deps.saveImageSettings(body); json(res, 200, { saved: true, selectionApplied: false }); return true;
+            const revision = await deps.saveImageSettings(body);
+            json(res, 200, { saved: true, selectionApplied: false, ...(revision ?? {}) }); return true;
         }
         if (url.pathname === "/api/local-coding/preferences") {
-            await deps.save(body); json(res, 200, { saved: true }); return true;
+            const value = body as { settings?: unknown; revision?: string };
+            await deps.saveModels(value?.settings, value?.revision); json(res, 200, { saved: true }); return true;
         }
         if (url.pathname === "/api/local-coding/model-preferences") {
-            await deps.saveModels(body); json(res, 200, { saved: true }); return true;
+            const value = body as { settings?: unknown; revision?: string };
+            await deps.saveModels(value?.settings, value?.revision); json(res, 200, { saved: true }); return true;
+        }
+        if (url.pathname === "/api/local-coding/role-preferences") {
+            const value = body as Record<string, unknown>;
+            if (!value || Object.keys(value).some(k => !["assignments", "revision"].includes(k))) throw new Error("execution_assignment_invalid");
+            await deps.saveRoles(value.assignments, value.revision); json(res, 200, { saved: true }); return true;
         }
         if (url.pathname === "/api/local-coding/activate-connection") {
             const value = body as Record<string, unknown>;
@@ -174,14 +202,24 @@ export async function handleLocalCodingRoutes(url: URL, req: IncomingMessage, re
             const model = purpose === "image" ? images.models?.[backend] : resolveLocalCodingModel(coding, backend, purpose);
             if (!model) { json(res, 200, { status: "blocked", reason: "model_not_selected", message: "Choose and save a model before testing." }); return true; }
             if (purpose === "image" && backend === "ollama") { json(res, 200, { status: "blocked", reason: "local_image_backend_not_enabled", message: "Ollama image execution is unavailable. Your selection is preserved." }); return true; }
-            if (purpose !== "image" && backend === "omlx" && !(await deps.inspect()).advertised_models.includes(OMLX_SETUP_MODELS[0].id)) {
-                json(res, 200, { status: "blocked", reason: "classifier_missing", message: "The required coding/review safety model is not installed. Image tasks do not require the coding pack." }); return true;
+            if (purpose !== "image" && backend === "omlx") {
+                const classifier = dashboardClassifier();
+                if (classifier === null) {
+                    json(res, 200, { status: "blocked", reason: "omlx_classifier_model_invalid", message: CLASSIFIER_CONFIGURATION_ERROR }); return true;
+                }
+                if (!(await deps.inspect()).advertised_models.includes(classifier)) {
+                    json(res, 200, { status: "blocked", reason: "classifier_missing", message: "The required coding/review safety model is not installed. Image tasks do not require the coding pack." }); return true;
+                }
             }
             const args = { mode: "code", max_tokens: 48, think: false, timeout_ms: 60_000, cloud_fallback: false, verify: false,
                 strict_entitlements: true, model_ceiling: "27b", route_guard: "local", escalation: "report",
                 ...(purpose === "image" ? { prompt: "Describe the shape and color shown.", images: [LOCAL_AI_TEST_PNG], image_backend: backend, image_model: model }
                     : { prompt: "Reply exactly LOCAL_READY for this local connection diagnostic.", local_backend: backend, local_role: purpose, local_model: model }) };
             const result = await deps.infer(args), data = result.structuredContent;
+            if (data?.status === "host_authorization_required") {
+                json(res, 200, { status: "blocked", purpose, backend, model, reason: "host_authorization_required",
+                    message: "This host requires review before local execution. Prepare the diagnostic through prism_infer, review its task packet, and execute it with prism local run --host-task <file> --approve." }); return true;
+            }
             const reportedBackend = data?.backend;
             // The normal inference result labels Ollama with its served tier
             // or exact selected ID (for example ollama-4b).

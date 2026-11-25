@@ -1,4 +1,14 @@
 const IMAGE_UPGRADE_GUIDE = "https://github.com/dcostenco/prism-coder/blob/main/docs/omlx.md#upgrade-an-existing-omlx-server";
+const SDXL_TURBO_SOURCE = "https://huggingface.co/stabilityai/sdxl-turbo/blob/main";
+const SDXL_TURBO_SETUP = Object.freeze({
+    title: "SDXL Turbo · Optional install",
+    instructions: "For local image generation through ComfyUI. Reuse your checkpoint or download it from Stability AI and place it in your ComfyUI models/checkpoints folder.",
+    terms: "Commercial use requires registration under Stability AI’s Community License and is subject to its $1 million annual revenue threshold, including affiliates.",
+    download: "Get the checkpoint from Stability AI",
+    license: "Read the checkpoint license",
+    checkpointUrl: SDXL_TURBO_SOURCE + "/sd_xl_turbo_1.0_fp16.safetensors",
+    licenseUrl: SDXL_TURBO_SOURCE + "/LICENSE.md",
+});
 const IMAGE_INPUT_TEXT = Object.freeze({
     not_selected: "Select an oMLX image model to check server compatibility.",
     checking: "Checking the selected model's server input contract…",
@@ -25,7 +35,16 @@ export function localImagePanelHTML(): string {
         <div class="skill-actions" style="flex-wrap:wrap"><button class="skill-save-btn" id="local-image-save" type="submit" disabled>Save image preference</button><button class="skill-upload-btn" id="local-image-refresh" type="button" onclick="loadLocalImages(false)">Refresh image models</button></div>
       </form>
       <p class="setting-desc" id="local-image-saved" aria-live="polite"></p>
-      <p id="local-image-error" role="alert" style="color:var(--accent-red);overflow-wrap:anywhere"></p>`;
+      <p id="local-image-error" role="alert" style="color:var(--accent-red);overflow-wrap:anywhere"></p>
+      <details id="local-image-generation-setup" style="margin-top:16px">
+        <summary class="setting-label">${SDXL_TURBO_SETUP.title}</summary>
+        <p class="setting-desc">${SDXL_TURBO_SETUP.instructions}</p>
+        <p class="setting-desc">${SDXL_TURBO_SETUP.terms}</p>
+        <p class="setting-desc">
+          <a id="local-image-sdxl-license" href="${SDXL_TURBO_SETUP.licenseUrl}" target="_blank" rel="noopener noreferrer">${SDXL_TURBO_SETUP.license}</a> ·
+          <a id="local-image-sdxl-download" href="${SDXL_TURBO_SETUP.checkpointUrl}" target="_blank" rel="noopener noreferrer">${SDXL_TURBO_SETUP.download}</a>
+        </p>
+      </details>`;
 }
 
 /** Kept independent of the coding request, including its busy/error state. ES5. */
@@ -59,9 +78,7 @@ function renderLocalImageMetadata() {
         var model = localImageModels[backend].filter(function(item) { return item.id === id; })[0];
         var text = !id ? 'No image model selected. No coding model is inherited.' : !model ? (localImageErrors[backend] ? 'Inventory unavailable; saved model availability is unknown.' : 'Selected model is unavailable in the current inventory.') :
             'Installed · Advertised vision: ' + model.capability.vision + ' (' + (model.capability.source === 'omlx.engine_type' ? 'oMLX engine metadata' : model.capability.source === 'ollama.show.capabilities' ? 'Ollama exact model metadata' : 'metadata unavailable or not inspected') + ')' +
-            (model.weightBytes ? ' · Weights: ' + localCodingGiB(model.weightBytes) : ' · Weight size unknown') +
-            (model.loadedBytes ? ' · Loaded memory: ' + localCodingGiB(model.loadedBytes) : model.loaded === true ? ' · Loaded; memory unknown' : model.loaded === false ? ' · Not loaded' : ' · Load status unknown') +
-            (model.residentEstimateBytes ? ' · Server resident estimate: ' + localCodingGiB(model.residentEstimateBytes) : '');
+            ' · ' + localModelMemoryText(backend, model);
         document.getElementById('local-image-' + backend + '-metadata').textContent = text + ' Image peak RAM unknown; execution requires a compatible server and current resource checks.' + (localImageErrors[backend] ? ' ' + localImageErrors[backend] : '');
     });
 }
@@ -100,7 +117,7 @@ function loadLocalImages(reset) {
         });
         localImageLoaded = true;
         localImageCanManage = data.canManage;
-        document.getElementById('local-image-memory').textContent = 'Available RAM: ' + (data.availableMemoryBytes ? localCodingGiB(data.availableMemoryBytes) : 'unknown') + '. Metadata is advisory; image peak RAM is unknown. Refresh never loads, downloads or unloads a model.';
+        document.getElementById('local-image-memory').textContent = 'Host RAM estimate: ' + localAvailableRamText(data.availableMemoryBytes) + '. Image peak RAM is unknown. Refresh never loads, downloads or unloads a model.';
         document.getElementById('local-image-saved').textContent = 'Saved image backend: ' + (settings.backend || 'not selected') + ' · oMLX checks compatibility on each request; saving does not load a model.';
         if (!data.canManage) document.getElementById('local-image-error').textContent = 'Open this dashboard on this Mac to change image preferences.';
         renderLocalImageMetadata();
@@ -121,7 +138,10 @@ function saveLocalImages(event) {
     localImageBusy = true;
     localImageSequence++;
     imageFieldsDisabled();
-    return localCodingRequest('/image-preferences', settings).then(function() {
+    return localCodingRequest('/image-preferences', settings).then(function(data) {
+        // Only our own image change can advance the existing coding/role form.
+        // A newer snapshot from another tab must still require explicit reload.
+        if (data && typeof localCodingRevision === 'string' && data.previousRevision === localCodingRevision && typeof data.revision === 'string') localCodingRevision = data.revision;
         localImageBusy = false;
         return loadLocalImages(true);
     }).catch(function(error) {

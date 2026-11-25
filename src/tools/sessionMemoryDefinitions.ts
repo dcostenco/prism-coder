@@ -1,4 +1,5 @@
 import { type Tool } from "@modelcontextprotocol/sdk/types.js";
+import { HOST_IMAGE_ROUTING_GUIDANCE } from "./hostImageRouting.js";
 
 // ─── Session Save Ledger ─────────────────────────────────────
 
@@ -123,6 +124,26 @@ export const SESSION_SAVE_HANDOFF_TOOL: Tool = {
   },
 };
 
+export const SESSION_SHARE_PROJECT_MEMORY_TOOL: Tool = {
+  name: "session_share_project_memory",
+  description: "Explicitly share one project decision or handoff note with the current workspace. Existing session memory remains private; this never copies a personal handoff.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project: { type: "string", description: "Project identifier." },
+      summary: { type: "string", description: "The single decision or handoff note to share." },
+      decisions: { type: "array", items: { type: "string" } },
+      keywords: { type: "array", items: { type: "string" } },
+      files_changed: { type: "array", items: { type: "string" } },
+      conversation_id: { type: "string" },
+      role: { type: "string" },
+      event_type: { type: "string", enum: ["project_decision", "project_handoff"], description: "Share a selected decision or handoff note; personal state is never copied." },
+    },
+    required: ["project", "summary"],
+    additionalProperties: false,
+  },
+};
+
 // ─── Session Load Context ─────────────────────────────────────
 
 export const SESSION_LOAD_CONTEXT_TOOL: Tool = {
@@ -204,7 +225,8 @@ export const SESSION_ROUTE_PROMPT_TOOL: Tool = {
     "does return skills, read and follow them before doing the work \u2014 they are the rules for the task at hand, " +
     "not background. It also checks bounded implementation requests for Factory. Supply the current project, working_directory, files_involved and test_command when known. " +
     "When prism_factory_route recommends session_start_pipeline, call it automatically with recommended_args, then report the pipeline id and monitor it. " +
-    "Routing itself does not execute code. Skip it only for follow-ups within work you have already routed.",
+    "Routing itself does not execute code. Skip it only for follow-ups within work you have already routed. " +
+    HOST_IMAGE_ROUTING_GUIDANCE,
   annotations: {
     readOnlyHint: true,
     destructiveHint: false,
@@ -233,6 +255,22 @@ export const SESSION_ROUTE_PROMPT_TOOL: Tool = {
       files_involved: { type: "array", items: { type: "string" }, description: "Relative code files the current implementation task concerns." },
       test_command: { type: "string", description: "Repository verification command, supplied by the host from the request or repository instructions." },
       allowed_write_paths: { type: "array", items: { type: "string" }, description: "Relative files the user authorized Factory to change." },
+      image_generation: {
+        type: "object",
+        description: "Include only for an actual request to generate an image. Prism detects the MCP client independently.",
+        properties: {
+          available_tools: {
+            type: "array", maxItems: 32, items: { type: "string", maxLength: 128 },
+            description: "Exact names of image generation tools callable by this host in this session.",
+          },
+          host_model: {
+            type: "string", maxLength: 128,
+            description: "Caller-reported chat model from runtime metadata, if available. Prism does not verify this value.",
+          },
+        },
+        required: ["available_tools"],
+        additionalProperties: false,
+      },
     },
     required: ["prompt"],
   },
@@ -398,10 +436,11 @@ export const SESSION_COMPACT_LEDGER_TOOL: Tool = {
   name: "session_compact_ledger",
   description:
     "Auto-compact old session ledger entries by rolling them up into AI-generated summaries. " +
-    "This prevents the ledger from growing indefinitely and keeps deep context loading fast.\n\n" +
+    "This prevents the ledger from growing indefinitely and keeps deep context loading fast. " +
+    "Supported for SQLite and explicitly configured legacy Supabase storage. Synalux cloud storage does not support this operation yet.\n\n" +
     "How it works:\n" +
     "1. Finds projects with more entries than the threshold\n" +
-    "2. Summarizes old entries using Gemini (keeps recent entries intact)\n" +
+    "2. Summarizes old entries with the configured inference policy and keeps recent entries intact\n" +
     "3. Inserts a rollup entry and archives the originals (soft-delete)\n\n" +
     "Use dry_run=true to preview what would be compacted without executing.",
   inputSchema: {
@@ -797,6 +836,10 @@ export const MEMORY_CHECKOUT_TOOL: Tool = {
         type: "number",
         description: "The version number to restore from history (get this from memory_history).",
       },
+      role: {
+        type: "string",
+        description: "Memory role to restore; defaults to the dashboard's configured role, or global.",
+      },
     },
     required: ["project", "target_version"],
   },
@@ -816,11 +859,13 @@ export function isMemoryHistoryArgs(
 
 export function isMemoryCheckoutArgs(
   args: unknown
-): args is { project: string; target_version: number } {
+): args is { project: string; target_version: number; role?: string } {
   if (typeof args !== "object" || args === null) return false;
   const a = args as Record<string, unknown>;
   if (typeof a.project !== "string") return false;
   if (typeof a.target_version !== "number") return false;
+  if (!Number.isSafeInteger(a.target_version) || a.target_version < 1) return false;
+  if (a.role !== undefined && (typeof a.role !== "string" || a.role.length === 0)) return false;
   return true;
 }
 
@@ -2016,6 +2061,10 @@ export const QUERY_MEMORY_NATURAL_TOOL: Tool = {
     "automatically run one quick Synalux web search, preserve the raw sources, " +
     "and synthesize a grounded answer through prism_infer. Reserved or uncertain " +
     "content is cloud-or-refuse and never sent through the local web-grounded path.\n\n" +
+    "With PRISM_HOST_TASKS=required, synthesis or web work first returns a host-review packet. " +
+    "Retrieved evidence requires its own frozen drafting approval; query approval does not authorize drafting.\n\n" +
+    "cloud_fallback, verify and route_guard apply to the separately approved inference task. " +
+    "For local-only processing, also disable web_fallback and explicitly use cloud_fallback:false, verify:false, route_guard:'local'.\n\n" +
     "**Examples:**\n" +
     "- \"What did we decide about authentication?\"\n" +
     "- \"What's still open on the billing project?\"\n" +
@@ -2044,6 +2093,22 @@ export const QUERY_MEMORY_NATURAL_TOOL: Tool = {
         description: "If true, use one paid Synalux web search when Prism memory has no useful evidence. Default: true.",
         default: true,
       },
+      cloud_fallback: {
+        type: "boolean",
+        description: "Allow cloud answer fallback in the inference task. Default: true; separate from web retrieval and grounding verification.",
+        default: true,
+      },
+      verify: {
+        type: "boolean",
+        description: "Request optional Portal grounding verification of the draft and evidence. Default: true. False retains input/output safety checks and host approval.",
+        default: true,
+      },
+      route_guard: {
+        type: "string",
+        enum: ["auto", "local"],
+        description: "Inference route correction: auto retains configured correction; local skips only the optional Portal correction.",
+        default: "auto",
+      },
       conversation_id: {
         type: "string",
         description: "Optional session_bootstrap conversation id for inference telemetry and continuity.",
@@ -2058,6 +2123,9 @@ export interface QueryMemoryNaturalArgs {
   project?: string;
   synthesize?: boolean;
   web_fallback?: boolean;
+  cloud_fallback?: boolean;
+  verify?: boolean;
+  route_guard?: "auto" | "local";
   conversation_id?: string;
 }
 
@@ -2071,6 +2139,9 @@ export function isQueryMemoryNaturalArgs(
       (typeof a.project !== "string" || !a.project.trim())) return false;
   if (a.synthesize !== undefined && typeof a.synthesize !== "boolean") return false;
   if (a.web_fallback !== undefined && typeof a.web_fallback !== "boolean") return false;
+  if (a.cloud_fallback !== undefined && typeof a.cloud_fallback !== "boolean") return false;
+  if (a.verify !== undefined && typeof a.verify !== "boolean") return false;
+  if (a.route_guard !== undefined && a.route_guard !== "auto" && a.route_guard !== "local") return false;
   if (a.conversation_id !== undefined &&
       (typeof a.conversation_id !== "string" || !a.conversation_id.trim())) return false;
   return true;

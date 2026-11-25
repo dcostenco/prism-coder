@@ -42,6 +42,7 @@ import { resolveProject } from "../utils/projectResolver.js";
 import { getUpdateNotice } from "../updateNotice.js";
 import type { StorageBackend } from "../storage/interface.js";
 import { findRunningDashboardAccessState } from "../dashboard/dashboardAccess.js";
+import { isDashboardSettingValueAllowed } from "../dashboard/settingsPolicy.js";
 import { isDarkFactoryEnabled } from "../darkfactory/enablement.js";
 import { routeFactoryPrompt, formatFactoryPromptRoute } from "../darkfactory/promptRouting.js";
 import { factoryBackendReadiness } from "../darkfactory/backendReadiness.js";
@@ -1031,9 +1032,9 @@ export async function sessionSaveLedgerHandler(args: unknown) {
   // ─── Fire-and-forget auto-compact ────────────────────────────
   // If the user has opted into auto-compact (via dashboard Settings → Boot),
   // run a health check after saving and compact if brain is degraded/unhealthy.
-  // Uses debounce Set to prevent concurrent Gemini calls for same project.
+  // Uses a Set to prevent concurrent compaction for the same project.
   getSetting("compaction_auto", "false").then(async (autoCompact) => {
-    if (autoCompact !== "true") return;
+    if (autoCompact !== "true" || storage.supportsLedgerCompaction === false) return;
     if (activeCompactions.has(project)) {
       debugLog(`[auto-compact] Skipped for "${project}" — compaction already in progress`);
       return;
@@ -1046,8 +1047,11 @@ export async function sessionSaveLedgerHandler(args: unknown) {
       const report = runHealthCheck(healthStats);
       if (report.status === "degraded" || report.status === "unhealthy") {
         debugLog(`[auto-compact] Brain "${project}" is ${report.status} — triggering compaction`);
-        await compactLedgerHandler({ project });
-        debugLog(`[auto-compact] Compaction complete for "${project}"`);
+        const result = await compactLedgerHandler({ project });
+        if (result.isError) throw new Error(result.content[0]?.text || "Ledger compaction failed");
+        if (result.structuredContent?.projects_compacted) {
+          debugLog(`[auto-compact] Compaction complete for "${project}"`);
+        }
       }
     } catch (err) {
       console.error(`[auto-compact] Non-fatal error for "${project}": ${err instanceof Error ? err.message : String(err)}`);
@@ -1186,6 +1190,17 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   let mergeAttempts = 0;
   let isMerged = false;
   let mergeStrategy: Record<string, string> | null = null;
+  let persistedHandoff: {
+    last_summary: string | null; pending_todo: string[] | null; active_decisions: string[] | null;
+    keywords: string[] | null; key_context: string | null; active_branch: string | null;
+    role: string;
+  } | null = null;
+  const historyIdentityErrors = new Set([
+    "Ambiguous handoff history identity",
+    "Invalid scoped handoff history response",
+    "Handoff history identity mismatch",
+  ]);
+  const historyFailure = (attempted: boolean) => `The expected handoff history could not be verified in this role/workspace. Reload context before saving; ${attempted ? "no further merge was attempted" : "no merge was attempted"}.`;
 
   while (data.status === "conflict" && mergeAttempts < MAX_MERGE_ATTEMPTS) {
     // If the user explicitly disabled CRDT merging, return old OCC error
@@ -1212,9 +1227,18 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     );
 
     // Step 1: Fetch the base state (what the incoming agent originally read)
-    const baseDbState = expected_version
-      ? await storage.getHandoffAtVersion(project, expected_version, PRISM_USER_ID)
-      : null;
+    let baseDbState: Awaited<ReturnType<typeof storage.getHandoffAtVersion>> = null;
+    try {
+      baseDbState = expected_version
+        ? await storage.getHandoffAtVersion(project, expected_version, PRISM_USER_ID, effectiveRole)
+        : null;
+    } catch (error) {
+      if (!(error instanceof Error) || !historyIdentityErrors.has(error.message)) throw error;
+      return { content: [{ type: "text", text: historyFailure(mergeAttempts > 0) }], isError: true };
+    }
+    if (expected_version && !baseDbState) {
+      return { content: [{ type: "text", text: `The expected handoff version is unavailable in this role/workspace. Reload context before saving; ${mergeAttempts > 0 ? "no further merge was attempted" : "no merge was attempted"}.` }], isError: true };
+    }
     const baseState = dbToHandoffSchema(baseDbState);
 
     // Step 2: Fetch current DB state (what beat us to the save)
@@ -1248,8 +1272,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
 
     // Step 5: Build merged handoff and retry save
     const mergedExpectedVersion = (currentDbState as Record<string, unknown>).version as number;
-    data = await storage.saveHandoff(
-      {
+    const mergedHandoff = {
         project,
         user_id: PRISM_USER_ID,
         last_summary: crdt.merged.summary ?? null,
@@ -1264,14 +1287,22 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
           last_merge_strategy: crdt.strategy,
         },
         role: effectiveRole,
-      },
+      };
+    data = await storage.saveHandoff(mergedHandoff,
       mergedExpectedVersion ?? null
     );
 
     // Update these for the snapshot/notification blocks below
     if (data.status !== "conflict") {
-      // Merge succeeded — update local vars for the success path
-      keywords = crdt.merged.keywords ?? keywords;
+      persistedHandoff = {
+        last_summary: mergedHandoff.last_summary,
+        pending_todo: mergedHandoff.pending_todo,
+        active_decisions: mergedHandoff.active_decisions,
+        keywords: mergedHandoff.keywords,
+        key_context: mergedHandoff.key_context,
+        active_branch: mergedHandoff.active_branch,
+        role: effectiveRole,
+      };
     }
 
     mergeAttempts++;
@@ -1295,28 +1326,37 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
 
   // ─── Success: handoff created or updated ───
   const newVersion = data.version;
+  const saved = persistedHandoff ?? {
+    last_summary: last_summary ?? null,
+    pending_todo: open_todos ?? null,
+    active_decisions: null,
+    keywords: keywords ?? null,
+    key_context: key_context ?? null,
+    active_branch: active_branch ?? null,
+    role: effectiveRole,
+  };
 
   // ─── TIME MACHINE: Auto-snapshot for time travel ───
   // Every successful save creates a snapshot so the user can revert later.
   // Await the attempt so short-lived CLI/MCP transports cannot exit before the
   // snapshot reaches storage. Failure stays non-fatal because the primary
   // handoff has already been durably saved.
-  let historySnapshotSaved = false;
-  if (data.status === "created" || data.status === "updated") {
+  let historySnapshotSaved = data.history_saved === true;
+  if ((data.status === "created" || data.status === "updated") && !historySnapshotSaved) {
     const snapshotEntry = {
       project,
       user_id: PRISM_USER_ID,
-      last_summary: last_summary ?? null,
-      pending_todo: open_todos ?? null,
-      active_decisions: null,
-      keywords: keywords ?? null,
-      key_context: key_context ?? null,
-      active_branch: active_branch ?? null,
-      role: effectiveRole,
+      last_summary: saved.last_summary,
+      pending_todo: saved.pending_todo,
+      active_decisions: saved.active_decisions,
+      keywords: saved.keywords,
+      key_context: saved.key_context,
+      active_branch: saved.active_branch,
+      role: saved.role,
       version: newVersion,
     };
     try {
-      await storage.saveHistorySnapshot(snapshotEntry, active_branch ?? "main");
+      await storage.saveHistorySnapshot(snapshotEntry, saved.active_branch ?? "main");
       historySnapshotSaved = true;
     } catch (err) {
       console.error(`[session_save_handoff] History snapshot failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
@@ -1327,9 +1367,9 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   let embeddingQueued = false;
   if (data.status === "created" || data.status === "updated") {
     const embeddingText = [
-      last_summary || "",
-      key_context || "",
-      ...(open_todos || []),
+      saved.last_summary || "",
+      saved.key_context || "",
+      ...(saved.pending_todo || []),
     ].filter(Boolean).join("\n");
 
     // Cloud memory does not keep handoff vectors (patchHandoff writes nowhere), so the
@@ -1396,7 +1436,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     captureLocalEnvironment(project, PRISM_CAPTURE_PORTS).then(async (captureMeta) => {
       if (captureMeta) {
         try {
-          const latestCtx = await storage.loadContext(project, "quick", PRISM_USER_ID);
+          const latestCtx = await storage.loadContext(project, "quick", PRISM_USER_ID, effectiveRole);
           if (latestCtx) {
             const ctx = latestCtx as any;
             const updatedMeta = { ...(ctx.metadata || {}) };
@@ -1413,6 +1453,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
               keywords: ctx.keywords ?? null,
               key_context: ctx.key_context ?? null,
               active_branch: ctx.active_branch ?? null,
+              role: effectiveRole,
             }, newVersion);
             debugLog(`[AutoCapture] HTML snapshot indexed in visual memory for "${project}"`);
           }
@@ -1435,12 +1476,12 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
   //   If the user saves another handoff while the merger runs,
   //   the merger's save will fail with a version conflict. This is
   //   intentional — active user input always wins over background merging.
-  if (data.status === "updated" && key_context) {
+  if (data.status === "updated" && saved.key_context) {
     // Use dynamic import to avoid loading Gemini SDK if not needed
     import("../utils/factMerger.js").then(async ({ consolidateFacts }) => {
       try {
         // Step 1: Load the old context from the database
-        const oldState = await storage.loadContext(project, "quick", PRISM_USER_ID);
+        const oldState = await storage.loadContext(project, "quick", PRISM_USER_ID, effectiveRole);
         const oldKeyContext = (oldState as any)?.key_context || "";  // extract old key_context
 
         // Step 2: Skip merge if old context is empty (nothing to merge with)
@@ -1450,10 +1491,10 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
         }
 
         // Step 3: Call Gemini to intelligently merge old + new context
-        const mergedContext = await consolidateFacts(oldKeyContext, key_context);
+        const mergedContext = await consolidateFacts(oldKeyContext, saved.key_context!);
 
         // Step 4: Skip patch if merged result is same as current key_context
-        if (mergedContext === key_context) {
+        if (mergedContext === saved.key_context) {
           debugLog("[FactMerger] No changes after merge — skipping patch");
           return;  // Gemini determined no contradictions existed
         }
@@ -1465,11 +1506,12 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
           project,                                // same project
           user_id: PRISM_USER_ID,                 // same user
           key_context: mergedContext,              // merged context (cleaned by Gemini)
-          last_summary: last_summary ?? null,      // preserve existing summary
-          pending_todo: open_todos ?? null,        // preserve existing TODOs
-          active_decisions: null,                  // preserve existing decisions
-          keywords: keywords ?? null,              // preserve existing keywords
-          active_branch: active_branch ?? null,    // preserve existing branch
+          last_summary: saved.last_summary,
+          pending_todo: saved.pending_todo,
+          active_decisions: saved.active_decisions,
+          keywords: saved.keywords,
+          active_branch: saved.active_branch,
+          role: effectiveRole,
           metadata: {},                            // no metadata changes
         }, newVersion);                            // use current version for OCC
 
@@ -1501,7 +1543,7 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     (isMerged
     ? `🔄 Auto-merged conflict for "${project}" (v${expected_version} → v${newVersion})\n` +
       `Strategy: ${JSON.stringify(mergeStrategy)}\n` +
-      (last_summary ? `Summary: ${last_summary}\n` : "") +
+      (saved.last_summary ? `Summary: ${saved.last_summary}\n` : "") +
       historySnapshotLine +
       metricsBlock +
       `\n🔑 Remember: pass expected_version: ${newVersion} on your next save ` +
@@ -1527,6 +1569,40 @@ export async function sessionSaveHandoffHandler(args: unknown, server?: Server) 
     }],
     isError: false,
   };
+}
+
+/** Publish one explicitly selected project decision/handoff note. Personal
+ * handoff state remains private and is never copied by this operation. */
+export async function sessionShareProjectMemoryHandler(args: unknown) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Invalid explicit project sharing fields');
+  const input = args as Record<string, unknown>;
+  const allowed = ['project', 'summary', 'decisions', 'keywords', 'files_changed', 'conversation_id', 'role', 'event_type'];
+  if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('Invalid explicit project sharing fields');
+  const project = typeof input.project === 'string' ? input.project.trim() : '';
+  const summary = typeof input.summary === 'string' ? input.summary.trim() : '';
+  if (!project || project.length > 100 || !summary || summary.length > 12000) throw new Error('project and summary are required within their size limits');
+  for (const [key, cap, size] of [['decisions',100,2000],['keywords',50,200],['files_changed',200,500]] as const) {
+    const value = input[key];
+    if (value !== undefined && (!Array.isArray(value) || value.length > cap
+      || value.some(item => typeof item !== 'string' || !item.trim() || item.length > size))) throw new Error(`Invalid selected ${key}`);
+  }
+  if (input.event_type !== undefined && input.event_type !== 'project_decision' && input.event_type !== 'project_handoff') throw new Error('Invalid project memory kind');
+  const role = input.role ?? (await getSetting('default_role', 'global') || 'global');
+  if (typeof role !== 'string' || !isDashboardSettingValueAllowed('default_role', role)
+    || input.conversation_id !== undefined && (typeof input.conversation_id !== 'string' || input.conversation_id.length > 200)) throw new Error('Invalid sharing identity');
+  const storage = await getStorage() as StorageBackend & { shareProjectMemory?: (value: any) => Promise<any> };
+  if (typeof storage.shareProjectMemory !== 'function') {
+    throw new Error('Project sharing is available only on the Synalux workspace backend');
+  }
+  const result = await storage.shareProjectMemory({
+    project, summary,
+    decisions: Array.isArray(input.decisions) ? input.decisions : undefined,
+    keywords: Array.isArray(input.keywords) ? input.keywords : undefined,
+    files_changed: Array.isArray(input.files_changed) ? input.files_changed : undefined,
+    conversation_id: typeof input.conversation_id === 'string' ? input.conversation_id : undefined,
+    role, event_type: input.event_type as 'project_decision' | 'project_handoff' | undefined,
+  });
+  return { content: [{ type: 'text', text: `Shared one project memory entry (${result.id}) with the current workspace.` }] };
 }
 
 interface SessionLoadContextOptions {
@@ -2902,7 +2978,7 @@ export async function memoryHistoryHandler(args: unknown) {
     const summary = h.snapshot.last_summary || "(no summary)";
     const todos = h.snapshot.pending_todo?.length || 0;
     const branch = h.branch !== "main" ? ` [branch: ${h.branch}]` : "";
-    return `  v${h.version} [${h.created_at}]${branch}\n    Summary: ${summary}\n    TODOs: ${todos} items`;
+    return `  v${h.version} [${h.created_at}]${branch} [role: ${h.snapshot.role || "global"}]\n    Summary: ${summary}\n    TODOs: ${todos} items`;
   }).join("\n\n");
 
   return {
@@ -2920,44 +2996,70 @@ export async function memoryCheckoutHandler(args: unknown) {
     throw new Error("Invalid arguments for memory_checkout");
   }
 
-  const { project, target_version } = args;
+  const { project, target_version, role } = args;
   const storage = await getStorage();
+  const effectiveRole = role || await getSetting("default_role", "global") || "global";
 
   debugLog(
     `[memory_checkout] Reverting project="${project}" to version ${target_version}`
   );
 
   // 1. Find the target snapshot
-  const history = await storage.getHistory(project, PRISM_USER_ID, 50);
-  const targetState = history.find(h => h.version === target_version);
+  let targetState: Awaited<ReturnType<typeof storage.getHandoffAtVersion>>;
+  try {
+    targetState = await storage.getHandoffAtVersion(project, target_version, PRISM_USER_ID, effectiveRole);
+  } catch {
+    return {
+      content: [{ type: "text", text: "The exact role/workspace history could not be verified. Reload context before checkout; no write was attempted." }],
+      isError: true,
+    };
+  }
 
   if (!targetState) {
-    const available = history.map(h => `v${h.version}`).join(", ") || "none";
     return {
       content: [{
         type: "text",
         text: `❌ Version ${target_version} not found in history for "${project}".\n\n` +
-          `Available versions: ${available}\n\n` +
+          `Memory role: ${effectiveRole}\n\n` +
           `Use memory_history to see the full timeline.`,
       }],
       isError: true,
     };
   }
 
+  if (targetState.project !== project || targetState.version !== target_version
+      || (targetState.role ?? "global") !== effectiveRole) {
+    return {
+      content: [{ type: "text", text: "The history snapshot identity does not match this project, role and version. Reload context before checkout; no write was attempted." }],
+      isError: true,
+    };
+  }
+
   // 2. Get current state for OCC
-  const currentContext = await storage.loadContext(project, "quick", PRISM_USER_ID);
+  const currentContext = await storage.loadContext(project, "quick", PRISM_USER_ID, effectiveRole);
   const currentVersion = currentContext ? (currentContext as Record<string, unknown>).version as number : null;
+  if (!Number.isSafeInteger(currentVersion) || currentVersion === null || currentVersion < 1
+      || (currentContext?.role !== undefined && currentContext.role !== effectiveRole)) {
+    return {
+      content: [{ type: "text", text: "The current handoff version could not be verified in this role/workspace. Reload context before checkout; no write was attempted." }],
+      isError: true,
+    };
+  }
 
   // 3. Build the revert handoff — copy the historical snapshot but mark it as a revert
+  const restoredFields = dbToHandoffSchema(targetState)!;
   const revertHandoff = {
-    ...targetState.snapshot,
+    ...targetState,
     project,
     user_id: PRISM_USER_ID,
-    last_summary: `[REVERTED TO v${target_version}] ${targetState.snapshot.last_summary || ""}`,
+    role: effectiveRole,
+    key_context: restoredFields.key_context,
+    active_branch: restoredFields.active_branch,
+    last_summary: `[REVERTED TO v${target_version}] ${targetState.last_summary || ""}`,
   };
 
   // 4. Save with OCC — pass current version to prevent race conditions
-  const result = await storage.saveHandoff(revertHandoff, currentVersion);
+  const result = await storage.saveHandoff(revertHandoff, currentVersion, { restoreContextFields: true });
 
   if (result.status === "conflict") {
     return {
@@ -2976,9 +3078,15 @@ export async function memoryCheckoutHandler(args: unknown) {
     ...revertHandoff,
     version: result.version,
   };
-  await storage.saveHistorySnapshot(revertSnapshotEntry).catch(err =>
-    console.error(`[memory_checkout] History snapshot of revert failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`)
-  );
+  let historySnapshotSaved = result.history_saved === true;
+  if (!historySnapshotSaved) {
+    try {
+      await storage.saveHistorySnapshot(revertSnapshotEntry);
+      historySnapshotSaved = true;
+    } catch (err) {
+      console.error(`[memory_checkout] History snapshot of revert failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   const newVersion = result.version;
 
@@ -2989,9 +3097,11 @@ export async function memoryCheckoutHandler(args: unknown) {
         `• Project: "${project}"\n` +
         `• Reverted from: v${currentVersion || "?"} → restored v${target_version}\n` +
         `• New current version: v${newVersion}\n` +
-        `• Summary: ${targetState.snapshot.last_summary || "(no summary)"}\n\n` +
-        `The project's memory has been restored to the state from ${targetState.created_at}.\n` +
-        `This revert is also saved in history, so you can undo it with another memory_checkout.\n\n` +
+        `• Summary: ${targetState.last_summary || "(no summary)"}\n\n` +
+        `The project's memory has been restored to ${targetState.created_at ? `the state from ${targetState.created_at}` : `version ${target_version}`}.\n` +
+        (historySnapshotSaved
+          ? `This revert is also saved in history, so you can undo it with another memory_checkout.\n\n`
+          : `⚠️ The restored handoff is saved, but its history snapshot was not saved. Undo history for this new version is unavailable.\n\n`) +
         `🔑 Remember: pass expected_version: ${newVersion} on your next save.`,
     }],
     isError: false,

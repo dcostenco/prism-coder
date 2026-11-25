@@ -5,6 +5,7 @@ import { PipelineState } from '../storage/interface.js';
 import { SafetyController } from './safetyController.js';
 import { debugLog } from '../utils/logger.js';
 import { readContextFiles } from './actionExecutor.js';
+import { PRISM_FORCE_LOCAL, PRISM_STRICT_LOCAL_MODE } from '../config.js';
 
 /**
  * JSON output schema instruction injected into EXECUTE step prompts.
@@ -86,11 +87,20 @@ export async function invokeClawAgent(
   timeoutMs = 120000 // 2 min default timeout for internal executions
 ): Promise<{ success: boolean; resultText: string }> {
 
-  // BYOM Override: Provide path to use alternative open-source pipelines 
-  // (e.g. through the OpenAI structured adapter which also points to local endpoints like Ollama / vLLM if configured)
-  const llm = spec.modelOverride 
-    ? new OpenAIAdapter() // Bypasses the factory to route locally
-    : getLLMProvider();
+  if ((await import('../utils/hostTasks.js')).hostTasksRequired()) {
+    return { success: false, resultText: 'host_authorization_required: autonomous Factory execution cannot consume host-reviewed task packets; use the host CLI workflow.' };
+  }
+
+  // The explicit model uses the configured OpenAI-compatible endpoint.
+  // Apply the same residency policy before loading context for the request.
+  let llm;
+  try {
+    llm = spec.modelOverride
+      ? new OpenAIAdapter({ localOnly: PRISM_FORCE_LOCAL || PRISM_STRICT_LOCAL_MODE })
+      : getLLMProvider();
+  } catch (error) {
+    return { success: false, resultText: error instanceof Error ? error.message : String(error) };
+  }
 
   // Scope injection via SafetyController — single source of truth
   const systemPrompt = SafetyController.generateBoundaryPrompt(spec, state);

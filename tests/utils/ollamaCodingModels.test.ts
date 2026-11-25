@@ -6,16 +6,29 @@ function fixture(overrides: Record<string, unknown> = {}, weightBytes = 12 * GIB
         "example.block_count": 60, "example.embedding_length": 4096, "example.attention.head_count": 32, "example.attention.head_count_kv": 8, ...overrides };
     const fetcher = vi.fn(async (url: any, init?: RequestInit) => {
         const data = String(url).endsWith("/api/tags") ? { models: [{ name: id, size: weightBytes }] }
-            : String(url).endsWith("/api/ps") ? { models: [{ name: id, size_vram: 13 * GIB, context_length: 4096 }] }
+            : String(url).endsWith("/api/ps") ? { models: [{ name: id, size: 15 * GIB, size_vram: 13 * GIB, context_length: 4096 }] }
             : { model_info: info, capabilities: ["completion", "thinking"], parameters: "num_ctx 65536" };
         return new Response(JSON.stringify(data));
     });
     return { fetcher };
 }
 describe("discovered Ollama coding models", () => {
+    it("RH sizes KV memory for a requested continuation context without changing legacy defaults", async () => {
+        const { fetcher } = fixture();
+        const legacy = await selectedOllamaCodingModel("http://local", id, "27b", fetcher);
+        const larger = await selectedOllamaCodingModel("http://local", id, "27b", fetcher, { requestedContextTokens: 32768 });
+        expect(legacy.ctxTokens).toBe(4096); expect(larger.ctxTokens).toBe(32768);
+        expect(larger.minFreeGb).toBeGreaterThan(legacy.minFreeGb);
+        const sameBucket = await Promise.all([20000, 20080].map(requestedContextTokens =>
+            selectedOllamaCodingModel("http://local", id, "27b", fetcher, { requestedContextTokens })));
+        expect(sameBucket.map(choice => choice.ctxTokens)).toEqual([20480, 20480]);
+        await expect(selectedOllamaCodingModel("http://local", id, "27b", fetcher, { requestedContextTokens: 32769 }))
+            .rejects.toThrow("ollama_model_context_insufficient");
+        expect(fetcher.mock.calls.every(([url]) => !String(url).endsWith("/api/chat"))).toBe(true);
+    });
     it("discovers arbitrary IDs, weights and loaded memory without inference or pull calls", async () => {
         const { fetcher } = fixture();
-        expect(await inspectOllamaCodingModels("http://local", fetcher)).toEqual([{ id, weightBytes: 12 * GIB, loaded: true, loadedBytes: 13 * GIB, contextTokens: 4096 }]);
+        expect(await inspectOllamaCodingModels("http://local", fetcher)).toEqual([{ id, weightBytes: 12 * GIB, loaded: true, loadedBytes: 15 * GIB, loadedVramBytes: 13 * GIB, contextTokens: 4096 }]);
         expect(fetcher.mock.calls.map(call => call[0])).toEqual(["http://local/api/tags", "http://local/api/ps"]);
         expect(fetcher.mock.calls.every(call => call[1]?.redirect === "error")).toBe(true);
     });

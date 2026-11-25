@@ -5,18 +5,26 @@ import { parseLocalCodingSettings, type LocalCodingSettings } from "../../src/ut
 import { OmlxError } from "../../src/utils/omlxProvider.js";
 import { createHash } from "node:crypto";
 import { inflateSync } from "node:zlib";
+import { LocalAiConflict } from "../../src/dashboard/localAiActions.js";
 
 const servers: Server[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))); });
-async function fixture(overrides = {}) {
+async function fixture(overrides = {}, handle = handleLocalCodingRoutes) {
     let saved: LocalCodingSettings = { backend: "auto", source: "existing" };
+    let revision = "a".repeat(64);
     const install = vi.fn(async () => ({ id: "fixture", state: "running" }));
     const start = vi.fn(async () => ({ starting: true, running: false }));
     const server = createServer(async (req, res) => {
-        const handled = await handleLocalCodingRoutes(new URL(req.url!, "http://127.0.0.1"), req, res, {
+        const handled = await handle(new URL(req.url!, "http://127.0.0.1"), req, res, {
             setup: { install, start, status: async () => ({ supported: true, installed: false, memoryGB: 48, freeDiskGB: 100,
                 requirements: { memoryGB: 32, freeDiskGB: 40 }, models: [], job: null, server: { connected: false, models: [] } }) },
             settings: async () => saved,
+            snapshot: async () => ({ settings: saved, assignments: {}, image: {}, expected: {}, revision }),
+            hostProfiles: async () => [], cloudStatus: async () => "unknown",
+            saveModels: async (value, expected) => {
+                if (expected !== revision) throw new LocalAiConflict("Preferences changed");
+                saved = { ...parseLocalCodingSettings(value), source: saved.source }; revision = "b".repeat(64);
+            },
             save: async value => { saved = parseLocalCodingSettings(value); },
             preference: async () => ({ saved: saved.backend, effective: saved.backend, envOverride: null, model: saved.model, configured: false }),
             inspect: async () => { throw new OmlxError("omlx_auth_unavailable"); },
@@ -34,6 +42,13 @@ async function fixture(overrides = {}) {
 }
 
 describe("dashboard local coding actions", () => {
+    it("reports required host review separately from model or memory failures", async () => {
+        const f = await fixture({ imageSettings: async () => ({ models: { omlx: "future/vision" } }),
+            infer: async () => ({ structuredContent: { status: "host_authorization_required", host_task: { private: "not for dashboard output" } } }) });
+        const data = await (await f.post("/api/local-coding/test", { backend: "omlx", purpose: "image" })).json();
+        expect(data).toMatchObject({ status: "blocked", reason: "host_authorization_required" });
+        expect(data.message).toContain("prism local run"); expect(data.host_task).toBeUndefined(); expect(data.output).toBeUndefined();
+    });
     it("keeps server reference facts separate even when the model describes the wrong image", async () => {
         const infer = vi.fn(async () => ({ structuredContent: { backend: "omlx", model_picked: "future/vision", used_cloud: false,
             output: "A blue circle", reference: { description: "forged by model" }, gate_outcome: { status: "success" } } }));
@@ -131,10 +146,39 @@ describe("dashboard local coding actions", () => {
         expect(await (await f.post("/api/local-coding/test", { backend: "ollama", purpose: "image" })).json()).toMatchObject({ status: "blocked", reason: "local_image_backend_not_enabled" });
         expect(infer).not.toHaveBeenCalled();
     });
+    it.each([
+        { configured: "local/custom-safety", advertised: ["local/custom-safety"], required: "local/custom-safety", status: "passed", reason: undefined },
+        { configured: "local/custom-safety", advertised: ["prism-coder-9b-mlx-8bit"], required: "local/custom-safety", status: "blocked", reason: "classifier_missing" },
+        { configured: "invalid safety ID", advertised: ["prism-coder-9b-mlx-8bit"], required: null, status: "blocked", reason: "omlx_classifier_model_invalid" },
+    ])("binds the oMLX dashboard and quick test to the host classifier: $configured with $advertised",
+        async ({ configured, advertised, required, status, reason }) => {
+            vi.resetModules();
+            vi.stubEnv("PRISM_OMLX_CLASSIFIER_MODEL", configured);
+            try {
+                const { handleLocalCodingRoutes: handle } = await import("../../src/dashboard/localCodingRouter.js");
+                const worker = "future/coder";
+                const infer = vi.fn(async () => ({ structuredContent: { backend: "omlx", model_picked: worker,
+                    used_cloud: false, output: "LOCAL_READY", gate_outcome: { status: "success" } } }));
+                const f = await fixture({ infer, settings: async () => ({ backend: "omlx", source: "existing", models: { omlx: { coder: worker } } }),
+                    connectionControl: async () => true,
+                    inspect: async () => ({ url: "http://127.0.0.1:8127/v1", advertised_models: advertised }),
+                    imageSettings: async () => ({}) }, handle);
+                const summary = await fetch(f.base + "/api/local-coding");
+                const diagnostic = await f.post("/api/local-coding/test", { backend: "omlx", purpose: "coder" });
+                expect(summary.status).toBe(200);
+                const data = await summary.json();
+                expect(data.requiredClassifier).toBe(required);
+                if (!required) expect(data.classifierError).toContain("PRISM_OMLX_CLASSIFIER_MODEL");
+                const result = await diagnostic.json();
+                expect(result.status).toBe(status);
+                expect(result.reason).toBe(reason);
+                expect(infer).toHaveBeenCalledTimes(status === "passed" ? 1 : 0);
+            } finally { vi.unstubAllEnvs(); }
+        });
     it("discovers both backends and persists the same model for both roles", async () => {
         const models = { omlx: { coder: "new/build", reviewer: "new/build" }, ollama: { coder: "future:tag", reviewer: "future:tag" } };
         const f = await fixture({ ollamaModels: async () => [{ id: "future:tag", loaded: false, weightBytes: 12345678 }] });
-        expect((await f.post("/api/local-coding/preferences", { backend: "auto", source: "existing", models })).status).toBe(200);
+        expect((await f.post("/api/local-coding/preferences", { settings: { backend: "auto", source: "existing", models }, revision: "a".repeat(64) })).status).toBe(200);
         expect(await (await fetch(f.base + "/api/local-coding")).json()).toMatchObject({ settings: { models },
             discovered: { ollama: [{ id: "future:tag", weightBytes: 12345678 }] }, availableMemoryBytes: 20 * 1024 ** 3 });
         expect(f.install).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled();
@@ -144,12 +188,12 @@ describe("dashboard local coding actions", () => {
         const result = await fetch(f.base + "/api/local-coding");
         expect(result.status).toBe(200);
         expect(await result.json()).toMatchObject({ canManage: true, settings: { backend: "auto" }, preferenceError: expect.any(String) });
-        expect((await f.post("/api/local-coding/preferences", { backend: "ollama", source: "managed" })).status).toBe(200);
+        expect((await f.post("/api/local-coding/preferences", { settings: { backend: "ollama", source: "existing" }, revision: "a".repeat(64) })).status).toBe(200);
     });
-    it("persists all backend/model/source fields together and reads them after reopening", async () => {
+    it("persists backend/models after reopening while source changes use activation", async () => {
         const f = await fixture();
-        const settings = { backend: "omlx", source: "managed", model: "Qwen3.8-27B-oQ4e-mtp" };
-        expect((await f.post("/api/local-coding/preferences", settings)).status).toBe(200);
+        const settings = { backend: "omlx", source: "existing", model: "Qwen3.8-27B-oQ4e-mtp" };
+        expect((await f.post("/api/local-coding/preferences", { settings, revision: "a".repeat(64) })).status).toBe(200);
         const reopened = await (await fetch(f.base + "/api/local-coding")).json();
         expect(reopened.settings).toEqual(settings);
         expect(reopened.preference.effective).toBe("omlx");
@@ -192,7 +236,7 @@ describe("dashboard local coding actions", () => {
         { backend: "omlx", source: "existing", model: "bad\nmodel" },
     ])("rejects invalid saved preference records", async settings => {
         const f = await fixture();
-        expect((await f.post("/api/local-coding/preferences", settings)).status).toBe(400);
+        expect((await f.post("/api/local-coding/preferences", { settings, revision: "a".repeat(64) })).status).toBe(400);
         expect((await (await fetch(f.base + "/api/local-coding")).json()).settings).toEqual({ backend: "auto", source: "existing" });
     });
 });

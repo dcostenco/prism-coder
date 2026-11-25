@@ -1,23 +1,130 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { ReservedRefusalError } from "../../src/tools/prismInferHandler.js";
 import { fileURLToPath } from "node:url";
+import { compactLedgerHandler } from "../../src/tools/compactionHandler.js";
+import { appendInferMetric } from "../../src/storage/inferMetricsLedger.js";
+import { FREE_ENTITLEMENTS, getEntitlements } from "../../src/utils/entitlements.js";
+import { callLayer1, keywordBackstop } from "../../src/utils/layer1.js";
+import { consumeHostExecution, HostAuthorizationError } from "../../src/utils/hostTasks.js";
+import { getSynaluxJwt } from "../../src/utils/synaluxJwt.js";
 
-/**
- * A Layer 1 refusal must never be reported as "no local answer".
- *
- * Callers of the old `callLocalLlm` helper treated null as unavailability and
- * responded by trying the cloud — compactionHandler does exactly that, on
- * ledger content, three lines after the local attempt. When inferText caught
- * every throw into null, a reserved-content refusal became indistinguishable
- * from "Ollama is down", so the classifier's refusal was the trigger for the
- * cloud disclosure it exists to prevent.
- *
- * That is a fail-open in a reserved category, and it was introduced by routing
- * these callers through the ladder — before, there was no Layer 1 at all, so
- * there was no refusal to lose. Adding screening whose "no" is discarded is
- * worse than no screening, because it reads as protection.
- */
-describe("inferText fails CLOSED on a reserved-content refusal", () => {
+const { storage, generateText } = vi.hoisted(() => ({
+    storage: {
+        getCompactionCandidates: vi.fn(),
+        getLedgerEntries: vi.fn(),
+        saveLedger: vi.fn(),
+        patchLedger: vi.fn(),
+        createLink: vi.fn(),
+        upsertSemanticKnowledge: vi.fn(),
+    },
+    generateText: vi.fn(),
+}));
+
+vi.mock("../../src/config.js", async original => ({
+    ...await original<typeof import("../../src/config.js")>(),
+    PRISM_LOCAL_LLM_ENABLED: true,
+    PRISM_FORCE_LOCAL: false,
+    PRISM_STRICT_LOCAL_MODE: false,
+    PRISM_LOCAL_LLM_URL: "http://127.0.0.1:11434",
+    PRISM_SYNALUX_BASE_URL: "https://provider.fixture.invalid",
+}));
+vi.mock("../../src/storage/index.js", () => ({
+    activeStorageBackend: "local",
+    getStorage: () => storage,
+}));
+vi.mock("../../src/storage/inferMetricsLedger.js", () => ({
+    appendInferMetric: vi.fn(),
+    queryInferMetrics: vi.fn(),
+}));
+vi.mock("../../src/utils/llm/factory.js", () => ({
+    getLLMProvider: () => ({ generateText }),
+}));
+vi.mock("../../src/utils/entitlements.js", async original => ({
+    ...await original<typeof import("../../src/utils/entitlements.js")>(),
+    getEntitlements: vi.fn(),
+}));
+vi.mock("../../src/utils/layer1.js", async original => ({
+    ...await original<typeof import("../../src/utils/layer1.js")>(),
+    callLayer1: vi.fn(),
+    keywordBackstop: vi.fn(),
+}));
+vi.mock("../../src/utils/inferencePolicy.js", async original => ({
+    ...await original<typeof import("../../src/utils/inferencePolicy.js")>(),
+    getAnswerCheckPolicy: async () => null,
+    getClassifierInputPolicy: async () => null,
+    getSecondReadPolicy: async () => null,
+}));
+vi.mock("../../src/utils/hostTasks.js", async original => ({
+    ...await original<typeof import("../../src/utils/hostTasks.js")>(),
+    consumeHostExecution: vi.fn(),
+}));
+vi.mock("../../src/utils/localCodingPreference.js", async original => ({
+    ...await original<typeof import("../../src/utils/localCodingPreference.js")>(),
+    localCodingPreference: async () => ({ saved: "ollama", effective: "ollama", configured: true, envOverride: null }),
+}));
+vi.mock("../../src/utils/availableMemory.js", () => ({ getAvailableMemoryBytes: () => freeMemory }));
+vi.mock("../../src/utils/omlxProvider.js", async original => ({
+    ...await original<typeof import("../../src/utils/omlxProvider.js")>(),
+    withInferenceResourceLease: async (_exclusive: boolean, action: () => Promise<unknown>) => action(),
+    withOllamaResourceLease: async (action: () => Promise<unknown>) => action(),
+}));
+vi.mock("../../src/utils/ddLogger.js", () => ({ ddLog: vi.fn() }));
+vi.mock("../../src/utils/synaluxJwt.js", () => ({
+    getSynaluxJwt: vi.fn(async () => null),
+    invalidateSynaluxJwt: vi.fn(),
+}));
+
+let installed: string[];
+let freeMemory: number;
+let respond: (path: string) => Response | undefined;
+
+function compactFixture(count = 1, signal?: AbortSignal) {
+    const entries = Array.from({ length: count + 1 }, (_, index) => ({
+        id: `entry-${index}`,
+        summary: "Routine project maintenance.",
+        decisions: [],
+        files_changed: [],
+        keywords: [],
+        session_date: "2026-11-20",
+    }));
+    storage.getLedgerEntries.mockResolvedValueOnce(entries).mockResolvedValueOnce(entries.slice(0, count));
+    return compactLedgerHandler({ project: "fixture", threshold: 1, keep_recent: 1 }, signal);
+}
+
+function expectNoFallbackOrWrites() {
+    expect(getSynaluxJwt).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
+    expect(storage.saveLedger).not.toHaveBeenCalled();
+    expect(storage.patchLedger).not.toHaveBeenCalled();
+    expect(storage.createLink).not.toHaveBeenCalled();
+    expect(storage.upsertSemanticKnowledge).not.toHaveBeenCalled();
+}
+
+describe("Compaction inference failure boundary", () => {
+    beforeEach(() => {
+        vi.resetAllMocks();
+        installed = ["prism-coder:4b"];
+        freeMemory = 16 * 1024 ** 3;
+        respond = () => undefined;
+        vi.mocked(getEntitlements).mockResolvedValue(FREE_ENTITLEMENTS);
+        vi.mocked(callLayer1).mockResolvedValue("ERROR");
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_RESERVED");
+        generateText.mockResolvedValue(JSON.stringify({ summary: "Combined routine maintenance." }));
+        storage.saveLedger.mockResolvedValue([{ id: "rollup-fixture" }]);
+        vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+            const url = new URL(input);
+            if (url.origin !== "http://127.0.0.1:11434") throw new Error("Unexpected provider origin");
+            const override = respond(url.pathname);
+            if (override) return override;
+            if (url.pathname === "/api/tags") return Response.json({ models: installed.map(name => ({ name })) });
+            if (url.pathname === "/api/ps") return Response.json({ models: [] });
+            if (url.pathname === "/api/show") return Response.json({ parameters: "num_ctx 32768" });
+            throw new Error("Unexpected network request in the offline compaction fixture");
+        }));
+    });
+
+    afterEach(() => vi.unstubAllGlobals());
+
     it("ReservedRefusalError is exported and identifiable by type", () => {
         // The check must not be a regex over the message — a reworded error
         // would silently reopen the hole.
@@ -27,35 +134,367 @@ describe("inferText fails CLOSED on a reserved-content refusal", () => {
         expect(err.refusal_reason).toBe("layer1_reserved");
     });
 
-    it("the handler source rethrows the refusal instead of returning null", async () => {
-        // Asserted against the source because inferText builds its own
-        // production deps (live Ollama, real entitlements) and cannot be driven
-        // from a unit test without a network. The invariant being pinned is
-        // structural: the catch block must not swallow this error type.
-        const { readFileSync } = await import("node:fs");
-        const src = readFileSync(
-            fileURLToPath(new URL("../../src/tools/prismInferHandler.ts", import.meta.url)),
-            "utf8",
-        );
-        const catchBlock = src.slice(src.indexOf("export async function inferText"));
-        const body = catchBlock.slice(0, catchBlock.indexOf("\n}"));
-
-        expect(body, "inferText no longer rethrows reserved refusals")
-            .toMatch(/err instanceof ReservedRefusalError[\s\S]*?throw err/);
-        // And the null return must still exist for genuine unavailability.
-        expect(body).toMatch(/return null/);
+    it.each([
+        { count: 1, cloud: false },
+        { count: 1, cloud: true },
+        { count: 11, cloud: false },
+    ])("stops compaction for $count entries when the backstop refuses (plan cloud $cloud)", async ({ count, cloud }) => {
+        vi.mocked(getEntitlements).mockResolvedValue({
+            ...FREE_ENTITLEMENTS,
+            features: { ...FREE_ENTITLEMENTS.features, cloud_fallback: cloud },
+        });
+        await expect(compactFixture(count)).rejects.toThrow(/keyword backstop/);
+        expectNoFallbackOrWrites();
+        expect(keywordBackstop).toHaveBeenCalledOnce();
+        expect(appendInferMetric).toHaveBeenCalledOnce();
+        expect(appendInferMetric).toHaveBeenCalledWith(expect.objectContaining({
+            gate_outcome: "refused",
+            refusal_reason: "keyword_backstop_reserved",
+        }));
     });
 
-    it("compaction's cloud fallback is only reachable on unavailability", async () => {
+    it("keeps semantic safety and host authorization refusals out of compaction fallback", async () => {
+        vi.mocked(callLayer1).mockResolvedValueOnce("OBVIOUS_RESERVED");
+        await expect(compactFixture()).rejects.toBeInstanceOf(ReservedRefusalError);
+        expectNoFallbackOrWrites();
+
+        const refusal = new HostAuthorizationError("host_authorization_required");
+        vi.mocked(consumeHostExecution).mockImplementationOnce(() => { throw refusal; });
+        await expect(compactFixture()).rejects.toBe(refusal);
+        expectNoFallbackOrWrites();
+    });
+
+    it("propagates an unclassified failure before compaction fallback", async () => {
+        const failure = new Error("Fixture could not resolve inference settings");
+        vi.mocked(getEntitlements).mockRejectedValueOnce(failure);
+        await expect(compactFixture()).rejects.toBe(failure);
+        expectNoFallbackOrWrites();
+    });
+
+    it.each([
+        { label: "authorization required", path: "/api/tags", status: 401, body: "{}" },
+        { label: "access forbidden", path: "/api/tags", status: 403, body: "{}" },
+        { label: "service returned an ambiguous error", path: "/api/tags", status: 503, body: "{}" },
+        { label: "partial inventory", path: "/api/tags", status: 206, body: '{"models":[]}' },
+        { label: "malformed inventory", path: "/api/tags", status: 200, body: "invalid json" },
+        { label: "missing model list", path: "/api/tags", status: 200, body: "{}" },
+        { label: "blank model name", path: "/api/tags", status: 200, body: '{"models":[{"name":" "}]}' },
+        { label: "inventory contains a provider error", path: "/api/tags", status: 200, body: '{"models":[],"error":"denied"}' },
+        { label: "model ID with spaces", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture bad:latest"}]}' },
+        { label: "empty model name components", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture//:"}]}' },
+        { label: "empty model tag", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture:"}]}' },
+        { label: "non-ASCII model ID that folds to ASCII", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture\u212a:latest"}]}' },
+        { label: "conflicting inventory aliases", path: "/api/tags", status: 200, body: '{"models":[{"name":"fixture:latest","model":"different:latest"}]}' },
+        { label: "duplicate catalog model IDs", path: "/api/tags", status: 200, body: '{"models":[{"name":"other:latest"},{"name":"other:latest"}]}' },
+        { label: "duplicate default-registry catalog aliases", path: "/api/tags", status: 200, body: '{"models":[{"name":"other"},{"name":"registry.ollama.ai/library/Other:Latest"}]}' },
+        { label: "loaded model lookup denied", path: "/api/ps", status: 403, body: "{}" },
+        { label: "invalid loaded model ID", path: "/api/ps", status: 200, body: '{"models":[{"name":"other model"}]}' },
+        { label: "duplicate loaded model IDs", path: "/api/ps", status: 200, body: '{"models":[{"name":"other:latest"},{"name":"other:latest"}]}' },
+    ])("keeps $label out of fallback", async ({ path, status, body }) => {
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        respond = route => route === path ? new Response(body, { status }) : undefined;
+        await expect(compactFixture()).rejects.toThrow();
+        expectNoFallbackOrWrites();
+        expect(callLayer1).not.toHaveBeenCalled();
+    });
+
+    it("refuses an ambiguous inventory timeout", async () => {
+        respond = path => {
+            if (path === "/api/tags") throw new DOMException("Inventory timeout", "TimeoutError");
+        };
+        await expect(compactFixture()).rejects.toThrow();
+        expectNoFallbackOrWrites();
+    });
+
+    it.each([
+        { label: "mixed address failures", wrap: (refused: Error, timeout: Error) => new AggregateError([refused, timeout]) },
+        { label: "an empty aggregate", wrap: () => new AggregateError([]) },
+        { label: "a conflicting nested cause", wrap: (_refused: Error, timeout: Error) => new Error("Wrapped", { cause: timeout }) },
+    ])("keeps $label out of closed-listener fallback", async ({ wrap }) => {
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        const refused = Object.assign(new Error("Connection refused"), { code: "ECONNREFUSED" });
+        const timeout = Object.assign(new Error("Connection timed out"), { code: "ETIMEDOUT" });
+        const cause = Object.assign(wrap(refused, timeout), { code: "ECONNREFUSED" });
+        respond = path => {
+            if (path === "/api/tags") throw new TypeError("Fetch failed", { cause });
+        };
+        await expect(compactFixture()).rejects.toThrow("Fetch failed");
+        expectNoFallbackOrWrites();
+        expect(callLayer1).not.toHaveBeenCalled();
+    });
+
+    it("honors the first authorization denial from the actual classifier", async () => {
+        const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+        vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        let requests = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            requests++;
+            return requests === 1 ? new Response("{}", { status: 403 })
+                : Response.json({ message: { content: "OBVIOUS_NOT_RESERVED" }, done: true });
+        };
+        await expect(compactFixture()).rejects.toThrow(/classification could not be confirmed/);
+        expect(requests).toBe(1);
+        expectNoFallbackOrWrites();
+    });
+
+    it.each(["denial", "malformed reply", "abort"])("stops on local generation %s", async failure => {
+        vi.mocked(callLayer1).mockResolvedValue("OBVIOUS_NOT_RESERVED");
+        let requests = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            requests++;
+            if (failure === "abort") throw new DOMException("Fixture cancelled", "AbortError");
+            return failure === "denial" ? new Response("{}", { status: 401 }) : new Response("invalid json");
+        };
+        await expect(compactFixture()).rejects.toThrow(/local generation did not complete/);
+        expect(requests).toBe(1);
+        expectNoFallbackOrWrites();
+    });
+
+    describe.each(["classifier", "generator"])("protected %s response", phase => {
+        it.each([
+            { label: "unfinished", status: 200, envelope: { done: false } },
+            { label: "missing completion", status: 200, envelope: {} },
+            { label: "nonboolean completion", status: 200, envelope: { done: "true" } },
+            { label: "truncated", status: 200, envelope: { done: true, done_reason: "length" } },
+            { label: "partial HTTP response", status: 206, envelope: { done: true } },
+            { label: "explicit provider error", status: 200, envelope: { done: true, error: "" } },
+            { label: "nontext content", status: 200, envelope: { done: true, message: { content: 7 } } },
+            { label: "non-assistant role", status: 200, envelope: { done: true, message: { role: "user" } } },
+            { label: "wrong reported model", status: 200, envelope: { done: true, model: "other:latest" } },
+        ])("refuses $label before fallback or ledger writes", async ({ status, envelope }) => {
+            const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+            vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+            vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+            if (phase === "classifier") freeMemory = 0;
+            const classification = phase === "classifier";
+            const validText = classification ? "OBVIOUS_NOT_RESERVED" : JSON.stringify({ summary: "Routine maintenance summary." });
+            let requests = 0;
+            respond = path => {
+                if (path !== "/api/chat") return;
+                requests++;
+                if (!classification && requests === 1) {
+                    return Response.json({ done: true, done_reason: "stop", message: { content: "OBVIOUS_NOT_RESERVED" } });
+                }
+                return Response.json({ ...envelope, message: { content: validText, ...("message" in envelope ? envelope.message : {}) } }, { status });
+            };
+            const failure = classification ? /classification could not be confirmed/ : /local generation did not complete/;
+            await expect(compactFixture()).rejects.toThrow(failure);
+            expect(requests).toBe(classification ? 1 : 2);
+            expectNoFallbackOrWrites();
+        });
+    });
+
+    it("refuses conflicting classifier labels before fallback or ledger writes", async () => {
+        const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+        vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        freeMemory = 0;
+        respond = path => path === "/api/chat" ? Response.json({
+            done: true, done_reason: "stop",
+            message: { role: "assistant", content: "OBVIOUS_NOT_RESERVED\nOBVIOUS_RESERVED" },
+        }) : undefined;
+        await expect(compactFixture()).rejects.toThrow(/classification could not be confirmed/);
+        expect(callLayer1).toHaveBeenCalledOnce();
+        expectNoFallbackOrWrites();
+    });
+
+    it.each([1, 2])("keeps originals if classification refuses after %s locally summarized chunks", async successfulChunks => {
+        vi.mocked(callLayer1).mockResolvedValue("ERROR");
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        for (let i = 0; i < successfulChunks; i++) vi.mocked(callLayer1).mockResolvedValueOnce("OBVIOUS_NOT_RESERVED");
+        let localOutputs = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            localOutputs++;
+            return Response.json({ message: { content: JSON.stringify({ summary: "Summarized routine maintenance." }) }, done: true });
+        };
+        await expect(compactFixture(11)).rejects.toThrow(/classification could not be confirmed/);
+        expect(callLayer1).toHaveBeenCalledTimes(successfulChunks + 1);
+        expect(localOutputs).toBe(successfulChunks);
+        expectNoFallbackOrWrites();
+    });
+
+    it.each(["empty inventory", "unrelated model", "closed listener", "all addresses refused", "insufficient RAM"])(
+        "uses the configured fallback after confirmed local unavailability from %s", async evidence => {
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        vi.mocked(callLayer1).mockResolvedValue("OBVIOUS_NOT_RESERVED");
+        if (evidence === "empty inventory") installed = [];
+        if (evidence === "unrelated model") installed = ["fixture-other:latest"];
+        if (evidence === "closed listener" || evidence === "all addresses refused") respond = path => {
+            if (path === "/api/tags") {
+                const refused = Object.assign(new Error("Connection refused"), { code: "ECONNREFUSED" });
+                const cause = evidence === "closed listener" ? refused : new AggregateError([refused, refused]);
+                throw new TypeError("Fetch failed", { cause });
+            }
+        };
+        if (evidence === "insufficient RAM") freeMemory = 0;
+        const result = await compactFixture();
+        expect(result.isError).toBe(false);
+        expect(generateText).toHaveBeenCalledOnce();
+        expect(storage.saveLedger).toHaveBeenCalledOnce();
+        expect(storage.patchLedger).toHaveBeenCalledOnce();
+    });
+
+    it("uses the keyword floor when verified inventory lacks a classifier", async () => {
+        installed = [];
+        await expect(compactFixture()).rejects.toThrow(/keyword backstop/);
+        expect(callLayer1).not.toHaveBeenCalled();
+        expectNoFallbackOrWrites();
+    });
+
+    it("uses a model warmed by classification before considering cloud fallback", async () => {
+        freeMemory = 0;
+        let warmed = false;
+        let localResponses = 0;
+        vi.mocked(callLayer1).mockImplementationOnce(async () => {
+            warmed = true;
+            return "OBVIOUS_NOT_RESERVED";
+        });
+        respond = path => {
+            if (path === "/api/ps") return Response.json({ models: warmed ? [{ name: "prism-coder:4b" }] : [] });
+            if (path === "/api/chat") {
+                localResponses++;
+                return Response.json({ message: { content: JSON.stringify({ summary: "Summarized routine maintenance." }) }, done: true });
+            }
+        };
+        const result = await compactFixture();
+        expect(result.isError).toBe(false);
+        expect(localResponses).toBe(1);
+        expect(generateText).not.toHaveBeenCalled();
+        expect(storage.saveLedger).toHaveBeenCalledOnce();
+    });
+
+    it("matches a loaded tier across canonical Ollama aliases before using the RAM estimate", async () => {
+        freeMemory = 0;
+        installed = ["registry.ollama.ai/library/Prism-Coder:4B"];
+        vi.mocked(callLayer1).mockResolvedValue("OBVIOUS_NOT_RESERVED");
+        respond = path => {
+            if (path === "/api/ps") return Response.json({ models: [{ name: "prism-coder:4b" }] });
+            if (path === "/api/chat") return Response.json({
+                model: installed[0], done: true, message: { role: "assistant", content: '{"summary":"Routine maintenance."}' },
+            });
+        };
+        expect((await compactFixture()).isError).toBe(false);
+        expect(generateText).not.toHaveBeenCalled();
+        expect(storage.saveLedger).toHaveBeenCalledOnce();
+        expect(storage.patchLedger).toHaveBeenCalledOnce();
+    });
+
+    it("stops after an inventory read that settles after caller cancellation", async () => {
+        const controller = new AbortController();
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        respond = path => {
+            if (path === "/api/tags") {
+                controller.abort();
+                return Response.json({ models: [{ name: "prism-coder:4b" }] });
+            }
+        };
+        await expect(compactFixture(1, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+        expect(vi.mocked(fetch).mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(["/api/tags"]);
+        expect(callLayer1).not.toHaveBeenCalled();
+        expectNoFallbackOrWrites();
+    });
+
+    it("discards a configured reply that settles after caller cancellation", async () => {
+        const controller = new AbortController();
+        installed = [];
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        generateText.mockImplementationOnce(async () => {
+            controller.abort();
+            return '{"summary":"Routine maintenance."}';
+        });
+        await expect(compactFixture(1, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+        expect(generateText).toHaveBeenCalledExactlyOnceWith(expect.any(String), undefined, {
+            signal: controller.signal, requireCompleteResponse: true,
+        });
+        expect(storage.saveLedger).not.toHaveBeenCalled();
+        expect(storage.patchLedger).not.toHaveBeenCalled();
+    });
+
+    it("finishes an already-started rollup and stops before the next project", async () => {
+        const controller = new AbortController();
+        installed = [];
+        vi.mocked(keywordBackstop).mockReturnValue("OBVIOUS_NOT_RESERVED");
+        storage.getCompactionCandidates.mockResolvedValueOnce([
+            { project: "first", total_entries: 2, to_compact: 1 },
+            { project: "second", total_entries: 2, to_compact: 1 },
+        ]);
+        storage.getLedgerEntries.mockResolvedValueOnce([{
+            id: "first-original", summary: "Routine maintenance.", keywords: [],
+            decisions: [], files_changed: [], session_date: "2026-11-20",
+        }]);
+        storage.saveLedger.mockImplementationOnce(async () => {
+            controller.abort();
+            return [{ id: "first-rollup" }];
+        });
+        await expect(compactLedgerHandler({ threshold: 1, keep_recent: 1 }, controller.signal))
+            .rejects.toMatchObject({ name: "AbortError" });
+        expect(storage.getLedgerEntries).toHaveBeenCalledOnce();
+        expect(storage.saveLedger).toHaveBeenCalledWith(expect.objectContaining({ project: "first" }));
+        expect(storage.patchLedger).toHaveBeenCalledExactlyOnceWith("first-original", expect.objectContaining({
+            archived_at: expect.any(String),
+        }));
+    });
+
+    it.each([false, true])("writes a local rollup after complete replies (tagged summary: %s)", async tagged => {
+        const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+        vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+        const summary = "Summarized routine maintenance.";
+        const payload = JSON.stringify({ summary });
+        const reply = tagged ? "<|synalux_think|>Combine the entries.</|synalux_think|>\n"
+            + "<|tool_call|>" + payload + "</|tool_call|>" : payload;
+        let requests = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            const content = ++requests === 1 ? "OBVIOUS_NOT_RESERVED" : reply;
+            return Response.json({ done: true, done_reason: "stop", message: { content } });
+        };
+        expect((await compactFixture()).isError).toBe(false);
+        expect(requests).toBe(2);
+        expect(generateText).not.toHaveBeenCalled();
+        expect(storage.saveLedger).toHaveBeenCalledOnce();
+        expect(storage.saveLedger).toHaveBeenCalledWith(expect.objectContaining({ summary: expect.stringContaining(summary) }));
+        expect(storage.patchLedger).toHaveBeenCalledOnce();
+    });
+
+    it("rejects a malformed tagged summary through the real inference path", async () => {
+        const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+        vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+        let requests = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            const content = ++requests === 1 ? "OBVIOUS_NOT_RESERVED" : '<|tool_call|>{"summary":</|tool_call|>';
+            return Response.json({ done: true, done_reason: "stop", message: { content } });
+        };
+        await expect(compactFixture()).rejects.toThrow(/did not receive a usable summary/);
+        expect(requests).toBe(2);
+        expectNoFallbackOrWrites();
+    });
+
+    it("does not archive originals when a completed local reply fails the quality gate", async () => {
+        const actual = await vi.importActual<typeof import("../../src/utils/layer1.js")>("../../src/utils/layer1.js");
+        vi.mocked(callLayer1).mockImplementation(actual.callLayer1);
+        let requests = 0;
+        respond = path => {
+            if (path !== "/api/chat") return;
+            const content = ++requests === 1 ? "OBVIOUS_NOT_RESERVED" : "...";
+            return Response.json({ done: true, done_reason: "stop", message: { content } });
+        };
+        await expect(compactFixture()).rejects.toThrow(/empty_response/);
+        expect(requests).toBe(2);
+        expectNoFallbackOrWrites();
+    });
+
+    it("compaction routes local summaries through inferText", async () => {
         const { readFileSync } = await import("node:fs");
         const src = readFileSync(
             fileURLToPath(new URL("../../src/tools/compactionHandler.ts", import.meta.url)),
             "utf8",
         );
-        // The fallback triggers on a falsy local response. That is now only
-        // reachable when inferText returns null — a refusal propagates past it.
         expect(src).toMatch(/const localResponse = await inferText/);
-        expect(src).toMatch(/falling back to cloud LLM/);
         expect(src, "compaction reintroduced a direct local-LLM call")
             .not.toMatch(/callLocalLlm/);
     });

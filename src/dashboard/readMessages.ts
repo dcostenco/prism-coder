@@ -11,6 +11,7 @@ export const DASHBOARD_READ_MESSAGES = {
   graphLoading: 'Loading graph…',
   graphUnavailable: 'Graph unavailable. Retry to refresh the selected filters.',
   graphEmpty: 'No knowledge associations match these filters.',
+  graphChooseProjectForQuiz: 'Choose a project in the graph filter to use Test Me.',
   graphSessions: 'sessions', graphStoredLinks: 'stored links',
   graphProjects: 'projects', graphKeywords: 'keywords', graphEdges: 'edges',
   vmUnavailable: 'VM inventory unavailable. This dashboard has not loaded a live template or running-instance source.',

@@ -45,6 +45,25 @@ import {
 const program = new Command();
 
 const local = program.command('local').description('Local coding setup and backend preference');
+local.command('run').description('Execute one fully reviewed host-task packet through the host terminal')
+  .requiredOption('--host-task <file>', 'Owner-only packet JSON file, or - for stdin')
+  .option('--approve', 'Host confirms this exact task is resolved and permitted for local execution')
+  .action(async (options: { hostTask: string; approve?: boolean }) => {
+    try {
+      const { runHostTaskCli } = await import('./hostTaskCli.js');
+      console.log(JSON.stringify(await runHostTaskCli(options.hostTask, options.approve === true)));
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : 'host_task_execution_failed'); process.exitCode = 1;
+    } finally {
+      await closeStorage();
+      const { closeConfigStorage } = await import('./storage/configStorage.js'); closeConfigStorage();
+    }
+  });
+local.command('bridge').description('Machine JSON bridge for dashboard-managed oMLX clients').action(async () => {
+  const { runLocalBridgeCommand } = await import('./localBridge.js');
+  try { await runLocalBridgeCommand(); }
+  finally { await closeStorage().catch(() => {}); }
+});
 local.command('status').description('Show oMLX installation and saved coding preference').action(async () => {
   const { omlxSetup } = await import('./utils/omlxSetup.js');
   const { readLocalCodingSettings } = await import('./utils/localCodingSettings.js');

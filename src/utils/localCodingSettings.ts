@@ -13,7 +13,7 @@ export const LOCAL_CODING_SETTING_KEY = "local_coding_config_v2";
 export const LEGACY_LOCAL_CODING_SETTING_KEY = "local_coding_config";
 const KEY = LOCAL_CODING_SETTING_KEY, LEGACY_KEY = LEGACY_LOCAL_CODING_SETTING_KEY;
 export function isLocalCodingModelId(value: unknown): value is string {
-    return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(value);
+    return typeof value === "string" && value.trim() === value && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(value);
 }
 function record(value: unknown): Record<string, unknown> {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("local_coding_preference_invalid");

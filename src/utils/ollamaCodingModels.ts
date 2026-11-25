@@ -11,11 +11,21 @@ export interface LocalCodingModelObservation {
     id: string;
     weightBytes?: number;
     loadedBytes?: number;
+    loadedVramBytes?: number;
+    residentEstimateBytes?: number;
     loaded: boolean;
     contextTokens?: number;
 }
-export interface LocalModelProbeOptions { deadlineMs?: number; signal?: AbortSignal }
+export interface LocalModelProbeOptions { deadlineMs?: number; signal?: AbortSignal; requestedContextTokens?: number; track?: (promise: Promise<unknown>) => void }
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+
+function ollamaLoadedMemory(model?: { size?: unknown; size_vram?: unknown }): { loadedBytes?: number; loadedVramBytes?: number } {
+    const vram = model?.size_vram;
+    return {
+        ...(positive(model?.size) ? { loadedBytes: model.size } : {}),
+        ...(vram === 0 || positive(vram) ? { loadedVramBytes: vram } : {}),
+    };
+}
 
 /** Read-only metadata probes; never pulls or loads a model. */
 async function metadata(url: string, fetchImpl: typeof fetch, model?: string, options: LocalModelProbeOptions = {}): Promise<Record<string, any>> {
@@ -25,6 +35,14 @@ async function metadata(url: string, fetchImpl: typeof fetch, model?: string, op
     const signal = AbortSignal.any([controller.signal, ...(options.signal ? [options.signal] : [])]);
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let response: Response | undefined;
+    let cancellation: Promise<void> | undefined;
+    const cancelBody = () => {
+        const body = reader ?? response?.body;
+        if (!body) return Promise.resolve();
+        // Abort and the work's finally must await the same teardown, rather
+        // than a second cancel() that may resolve before the first finishes.
+        return cancellation ??= Promise.resolve().then(() => body.cancel()).catch(() => undefined);
+    };
     let timer: ReturnType<typeof setTimeout> | undefined;
     let deadlineFired = false;
     const work = async () => {
@@ -55,14 +73,13 @@ async function metadata(url: string, fetchImpl: typeof fetch, model?: string, op
             if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("ollama_model_metadata_invalid");
             return data as Record<string, any>;
         } finally {
-            if (reader) void reader.cancel().catch(() => {});
-            else void response?.body?.cancel().catch(() => {});
+            await cancelBody();
         }
     };
     let onAbort: () => void;
     const aborted = new Promise<never>((_resolve, reject) => {
         onAbort = () => {
-            void reader?.cancel().catch(() => {});
+            void cancelBody();
             if (deadlineFired) { reject(new Error("ollama_model_probe_deadline")); return; }
             try { check(); } catch (error) { reject(error); return; }
             reject(new Error("ollama_model_metadata_unavailable"));
@@ -75,7 +92,11 @@ async function metadata(url: string, fetchImpl: typeof fetch, model?: string, op
         const deadlineBound = remaining <= 3000;
         const timeout = Math.min(3000, Math.max(1, Math.ceil(remaining)));
         timer = setTimeout(() => { deadlineFired = deadlineBound; controller.abort(); }, timeout);
-        return await Promise.race([work(), aborted]);
+        const pending = work();
+        // A rejected timeout race is not evidence that the HTTP/body work
+        // settled. Let the request owner retain its lease through that work.
+        options.track?.(pending.catch(() => undefined));
+        return await Promise.race([pending, aborted]);
     } finally {
         clearTimeout(timer);
         signal.removeEventListener("abort", onAbort!);
@@ -101,7 +122,7 @@ export async function inspectOllamaImageModels(selectedId?: string, url = PRISM_
             const loaded = ps.models.find((row: any) => row && (row.name === entry.name || row.model === entry.name));
             return { id: entry.name, loaded: Boolean(loaded), capability: advertisedImageCapability("ollama", {}),
                 ...(positive(entry.size) ? { weightBytes: entry.size } : {}),
-                ...(positive(loaded?.size_vram) ? { loadedBytes: loaded.size_vram } : {}) };
+                ...ollamaLoadedMemory(loaded) };
         });
         const selected = models.find(model => model.id === selectedId);
         if (selected) {
@@ -122,7 +143,7 @@ export async function inspectOllamaCodingModels(url = PRISM_LOCAL_LLM_URL, fetch
         const loaded = ps.models.find((entry: any) => entry && (entry.name === model.name || entry.model === model.name));
         return { id: model.name, loaded: Boolean(loaded),
             ...(positive(model.size) ? { weightBytes: model.size } : {}),
-            ...(positive(loaded?.size_vram) ? { loadedBytes: loaded.size_vram } : {}),
+            ...ollamaLoadedMemory(loaded),
             ...(positive(loaded?.context_length) ? { contextTokens: loaded.context_length } : {}) };
     });
 }
@@ -146,7 +167,13 @@ export async function selectedOllamaCodingModel(url: string, id: string, ceiling
     // Rounding admits e.g. 27.4B as 27B without making the top tier unlimited.
     const maxBillions = /^(2|4|9|27)b$/.test(ceiling) ? Number(ceiling.slice(0, -1)) : 0;
     if (!maxBillions || Math.round(params / 1e9) > maxBillions) throw new Error("ollama_model_ceiling");
-    const ctxTokens = Math.min(nativeContext, CODING_CONTEXT_LIMIT);
+    const requestedContext = options.requestedContextTokens;
+    if (requestedContext !== undefined && (!positive(requestedContext) || requestedContext > nativeContext))
+        throw new Error("ollama_model_context_insufficient");
+    // Reuse stable context sizes across nearby tool turns; never round above
+    // the declared native limit or below the measured request requirement.
+    const ctxTokens = requestedContext === undefined ? Math.min(nativeContext, CODING_CONTEXT_LIMIT)
+        : Math.min(nativeContext, Math.ceil(requestedContext / CODING_CONTEXT_LIMIT) * CODING_CONTEXT_LIMIT);
     const layers = info[`${architecture}.block_count`], heads = info[`${architecture}.attention.head_count_kv`];
     const embedding = info[`${architecture}.embedding_length`], attentionHeads = info[`${architecture}.attention.head_count`];
     if (![layers, heads, embedding, attentionHeads].every(positive)) throw new Error("ollama_model_memory_unknown");

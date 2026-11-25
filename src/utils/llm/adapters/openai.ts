@@ -68,15 +68,17 @@ export class OpenAIAdapter implements LLMProvider {
   // One instance per factory singleton = one instance per MCP server process.
   private client: OpenAI;
 
-  constructor() {
+  constructor({ localOnly = false } = {}) {
     // Priority: dashboard setting → environment variable → empty string.
     // This lets users configure keys via the dashboard without touching .env.
     const apiKey  = getSettingSync("openai_api_key",  process.env.OPENAI_API_KEY ?? "");
     const baseURL = getSettingSync("openai_base_url", "https://api.openai.com/v1");
-
-    // Detect local inference endpoints — these don't need a real API key.
-    // Ollama and LM Studio use local HTTP servers with no authentication.
-    const isLocal = baseURL.includes("localhost") || baseURL.includes("127.0.0.1");
+    const endpoint = new URL(baseURL);
+    const isLocal = ["http:", "https:"].includes(endpoint.protocol)
+      && ["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname);
+    if (localOnly && (!isLocal || endpoint.username || endpoint.password || endpoint.search || endpoint.hash)) {
+      throw new Error("Local-only model overrides require a loopback endpoint.");
+    }
 
     // Fail construction if no key AND we're pointing at a real API endpoint.
     // The factory will catch this and fall back to GeminiAdapter gracefully.
@@ -92,6 +94,7 @@ export class OpenAIAdapter implements LLMProvider {
       // "ollama" is the conventional placeholder in the Ollama docs.
       apiKey:  apiKey || "ollama",
       baseURL,
+      ...(localOnly ? { fetch: (input, init) => globalThis.fetch(input, { ...init, redirect: "error" }) } : {}),
     });
 
     debugLog(`[OpenAIAdapter] Initialized — baseURL=${baseURL}, keyless=${!apiKey}`);
@@ -114,11 +117,19 @@ export class OpenAIAdapter implements LLMProvider {
 
     debugLog(`[OpenAIAdapter] generateText — model=${model}, messages=${messages.length}`);
 
-    const response = await this.client.chat.completions.create({ model, messages, ...(options?.json ? { response_format: { type: "json_object" as const } } : {}), ...(options?.maxOutputTokens ? { max_tokens: options.maxOutputTokens } : {}) });
+    const request = { model, messages, ...(options?.json ? { response_format: { type: "json_object" as const } } : {}),
+      ...(options?.maxOutputTokens ? { max_tokens: options.maxOutputTokens } : {}) };
+    const response = options?.signal
+      ? await this.client.chat.completions.create(request, { signal: options.signal })
+      : await this.client.chat.completions.create(request);
 
+    const choice = response.choices[0];
+    if (options?.requireCompleteResponse && (choice?.finish_reason !== "stop" || choice.message?.refusal != null)) {
+      throw new Error("[OpenAIAdapter] Text generation did not complete.");
+    }
     // choices[0] is always the primary completion. ?? "" returns empty string
     // on null content (e.g. if the model returned a function call instead).
-    return response.choices[0]?.message?.content ?? "";
+    return choice?.message?.content ?? "";
   }
 
   // ─── Embedding Generation ────────────────────────────────────────────────

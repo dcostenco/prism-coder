@@ -64,10 +64,12 @@ import { isSynaluxSignedOut } from "../utils/synaluxCredentialState.js";
 import { KnowledgeSearchRequestSchema, KnowledgeSearchResponseSchema, ProjectAnalyticsResponseSchema, FactoryPipelinesResponseSchema, FactoryPipelineResponseSchema, FactoryHarnessResponseSchema, FactoryRunResponseSchema, FactoryRunsResponseSchema } from "./portalContracts.js";
 import type { VerificationHarness, ValidationResult } from '../verification/schema.js';
 import type { EmbeddingSupport } from "./interface.js";
+import { contextRestoreRequested, assertContextRestoreResult, LinkedLedgerProjectionUnavailableError } from "./interface.js";
 import type {
   LedgerEntry,
   HandoffEntry,
   SaveHandoffResult,
+  SaveHandoffOptions,
   ContextResult,
   KnowledgeSearchResult,
   SemanticSearchResult,
@@ -134,12 +136,38 @@ function buildContextLoadKey(project: string, level: string, userId: string, rol
 }
 
 export class SynaluxStorage extends SupabaseStorage {
+  readonly supportsLedgerCompaction = false;
+
   /**
    * Cloud memory keeps ledger vectors (save_embedding) but not handoff vectors
    * (patchHandoff is inherited and writes nowhere), and the local SDM index never
    * sees its vectors. Embeddings are metered by the Portal.
    */
   readonly embeddingSupport: EmbeddingSupport = { handoffVectors: false, localSdm: false, serverMetered: true };
+
+  /** Explicitly publish one project decision/handoff note to the current workspace. */
+  async shareProjectMemory(input: {
+    project: string;
+    summary: string;
+    decisions?: string[];
+    keywords?: string[];
+    files_changed?: string[];
+    conversation_id?: string;
+    role?: string;
+    event_type?: "project_decision" | "project_handoff";
+  }): Promise<{ id: string; visibility: "workspace" }> {
+    const result = await this.portalPost("/api/v1/prism/memory", {
+      action: "share_project_memory",
+      project: input.project, summary: input.summary, decisions: input.decisions,
+      keywords: input.keywords, files_changed: input.files_changed,
+      conversation_id: input.conversation_id, role: input.role, event_type: input.event_type,
+    }) as { entry?: { id?: unknown }; visibility?: unknown };
+    const id = result.entry?.id;
+    if (typeof id !== "string" || result.visibility !== "workspace") {
+      throw new Error("[SynaluxStorage] Invalid project memory share response");
+    }
+    return { id, visibility: "workspace" };
+  }
 
   logAccess(entryId: string, contextHash?: string): void {
     void this.recordAccesses([entryId], contextHash).catch(() => console.error(ACCESS_MESSAGES.failed));
@@ -510,14 +538,17 @@ export class SynaluxStorage extends SupabaseStorage {
 
   // ─── Handoff ─────────────────────────────────────────────────
 
-  async saveHandoff(handoff: HandoffEntry, expectedVersion?: number | null): Promise<SaveHandoffResult> {
+  async saveHandoff(handoff: HandoffEntry, expectedVersion?: number | null, options?: SaveHandoffOptions): Promise<SaveHandoffResult> {
+    const restoreContext = contextRestoreRequested(handoff, expectedVersion, options);
     const result = await this.portalPost("/api/v1/prism/memory", {
-      action: "save_handoff",
+      action: restoreContext ? "restore_handoff" : "save_handoff",
       project: handoff.project,
       last_summary: handoff.last_summary,
-      key_context: handoff.key_context,
+      key_context: restoreContext ? handoff.key_context ?? null : handoff.key_context,
       open_todos: handoff.pending_todo,
-      active_branch: handoff.active_branch,
+      active_decisions: handoff.active_decisions,
+      keywords: handoff.keywords,
+      active_branch: restoreContext ? handoff.active_branch ?? null : handoff.active_branch,
       role: handoff.role,
       expected_version: expectedVersion ?? undefined,
     });
@@ -531,6 +562,7 @@ export class SynaluxStorage extends SupabaseStorage {
     }
 
     const value = candidate as Record<string, unknown>;
+    if (restoreContext) assertContextRestoreResult(value, expectedVersion as number);
     if (value.status === "conflict" && Number.isSafeInteger(value.current_version)) {
       return {
         status: "conflict",
@@ -542,6 +574,7 @@ export class SynaluxStorage extends SupabaseStorage {
       return {
         status: value.status,
         version: value.version as number,
+        ...(value.history_saved === true ? { history_saved: true } : {}),
       };
     }
     // Older portal RPC wrappers returned only the new version. Preserve that
@@ -948,6 +981,24 @@ export class SynaluxStorage extends SupabaseStorage {
     })) as MemoryLink[];
   }
 
+  async getLinkedLedgerSummaries(sourceId: string, limit: number): Promise<Array<{ id: string; summary: string }>> {
+    const query = new URLSearchParams({
+      source_id: sourceId,
+      limit: String(limit),
+      include_target_summaries: "true",
+    });
+    const result = await this.portalGet(`/api/v1/prism/graph/edge?${query.toString()}`);
+    const summaries = result.target_summaries;
+    if (summaries === undefined) {
+      throw new LinkedLedgerProjectionUnavailableError("Portal graph response does not contain the requested linked summaries.");
+    }
+    if (!Array.isArray(summaries) || summaries.length > limit
+      || summaries.some(row => typeof row?.id !== "string" || typeof row?.summary !== "string")) {
+      throw new Error("Portal graph response does not contain the requested linked summaries.");
+    }
+    return summaries;
+  }
+
   // ─── Project inventory + export ──────────────────────────────
   // Both portal actions shipped in Phase 3 but the client was never
   // wired: listProjects and the export path fell through to
@@ -1046,6 +1097,41 @@ export class SynaluxStorage extends SupabaseStorage {
       branch: v.branch ?? "main",
       created_at: v.created_at ?? new Date().toISOString(),
     })) as HistorySnapshot[];
+  }
+
+  /**
+   * Paid-tier CRDT base reads must use the portal-scoped history endpoint.
+   * The inherited direct-Supabase implementation has no workspace/role
+   * principal and can return null on a direct-DB error, which makes a
+   * completed handoff look like an empty base during conflict recovery.
+   */
+  async getHandoffAtVersion(
+    project: string,
+    version: number,
+    _userId: string = "default",
+    role: string = "global",
+  ): Promise<Record<string, unknown> | null> {
+    if (!Number.isSafeInteger(version) || version < 1) return null;
+    const result = await this.portalPost("/api/v1/prism/memory", {
+      action: "memory_history",
+      project,
+      target_version: version,
+      role,
+    });
+    if (!Array.isArray(result.versions) || result.versions.length > 1) throw new Error("Invalid scoped handoff history response");
+    const match = result.versions[0] as { version?: unknown; snapshot?: Record<string, unknown> } | undefined;
+    if (!match) return null;
+    const snapshot = match.snapshot;
+    const snapshotRoleMatches = role === "global"
+      ? (snapshot?.role == null || snapshot?.role === "global")
+      : snapshot?.role === role;
+    if (match.version !== version || !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)
+        || snapshot.project !== project || !snapshotRoleMatches || snapshot.version !== version) {
+      throw new Error("Handoff history identity mismatch");
+    }
+    // The server's authenticated principal is authoritative; a caller's local
+    // compatibility user ID must not relabel a remote author's snapshot.
+    return snapshot;
   }
 
   // ─── Factory read path ────────────────────────────────────────

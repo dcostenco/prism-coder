@@ -53,35 +53,13 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "prism-bench-"));
 // serve — visible here instead of masked by a divergent copy.
 const { MODEL_TIERS, resolveOllamaName } = await import("../dist/utils/modelPicker.js");
 const { probeVision } = await import("../dist/tools/prismInferHandler.js");
+const { getAvailableMemoryBytes: freeBytes } = await import("../dist/utils/availableMemory.js");
 
 /** Rough token estimate, matching the handler's chars/4 convention. */
 const estTokens = (s) => Math.ceil(String(s ?? "").length / 4);
 const IMAGE_TOKENS = 3_000; // flat per-image estimate, as in the ctx gate
 
 // ── helpers ─────────────────────────────────────────────────────────────────
-/**
- * Mirrors src/utils/availableMemory.ts. Using os.freemem() directly on darwin
- * reports wired+free only and ignores inactive/speculative pages the OS hands
- * back on demand — a 48GB Mac looks like it has 2GB and every tier is skipped.
- * The RAM gate here must read the same number prism's picker reads, or the
- * bench measures a different machine than production does.
- */
-function freeBytes() {
-    if (process.platform !== "darwin") return os.freemem();
-    try {
-        const out = execFileSync("vm_stat", { encoding: "utf8", timeout: 1000 });
-        const pageSize = Number(out.match(/page size of (\d+) bytes/)?.[1] ?? 16_384);
-        let pages = 0;
-        for (const re of [/Pages free:\s+(\d+)/, /Pages inactive:\s+(\d+)/,
-                          /Pages speculative:\s+(\d+)/, /Pages purgeable:\s+(\d+)/]) {
-            const m = out.match(re);
-            if (m) pages += Number(m[1]);
-        }
-        return pages > 0 ? pages * pageSize : os.freemem();
-    } catch {
-        return os.freemem();
-    }
-}
 const gb = (b) => (b / 1024 ** 3).toFixed(1);
 
 function stripFence(s) {

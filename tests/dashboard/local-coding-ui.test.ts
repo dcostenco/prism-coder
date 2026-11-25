@@ -3,25 +3,137 @@ import { JSDOM } from "jsdom";
 import { localCodingPanelHTML, localCodingScript } from "../../src/dashboard/localCodingUI.js";
 const windows: JSDOM[] = [];
 afterEach(() => { windows.splice(0).forEach(dom => dom.window.close()); });
-function fixture() {
+function fixture(availableMemoryBytes: number | null = 20 * 1024 ** 3) {
     let settings: any = { backend: "auto", source: "existing" };
+    let assignments: any = {}, revision = 'a'.repeat(64), imageSettings: any = {}, changeBeforeImageSave = false;
     const posts: any[] = [];
     let discoveryErrors: any = {};
     let inventory = [{ id: "new/build", loaded: false, weightBytes: 12 * 1024 ** 3 }];
     const dom = new JSDOM(localCodingPanelHTML(), { url: "http://127.0.0.1", runScripts: "outside-only" }); windows.push(dom);
     dom.window.fetch = async (_url: any, init: any) => {
-        if (init?.method === "POST") { settings = JSON.parse(init.body); posts.push(settings); return { ok: true, json: async () => ({ saved: true }) } as Response; }
-        return { ok: true, json: async () => ({ settings, preference: { envOverride: null }, canManage: true,
+        if (init?.method === "POST") { const body = JSON.parse(init.body); posts.push(body);
+            if (String(_url).endsWith('/image-preferences')) {
+                if (changeBeforeImageSave) { revision = 'c'.repeat(64); changeBeforeImageSave = false; }
+                const previousRevision = revision; imageSettings = body; revision = 'b'.repeat(64);
+                return { ok: true, json: async () => ({saved:true,previousRevision,revision}) } as Response;
+            }
+            if (body.revision !== revision) return { ok: false, json: async () => ({error:'Preferences changed. Refresh and retry.'}) } as Response;
+            if (body.settings) settings = body.settings; if (body.assignments) assignments = body.assignments;
+            return { ok: true, json: async () => ({ saved: true }) } as Response; }
+        if (String(_url).startsWith('/api/local-coding/image-models')) return { ok:true,json:async()=>({settings:imageSettings,discovered:{omlx:[{id:'new/vision',capability:{vision:true,source:'omlx.engine_type'}}],ollama:[]},discoveryErrors:{},availableMemoryBytes,canManage:true}) } as Response;
+        return { ok: true, json: async () => ({ settings, assignments, revision, executionCatalog: { cloud: {status:'entitled'}, hosts: [{id:'b'.repeat(64),provider:'fixture',model:'host-model',effort:'high',status:'configured'}] }, preference: { envOverride: null }, canManage: true,
             connection: { connected: true, control: true, model: "new/build", models: inventory.map(m => m.id) },
-            discovered: { omlx: inventory, ollama: [{ id: "next:tag", loaded: true }] }, discoveryErrors, availableMemoryBytes: 20 * 1024 ** 3,
+            discovered: { omlx: inventory, ollama: [{ id: "next:tag", loaded: true }] }, discoveryErrors, availableMemoryBytes,
             managed: { supported: true, installed: true, models: [], freeDiskGB: 100, job: null, server: { connected: true } } }) } as Response;
     };
     dom.window.eval(localCodingScript());
     const field = (name: string) => dom.window.document.getElementById('local-coding-' + name) as HTMLSelectElement;
     return { dom, posts, field, load: () => (dom.window as any).loadLocalCoding(false), save: () => (dom.window as any).saveLocalCoding({ preventDefault() {} }),
+        externalChange: () => { revision = 'c'.repeat(64); },
+        changeBeforeImageSave: () => { changeBeforeImageSave = true; },
+        loadImages: () => (dom.window as any).loadLocalImages(true),
+        saveImage: () => (dom.window as any).saveLocalImages({preventDefault(){}}),
         removeModel: () => { inventory = []; }, failInventory: () => { inventory = []; discoveryErrors = { omlx: 'Inventory unavailable' }; } };
 }
 describe("local model assignment controls", () => {
+    it('shows provider-specific sizes without inventing a combined cold-load minimum', async () => {
+        const f = fixture();
+        const read = f.dom.window.fetch;
+        const gib = 1024 ** 3;
+        f.dom.window.fetch = async (url, init) => {
+            const response = await read(url, init);
+            const data = await response.json();
+            data.requiredClassifier = 'safety/check';
+            data.discovered = {
+                omlx: [
+                    { id: 'new/build', loaded: false, weightBytes: 16 * gib, residentEstimateBytes: 14 * gib },
+                    { id: 'safety/check', loaded: false, weightBytes: 9 * gib, residentEstimateBytes: 8 * gib },
+                ],
+                ollama: [{ id: 'next:tag', loaded: true, weightBytes: 12 * gib, loadedBytes: 15 * gib, loadedVramBytes: 10 * gib }],
+            };
+            return { ok: true, json: async () => data } as Response;
+        };
+        await f.load();
+        const memory = (backend: string) => f.dom.window.document.getElementById('local-coding-' + backend + '-coder-memory')!.textContent;
+        f.field('omlx-coder').value = 'new/build';
+        f.field('ollama-coder').value = 'next:tag';
+        (f.dom.window as any).renderLocalCodingMemory();
+        expect(memory('omlx')).toContain('Server resident estimate: 14.0 GiB');
+        expect(memory('omlx')).toContain('Safety model resident estimate: 8.0 GiB');
+        expect(memory('omlx')).not.toContain('at least');
+        expect(memory('ollama')).toContain('Stored model: 12.0 GiB');
+        expect(memory('ollama')).toContain('Reported loaded memory: 15.0 GiB');
+        expect(memory('ollama')).toContain('GPU portion: 10.0 GiB');
+    });
+    it('shows an invalid oMLX safety model configuration while keeping recovery controls available', async () => {
+        const f = fixture();
+        const read = f.dom.window.fetch;
+        const message = 'Invalid oMLX safety model configuration. Check PRISM_OMLX_CLASSIFIER_MODEL.';
+        f.dom.window.fetch = async (url, init) => {
+            const response = await read(url, init);
+            const data = await response.json();
+            data.requiredClassifier = null;
+            data.classifierError = message;
+            return { ok: true, json: async () => data } as Response;
+        };
+        await f.load();
+        expect(f.field('connection').textContent).toContain(message);
+        expect(f.field('connection').textContent).not.toContain('required classifier not advertised');
+        expect(f.field('omlx-coder').disabled).toBe(false);
+    });
+    it.each([[0, '0.0 GiB'], [null, 'unknown'], [-1, 'unknown']] as const)(
+        'reports %s bytes as %s in the coding and image panels', async (bytes, expected) => {
+            const f = fixture(bytes);
+            await f.load();
+            await f.loadImages();
+            for (const panel of ['coding', 'image']) {
+                expect(f.dom.window.document.getElementById('local-' + panel + '-memory')!.textContent)
+                    .toContain('Host RAM estimate: ' + expected);
+            }
+        },
+    );
+    it.each(['coding','roles'])('an image save advances only the same-tab revision for the next %s save', async kind => {
+        const f = fixture(); await f.load(); await f.loadImages(); const w = f.dom.window as any;
+        f.field('omlx-coder').value = 'new/build';
+        const coder = f.dom.window.document.getElementById('execution-role-coder') as HTMLSelectElement;
+        coder.value = JSON.stringify({runtime:'synalux'});
+        await f.saveImage();
+        expect(f.field('omlx-coder').value).toBe('new/build');
+        expect(coder.value).toBe(JSON.stringify({runtime:'synalux'}));
+        if (kind === 'coding') await f.save(); else await w.saveExecutionRoles({preventDefault(){}});
+        expect(f.posts[1].revision).toBe('b'.repeat(64));
+        expect(f.dom.window.document.getElementById(kind === 'coding' ? 'local-coding-error' : 'execution-role-status')!.textContent).not.toContain('Preferences changed');
+    });
+    it('an image save cannot lend a stale coding form another tab\'s revision', async () => {
+        const f = fixture(); await f.load(); await f.loadImages(); f.changeBeforeImageSave();
+        await f.saveImage(); await f.save();
+        expect(f.posts[1].revision).toBe('a'.repeat(64));
+        expect(f.dom.window.document.getElementById('local-coding-error')!.textContent).toContain('Preferences changed');
+    });
+    it('reload saved choices provides an explicit recovery after a stale-save refusal', async () => {
+        const f = fixture(); await f.load(); f.externalChange(); await f.save();
+        const button = f.dom.window.document.getElementById('local-coding-reload'); expect(button).not.toBeNull();
+        await (f.dom.window as any).eval(button!.getAttribute('onclick')!);
+        await f.save();
+        expect(f.posts[1].revision).toBe('c'.repeat(64));
+        expect(f.dom.window.document.getElementById('local-coding-error')!.textContent).not.toContain('Preferences changed');
+    });
+    it('discovers local/cloud/configured host role choices, saves and reloads without execution', async () => {
+        const f = fixture(); await f.load(); const w = f.dom.window as any;
+        const coder = f.dom.window.document.getElementById('execution-role-coder') as HTMLSelectElement;
+        const reviewer = f.dom.window.document.getElementById('execution-role-reviewer') as HTMLSelectElement;
+        expect([...reviewer.options].map(o => o.textContent).join(' ')).toContain('configured, execution unproved');
+        coder.value = JSON.stringify({runtime:'synalux'}); reviewer.value = JSON.stringify({runtime:'host',profile:'b'.repeat(64)});
+        await w.saveExecutionRoles({preventDefault(){}});
+        expect(f.posts[0]).toEqual({assignments:{coder:{runtime:'synalux'},reviewer:{runtime:'host',profile:'b'.repeat(64)}},revision:'a'.repeat(64)});
+        expect(coder.value).toBe(JSON.stringify({runtime:'synalux'})); expect(reviewer.value).toContain('host');
+        expect(f.dom.window.document.getElementById('execution-role-status')!.textContent).toContain('No models were loaded');
+    });
+    it('an inventory refresh cannot lend a stale edited form a newer revision', async () => {
+        const f = fixture(); await f.load(); f.externalChange(); await f.load(); await f.save();
+        expect(f.posts[0].revision).toBe('a'.repeat(64));
+        expect(f.dom.window.document.getElementById('local-coding-error')!.textContent).toContain('Preferences changed');
+    });
     const imageReply = { status: "passed", purpose: "image", message: "Execution complete.", output: "A blue circle <img src=x onerror=alert(1)>",
         reference: { source: "builtin-diagnostic", description: "Solid red square", width: 32, height: 32, format: "PNG", sha256: "a".repeat(64) } };
     function reply(f: ReturnType<typeof fixture>, value: unknown) { f.dom.window.fetch = async () => ({ ok: true, json: async () => value }) as Response; }
@@ -79,8 +191,9 @@ describe("local model assignment controls", () => {
         f.field('source').value = 'managed';
         f.field('omlx-coder').value = 'new/build';
         await f.save();
-        expect(f.posts[0].source).toBe('existing');
-        expect(f.posts[0].models.omlx.coder).toBe('new/build');
+        expect(f.posts[0].settings.source).toBe('existing');
+        expect(f.posts[0].settings.models.omlx.coder).toBe('new/build');
+        expect(f.posts[0].revision).toBe('a'.repeat(64));
     });
     it("offers server-only setup and separate upstream release notes while preserving the pinned source", () => {
         const f = fixture();
@@ -100,11 +213,11 @@ describe("local model assignment controls", () => {
         expect(f.field('omlx-coder').options[1].value).toBe('new/build');
         for (const role of ['coder','reviewer']) { f.field('omlx-' + role).value = 'new/build'; f.field('ollama-' + role).value = 'next:tag'; }
         await f.save();
-        expect(f.posts[0].models).toEqual({ omlx: { coder: 'new/build', reviewer: 'new/build' }, ollama: { coder: 'next:tag', reviewer: 'next:tag' } });
+        expect(f.posts[0].settings.models).toEqual({ omlx: { coder: 'new/build', reviewer: 'new/build' }, ollama: { coder: 'next:tag', reviewer: 'next:tag' } });
         (f.dom.window as any).localCodingLoaded = false;
         await f.load(); expect(f.field('omlx-reviewer').value).toBe('new/build'); expect(f.field('ollama-reviewer').value).toBe('next:tag');
-        expect(f.field('omlx-reviewer-memory').textContent).toContain('Reported weights: 12.0 GiB');
-        expect(f.field('ollama-reviewer-memory').textContent).toContain('RAM requirements unknown');
+        expect(f.field('omlx-reviewer-memory').textContent).toContain('Server model size estimate: 12.0 GiB');
+        expect(f.field('ollama-reviewer-memory').textContent).toContain('Reported loaded memory: unknown');
     });
     it("preserves unsaved choices on refresh and shows a missing saved ID instead of replacing it", async () => {
         const f = fixture(); await f.load(); f.field('omlx-reviewer').value = 'new/build'; await f.load();

@@ -420,6 +420,12 @@ describe("CRDT — dbToHandoffSchema(): DB row → HandoffSchema normalisation",
   it("returns null for a null DB row (no handoff state)", () => {
     expect(dbToHandoffSchema(null)).toBeNull();
   });
+  it("retains canonical cloud snapshot context and branch stored inside metadata", () => {
+    const row = { last_summary: "Committed state", pending_todo: ["Retained task"],
+      active_decisions: ["Retained decision"], metadata: { key_context: "Retained context", active_branch: "feature/retained" } };
+    expect(dbToHandoffSchema(row)).toMatchObject({ summary: "Committed state", pending_todo: ["Retained task"],
+      active_decisions: ["Retained decision"], key_context: "Retained context", active_branch: "feature/retained" });
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════

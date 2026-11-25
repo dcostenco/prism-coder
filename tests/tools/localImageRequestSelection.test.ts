@@ -88,6 +88,7 @@ describe("selected-image admission before provider work", () => {
     });
     it("never consults image settings for text requests", async () => {
         const f = fixture(); f.imagePreference.mockRejectedValue(Error("must not read"));
+        f.deps.codingPreference = vi.fn(async () => ({ saved: "ollama", effective: "ollama", envOverride: null, configured: false }));
         await expect(runInfer({ prompt: "Describe a color.", mode: "chat", escalation: "report", cloud_fallback: false }, f.deps)).rejects.toThrow("no backend produced output");
         expect(f.imagePreference).not.toHaveBeenCalled();
     });
