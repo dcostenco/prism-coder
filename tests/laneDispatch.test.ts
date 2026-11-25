@@ -125,7 +125,7 @@ describe("each lane tool through the real server", () => {
     const text = firstText(reply);
     expect(text.startsWith(BOUND_BLOCK)).toBe(true);
     const json = text.slice(BOUND_BLOCK.length);
-    expect(JSON.parse(json)).toMatchObject({ status: "success" }); // the answer itself is still there
+    expect(JSON.parse(json)).toEqual({ status: "success", context: CONTEXT }); // the answer itself is still there, minus the raw lane fields
     expect(json).not.toContain("lane_block");
     expect(json).not.toContain("lane_status");
     expect(json).not.toContain("lane_paths");
