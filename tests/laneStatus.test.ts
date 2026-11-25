@@ -264,7 +264,6 @@ describe("the block is clean, capped, and shares one budget across projects", ()
 });
 
 describe("session_set_program_register (D-2a register tool)", () => {
-  const registerResponse = attach.bound.response;
   const wire = JSON.parse(readFileSync(join(FIXTURES, "prism-lane-wire-contract.json"), "utf8"));
 
   it("round-trips against the portal's wire contract and shows its read-back", async () => {

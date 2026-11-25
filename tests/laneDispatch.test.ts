@@ -125,6 +125,7 @@ describe("each lane tool through the real server", () => {
     const text = firstText(reply);
     expect(text.startsWith(BOUND_BLOCK)).toBe(true);
     const json = text.slice(BOUND_BLOCK.length);
+    expect(JSON.parse(json)).toMatchObject({ status: "success" }); // the answer itself is still there
     expect(json).not.toContain("lane_block");
     expect(json).not.toContain("lane_status");
     expect(json).not.toContain("lane_paths");
@@ -168,7 +169,9 @@ describe("session_bootstrap", () => {
   it("leaves a supplied id the portal would reject (over 255 characters) off the lane requests", async () => {
     holder.settings.set("autoload_projects", "proj");
     await callTool("session_bootstrap", { prompt: "hello", conversation_id: "x".repeat(300) });
-    for (const request of portalRequests().filter(body => body.action === "load_context")) expect(request).not.toHaveProperty("conversation_id");
+    const loads = portalRequests().filter(body => body.action === "load_context");
+    expect(loads.length).toBeGreaterThan(0); // it did load: the loop below checks something
+    for (const request of loads) expect(request).not.toHaveProperty("conversation_id");
   });
 
   it("sends its own conversation id on the lane requests it makes, the same one it prints", async () => {
