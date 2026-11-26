@@ -7,8 +7,10 @@
  *
  * Usage:
  *   node scripts/prism-agent.mjs "your question"
- *   PRISM_MODEL=dcostenco/prism-coder:9b node scripts/prism-agent.mjs "..."
+ *   With Ollama selected: PRISM_MODEL=dcostenco/prism-coder:9b node scripts/prism-agent.mjs "..."
  *   node scripts/prism-agent.mjs --ceiling 9b "your question"
+ *   PRISM_MODEL overrides the model within the selected backend. Ollama uses
+ *   Prism's configured loopback endpoint and refuses remote endpoints.
  *
  * ARCHITECTURAL BOUNDARY — CLI tools (shell_run, read_file, list_directory):
  *   These tools execute on the USER'S LOCAL MACHINE with the user's own
@@ -51,6 +53,7 @@ const BRAVE_API_KEY = env.BRAVE_API_KEY;
 // ── model selection ───────────────────────────────────────────────────────────
 const TIER_ORDER = ["27b", "9b", "4b", "2b"];
 const TIER_RAM   = { "27b": 17_000, "9b": 7_000, "4b": 3_000, "2b": 1_500 }; // MB
+const OLLAMA_CONTEXT_TOKENS = 16_384;
 
 async function loadCodingConfig() {
   try {
@@ -70,14 +73,16 @@ async function resolveAgentRuntime(ceiling, explicitModel) {
   if (assignment?.runtime === "host" || assignment?.runtime === "synalux") {
     throw new Error("prism-agent requires a local coder role. Select a local runtime in Prism.");
   }
-  if (preference.effective === "auto" && (!ceiling || ceiling === "27b")) {
-    const { getEntitlements } = await import("../dist/utils/entitlements.js");
-    if ((await getEntitlements()).model_ceiling === "27b") {
-      const { configuredOmlxModel } = await import("../dist/utils/omlxProvider.js");
-      preference.configured = Boolean(await configuredOmlxModel(resolveLocalCodingModel(preference, "omlx", "coder")));
-    }
+  let effectiveCeiling = ceiling;
+  if (preference.effective !== "omlx") {
+    const { clampCeiling, getEntitlements } = await import("../dist/utils/entitlements.js");
+    effectiveCeiling = clampCeiling(ceiling ?? "27b", (await getEntitlements()).model_ceiling);
   }
-  const backend = resolveLocalCodingBackend({ mode: "code", model_ceiling: ceiling }, preference);
+  if (preference.effective === "auto" && effectiveCeiling === "27b") {
+    const { configuredOmlxModel } = await import("../dist/utils/omlxProvider.js");
+    preference.configured = Boolean(await configuredOmlxModel(resolveLocalCodingModel(preference, "omlx", "coder")));
+  }
+  const backend = resolveLocalCodingBackend({ mode: "code", model_ceiling: effectiveCeiling }, preference);
   const model = resolveLocalCodingModel(preference, backend, "coder",
     explicitModel || (assignment?.runtime === backend ? assignment.model : undefined));
   if (backend === "omlx") return { backend, model };
@@ -87,9 +92,20 @@ async function resolveAgentRuntime(ceiling, explicitModel) {
   try { url = loopbackUrl(PRISM_LOCAL_LLM_URL, ""); }
   catch { throw new Error("PRISM_LOCAL_LLM_URL must point to a loopback Ollama endpoint."); }
   const { getAvailableMemoryBytes } = await import("../dist/utils/availableMemory.js");
-  const selected = model ?? pickModel(ceiling, await getAvailableMemoryBytes());
+  if (model) {
+    const { selectedOllamaCodingModel } = await import("../dist/utils/ollamaCodingModels.js");
+    const selected = await selectedOllamaCodingModel(url, model, effectiveCeiling, undefined, {
+      requestedContextTokens: OLLAMA_CONTEXT_TOKENS,
+    });
+    const availableBytes = await getAvailableMemoryBytes();
+    if (!Number.isSafeInteger(availableBytes) || availableBytes < selected.minFreeGb * 1024 ** 3) {
+      throw new Error("Available memory is below the minimum for the selected Ollama model.");
+    }
+    return { backend, model: selected.tag, url, contextTokens: selected.ctxTokens };
+  }
+  const selected = pickModel(effectiveCeiling, await getAvailableMemoryBytes());
   if (!selected) throw new Error("Available memory is below the minimum for automatic Ollama model selection.");
-  return { backend, model: selected, url };
+  return { backend, model: selected, url, contextTokens: OLLAMA_CONTEXT_TOKENS };
 }
 
 export function pickModel(ceiling, availableBytes) {
@@ -619,7 +635,7 @@ async function runAgent(userPrompt, runtime) {
             messages,
             tools: isLastRound ? [] : TOOLS,
             stream: false,
-            options: { temperature: 0, num_predict: 4096, num_ctx: 16_384 },
+            options: { temperature: 0, num_predict: 4096, num_ctx: runtime.contextTokens },
           }),
         }).then((response) => {
           if (!response.ok) throw new Error(`Ollama error: ${response.status}`);

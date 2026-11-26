@@ -11,10 +11,13 @@ const settings = new URL("../../dist/utils/localCodingSettings.js", import.meta.
 const storage = new URL("../../dist/storage/configStorage.js", import.meta.url);
 const handler = new URL("../../dist/tools/prismInferHandler.js", import.meta.url);
 const entitlements = new URL("../../dist/utils/entitlements.js", import.meta.url);
+const memory = new URL("../../dist/utils/availableMemory.js", import.meta.url);
 const request = 'PRISM_TOOL_REQUESTS\n[{"name":"read_file","arguments":{"path":"facts.txt"}}]';
+const GiB = 1024 ** 3;
 
 function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, backendOverride, malformedOmlxSettings,
-  planCeiling, ollamaUrl = "http://127.0.0.1:19992/" }) {
+  planCeiling, ceiling, availableBytes = 16 * GiB, ollamaParams = 9e9, ollamaWeight = 2 * GiB,
+  ollamaUrl = "http://127.0.0.1:19992/" }) {
   const dir = mkdtempSync(join(tmpdir(), "prism-agent-test-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const tracePath = join(dir, "trace.jsonl");
@@ -43,9 +46,11 @@ function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, b
       } };
     }
   `;
-  const modules = { [handler.href]: mockHandler };
+  const modules = { [handler.href]: mockHandler,
+    [memory.href]: `export function getAvailableMemoryBytes() { return ${availableBytes}; }` };
   if (planCeiling) {
-    modules[entitlements.href] = `export async function getEntitlements() {
+    modules[entitlements.href] = `export { clampCeiling } from ${JSON.stringify(entitlements.href + "?fixture-original")};
+    export async function getEntitlements() {
       return { model_ceiling: ${JSON.stringify(planCeiling)} };
     }`;
   }
@@ -58,6 +63,7 @@ function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, b
       return nextLoad(url, context);
     }
   `;
+  const ollamaModel = model ?? (assignment?.runtime === "ollama" ? assignment.model : config.models?.ollama?.coder);
   writeFileSync(preload, `
     import { appendFileSync } from "node:fs";
     import { register } from "node:module";
@@ -67,13 +73,37 @@ function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, b
     const assignment = ${JSON.stringify(assignment)};
     if (assignment) await setSetting("execution_roles_v1", JSON.stringify({ coder: assignment }));
     register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))});
-    globalThis.fetch = async (url, init) => {
-      appendFileSync(${JSON.stringify(tracePath)}, JSON.stringify({ transport: "http", url, redirect: init.redirect, args: JSON.parse(init.body) }) + "\\n");
-      if (url !== "http://127.0.0.1:19992/api/chat") throw new Error("Unexpected network request");
-      return Response.json({ message: { content: "Ollama fixture answer" } });
+    globalThis.fetch = async (url, init = {}) => {
+      const args = init.body ? JSON.parse(init.body) : undefined;
+      appendFileSync(${JSON.stringify(tracePath)}, JSON.stringify({ transport: "http", url, redirect: init.redirect, args }) + "\\n");
+      switch (url) {
+        case "http://127.0.0.1:19992/api/tags":
+          return Response.json({ models: [{ name: ${JSON.stringify(ollamaModel)}, size: ${ollamaWeight} }] });
+        case "http://127.0.0.1:19992/api/ps":
+          return Response.json({ models: [] });
+        case "http://127.0.0.1:19992/api/show":
+          if (args?.model !== ${JSON.stringify(ollamaModel)}) throw new Error("Unexpected model metadata request");
+          return Response.json({
+            capabilities: ["completion", "tools"],
+            model_info: {
+              "general.parameter_count": ${ollamaParams},
+              "general.architecture": "fixture",
+              "fixture.context_length": 32768,
+              "fixture.block_count": 24,
+              "fixture.attention.head_count_kv": 4,
+              "fixture.embedding_length": 2048,
+              "fixture.attention.head_count": 16,
+            },
+          });
+        case "http://127.0.0.1:19992/api/chat":
+          return Response.json({ message: { content: "Ollama fixture answer" } });
+        default:
+          throw new Error("Unexpected network request");
+      }
     };
   `);
-  const child = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, fileURLToPath(entry), "Read the fixture."], {
+  const cliArgs = [...(ceiling ? ["--ceiling", ceiling] : []), "Read the fixture."];
+  const child = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, fileURLToPath(entry), ...cliArgs], {
     cwd: dir, encoding: "utf8", timeout: 15_000,
     env: { HOME: dir, USERPROFILE: dir, PATH: process.env.PATH, PRISM_MAX_ROUNDS: String(rounds),
       PRISM_LOCAL_LLM_URL: ollamaUrl,
@@ -109,12 +139,28 @@ test("Ollama still uses native chat with the saved model and configured URL", t 
   const run = fixture(t, { config: ollama, replies: [] });
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /Ollama fixture answer/);
-  assert.equal(run.trace.length, 1);
-  assert.equal(run.trace[0].url, "http://127.0.0.1:19992/api/chat");
-  assert.equal(run.trace[0].redirect, "error");
-  assert.equal(run.trace[0].args.model, "fixture:9b");
-  assert.ok(run.trace[0].args.tools.some(tool => tool.function.name === "read_file"));
+  assert.deepEqual(run.trace.map(call => new URL(call.url).pathname), ["/api/tags", "/api/ps", "/api/show", "/api/chat"]);
+  const chat = run.trace[3];
+  assert.equal(chat.redirect, "error");
+  assert.equal(chat.args.model, "fixture:9b");
+  assert.equal(chat.args.options.num_ctx, 16384);
+  assert.ok(chat.args.tools.some(tool => tool.function.name === "read_file"));
 });
+
+for (const [name, options, reason] of [
+  ["caller ceiling", { ceiling: "4b", ollamaParams: 27e9 }, /ollama_model_ceiling/],
+  ["plan ceiling", { planCeiling: "4b", ollamaParams: 27e9 }, /ollama_model_ceiling/],
+  ["available RAM", { ollamaParams: 27e9, ollamaWeight: 12 * GiB }, /below the minimum for the selected Ollama model/],
+]) {
+  test(`a saved Ollama model over the ${name} is refused before chat`, t => {
+    const config = { ...ollama, models: { ollama: { coder: "fixture:27b" } } };
+    const run = fixture(t, { config, replies: [], ...options });
+    assert.equal(run.status, 1, run.stderr);
+    assert.match(run.stderr, reason);
+    assert.deepEqual(run.trace.map(call => new URL(call.url).pathname), ["/api/tags", "/api/ps", "/api/show"]);
+    assert.equal(run.stdout, "");
+  });
+}
 
 test("a remote Ollama endpoint is refused before sending the prompt", t => {
   const run = fixture(t, { config: ollama, ollamaUrl: "http://example.test:11434", replies: [] });
@@ -125,10 +171,11 @@ test("a remote Ollama endpoint is refused before sending the prompt", t => {
 
 test("Auto skips oMLX settings when the plan cannot select oMLX", t => {
   const run = fixture(t, { config: { backend: "auto", source: "existing", models: { ollama: { coder: "fixture:2b" } } },
-    malformedOmlxSettings: true, planCeiling: "4b", replies: [] });
+    malformedOmlxSettings: true, planCeiling: "4b", ollamaParams: 2e9, replies: [] });
   assert.equal(run.status, 0, run.stderr);
-  assert.equal(run.trace.length, 1);
-  assert.equal(run.trace[0].args.model, "fixture:2b");
+  assert.equal(run.trace.length, 4);
+  assert.equal(run.trace[3].url, "http://127.0.0.1:19992/api/chat");
+  assert.equal(run.trace[3].args.model, "fixture:2b");
 });
 
 test("the coder role model takes precedence over the older backend model", t => {
