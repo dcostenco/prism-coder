@@ -12,12 +12,13 @@ const storage = new URL("../../dist/storage/configStorage.js", import.meta.url);
 const handler = new URL("../../dist/tools/prismInferHandler.js", import.meta.url);
 const entitlements = new URL("../../dist/utils/entitlements.js", import.meta.url);
 const memory = new URL("../../dist/utils/availableMemory.js", import.meta.url);
+const codingQuality = new URL("../../dist/utils/codingQualityPolicy.js", import.meta.url);
 const request = 'PRISM_TOOL_REQUESTS\n[{"name":"read_file","arguments":{"path":"facts.txt"}}]';
 const GiB = 1024 ** 3;
 
 function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, backendOverride, malformedOmlxSettings,
   planCeiling, ceiling, availableBytes = 16 * GiB, ollamaParams = 9e9, ollamaWeight = 2 * GiB,
-  ollamaUrl = "http://127.0.0.1:19992/" }) {
+  ollamaUrl = "http://127.0.0.1:19992/", prompt = "Read the fixture.", exerciseCodeQuality = false }) {
   const dir = mkdtempSync(join(tmpdir(), "prism-agent-test-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const tracePath = join(dir, "trace.jsonl");
@@ -39,6 +40,11 @@ function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, b
       if (reply.waitForAbort) {
         try { await setTimeout(5_000, undefined, { signal: context.signal }); }
         catch (error) { log({ stopped: context.signal.aborted }); throw error; }
+      }
+      if (${exerciseCodeQuality} && args.mode === "code") {
+        const { passesCodingQualityGate } = await import(${JSON.stringify(codingQuality.href)});
+        const check = passesCodingQualityGate(args.prompt, reply.output);
+        if (!check.pass) reply.gate_outcome = { status: "degraded", reason: check.reason };
       }
       return { structuredContent: {
         backend: "omlx", model_picked: args.local_model ?? "auto-discovered-mlx",
@@ -102,7 +108,7 @@ function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, b
       }
     };
   `);
-  const cliArgs = [...(ceiling ? ["--ceiling", ceiling] : []), "Read the fixture."];
+  const cliArgs = [...(ceiling ? ["--ceiling", ceiling] : []), prompt];
   const child = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, fileURLToPath(entry), ...cliArgs], {
     cwd: dir, encoding: "utf8", timeout: 15_000,
     env: { HOME: dir, USERPROFILE: dir, PATH: process.env.PATH, PRISM_MAX_ROUNDS: String(rounds),
@@ -133,6 +139,28 @@ test("saved oMLX backend and coder model drive the CLI tool loop", t => {
   }
   assert.match(run.trace[1].args.prompt, /synthetic-tool-result/);
   assert.match(run.trace[1].args.system, /Tools are unavailable/);
+});
+
+const strictPrompt = "Return only source code. Implement function readFacts from facts.txt.";
+const strictAnswer = 'function readFacts() { return "synthetic-tool-result"; }';
+
+test("a source-only oMLX request can read evidence before its final code check", t => {
+  const run = fixture(t, { config: omlx, prompt: strictPrompt, exerciseCodeQuality: true,
+    replies: [{ output: request }, { output: strictAnswer }] });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim(), strictAnswer);
+  assert.deepEqual(run.trace.map(event => event.args.mode), ["chat", "code"]);
+  assert.match(run.trace[1].args.prompt, /synthetic-tool-result/);
+});
+
+test("ordinary oMLX text that fails the code check is withheld for one final code round", t => {
+  const invalidDraft = "Here is the function you requested.";
+  const run = fixture(t, { config: omlx, prompt: strictPrompt, exerciseCodeQuality: true, rounds: 4,
+    replies: [{ output: invalidDraft }, { output: strictAnswer }] });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim(), strictAnswer);
+  assert.deepEqual(run.trace.map(event => event.args.mode), ["chat", "code"]);
+  assert.doesNotMatch(run.trace[1].args.prompt, /Here is the function you requested/);
 });
 
 test("Ollama still uses native chat with the saved model and configured URL", t => {

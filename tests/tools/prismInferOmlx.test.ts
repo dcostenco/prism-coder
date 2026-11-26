@@ -60,6 +60,23 @@ function fixture() {
 }
 
 describe("trusted bridge execution context", () => {
+    it("returns a model-origin evidence request in an explicit local-only oMLX chat round", async () => {
+        const f = fixture();
+        const request = 'PRISM_TOOL_REQUESTS\n[{"name":"read_file","arguments":{"path":"facts.txt"}}]';
+        f.omlx.generate = vi.fn(async () => ({ ok: true as const, text: request, doneReason: "stop" }));
+        const response = await prismInferHandler(ask({
+            mode: "chat",
+            local_model: MODEL,
+            prompt: "Return only source code. Implement function readFacts from facts.txt.",
+        }), f.deps, { localOnly: true, requiredLocalBackend: "omlx" });
+        expect(response.structuredContent).toMatchObject({
+            backend: "omlx", model_picked: MODEL, used_cloud: false, output: request,
+            output_origin: "model", gate_outcome: { status: "success" },
+        });
+        expect(f.deps.callLocal).not.toHaveBeenCalled();
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+
     it.each(["classification", "drafting"])("stops the owned %s operation on MCP Cancel without registering again", async phase => {
         const f = fixture();
         f.deps.callLayer1 = undefined;

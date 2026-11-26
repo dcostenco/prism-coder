@@ -569,7 +569,8 @@ async function omlxRound(runtime, messages, toolsAllowed) {
   const response = await prismInferHandler({
     prompt,
     system,
-    mode: "code",
+    // Tool requests are intermediate data. The code mode checks final source.
+    mode: toolsAllowed ? "chat" : "code",
     local_backend: "omlx",
     ...(runtime.model ? { local_model: runtime.model } : {}),
     ...(ceiling ? { model_ceiling: ceiling } : {}),
@@ -588,7 +589,13 @@ async function omlxRound(runtime, messages, toolsAllowed) {
   runtime.model ??= result.model_picked;
   const answer = result.output.trim();
   const counts = { prompt_eval_count: result.prompt_tokens, eval_count: result.completion_tokens };
-  if (!answer.startsWith(TOOL_REQUEST_PREFIX)) return { ...counts, message: { content: result.output } };
+  if (!answer.startsWith(TOOL_REQUEST_PREFIX)) {
+    if (toolsAllowed && result.output_origin !== "replaced") {
+      const { passesCodingQualityGate } = await import("../dist/utils/codingQualityPolicy.js");
+      if (!passesCodingQualityGate(messages[1].content, answer).pass) return { needsCodeRound: true };
+    }
+    return { ...counts, message: { content: result.output } };
+  }
   if (!toolsAllowed || result.output_origin !== "model") {
     throw new Error("oMLX tool requests require a model response in a tool-enabled round.");
   }
@@ -618,15 +625,20 @@ async function runAgent(userPrompt, runtime) {
   console.error(`[prism-agent] backend=${runtime.backend} model=${runtime.model ?? "auto"} max_rounds=${MAX_ROUNDS}`);
 
   const MAX_TOOL_CALLS_PER_ROUND = 3;
+  let finalize = false;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const t0 = Date.now();
-    const isLastRound = round === MAX_ROUNDS - 1;
+    const isLastRound = finalize || round === MAX_ROUNDS - 1;
 
     let data;
     try {
       if (runtime.backend === "omlx") {
         data = await omlxRound(runtime, messages, !isLastRound);
+        if (data.needsCodeRound) {
+          finalize = true;
+          continue;
+        }
       } else {
         const fetchPromise = fetch(`${runtime.url}/api/chat`, {
           method: "POST",
