@@ -169,6 +169,21 @@ test("a remote Ollama endpoint is refused before sending the prompt", t => {
   assert.deepEqual(run.trace, []);
 });
 
+test("an unknown plan tier cannot raise the caller's ceiling on a saved Ollama model", t => {
+  const run = fixture(t, { config: ollama, planCeiling: "unknown", ceiling: "4b", replies: [] });
+  assert.equal(run.status, 1, run.stderr);
+  assert.match(run.stderr, /ollama_model_ceiling/);
+  assert.deepEqual(run.trace.map(call => new URL(call.url).pathname), ["/api/tags", "/api/ps", "/api/show"]);
+});
+
+test("an unknown plan tier cannot make Auto probe oMLX above the caller's ceiling", t => {
+  const run = fixture(t, { config: { backend: "auto", source: "existing", models: { ollama: { coder: "fixture:2b" } } },
+    malformedOmlxSettings: true, planCeiling: "unknown", ceiling: "4b", ollamaParams: 2e9, replies: [] });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.trace[3].url, "http://127.0.0.1:19992/api/chat");
+  assert.equal(run.trace[3].args.model, "fixture:2b");
+});
+
 test("Auto skips oMLX settings when the plan cannot select oMLX", t => {
   const run = fixture(t, { config: { backend: "auto", source: "existing", models: { ollama: { coder: "fixture:2b" } } },
     malformedOmlxSettings: true, planCeiling: "4b", ollamaParams: 2e9, replies: [] });
