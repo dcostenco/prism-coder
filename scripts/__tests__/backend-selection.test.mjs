@@ -13,6 +13,7 @@ const handler = new URL("../../dist/tools/prismInferHandler.js", import.meta.url
 const entitlements = new URL("../../dist/utils/entitlements.js", import.meta.url);
 const memory = new URL("../../dist/utils/availableMemory.js", import.meta.url);
 const codingQuality = new URL("../../dist/utils/codingQualityPolicy.js", import.meta.url);
+const quality = new URL("../../dist/utils/qualityGate.js", import.meta.url);
 const request = 'PRISM_TOOL_REQUESTS\n[{"name":"read_file","arguments":{"path":"facts.txt"}}]';
 const GiB = 1024 ** 3;
 
@@ -41,9 +42,11 @@ function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, b
         try { await setTimeout(5_000, undefined, { signal: context.signal }); }
         catch (error) { log({ stopped: context.signal.aborted }); throw error; }
       }
-      if (${exerciseCodeQuality} && args.mode === "code") {
+      if (${exerciseCodeQuality}) {
+        const { passesQualityGate } = await import(${JSON.stringify(quality.href)});
         const { passesCodingQualityGate } = await import(${JSON.stringify(codingQuality.href)});
-        const check = passesCodingQualityGate(args.prompt, reply.output);
+        let check = passesQualityGate(reply.output, false, "stop", args.mode);
+        if (check.pass && args.mode === "code") check = passesCodingQualityGate(args.prompt, reply.output);
         if (!check.pass) reply.gate_outcome = { status: "degraded", reason: check.reason };
       }
       return { structuredContent: {
@@ -161,6 +164,24 @@ test("ordinary oMLX text that fails the code check is withheld for one final cod
   assert.equal(run.stdout.trim(), strictAnswer);
   assert.deepEqual(run.trace.map(event => event.args.mode), ["chat", "code"]);
   assert.doesNotMatch(run.trace[1].args.prompt, /Here is the function you requested/);
+});
+
+test("an oMLX coding round does not serve a four-character chat answer", t => {
+  const run = fixture(t, { config: omlx, prompt: "Summarize the source at facts.txt.", exerciseCodeQuality: true,
+    replies: [{ output: "DONE" }, { output: "The source defines a reader." }] });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim(), "The source defines a reader.");
+  assert.deepEqual(run.trace.map(event => event.args.mode), ["chat", "code"]);
+});
+
+test("a chat prose-loop rejection gets one ordinary code round", t => {
+  const source = ["first", "second", "third"].map(name =>
+    `function ${name}(value) {\n  const normalized = value.toString();\n  return normalized;\n}`).join("\n");
+  const run = fixture(t, { config: omlx, prompt: "Return only source code.", exerciseCodeQuality: true,
+    replies: [{ output: source }, { output: source }] });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim(), source);
+  assert.deepEqual(run.trace.map(event => event.args.mode), ["chat", "code"]);
 });
 
 test("Ollama still uses native chat with the saved model and configured URL", t => {

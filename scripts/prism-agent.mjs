@@ -581,18 +581,28 @@ async function omlxRound(runtime, messages, toolsAllowed) {
   }, undefined, { localOnly: true, requiredLocalBackend: "omlx", signal });
   signal.throwIfAborted();
   const result = response.structuredContent;
-  if (response.isError || result?.backend !== "omlx" || result.used_cloud !== false
-    || result.gate_outcome?.status !== "success" || typeof result.output !== "string" || !result.output.trim()
-    || typeof result.model_picked !== "string" || (runtime.model && result.model_picked !== runtime.model)) {
-    throw new Error(`oMLX inference did not produce a usable local result (${result?.gate_outcome?.reason ?? "no_success"}).`);
+  const gate = result?.gate_outcome;
+  const matchingResult = !response.isError && result?.backend === "omlx" && result.used_cloud === false
+    && typeof result.output === "string" && result.output.trim()
+    && typeof result.model_picked === "string" && (!runtime.model || result.model_picked === runtime.model);
+  // Chat's prose loop detector can reject repeating source that code mode permits.
+  // Discard the draft and let one tool-free code round make the final judgment.
+  const retryCode = matchingResult && toolsAllowed && result.output_origin === "model"
+    && gate?.status === "degraded" && gate.reason === "loop_detected"
+    && !result.output.trim().startsWith(TOOL_REQUEST_PREFIX);
+  if (!matchingResult || (gate?.status !== "success" && !retryCode)) {
+    throw new Error(`oMLX inference did not produce a usable local result (${gate?.reason ?? "no_success"}).`);
   }
   runtime.model ??= result.model_picked;
+  if (retryCode) return { needsCodeRound: true };
   const answer = result.output.trim();
   const counts = { prompt_eval_count: result.prompt_tokens, eval_count: result.completion_tokens };
   if (!answer.startsWith(TOOL_REQUEST_PREFIX)) {
     if (toolsAllowed && result.output_origin !== "replaced") {
+      const { passesQualityGate } = await import("../dist/utils/qualityGate.js");
       const { passesCodingQualityGate } = await import("../dist/utils/codingQualityPolicy.js");
-      if (!passesCodingQualityGate(messages[1].content, answer).pass) return { needsCodeRound: true };
+      if (!passesQualityGate(answer, false, undefined, "code").pass
+        || !passesCodingQualityGate(messages[1].content, answer).pass) return { needsCodeRound: true };
     }
     return { ...counts, message: { content: result.output } };
   }
