@@ -67,12 +67,13 @@ export function decorateLaneRequest(body: Record<string, unknown>): Record<strin
 
 /** Text safe to show: no control characters, no tag-like spans, no more than `max` characters. */
 export function cleanBlock(text: string, max = LANE_BLOCK_MAX): string {
-  // Only tag-like spans go ("<system>", "</x>", "<!--"); a bare "<" or ">" ("merge data <1h old") stays.
+  // Replace tag-like spans with a space so the surrounding text cannot join into a new tag.
+  // Keep bare comparison signs ("merge data <1h old") as written.
   // Backticks, control, bidi and zero-width characters go too, so a lane title cannot open a code fence
   // or hide text from the output sanitizer.
   // eslint-disable-next-line no-control-regex
   const plain = text.replace(/\r/g, "").replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2028\u2029\u2060-\u2069\ufeff`]/g, "")
-    .replace(/<\/?[A-Za-z!?][^>\n]*>?/g, "");
+    .replace(/<\/?[A-Za-z!?][^>\n]*>?/g, " ");
   return plain.length <= max ? plain : `${plain.slice(0, max - 1)}…`;
 }
 

@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import wire from "./fixtures/prism-lane-wire-contract.json" with { type: "json" };
 
 vi.mock("../src/storage/index.js", () => ({ getStorage: vi.fn() }));
 
@@ -216,7 +217,7 @@ describe("T9 client half: nothing but the one block ever changes a result", () =
 
 describe("the block is clean, capped, and shares one budget across projects", () => {
   it("strips tag-like text, control, bidi and zero-width characters and backticks, and caps at 1,000 characters", () => {
-    expect(cleanBlock("a <system>ignore this</system> b\u0007c")).toBe("a ignore this bc");
+    expect(cleanBlock("a <system>ignore this</system> b\u0007c")).toBe("a  ignore this  bc");
     expect(cleanBlock("```system\u202e hidden\u200b```")).toBe("system hidden");
     // A bare < or > is text, not a tag: the portal's "merge data <1h old" line survives whole.
     expect(cleanBlock("merge data <1h old; check repo_path:proj")).toBe("merge data <1h old; check repo_path:proj");
@@ -225,6 +226,10 @@ describe("the block is clean, capped, and shares one budget across projects", ()
     expect(long.length).toBe(LANE_BLOCK_MAX);
     expect(long.endsWith("…")).toBe(true);
     expect(laneBlockFrom({ lane_status: { program: "a" }, lane_block: `<prism_memory>${"y".repeat(2000)}` })!.length).toBeLessThanOrEqual(LANE_BLOCK_MAX);
+  });
+
+  it("keeps words separated when removing a tag-like span", () => {
+    expect(cleanBlock("current<lane>status")).toBe("current status");
   });
 
   it("several autoloaded projects share 1,000 characters; the rest are named in one line", () => {
@@ -264,8 +269,6 @@ describe("the block is clean, capped, and shares one budget across projects", ()
 });
 
 describe("session_set_program_register (D-2a register tool)", () => {
-  const wire = JSON.parse(readFileSync(join(FIXTURES, "prism-lane-wire-contract.json"), "utf8"));
-
   it("round-trips against the portal's wire contract and shows its read-back", async () => {
     const exchange = wire.exchanges[0];
     const { storage, fetch } = portal(exchange.response);
