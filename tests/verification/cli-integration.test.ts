@@ -71,11 +71,27 @@ describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000
     await fs.rm(tmpBase, { recursive: true, force: true }).catch(() => {});
   });
 
-  it.each(['prism-coder', 'prism-mcp-server'])('serves MCP through the npm bin %s', async (bin) => {
-    const home = path.join(tmpBase, bin);
+  it.each([
+    ['server package', 'prism-coder'],
+    ['server package', 'prism-mcp-server'],
+    ['legacy wrapper', 'prism-coder'],
+    ['legacy wrapper', 'prism-mcp-server'],
+  ])('serves MCP through the %s bin %s', async (source, bin) => {
+    const home = path.join(tmpBase, `${source}-${bin}`);
     await fs.mkdir(home);
+    let target = path.join(path.dirname(cliPath), 'server.js');
+    if (source === 'legacy wrapper') {
+      const repo = path.resolve(__dirname, '../..');
+      const modules = path.join(home, 'node_modules');
+      const wrapper = path.join(modules, 'prism-coder');
+      target = path.join(wrapper, 'bin', 'prism-coder.js');
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.copyFile(path.join(repo, 'packages/prism-coder/package.json'), path.join(wrapper, 'package.json'));
+      await fs.copyFile(path.join(repo, 'packages/prism-coder/bin/prism-coder.js'), target);
+      await fs.symlink(repo, path.join(modules, 'prism-mcp-server'), 'junction');
+    }
     const launcher = path.join(home, bin);
-    await fs.symlink(path.join(path.dirname(cliPath), 'server.js'), launcher, 'file');
+    await fs.symlink(target, launcher, 'file');
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [launcher],

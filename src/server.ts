@@ -39,6 +39,8 @@
  */
 
 import { realpathSync } from "node:fs";
+import { createRequire } from "node:module";
+import { sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LANE_TOOLS, laneCallContext, newLaneContext, prependLaneBlock } from "./session/laneStatus.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -1864,11 +1866,19 @@ async function resumeServerStartup(server: ReturnType<typeof createServer>): Pro
 // so either bin starts MCP and importing the module stays free of startup.
 let isDirectExecution = false;
 try {
-  const entryScript = process.argv[1];
-  isDirectExecution = !!entryScript &&
-    realpathSync(entryScript) === realpathSync(fileURLToPath(import.meta.url));
+  if (process.argv[1]) {
+    const entry = realpathSync(process.argv[1]);
+    const server = realpathSync(fileURLToPath(import.meta.url));
+    const legacyShim = `${sep}prism-coder${sep}bin${sep}prism-coder.js`;
+    // Published prism-coder shims import the dependency as their entry point.
+    // Verify that the shim resolves this copy of the server.
+    isDirectExecution = entry === server || (
+      entry.endsWith(legacyShim) &&
+      realpathSync(createRequire(entry).resolve("prism-mcp-server/dist/server.js")) === server
+    );
+  }
 } catch {
-  // An importer can have an argv operand that is not a file.
+  // An importer may have no resolvable entry file or wrapper dependency.
 }
 if (isDirectExecution) {
   startServer().catch((error) => {
