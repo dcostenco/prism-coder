@@ -38,6 +38,8 @@
  * ═══════════════════════════════════════════════════════════════════════
  */
 
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { LANE_TOOLS, laneCallContext, newLaneContext, prependLaneBlock } from "./session/laneStatus.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -1858,16 +1860,16 @@ async function resumeServerStartup(server: ReturnType<typeof createServer>): Pro
   }, 10000);
 }
 
-// Only auto-start when this module is executed directly (not imported by Smithery scanner).
-// IMPORTANT: npm install -g creates a symlink like /usr/local/bin/prism-mcp-server
-// whose path does NOT end with 'server.js'. Node.js sets process.argv[1] to the
-// symlink path, not the resolved target. Without the bin-name check, startServer()
-// never fires and the process silently exits with zero stdout (see issue #21).
-const entryScript = process.argv[1] ?? '';
-const isDirectExecution =
-  entryScript.endsWith('server.js') ||
-  entryScript.endsWith('server.ts') ||
-  entryScript.endsWith('prism-mcp-server');
+// npm launches the entry module through a bin symlink. Compare file identities
+// so either bin starts MCP and importing the module stays free of startup.
+let isDirectExecution = false;
+try {
+  const entryScript = process.argv[1];
+  isDirectExecution = !!entryScript &&
+    realpathSync(entryScript) === realpathSync(fileURLToPath(import.meta.url));
+} catch {
+  // An importer can have an argv operand that is not a file.
+}
 if (isDirectExecution) {
   startServer().catch((error) => {
     console.error('Fatal error running server:', error);

@@ -7,6 +7,8 @@ import * as fs from 'fs/promises';
 import { mkdtempSync } from 'node:fs';
 import * as os from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SqliteStorage } from '../../src/storage/sqlite.js';
 import {
   readDashboardAccessUrl,
@@ -67,6 +69,53 @@ describe('CLI Integration — Operator Contract & JSON Modes', { timeout: 30_000
 
   afterAll(async () => {
     await fs.rm(tmpBase, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it.each(['prism-coder', 'prism-mcp-server'])('serves MCP through the npm bin %s', async (bin) => {
+    const home = path.join(tmpBase, bin);
+    await fs.mkdir(home);
+    const launcher = path.join(home, bin);
+    await fs.symlink(path.join(path.dirname(cliPath), 'server.js'), launcher, 'file');
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [launcher],
+      env: {
+        HOME: home,
+        USERPROFILE: home,
+        PRISM_STORAGE: 'local',
+        PRISM_SKILL_SYNC_DISABLED: 'true',
+        PRISM_DISABLE_HOOK_AUTOINSTALL: '1',
+      },
+      stderr: 'ignore',
+    });
+    const client = new Client({ name: 'npm-bin-integration', version: '1.0.0' });
+    try {
+      await client.connect(transport, { timeout: 8000 });
+      const { tools } = await client.listTools({}, { timeout: 8000 });
+      expect(tools.map(tool => tool.name)).toContain('prism_infer');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('leaves MCP stopped when a different server.js imports the module', async () => {
+    const home = path.join(tmpBase, 'importer');
+    await fs.mkdir(home);
+    const importer = path.join(home, 'server.js');
+    const server = pathToFileURL(path.join(path.dirname(cliPath), 'server.js')).href;
+    await fs.writeFile(importer, `import(${JSON.stringify(server)}).then(() => console.log("imported"));\n`);
+    const { stdout } = await execFile(process.execPath, [importer], {
+      env: {
+        PATH: process.env.PATH,
+        HOME: home,
+        USERPROFILE: home,
+        PRISM_STORAGE: 'local',
+        PRISM_SKILL_SYNC_DISABLED: 'true',
+        PRISM_DISABLE_HOOK_AUTOINSTALL: '1',
+      },
+      timeout: 8000,
+    });
+    expect(stdout.trim()).toBe('imported');
   });
 
   it('verify status (text mode) outputs human readable text', async () => {
