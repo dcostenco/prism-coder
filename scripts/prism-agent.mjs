@@ -104,7 +104,8 @@ async function resolveAgentRuntime(ceiling, explicitModel) {
     if (!Number.isSafeInteger(availableBytes) || availableBytes < selected.minFreeGb * 1024 ** 3) {
       throw new Error("Available memory is below the minimum for the selected Ollama model.");
     }
-    return { backend, model: selected.tag, url, contextTokens: selected.ctxTokens };
+    return { backend, model: selected.tag, url, contextTokens: selected.ctxTokens,
+      supportsTools: selected.supportsTools };
   }
   const selected = pickModel(effectiveCeiling, await getAvailableMemoryBytes());
   if (!selected) throw new Error("Available memory is below the minimum for automatic Ollama model selection.");
@@ -528,18 +529,6 @@ async function executeTool(name, args) {
 }
 
 // ── agentic loop ──────────────────────────────────────────────────────────────
-async function withTimeout(promise, ms, label) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 const TOOL_REQUEST_PREFIX = "PRISM_TOOL_REQUESTS\n";
 
 function isOmlxToolRequest(call) {
@@ -622,16 +611,14 @@ async function omlxRound(runtime, messages, toolsAllowed) {
 }
 
 async function runAgent(userPrompt, runtime) {
+  const supportsTools = runtime.supportsTools !== false;
+  const system = "You are Prism Coder, an expert coding assistant." + (supportsTools
+    ? " IMPORTANT: Before generating any code that depends on specific library or framework APIs, " +
+      "ALWAYS call brave_web_search to verify current syntax. " +
+      "This prevents hallucinating outdated or wrong API shapes. Search first, code second."
+    : "");
   const messages = [
-    {
-      role: "system",
-      content:
-        "You are Prism Coder, an expert coding assistant. " +
-        "IMPORTANT: Before generating any code that depends on specific library or framework APIs, " +
-        "ALWAYS call brave_web_search to verify current syntax. " +
-        "This prevents hallucinating outdated or wrong API shapes. " +
-        "Search first, code second.",
-    },
+    { role: "system", content: system },
     { role: "user", content: userPrompt },
   ];
 
@@ -642,38 +629,31 @@ async function runAgent(userPrompt, runtime) {
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const t0 = Date.now();
-    const isLastRound = finalize || round === MAX_ROUNDS - 1;
+    const isLastRound = !supportsTools || finalize || round === MAX_ROUNDS - 1;
 
     let data;
-    try {
-      if (runtime.backend === "omlx") {
-        data = await omlxRound(runtime, messages, !isLastRound);
-        if (data.needsCodeRound) {
-          finalize = true;
-          continue;
-        }
-      } else {
-        const fetchPromise = fetch(`${runtime.url}/api/chat`, {
-          method: "POST",
-          redirect: "error",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: runtime.model,
-            messages,
-            tools: isLastRound ? [] : TOOLS,
-            stream: false,
-            options: { temperature: 0, num_predict: 4096, num_ctx: runtime.contextTokens },
-          }),
-        }).then((response) => {
-          if (!response.ok) throw new Error(`Ollama error: ${response.status}`);
-          return response.json();
-        });
-        data = await withTimeout(fetchPromise, TIMEOUT_MS, `round ${round + 1}`);
+    if (runtime.backend === "omlx") {
+      data = await omlxRound(runtime, messages, !isLastRound);
+      if (data.needsCodeRound) {
+        finalize = true;
+        continue;
       }
-    } catch (err) {
-      if (runtime.backend === "omlx") throw err;
-      console.error(`[round ${round + 1}] ERROR: ${err.message}`);
-      break;
+    } else {
+      const response = await fetch(`${runtime.url}/api/chat`, {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: runtime.model,
+          messages,
+          ...(supportsTools ? { tools: isLastRound ? [] : TOOLS } : {}),
+          stream: false,
+          options: { temperature: 0, num_predict: 4096, num_ctx: runtime.contextTokens },
+        }),
+      });
+      if (!response.ok) throw new Error(`Ollama error: ${response.status}`);
+      data = await response.json();
     }
 
     const msg = data.message;
@@ -690,8 +670,8 @@ async function runAgent(userPrompt, runtime) {
     messages.push({ role: "assistant", content: msg.content ?? "", tool_calls: cappedToolCalls.length ? cappedToolCalls : undefined });
 
     if (cappedToolCalls.length === 0) {
-      // Final answer
-      return msg.content ?? "";
+      if (typeof msg.content !== "string" || !msg.content.trim()) throw new Error("No final answer from the local model.");
+      return msg.content;
     }
 
     // Execute each tool call and append results
@@ -710,9 +690,7 @@ async function runAgent(userPrompt, runtime) {
     }
   }
 
-  // Fallback: return last assistant message if loop exhausted
-  const last = [...messages].reverse().find((m) => m.role === "assistant");
-  return last?.content ?? "(no response)";
+  throw new Error("No final answer within the configured round limit.");
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────

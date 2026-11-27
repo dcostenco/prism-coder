@@ -151,7 +151,7 @@ export async function inspectOllamaCodingModels(url = PRISM_LOCAL_LLM_URL, fetch
 /** A selected model gets one exact attempt, not a walk through named tiers.
  * Sizes plus overhead are an estimate, not a guarantee about peak RAM. */
 export async function selectedOllamaCodingModel(url: string, id: string, ceiling: string,
-    fetchImpl: typeof fetch = fetch, options: LocalModelProbeOptions = {}): Promise<ModelChoice> {
+    fetchImpl: typeof fetch = fetch, options: LocalModelProbeOptions = {}): Promise<ModelChoice & { supportsTools?: boolean }> {
     if (!isLocalCodingModelId(id)) throw new Error("ollama_model_id_invalid");
     const models = await inspectOllamaCodingModels(url, fetchImpl, options);
     const selected = models.find(model => model.id === id);
@@ -187,5 +187,5 @@ export async function selectedOllamaCodingModel(url: string, id: string, ceiling
     const requiredBytes = Math.max(selected.weightBytes * 1.5, selected.weightBytes + kvBytes + 2 * GIB);
     if (!Number.isFinite(requiredBytes) || requiredBytes <= 0) throw new Error("ollama_model_memory_unknown");
     return { tag: id, weightsGb: selected.weightBytes / GIB, minFreeGb: requiredBytes / GIB, ctxTokens,
-        prefersThinking: show.capabilities.includes("thinking") };
+        prefersThinking: show.capabilities.includes("thinking"), supportsTools: show.capabilities.includes("tools") };
 }

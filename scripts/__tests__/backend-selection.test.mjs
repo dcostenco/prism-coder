@@ -20,12 +20,15 @@ const GiB = 1024 ** 3;
 function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, backendOverride, malformedOmlxSettings,
   planCeiling, ceiling, availableBytes = 16 * GiB, ollamaParams = 9e9, ollamaWeight = 2 * GiB,
   ollamaUrl = "http://127.0.0.1:19992/", prompt = "Read the fixture.", exerciseCodeQuality = false,
-  facts = "synthetic-tool-result" }) {
+  facts = "synthetic-tool-result", ollamaCapabilities = ["completion", "tools"], ollamaStatus = 200,
+  ollamaAnswer = "Ollama fixture answer", existingOutput }) {
   const dir = mkdtempSync(join(tmpdir(), "prism-agent-test-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const tracePath = join(dir, "trace.jsonl");
   writeFileSync(join(dir, "facts.txt"), facts);
   writeFileSync(tracePath, "");
+  const outputPath = join(dir, "answer.txt");
+  if (existingOutput !== undefined) writeFileSync(outputPath, existingOutput);
   if (malformedOmlxSettings) {
     mkdirSync(join(dir, ".omlx"));
     writeFileSync(join(dir, ".omlx", "settings.json"), "{");
@@ -95,7 +98,7 @@ function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, b
         case "http://127.0.0.1:19992/api/show":
           if (args?.model !== ${JSON.stringify(ollamaModel)}) throw new Error("Unexpected model metadata request");
           return Response.json({
-            capabilities: ["completion", "tools"],
+            capabilities: ${JSON.stringify(ollamaCapabilities)},
             model_info: {
               "general.parameter_count": ${ollamaParams},
               "general.architecture": "fixture",
@@ -107,13 +110,17 @@ function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, b
             },
           });
         case "http://127.0.0.1:19992/api/chat":
-          return Response.json({ message: { content: "Ollama fixture answer" } });
+          if (${ollamaStatus} !== 200 || (args.tools?.length && !${JSON.stringify(ollamaCapabilities)}.includes("tools"))) {
+            return Response.json({ error: "Unsupported request" }, { status: ${ollamaStatus} === 200 ? 400 : ${ollamaStatus} });
+          }
+          return Response.json({ message: { content: ${JSON.stringify(ollamaAnswer)} } });
         default:
           throw new Error("Unexpected network request");
       }
     };
   `);
-  const cliArgs = [...(ceiling ? ["--ceiling", ceiling] : []), prompt];
+  const cliArgs = [...(ceiling ? ["--ceiling", ceiling] : []),
+    ...(existingOutput !== undefined ? ["-o", outputPath] : []), prompt];
   const child = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, fileURLToPath(entry), ...cliArgs], {
     cwd: dir, encoding: "utf8", timeout: 15_000,
     env: { HOME: dir, USERPROFILE: dir, PATH: process.env.PATH, PRISM_MAX_ROUNDS: String(rounds),
@@ -123,7 +130,7 @@ function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, b
   });
   assert.ifError(child.error);
   const trace = readFileSync(tracePath, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
-  return { ...child, trace };
+  return { ...child, trace, output: existingOutput !== undefined ? readFileSync(outputPath, "utf8") : undefined };
 }
 
 const omlx = { backend: "omlx", source: "existing", models: { omlx: { coder: "fixture-mlx" } } };
@@ -199,6 +206,28 @@ test("Ollama still uses native chat with the saved model and configured URL", t 
   assert.equal(chat.args.options.num_ctx, 16384);
   assert.ok(chat.args.tools.some(tool => tool.function.name === "read_file"));
 });
+
+test("a saved completion-only Ollama model receives one request without tools", t => {
+  const run = fixture(t, { config: ollama, ollamaCapabilities: ["completion"], replies: [] });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /Ollama fixture answer/);
+  const chats = run.trace.filter(call => call.url.endsWith("/api/chat"));
+  assert.equal(chats.length, 1);
+  assert.equal(chats[0].args.tools, undefined);
+  assert.doesNotMatch(chats[0].args.messages[0].content, /brave_web_search/);
+});
+
+for (const [name, response, reason] of [
+  ["provider error", { ollamaStatus: 400 }, /Ollama error: 400/],
+  ["empty answer", { ollamaAnswer: "  " }, /no final answer/i],
+]) {
+  test(`an Ollama ${name} leaves the existing output intact`, t => {
+    const run = fixture(t, { config: ollama, replies: [], existingOutput: "keep this answer", ...response });
+    assert.equal(run.status, 1, run.stderr);
+    assert.match(run.stderr, reason);
+    assert.equal(run.output, "keep this answer");
+  });
+}
 
 for (const [name, options, reason] of [
   ["caller ceiling", { ceiling: "4b", ollamaParams: 27e9 }, /ollama_model_ceiling/],
