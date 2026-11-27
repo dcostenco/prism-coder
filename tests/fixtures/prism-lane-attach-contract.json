@@ -1,0 +1,300 @@
+{
+  "contract": "Lane fields on load_context, save_ledger, save_handoff and detect_drift (drift-fix D-1b). Neutral names; times normalised.",
+  "bound": {
+    "action": "load_context",
+    "request": {
+      "program": "alpha",
+      "conversation_id": "conv-wire"
+    },
+    "response": {
+      "lane_status": {
+        "program": "alpha",
+        "version": 1,
+        "lanes": [
+          {
+            "id": "a",
+            "title": "Lane A",
+            "state": "active",
+            "status": "stalled",
+            "idle_hours": "<n>",
+            "state_age_hours": null,
+            "state_since": "<time>",
+            "last_merge": null,
+            "active_since": "<time>",
+            "stall_after_hours": 48,
+            "reason": "",
+            "next_slice": "next a",
+            "flags": [
+              {
+                "field": "state",
+                "at": "<time>",
+                "host": "host-x"
+              },
+              {
+                "field": "merge_paths",
+                "at": "<time>",
+                "host": "host-x"
+              },
+              {
+                "field": "active_since",
+                "at": "<time>",
+                "host": "host-x"
+              }
+            ],
+            "flagged_fields": [
+              "state",
+              "merge_paths",
+              "active_since"
+            ],
+            "flagged_at": "<time>",
+            "flag_host": "host-x",
+            "owner_confirmed_at": null,
+            "provenance": "state,merge_paths,active_since edited by tool <mm-dd>, unconfirmed",
+            "line": "a STALLED <n> · state,merge_paths,active_since edited by tool <mm-dd>, unconfirmed · \"Lane A\" · next: next a"
+          },
+          {
+            "id": "b",
+            "title": "Lane B",
+            "state": "parked",
+            "status": "parked",
+            "idle_hours": null,
+            "state_age_hours": "<n>",
+            "state_since": "<time>",
+            "last_merge": null,
+            "active_since": null,
+            "stall_after_hours": 48,
+            "reason": "waits for a",
+            "next_slice": "",
+            "flags": [
+              {
+                "field": "state",
+                "at": "<time>",
+                "host": "host-x"
+              },
+              {
+                "field": "merge_paths",
+                "at": "<time>",
+                "host": "host-x"
+              }
+            ],
+            "flagged_fields": [
+              "state",
+              "merge_paths"
+            ],
+            "flagged_at": "<time>",
+            "flag_host": "host-x",
+            "owner_confirmed_at": null,
+            "provenance": "state,merge_paths edited by tool <mm-dd>, unconfirmed",
+            "line": "b parked <n> · state,merge_paths edited by tool <mm-dd>, unconfirmed · \"Lane B\" · why: waits for a"
+          }
+        ]
+      },
+      "lane_block": "Lane status (alpha, register v1):\na STALLED <n> · state,merge_paths,active_since edited by tool <mm-dd>, unconfirmed · \"Lane A\" · next: next a\nb parked <n> · state,merge_paths edited by tool <mm-dd>, unconfirmed · \"Lane B\" · why: waits for a\nmerge data <1h old; check repo_path:proj\nThis list outranks summaries and memory notes.",
+      "lane_paths": [
+        {
+          "program": "alpha",
+          "version": 1,
+          "lanes": [
+            {
+              "id": "a",
+              "merge_paths": [
+                "src/a"
+              ]
+            },
+            {
+              "id": "b",
+              "merge_paths": [
+                "src/b"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "unbound": {
+    "action": "save_ledger",
+    "request": {
+      "conversation_id": "conv-wire-new"
+    },
+    "response": {
+      "lane_status": {
+        "unbound": true,
+        "project": "proj",
+        "programs": [
+          "alpha",
+          "beta"
+        ],
+        "more_programs": false,
+        "lanes": [
+          {
+            "program": "alpha",
+            "id": "a",
+            "title": "Lane A",
+            "state": "active",
+            "status": "stalled",
+            "idle_hours": "<n>",
+            "state_age_hours": null,
+            "state_since": "<time>",
+            "last_merge": null,
+            "active_since": "<time>",
+            "stall_after_hours": 48,
+            "reason": "",
+            "next_slice": "next a",
+            "flags": [
+              {
+                "field": "state",
+                "at": "<time>",
+                "host": "host-x"
+              },
+              {
+                "field": "merge_paths",
+                "at": "<time>",
+                "host": "host-x"
+              },
+              {
+                "field": "active_since",
+                "at": "<time>",
+                "host": "host-x"
+              }
+            ],
+            "flagged_fields": [
+              "state",
+              "merge_paths",
+              "active_since"
+            ],
+            "flagged_at": "<time>",
+            "flag_host": "host-x",
+            "owner_confirmed_at": null,
+            "provenance": "state,merge_paths,active_since edited by tool <mm-dd>, unconfirmed",
+            "line": "a STALLED <n> · state,merge_paths,active_since edited by tool <mm-dd>, unconfirmed · \"Lane A\" · next: next a"
+          },
+          {
+            "program": "alpha",
+            "id": "b",
+            "title": "Lane B",
+            "state": "parked",
+            "status": "parked",
+            "idle_hours": null,
+            "state_age_hours": "<n>",
+            "state_since": "<time>",
+            "last_merge": null,
+            "active_since": null,
+            "stall_after_hours": 48,
+            "reason": "waits for a",
+            "next_slice": "",
+            "flags": [
+              {
+                "field": "state",
+                "at": "<time>",
+                "host": "host-x"
+              },
+              {
+                "field": "merge_paths",
+                "at": "<time>",
+                "host": "host-x"
+              }
+            ],
+            "flagged_fields": [
+              "state",
+              "merge_paths"
+            ],
+            "flagged_at": "<time>",
+            "flag_host": "host-x",
+            "owner_confirmed_at": null,
+            "provenance": "state,merge_paths edited by tool <mm-dd>, unconfirmed",
+            "line": "b parked <n> · state,merge_paths edited by tool <mm-dd>, unconfirmed · \"Lane B\" · why: waits for a"
+          },
+          {
+            "program": "beta",
+            "id": "c",
+            "title": "Lane C",
+            "state": "active",
+            "status": "ok",
+            "idle_hours": "<n>",
+            "state_age_hours": null,
+            "state_since": "<time>",
+            "last_merge": "<time>",
+            "active_since": "<time>",
+            "stall_after_hours": 48,
+            "reason": "",
+            "next_slice": "",
+            "flags": [
+              {
+                "field": "state",
+                "at": "<time>",
+                "host": "host-x"
+              },
+              {
+                "field": "merge_paths",
+                "at": "<time>",
+                "host": "host-x"
+              },
+              {
+                "field": "active_since",
+                "at": "<time>",
+                "host": "host-x"
+              }
+            ],
+            "flagged_fields": [
+              "state",
+              "merge_paths",
+              "active_since"
+            ],
+            "flagged_at": "<time>",
+            "flag_host": "host-x",
+            "owner_confirmed_at": null,
+            "provenance": "state,merge_paths,active_since edited by tool <mm-dd>, unconfirmed",
+            "line": "c ok <n> · state,merge_paths,active_since edited by tool <mm-dd>, unconfirmed · \"Lane C\""
+          }
+        ]
+      },
+      "lane_block": "Lane status (proj, no program named):\n[alpha] a STALLED <n> · state,merge_paths,active_since edited by tool <mm-dd>, unconfirmed · \"Lane A\"\n[alpha] b parked <n> · state,merge_paths edited by tool <mm-dd>, unconfirmed · \"Lane B\" · why: waits for a\n[beta] c ok <n> · state,merge_paths,active_since edited by tool <mm-dd>, unconfirmed · \"Lane C\"\nName a program with program: (level quick is enough).\nPrograms on proj: alpha, beta\nThis list outranks summaries and memory notes.",
+      "lane_paths": [
+        {
+          "program": "alpha",
+          "version": 1,
+          "lanes": [
+            {
+              "id": "a",
+              "merge_paths": [
+                "src/a"
+              ]
+            },
+            {
+              "id": "b",
+              "merge_paths": [
+                "src/b"
+              ]
+            }
+          ]
+        },
+        {
+          "program": "beta",
+          "version": 1,
+          "lanes": [
+            {
+              "id": "c",
+              "merge_paths": [
+                "src/c"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "no_programs": {
+    "action": "save_handoff",
+    "response_has_lane_fields": false
+  },
+  "unavailable": {
+    "action": "detect_drift",
+    "response": {
+      "lane_status": {
+        "unavailable": true
+      },
+      "lane_block": "Lane register unavailable"
+    }
+  }
+}

@@ -605,6 +605,22 @@ export async function sessionTaskRouteHandler(
     };
   }
 
+  // A configured host role is a handoff, never a local second-opinion run.
+  const { readExecutionAssignments, configuredHostProfiles } = await import("../utils/executionRoles.js");
+  try {
+    const assignment = (await readExecutionAssignments()).coder;
+    if (assignment?.runtime === "host") {
+      const profile = (await configuredHostProfiles()).find(p => p.id === assignment.profile);
+      return { content: [{ type: "text", text: JSON.stringify({ target: "host", confidence: 1,
+        needs_history: looksLikeFollowUp(args.task_description), complexity_score: 5,
+        rationale: profile ? "The saved coder role requires an exact configured host handoff; execution is not proved." : "The saved host profile is unavailable; no alternate runtime was selected.",
+        recommended_tool: null, ...(profile ? { host_profile: profile } : {}) }) }] };
+    }
+  } catch {
+    return { content: [{ type: "text", text: JSON.stringify({ target: "host", confidence: 1, complexity_score: 5,
+      needs_history: looksLikeFollowUp(args.task_description), rationale: "Execution role configuration could not be verified; no local delegation was started.", recommended_tool: null }) }] };
+  }
+
   const result = computeRoute(args);
 
   // v7.2.0: Experience-based bias adjustment

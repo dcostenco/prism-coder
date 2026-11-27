@@ -24,6 +24,7 @@ import { FACTORY_HOST_POLICY_LINES } from "./darkfactory/hostPolicy.js";
 import { CONTEXT_RECOVERY_POLICY_LINES } from "./contextRecoveryPolicy.js";
 import { EVIDENCE_WORKFLOW_POLICY_LINES } from "./evidenceWorkflowPolicy.js";
 import { LOCAL_FIRST_POLICY_ID, LOCAL_FIRST_POLICY_LINES } from "./localFirstPolicy.js";
+import { HOST_IMAGE_ROUTING_GUIDANCE } from "./tools/hostImageRouting.js";
 
 export const CONNECT_HOSTS = [
   "claude-code",
@@ -147,6 +148,7 @@ const GEMINI_STARTUP_MANAGED_START = "<!-- >>> prism connect managed: native sta
 const GEMINI_STARTUP_MANAGED_END = "<!-- <<< prism connect managed: native startup -->";
 const CODEX_STARTUP_MANAGED_START = "<!-- >>> prism connect managed: codex native startup -->";
 const CODEX_STARTUP_MANAGED_END = "<!-- <<< prism connect managed: codex native startup -->";
+const HOST_IMAGE_POLICY_LINES = ["## Prism image generation", HOST_IMAGE_ROUTING_GUIDANCE] as const;
 const CODEX_STARTUP_BODY = [
   "## Prism session startup",
   "On the first user turn of every conversation, including a greeting, your first action must be",
@@ -170,6 +172,8 @@ const CODEX_STARTUP_BODY = [
   ...LOCAL_FIRST_POLICY_LINES,
   "",
   ...EVIDENCE_WORKFLOW_POLICY_LINES,
+  "",
+  ...HOST_IMAGE_POLICY_LINES,
 ] as const;
 const CONNECT_STORAGE_BACKENDS = ["auto", "local", "synalux", "supabase"] as const;
 const LEGACY_CLAUDE_PROJECT_PRISM_ENTRY = {
@@ -772,6 +776,8 @@ function serializeClaudeStartupBlock(newline: string): string {
     ...LOCAL_FIRST_POLICY_LINES,
     "",
     ...EVIDENCE_WORKFLOW_POLICY_LINES,
+    "",
+    ...HOST_IMAGE_POLICY_LINES,
     CLAUDE_STARTUP_MANAGED_END,
     "",
   ].join(newline);
@@ -876,6 +882,8 @@ function serializeGeminiStartupBlock(newline: string): string {
     ...LOCAL_FIRST_POLICY_LINES,
     "",
     ...EVIDENCE_WORKFLOW_POLICY_LINES,
+    "",
+    ...HOST_IMAGE_POLICY_LINES,
     GEMINI_STARTUP_MANAGED_END,
     "",
   ].join(newline);

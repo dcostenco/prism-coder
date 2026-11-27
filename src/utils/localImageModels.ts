@@ -7,6 +7,7 @@ export interface LocalImageModelObservation {
     loaded?: boolean;
     weightBytes?: number;
     loadedBytes?: number;
+    loadedVramBytes?: number;
     residentEstimateBytes?: number;
     capability: ImageCapability;
 }

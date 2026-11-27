@@ -28,6 +28,9 @@ import {
   LedgerEntry,
   HandoffEntry,
   SaveHandoffResult,
+  SaveHandoffOptions,
+  contextRestoreRequested,
+  assertContextRestoreResult,
   ContextResult,
   KnowledgeSearchResult,
   SemanticSearchResult,
@@ -50,6 +53,21 @@ import { PRISM_USER_ID, PRISM_STORAGE } from "../config.js";
 import { getSetting as cfgGet, setSetting as cfgSet, getAllSettings as cfgGetAll } from "./configStorage.js";
 import { runAutoMigrations } from "./supabaseMigrations.js";
 import { SafetyController } from "../darkfactory/safetyController.js";
+
+function historyRoleFilter(role: string): Record<string, string> {
+  return role === "global"
+    ? { or: "(snapshot->>role.eq.global,snapshot->>role.is.null)" }
+    : { "snapshot->>role": `eq.${role}` };
+}
+
+function missingLegacyHistoryWorkspaceColumn(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { status?: unknown; code?: unknown; body?: unknown };
+  return candidate.status === 400
+    && candidate.code === "42703"
+    && typeof candidate.body === "string"
+    && /column\s+(?:(?:\"?session_handoffs_history\"?)\.)?\"?workspace_id\"?\s+does not exist/i.test(candidate.body);
+}
 
 export class SupabaseStorage implements StorageBackend {
   // ─── Lifecycle ─────────────────────────────────────────────
@@ -180,10 +198,12 @@ export class SupabaseStorage implements StorageBackend {
 
   async saveHandoff(
     handoff: HandoffEntry,
-    expectedVersion?: number | null
+    expectedVersion?: number | null,
+    options?: SaveHandoffOptions
   ): Promise<SaveHandoffResult> {
+    const restoreContext = contextRestoreRequested(handoff, expectedVersion, options);
     try {
-      const result = await supabaseRpc("save_handoff_with_version", {
+      const result = await supabaseRpc(restoreContext ? "restore_handoff_with_version" : "save_handoff_with_version", {
         p_project: handoff.project,
         p_expected_version: expectedVersion ?? null,
         p_last_summary: handoff.last_summary ?? null,
@@ -197,6 +217,7 @@ export class SupabaseStorage implements StorageBackend {
       });
 
       const data = Array.isArray(result) ? result[0] : result;
+      if (restoreContext) assertContextRestoreResult(data, expectedVersion as number);
 
       if (data?.status === "conflict") {
         return {
@@ -208,6 +229,7 @@ export class SupabaseStorage implements StorageBackend {
       return {
         status: data?.status || "updated",
         version: data?.version,
+        ...(data?.history_saved === true ? { history_saved: true } : {}),
       };
     } catch (e) {
       // The write failed. Reporting "updated" here told the agent its handoff
@@ -486,13 +508,19 @@ export class SupabaseStorage implements StorageBackend {
   // ─── Time Travel ──────────────────────────────────────────
 
   async saveHistorySnapshot(handoff: HandoffEntry, branch: string = "main"): Promise<void> {
-    await supabasePost("session_handoffs_history", {
-      project: handoff.project,
-      user_id: handoff.user_id,
-      version: handoff.version ?? 1,
-      snapshot: handoff,
-      branch,
+    const result = await supabaseRpc("save_prism_handoff_history", {
+      p_project: handoff.project,
+      p_user_id: handoff.user_id,
+      p_workspace_id: null,
+      p_role: handoff.role || "global",
+      p_version: handoff.version,
+      p_branch: branch,
     });
+    const snapshot = Array.isArray(result) ? result[0] : result;
+    if (!snapshot || snapshot.project !== handoff.project || snapshot.user_id !== handoff.user_id || snapshot.workspace_id !== null
+      || snapshot.role !== (handoff.role || "global") || snapshot.version !== handoff.version) {
+      throw new Error("Invalid canonical handoff history response");
+    }
   }
 
   async getHistory(
@@ -517,22 +545,39 @@ export class SupabaseStorage implements StorageBackend {
   async getHandoffAtVersion(
     project: string,
     version: number,
-    userId: string = "default"
+    userId: string = "default",
+    role: string = "global"
   ): Promise<Record<string, unknown> | null> {
     try {
-      const data = await supabaseGet("session_handoffs_history", {
+      const base = {
         select: "snapshot",
         project: `eq.${project}`,
         user_id: `eq.${userId}`,
         version: `eq.${version}`,
-        limit: "1",
-      });
+        ...historyRoleFilter(role),
+      };
+      let data: unknown;
+      try {
+        data = await supabaseGet("session_handoffs_history", {
+          ...base,
+          workspace_id: "is.null",
+          limit: "2",
+        });
+      } catch (error) {
+        if (!missingLegacyHistoryWorkspaceColumn(error)) throw error;
+        data = await supabaseGet("session_handoffs_history", {
+          ...base,
+          "snapshot->>workspace_id": "is.null",
+          limit: "2",
+        });
+      }
       const rows = Array.isArray(data) ? data : [];
       if (rows.length === 0) return null;
+      if (rows.length !== 1) throw new Error("Ambiguous handoff history identity");
       return rows[0].snapshot as Record<string, unknown> || null;
     } catch (err) {
       console.error(`[SupabaseStorage] Failed to get handoff at version ${version}: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
+      throw err;
     }
   }
 

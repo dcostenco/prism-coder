@@ -117,6 +117,36 @@ The free tier needs **no account, no API key, and no cloud**. Memory is stored i
 SQLite database at `~/.prism-mcp/data.db`. A dashboard launches automatically at
 `http://localhost:3000` (configurable via `PRISM_DASHBOARD_PORT`).
 
+### Generate images from a connected host
+
+Connect Prism to your host and restart it. Enable an image generation tool in
+that same session. Prism uses the connected MCP client and the tools available in
+the session to select a supported image tool. The selected tool generates the
+image under its provider's account or API key.
+
+| Host | Image tool setup |
+| --- | --- |
+| Codex | Start a session with its built-in image generation tool available. |
+| Gemini CLI | Install the [Nano Banana extension](https://github.com/gemini-cli-extensions/nanobanana) and configure its `NANOBANANA_API_KEY`. |
+| Claude Code | Register the built Nano Banana stdio server under the name `nanobanana` and make `NANOBANANA_API_KEY` available in the environment that launches Claude Code. [Claude Code MCP setup](https://code.claude.com/docs/en/mcp#option-3-add-a-local-stdio-server). |
+| Cursor | Use a session that exposes Cursor's image generation tool. |
+
+For Claude Code, run `npm run install-deps` and `npm run build` in a local copy
+of Nano Banana. Register the resulting `mcp-server/dist/index.js`:
+
+```bash
+claude mcp add --transport stdio --scope user nanobanana -- node /absolute/path/to/nanobanana/mcp-server/dist/index.js
+```
+
+Ask the host to generate one image and check that it returns a generated file or
+image. The model that answers the chat and the model that renders the image can
+come from different providers.
+
+For local rendering, install or reuse ComfyUI with its local image workflow. In
+**Account & Settings → Local AI**, expand **SDXL Turbo · Optional install** to
+review the checkpoint license and open the official download page. Place the
+checkpoint in ComfyUI's `models/checkpoints` folder. [ComfyUI installation](https://docs.comfy.org/comfy-cli/getting-started#install-comfyui-local).
+
 ---
 
 ## 2. Claude Desktop
@@ -564,9 +594,12 @@ OLLAMA_HOST=0.0.0.0 ollama serve
 
 # In your MCP config:
 "env": {
-  "LOCAL_LLM_URL": "http://192.168.1.100:11434"
+  "PRISM_LOCAL_LLM_URL": "http://192.168.1.100:11434"
 }
 ```
+
+Requests that carry on-device project memory in forced-local or strict-local mode
+require a loopback endpoint.
 
 ---
 

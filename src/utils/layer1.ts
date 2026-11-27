@@ -1,4 +1,5 @@
 import { withInferenceResourceLease, withOllamaResourceLease } from "./omlxProvider.js";
+import { isCompleteOllamaChatResponse } from "./ollamaResponses.js";
 /**
  * Layer 1 semantic pre-classifier for prism_infer.
  * ─────────────────────────────────────────────────────────────
@@ -159,12 +160,11 @@ const VALID: ReadonlySet<string> = new Set([
  * Note: OBVIOUS_NOT_RESERVED contains "RESERVED" as a substring — whole-token
  * matching via Set prevents the substring trap from inverting the gate.
  */
-export function parseLayer1(raw: string | null | undefined): Layer1Verdict {
+export function parseLayer1(raw: string | null | undefined, exact = false): Layer1Verdict {
     if (!raw) return "ERROR";
-    const m = raw.trim().toUpperCase().match(/[A-Z_]+/);
-    if (!m) return "ERROR";
-    const token = m[0];
-    return VALID.has(token) ? (token as Layer1Verdict) : "ERROR";
+    const text = raw.trim();
+    const token = exact ? text : text.toUpperCase().match(/[A-Z_]+/)?.[0];
+    return token && VALID.has(token) ? (token as Layer1Verdict) : "ERROR";
 }
 
 type IntentRule = (prompt: string) => boolean;
@@ -648,20 +648,30 @@ async function callLayer1Unleased(
          *  than UNCERTAIN_LENGTH. Explicit oMLX sets it: with no cloud to
          *  escalate to, an excerpt nobody read is not clearance. */
         strictErrors?: boolean;
+        /** Return the first provider failure for callers that must stop on it. */
+        retryOnError?: boolean;
+        /** Require terminal non-streaming Ollama evidence before reading the verdict. */
+        requireCompleteResponse?: boolean;
+        /** Accept exactly one classifier label for a protected caller. */
+        requireExactVerdict?: boolean;
         /** Read an oversize prompt whole, window by window, instead of as an
          *  excerpt. Explicit oMLX sets it with strictErrors. */
         readOversizeWhole?: boolean;
+        /** Trusted oMLX host policy replaces text heuristics; never an input argument.
+         * Requires strict, whole-input semantic reads and cannot apply to images. */
+        authoritativePolicy?: boolean;
     },
 ): Promise<Layer1Verdict> {
     if (!userPrompt || !userPrompt.trim()) return "ERROR";
 
     const oversize = userPrompt.length > MAX_CLASSIFIER_PROMPT_LENGTH;
     const hasImages = !!images?.length;
-    const deterministic = opts?.deterministic === false ? null
+    if (opts?.authoritativePolicy && (hasImages || !opts.strictErrors || !opts.readOversizeWhole || opts.classifierInput)) return "ERROR";
+    const deterministic = opts?.deterministic === false || opts?.authoritativePolicy ? null
         : classifyDeterministicLayer1(userPrompt);
     if (deterministic === "OBVIOUS_RESERVED") return deterministic;
 
-    if (oversize && keywordBackstop(userPrompt) === "OBVIOUS_RESERVED") {
+    if (oversize && !opts?.authoritativePolicy && keywordBackstop(userPrompt) === "OBVIOUS_RESERVED") {
         // The regex floor has no length limit — reserved vocabulary anywhere
         // in the full text (including the middle the excerpt can't see)
         // short-circuits to reserved handling.
@@ -716,23 +726,27 @@ async function callLayer1Unleased(
                     options: { num_predict: 16, temperature: 0 },
                 }),
                 signal: AbortSignal.timeout(timeoutMs),
+                ...(opts?.requireCompleteResponse ? { redirect: "error" } : {}),
             });
         } catch {
             return "ERROR";
         }
 
-        if (!res.ok) return "ERROR";
+        if (!res.ok || (opts?.requireCompleteResponse && res.status !== 200)) return "ERROR";
 
-        let data: unknown;
+        let data: { error?: unknown; message?: { content?: string } } | null;
         try {
             data = await res.json();
         } catch {
             return "ERROR";
         }
 
-        if ((data as { error?: string })?.error) return "ERROR";
-        const text = (data as { message?: { content?: string } })?.message?.content;
-        return parseLayer1(text);
+        if (opts?.requireCompleteResponse && !isCompleteOllamaChatResponse(data, model)) {
+            return "ERROR";
+        }
+        if (data?.error) return "ERROR";
+        const text = data?.message?.content;
+        return parseLayer1(text, opts?.requireExactVerdict);
     };
 
     // Image requests get the vision budget on both attempts, and an ERROR is
@@ -860,7 +874,7 @@ async function callLayer1Unleased(
     const firstBudget = hasImages ? LAYER1_IMAGE_TIMEOUT_MS : LAYER1_TIMEOUT_MS;
     const retryBudget = hasImages ? LAYER1_IMAGE_TIMEOUT_MS : LAYER1_RETRY_TIMEOUT_MS;
     const first = await classify(firstBudget);
-    const settled = first !== "ERROR" ? first : await classify(retryBudget);
+    const settled = first === "ERROR" && opts?.retryOnError !== false ? await classify(retryBudget) : first;
 
     // The picture overrules the words. A mundane request about a clinical
     // screenshot is exactly the shape that classified as NOT_RESERVED.

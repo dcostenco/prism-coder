@@ -29,6 +29,24 @@ interface SupabaseRequestOptions {
   headers?: Record<string, string>;  // Extra headers (e.g., upsert preferences)
 }
 
+/** Structured REST failure metadata for callers that need a narrow compatibility path. */
+export class SupabaseHttpError extends Error {
+  readonly status: number;
+  readonly statusText: string;
+  readonly body: string;
+  readonly code?: string;
+
+  constructor(method: SupabaseRequestOptions["method"], path: string, status: number,
+    statusText: string, body: string, code?: string) {
+    super(`Supabase ${method} ${path} failed: ${status} ${statusText}\n${body}`);
+    this.name = "SupabaseHttpError";
+    this.status = status;
+    this.statusText = statusText;
+    this.body = body;
+    this.code = code;
+  }
+}
+
 /**
  * Makes a single authenticated HTTP request to the Supabase REST API.
  * All public functions below delegate to this.
@@ -70,7 +88,14 @@ async function supabaseRequest(opts: SupabaseRequestOptions): Promise<unknown> {
   // Handle errors with a descriptive message
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Supabase ${opts.method} ${opts.path} failed: ${response.status} ${response.statusText}\n${errorText}`);
+    let code: string | undefined;
+    try {
+      const parsed = JSON.parse(errorText) as unknown;
+      if (parsed && typeof parsed === "object" && typeof (parsed as Record<string, unknown>).code === "string") {
+        code = (parsed as Record<string, unknown>).code as string;
+      }
+    } catch { /* Error bodies may be plain text. */ }
+    throw new SupabaseHttpError(opts.method, opts.path, response.status, response.statusText, errorText, code);
   }
 
   // Parse the response — some responses are empty (e.g., DELETE), so handle gracefully

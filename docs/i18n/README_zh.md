@@ -2,11 +2,11 @@
 
 **Give your AI agent memory that lasts — and see the cloud tokens it never had to spend.** Persistent sessions, knowledge graphs, offline tool-routing, and an auditable savings meter. Fully local and free.
 
-> **Current release: v20.22.5 — local oMLX images and memory accounting**
-> Choose an independent image model from discovered local inventory. Compatible
-> oMLX servers support controlled PNG image requests with local screening and
-> generation. Image accuracy depends on the model; Ollama image execution remains
-> unavailable for the saved image choice. See the [oMLX guide](../omlx.md).
+> **Current release: v20.22.5 — oMLX coding, review, and images**
+> Save exact coder and reviewer assignments, including models from an existing
+> or managed oMLX server. The image model has its own setting. Compatible oMLX
+> servers support controlled PNG requests with local screening. See the
+> [oMLX guide](../omlx.md).
 
 [![npm](https://img.shields.io/npm/v/prism-mcp-server?color=cb0000&label=npm)](https://www.npmjs.com/package/prism-mcp-server)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-00ADD8)](https://github.com/modelcontextprotocol/servers)
@@ -34,6 +34,10 @@ A paid subscription adds cloud sync, higher model tiers, and team features throu
   selection based on installed models, available RAM, context fit, and
   subscription entitlements. Eligible text-only coding can prefer configured
   oMLX; explicit task choices override the saved backend preference.
+- **Optional host-authorized tasks** — a host can require review of the exact
+  request, context and evidence before local execution. Expiring task packets
+  run through the host CLI; ordinary tool arguments cannot approve them.
+  See the [host-authorized workflow](../omlx.md#host-authorized-tasks).
 - **A savings meter you can audit** — `prism savings` (or the `local_savings`
   tool from any host) reports the token volume local serving kept off your
   cloud model: headline, local share, per-model breakdown. It reports tokens,
@@ -77,7 +81,7 @@ session memory continues to work without installing a model.
 | Step | What you do | What to expect |
 | --- | --- | --- |
 | **1. Connection** | Choose an existing oMLX server or a Prism-managed installation, then **Preview connection**. | Review the effect on coder, reviewer and image assignments before **Use this server** switches the shared oMLX connection. Saved model IDs are preserved. |
-| **2. Models** | Choose coder and reviewer models for each backend and **Save coding preference**. Save the separate **Image model** form independently. | Saving records a choice; it does not download or load weights. Missing saved IDs stay visible instead of being silently replaced. |
+| **2. Models** | Choose **Coder execution** and **Reviewer execution**, then **Save execution roles**. Auto uses the local backend preferences below. Save the separate **Image model** form independently. | Detected local models, Synalux-managed cloud and trusted configured host profiles stay distinct. Saving loads no weights and executes no host. Missing exact choices refuse rather than substitute. |
 | **3. Test** | Select backend and purpose, then **Test saved model**. | A small request may load the saved model. The result reports execution or a blocking reason, with no cloud inference fallback. |
 
 **Coding and review.** Auto prefers configured oMLX for eligible coding. You can
@@ -85,7 +89,15 @@ choose Ollama instead; explicit task choices take precedence. oMLX coding and
 review need the integration's separate text safety classifier. Local drafts and
 reviews still need host inspection and tests.
 
+In host-authorized mode (`PRISM_HOST_TASKS=required`), `prism local run`
+executes reviewed local tasks. A host or Synalux cloud role must be handled by
+its host/cloud executor; Prism refuses to replace it with a local worker.
+An explicit local task choice can override the saved role.
+
 ![Local AI coding model selectors with separate coder and reviewer assignments](../screenshots/local-ai-coding-models.png)
+
+*The screenshot shows the model-selector detail. The current dashboard also
+includes the execution-role controls described in the table above.*
 
 **Images have their own choice.** Select an oMLX vision model under **Image
 model**, then **Save image preference**. It may be the same model used for
@@ -234,6 +246,11 @@ or by re-enabling after each run.
 
 ## What's New in v20.22.5
 
+- **Exact coder and reviewer assignments:** save the backend and model for each
+  role. Explicit task choices take precedence. Prism refuses incompatible
+  backend and model choices.
+- **Owner-reviewed local tasks:** a task packet binds the reviewed request,
+  runtime, model and environment for one execution through the oMLX bridge.
 - **Independent image model:** Settings exposes a separate image choice from
   discovered oMLX/Ollama inventory, without changing coder/reviewer assignments.
 - **Controlled local images:** compatible oMLX servers accept inline PNGs after
@@ -243,6 +260,12 @@ or by re-enabling after each run.
 - **Memory and model switching:** count macOS free and file-backed pages once,
   and reclaim eligible idle oMLX models without interrupting active or pinned
   work. Memory estimates do not guarantee fit.
+- **Answer origin:** the structured `prism_infer` result carries
+  `output_origin`: `replaced` when the input-safety intercept answered, or the
+  final text differs from the draft given to the output-safety, route-contract
+  and verifier steps; otherwise `repaired` when a deterministic code repair
+  reported a change or the draft is the answer to a repair prompt; otherwise
+  `model`. It is absent when the output is empty.
 - **Reliability:** updated oMLX installer pin, device-key race fixes, dependency
   and CodeQL remediation, shared idle Factory polling, and the civilian-use
   policy correction for Syria. Full details are in [CHANGELOG.md](../../CHANGELOG.md).
@@ -1535,24 +1558,24 @@ Search across all memories with highlighted results, knowledge graph editing, an
 
 ## Local-first and privacy
 
-The free tier runs entirely on your machine. Paid tiers add cloud sync through the Synalux portal, which is what enables cross-device memory and team sharing.
+Signed-out Prism uses local memory and can run inference on this device. A Synalux account adds the cloud features included in its plan. Cloud sync and team sharing use the Synalux portal.
 
-| | Local tier (free) | Cloud tier (paid) |
+| | Signed out | Signed in to Synalux |
 |---|---|---|
-| Memory storage | Local SQLite | Synalux portal (Supabase-backed) |
-| Inference | Local Ollama models | Local models + Gemini 3.6 Flash fallback |
-| API keys required | None | Synalux subscription key |
-| Web search / scrape | Not included | Via Synalux portal (provider keys server-side) |
-| What leaves your machine | Nothing | Memory text, file paths, search queries, and inference prompts/drafts when their cloud feature is used, sent to the portal over TLS. Cloud memory writes have personal identifiers redacted; inference and route requests are transient. |
+| Memory storage | Local SQLite | Portal-backed memory when the plan includes it and the backend is selected. Local SQLite when local storage is selected. |
+| Inference | Local models | Local models with plan-eligible Synalux fallback |
+| Synalux credentials | None | Account credentials |
+| Synalux web search / scrape | Unavailable | Available with an eligible plan (provider keys server-side) |
+| User content sent to Synalux | None | Memory text, file paths, search queries, and inference prompts/drafts when their cloud feature is used, sent to the portal over TLS. Cloud memory writes have personal identifiers redacted. Inference and route requests are transient. |
 | Works offline | ✅ | Local features yes; sync/cloud no |
 
 **Handling sensitive data.** Cloud memory writes pass through automatic
 redaction (SSNs, dates of birth, medical record numbers, phone numbers, emails,
 and clinical identifiers are stripped before storage). Cloud inference and
 route correction send the request over TLS for processing and do not store it
-as Prism memory. The **local tier** (no Synalux key) is the air-gap;
-`route_guard: "local"` only skips the route correction, and `cloud_fallback`
-and `verify` govern the other two channels.
+as Prism memory. Signed-out inference has no Synalux fallback.
+`route_guard: "local"` skips route correction. `cloud_fallback` and
+`verify` govern inference fallback and grounding verification respectively.
 
 ---
 
@@ -1684,15 +1707,14 @@ For the separate October 2026 coding and advisory-review comparison, see
 For the default **Ollama backend**, Prism tries an eligible local model first.
 If the quality gate detects an empty, truncated, think-only, or looping
 response, or the safety screen
-finds the request uncertain or reserved, a paid plan escalates the request
-through Gemini 3.6 Flash. Free-tier routing stays local and reports the
-outcome without making a cloud call.
+finds the request uncertain or reserved, an eligible signed-in account can
+escalate through Synalux. Signed-out routing reports the outcome without a
+cloud inference call.
 
-The flag follows the plan. Leave it unset and your plan decides: paid plans
-escalate, free plans never do. Pass `false` to forbid cloud inference fallback
-for a call, which the clinical delegation rules do for drafting; pass `true`
-to ask for it, which still requires a plan with cloud. A request that carries
-an image is never escalated; screenshots stay on this device.
+When you leave the flag unset, your account's entitlement decides. A signed-in
+Free account can use its daily cloud answer allowance. Pass `false` to forbid
+cloud inference fallback for a call. Pass `true` to request it with an eligible
+account. Prism keeps image requests on the device.
 
 Explicit `local_backend: "omlx"` never falls back to cloud inference or Ollama,
 regardless of plan or `cloud_fallback`. See [oMLX behavior](../omlx.md#runtime-behavior-and-failure-handling).
@@ -2065,7 +2087,7 @@ Router toggle or set `PRISM_TASK_ROUTER_ENABLED=false` for an explicit opt-out.
 <details>
 <summary>How Prism survives context compaction</summary>
 
-The LLM context window is treated as ephemeral scratch space; durable state lives in the persistent store (SQLite locally, the portal in the cloud). Every session begins with a mandatory no-argument `session_bootstrap` call, so Prism applies the dashboard's project and quick/standard/deep setting before the agent writes a response. When a project exceeds a threshold (default 50 entries), `session_compact_ledger` summarizes old entries into a rollup, soft-archives the originals, and links them in the graph. See [`docs/COMPACTION.md`](../COMPACTION.md)
+The LLM context window is treated as ephemeral scratch space; durable state lives in the persistent store (SQLite locally, the portal in the cloud). Every session begins with a mandatory no-argument `session_bootstrap` call, so Prism applies the dashboard's project and quick/standard/deep setting before the agent writes a response. In SQLite and explicitly configured legacy Supabase stores, `session_compact_ledger` summarizes old entries into a rollup, soft-archives the originals, and links them in the graph. Synalux cloud compaction requires a Portal operation for the rollup and archive. See [`docs/COMPACTION.md`](../COMPACTION.md)
 </details>
 
 ---
@@ -2221,14 +2243,15 @@ Run the full model stack on your own hardware — no cloud, full data sovereignt
 
 ```bash
 ollama pull dcostenco/prism-coder:9b       # default router
-export LOCAL_LLM_URL=http://localhost:11434
+export PRISM_LOCAL_LLM_URL=http://localhost:11434
 ```
 
 Self-hosted routing stays local: `9b → 4b` on desktop/server and `2b` on
 mobile/iPhone, with 27B available when installed and RAM-safe. Synalux-hosted
 paid tiers can use Gemini 3.6 Flash as the cloud fallback. For iOS or another
 machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point
-`LOCAL_LLM_URL` at the host's IP.
+`PRISM_LOCAL_LLM_URL` at the host's IP. Requests that carry on-device project
+memory in forced-local or strict-local mode require a loopback endpoint.
 
 ---
 
@@ -2238,7 +2261,7 @@ machine on the same network, run `OLLAMA_HOST=0.0.0.0 ollama serve` and point
 |---|---|---|
 | `PRISM_STORAGE` | `local` / `synalux` / `supabase` / `auto` | `auto` |
 | `PRISM_SYNALUX_API_KEY` | Paid-tier portal key (`synalux_sk_...`) | -- (local if unset) |
-| `LOCAL_LLM_URL` | Ollama endpoint | `http://localhost:11434` |
+| `PRISM_LOCAL_LLM_URL` | Ollama endpoint | `http://127.0.0.1:11434` |
 | `PRISM_FORCE_LOCAL` | Force local SQLite regardless of credentials | `false` |
 | `TELEMETRY_WRITE_TOKEN` | Portal analytics token (optional — metrics display works without it) | -- |
 

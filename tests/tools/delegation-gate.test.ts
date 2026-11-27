@@ -19,6 +19,8 @@ vi.mock("../../src/config.js", async (importOriginal) => {
 const mockGetSetting = vi.fn();
 const mockGetExperienceBias = vi.fn();
 const mockCallLocalLlm = vi.fn();  // now stands in for inferText
+const execution = vi.hoisted(() => ({ roles: vi.fn(async () => ({} as Record<string, unknown>)), hosts: vi.fn(async () => [] as any[]) }));
+vi.mock("../../src/utils/executionRoles.js", () => ({ readExecutionAssignments: execution.roles, configuredHostProfiles: execution.hosts }));
 vi.mock("../../src/storage/configStorage.js", () => ({
     getSetting: (...args: unknown[]) => mockGetSetting(...args),
 }));
@@ -49,9 +51,21 @@ beforeEach(() => {
     vi.clearAllMocks();
     mockGetExperienceBias.mockResolvedValue({ bias: 0, sampleCount: 0, rationale: "" });
     mockCallLocalLlm.mockResolvedValue(null);
+    execution.roles.mockResolvedValue({}); execution.hosts.mockResolvedValue([]);
 });
 
 describe("delegation gate", () => {
+    it("hands off the exact saved host role without invoking a local tie-breaker", async () => {
+        mockGetSetting.mockImplementation(async (_key, value) => value);
+        const profile = {id:'a'.repeat(64),provider:'fixture',model:'host-model',effort:'high',status:'configured'};
+        execution.roles.mockResolvedValue({coder:{runtime:'host',profile:profile.id}}); execution.hosts.mockResolvedValue([profile]);
+        const body = JSON.parse((await sessionTaskRouteHandler({task_description:'Generate a short helper for text formatting.'})).content[0].text);
+        expect(body).toMatchObject({target:'host',recommended_tool:null,host_profile:profile});
+        expect(mockCallLocalLlm).not.toHaveBeenCalled();
+        execution.hosts.mockResolvedValue([]);
+        const unavailable = JSON.parse((await sessionTaskRouteHandler({task_description:'Generate a short helper for text formatting.'})).content[0].text);
+        expect(unavailable).toMatchObject({target:'host',recommended_tool:null}); expect(unavailable.host_profile).toBeUndefined();
+    });
     it("allows local routing when delegation_enabled is not set", async () => {
         mockGetSetting.mockImplementation(async (_key, defaultValue) => defaultValue);
 

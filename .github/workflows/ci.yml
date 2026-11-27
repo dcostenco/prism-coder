@@ -138,6 +138,9 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
+      - name: Standalone Prism agent configuration tests
+        run: node --test scripts/__tests__/backend-selection.test.mjs scripts/__tests__/memory-selection.test.mjs
+
       - name: Raw-inference chokepoint guard
         shell: bash
         run: node scripts/no-raw-inference.mjs

@@ -36,6 +36,7 @@ const COVERAGE: Record<string, string | null> = {
     "Audit Dependencies": "Audit Dependencies",
     "Private repo leak guard": "Private repo leak guard",
     "Build TypeScript": "Build TypeScript",
+    "Standalone Prism agent configuration tests": "Standalone Prism agent configuration tests",
     "Raw-inference chokepoint guard": "Raw-inference chokepoint",
     "Run Unit Tests": "Run Unit Tests",
     "Process-Level CLI Tests": "Process-Level CLI Tests",

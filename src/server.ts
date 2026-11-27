@@ -38,8 +38,14 @@
  * ═══════════════════════════════════════════════════════════════════════
  */
 
+import { realpathSync } from "node:fs";
+import { createRequire } from "node:module";
+import { sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { LANE_TOOLS, laneCallContext, newLaneContext, prependLaneBlock } from "./session/laneStatus.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { appendHostImageRoute, HOST_IMAGE_ROUTING_GUIDANCE } from "./tools/hostImageRouting.js";
 import { monitorMcpTransport } from "./mcpTransportHealth.js";
 import { buildVSCodePrompt } from "./aba-protocol.js";
 import {
@@ -139,6 +145,7 @@ import {
 import {
   SESSION_SAVE_LEDGER_TOOL,
   SESSION_SAVE_HANDOFF_TOOL,
+  SESSION_SHARE_PROJECT_MEMORY_TOOL,
   SESSION_LOAD_CONTEXT_TOOL,
   SESSION_BOOTSTRAP_TOOL,
   SESSION_ROUTE_PROMPT_TOOL,
@@ -175,6 +182,7 @@ import {
   SESSION_TASK_ROUTE_TOOL,
   // Session Drift Detection
   SESSION_DETECT_DRIFT_TOOL,
+  SESSION_SET_PROGRAM_REGISTER_TOOL,
   isSessionDetectDriftArgs,
   // Behavioral Verifier
   VERIFY_BEHAVIOR_TOOL,
@@ -195,6 +203,7 @@ import {
 
   sessionSaveLedgerHandler,
   sessionSaveHandoffHandler,
+  sessionShareProjectMemoryHandler,
   sessionLoadContextHandler,
   sessionBootstrapHandler,
   sessionRoutePromptHandler,
@@ -243,6 +252,7 @@ import {
   sessionTaskRouteHandler,
   // Session Drift Detection
   sessionDetectDriftHandler,
+  sessionSetProgramRegisterHandler,
   // v7.3: Dark Factory Pipeline tools
   SESSION_START_PIPELINE_TOOL,
   SESSION_CHECK_PIPELINE_STATUS_TOOL,
@@ -262,6 +272,8 @@ import {
   // v15.4: prism_infer — local-first inference (RAM-gated cascade)
   PRISM_INFER_TOOL,
   prismInferHandler,
+  FILE_METADATA_TOOL,
+  fileMetadataHandler,
 } from "./tools/index.js";
 
 // ─── Security: Boundary Tags for Context Output ──────────────
@@ -286,6 +298,7 @@ const BASE_TOOLS: Tool[] = [
   BRAVE_ANSWERS_TOOL,                 // brave_answers — AI-grounded answers
   RESEARCH_PAPER_ANALYSIS_TOOL,       // gemini_research_paper_analysis — paper analysis
   PRISM_INFER_TOOL,                   // prism_infer — local-first inference (token-saving cascade)
+  FILE_METADATA_TOOL,
   // youcom_web_search — optional You.com web search, gated on YDC_API_KEY
   ...(YDC_API_KEY ? [YOUCOM_WEB_SEARCH_TOOL] : []),
 ];
@@ -302,6 +315,7 @@ function buildSessionMemoryTools(): Tool[] {
     SKILL_MANAGE_TOOL,           // skill_manage — list/delete scoped skills, release/restore platform skills
     SESSION_SAVE_LEDGER_TOOL,    // session_save_ledger — append immutable session log
     SESSION_SAVE_HANDOFF_TOOL,   // session_save_handoff — upsert latest project state (now with OCC)
+    SESSION_SHARE_PROJECT_MEMORY_TOOL,
     SESSION_LOAD_CONTEXT_TOOL,   // session_load_context — explicit project reload / legacy fallback
     KNOWLEDGE_SEARCH_TOOL,       // knowledge_search — search accumulated knowledge
     KNOWLEDGE_FORGET_TOOL,       // knowledge_forget — prune bad/old memories
@@ -334,6 +348,7 @@ function buildSessionMemoryTools(): Tool[] {
     SESSION_SYNTHESIZE_EDGES_TOOL, // session_synthesize_edges — inferred semantic graph enrichment
     SESSION_COGNITIVE_ROUTE_TOOL,  // session_cognitive_route — HDC policy-gated concept routing (v6.5)
     SESSION_DETECT_DRIFT_TOOL,     // session_detect_drift — semantic goal drift detection (synalux)
+    SESSION_SET_PROGRAM_REGISTER_TOOL, // session_set_program_register — lanes of a program (drift-fix D-2a)
     VERIFY_BEHAVIOR_TOOL,          // verify_behavior — behavioral verification via Synalux portal
     // ─── v6.1: Storage Hygiene tool ───
     MAINTENANCE_VACUUM_TOOL,       // maintenance_vacuum — reclaim SQLite disk space post-purge
@@ -470,16 +485,10 @@ export function getAvailableTools(): Tool[] {
 }
 
 export const PRISM_SERVER_INSTRUCTIONS =
-  `Prism MCP — The Mind Palace for AI Agents. On the first user turn of every conversation, ` +
-  `including greetings, call session_bootstrap exactly once BEFORE any user-facing response, passing the ` +
-  `user's verbatim first message as {prompt: "<first user message>"}. The prompt is matched against ` +
-  `prompt_keywords ON-DEVICE to load symptom-triggered skills on turn one; it is used for routing ` +
-  `only and never leaves the machine. Pass {} only when there is no user message. ` +
-  `When the startup display lists "Symptom-triggered skills", those skills matched the first message's ` +
-  `trigger rules — read each before proposing any change. Surfacing a name is not loading it: hosts that ` +
-  `do not auto-load skill files must fetch each body with knowledge_search, passing the skill name ` +
-  `exactly as listed. ` +
-  `AFTER turn one, call session_route_prompt at the start of any turn with a new task, changed work, or reported defect. Pass the verbatim message as {prompt} and held skills as {loaded}; supply current project, working_directory, files_involved and test_command when known. Read and follow returned skills. When prism_factory_route has target factory, automatically call recommended_tool with recommended_args, then monitor status. Routing itself never executes code. ` +
+  `Prism MCP. On each conversation's first user turn, including greetings, call session_bootstrap exactly once ` +
+  `BEFORE any user-facing response. Pass the user's verbatim first message as {prompt: "<first user message>"}. ` +
+  `The prompt matches prompt_keywords ON-DEVICE only for first-turn skill routing and never leaves the machine. ` +
+  `Pass {} only when there is no user message. ` +
   `Emit no preamble. Print the complete tool result verbatim as the entire first-turn startup display, before any optional ` +
   `answer. Do not summarize, paraphrase, rename headings, reformat, or omit any returned section. Preserve its order and ` +
   `line content. For a greeting-only prompt, stop after the verbatim startup display. ` +
@@ -487,6 +496,13 @@ export const PRISM_SERVER_INSTRUCTIONS =
   `session_load_context to recover when a save is refused with context_not_loaded (pass that save's project ` +
   `and conversation_id, then retry the save once; recovery is not a second startup), for an explicit project ` +
   `reload, or as an older-server fallback. ` +
+  `AFTER turn one, start new tasks, changed work, or reported defects with session_route_prompt. ` +
+  `${HOST_IMAGE_ROUTING_GUIDANCE} ` +
+  `When the startup display lists "Symptom-triggered skills", those skills matched the first message's ` +
+  `trigger rules — read each before proposing any change. Surfacing a name is not loading it: hosts that ` +
+  `do not auto-load skill files must fetch each body with knowledge_search, passing the skill name ` +
+  `exactly as listed. ` +
+  `For prompt routing, pass the verbatim message as {prompt} and held skills as {loaded}; supply current project, working_directory, files_involved and test_command when known. Read and follow returned skills. When prism_factory_route has target factory, automatically call recommended_tool with recommended_args, then monitor status. Routing itself never executes code. ` +
   `Use session_save_ledger to log completed work and session_save_handoff to preserve state for the next session. ` +
   `Reuse the conversation_id from session_bootstrap's <prism_session /> line for those saves and for ` +
   `session_detect_drift, the 60-minute goal-alignment drift check. Do not add the id to the visible greeting.\n\n` +
@@ -860,8 +876,17 @@ export function createServer() {
   // child spans from LLM adapters and background workers are automatically
   // nested under this root span in Jaeger/Zipkin without explicit ref-passing.
   // When otel_enabled=false, getTracer() returns a no-op tracer — zero overhead.
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
+
+    // Local metadata is a separate deterministic operation. Keep names/paths out
+    // of inference, provider routing, and generic invocation/telemetry handling.
+    if (name === FILE_METADATA_TOOL.name) {
+      return fileMetadataHandler(args, async () => {
+        if (!server.getClientCapabilities()?.roots) return [];
+        return (await server.listRoots({}, { timeout: 3000, maxTotalTimeout: 3000 })).roots;
+      });
+    }
 
     // Start the root span for this MCP tool invocation.
     // All child spans (llm.generate_text, worker.vlm_caption, etc.) are
@@ -878,7 +903,9 @@ export function createServer() {
     // of this async operation. AsyncLocalStorage ensures the context flows
     // through await chains — including fire-and-forget workers launched
     // within the handler body (e.g. imageCaptioner, embeddings backfill).
-    return otelContext.with(trace.setSpan(otelContext.active(), rootSpan), async () => {
+    // Drift-fix D-2a: this call's lane context (conversation, program, recorded blocks).
+    const laneCtx = newLaneContext(args, name, server.getClientVersion?.()?.name);
+    return laneCallContext.run(laneCtx, () => otelContext.with(trace.setSpan(otelContext.active(), rootSpan), async () => {
       const _ddStart = Date.now();
       try {
         if (!args) {
@@ -912,7 +939,7 @@ export function createServer() {
             result = await researchPaperAnalysisHandler(args); break;
 
           case "prism_infer":
-            result = await prismInferHandler(args); break;
+            result = await prismInferHandler(args, undefined, { signal: extra.signal }); break;
 
           // ── Optional You.com Web Search (only when YDC_API_KEY is set) ──
 
@@ -945,6 +972,11 @@ export function createServer() {
             void import("./sync/handoffSync.js").then(m => m.pushHandoffFromArgs(args)).catch(() => {});
             break;
 
+          case "session_share_project_memory":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
+            result = await sessionShareProjectMemoryHandler(args);
+            break;
+
           case "session_load_context":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
             contextLoadedByClient = true;  // v5.2.1: suppress deferred auto-push
@@ -965,7 +997,7 @@ export function createServer() {
             // Deliberately NOT gated on SESSION_MEMORY_ENABLED: routing is
             // on-device against a cached table, so it must keep working when
             // the memory backend is unconfigured or unreachable.
-            result = await sessionRoutePromptHandler(args); break;
+            result = appendHostImageRoute(await sessionRoutePromptHandler(args), args, server.getClientVersion()?.name); break;
 
           case "knowledge_search":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
@@ -979,7 +1011,7 @@ export function createServer() {
 
           case "session_compact_ledger":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
-            result = await compactLedgerHandler(args); break;
+            result = await compactLedgerHandler(args, extra.signal); break;
 
           case "session_search_memory":
             if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
@@ -1111,6 +1143,10 @@ export function createServer() {
             { const cid = (args as Record<string, unknown>)?.conversation_id as string | undefined;
               if (cid) { const { noteDriftCheck } = await import("./session/sessionContext.js"); noteDriftCheck(cid); } }
             break;
+
+          case "session_set_program_register":
+            if (!SESSION_MEMORY_ENABLED) throw new Error("Session memory not configured. Set SUPABASE_URL and SUPABASE_KEY.");
+            result = await sessionSetProgramRegisterHandler(args); break;
 
           case "verify_behavior":
             if (!isVerifyBehaviorArgs(args)) throw new Error("file_path and change_summary required.");
@@ -1248,6 +1284,9 @@ export function createServer() {
           }
         }
 
+        // Drift-fix D-2a: the lane block goes at character 0 of the first text, never on an error result.
+        if (result && !result.isError && LANE_TOOLS.has(name)) prependLaneBlock(result, laneCtx);
+
         // Sanitize all text content returning from MCP tools to prevent prompt injection
         if (result && Array.isArray(result.content)) {
           result.content.forEach((c: any) => {
@@ -1294,7 +1333,7 @@ export function createServer() {
         // in the BatchSpanProcessor's in-memory queue.
         rootSpan.end();
       }
-    });
+    }));
   });
 
   return server;
@@ -1823,16 +1862,24 @@ async function resumeServerStartup(server: ReturnType<typeof createServer>): Pro
   }, 10000);
 }
 
-// Only auto-start when this module is executed directly (not imported by Smithery scanner).
-// IMPORTANT: npm install -g creates a symlink like /usr/local/bin/prism-mcp-server
-// whose path does NOT end with 'server.js'. Node.js sets process.argv[1] to the
-// symlink path, not the resolved target. Without the bin-name check, startServer()
-// never fires and the process silently exits with zero stdout (see issue #21).
-const entryScript = process.argv[1] ?? '';
-const isDirectExecution =
-  entryScript.endsWith('server.js') ||
-  entryScript.endsWith('server.ts') ||
-  entryScript.endsWith('prism-mcp-server');
+// npm launches the entry module through a bin symlink. Compare file identities
+// so either bin starts MCP and importing the module stays free of startup.
+let isDirectExecution = false;
+try {
+  if (process.argv[1]) {
+    const entry = realpathSync(process.argv[1]);
+    const server = realpathSync(fileURLToPath(import.meta.url));
+    const legacyShim = `${sep}prism-coder${sep}bin${sep}prism-coder.js`;
+    // Published prism-coder shims import the dependency as their entry point.
+    // Verify that the shim resolves this copy of the server.
+    isDirectExecution = entry === server || (
+      entry.endsWith(legacyShim) &&
+      realpathSync(createRequire(entry).resolve("prism-mcp-server/dist/server.js")) === server
+    );
+  }
+} catch {
+  // An importer may have no resolvable entry file or wrapper dependency.
+}
 if (isDirectExecution) {
   startServer().catch((error) => {
     console.error('Fatal error running server:', error);

@@ -14,6 +14,18 @@ const fixture = () => ({ recommend: vi.fn(async () => undefined as string | unde
     }) });
 
 describe("unassigned local coding selection", () => {
+    it.each([true, false])('OR caller Stop cancels Auto metadata and starts no later lookup; alreadyStopped=%s', async alreadyStopped => {
+        const f = fixture(), controller = new AbortController();
+        let probeSignal: AbortSignal | undefined;
+        f.ollamaModels = vi.fn(async (_url: string, _fetch: unknown, options: { signal: AbortSignal }) => {
+            probeSignal = options.signal; controller.abort(); return [row('org/code:future')];
+        }) as any;
+        if (alreadyStopped) controller.abort();
+        await expect(selectUnassignedCodingModel(request({ backend: 'ollama', signal: controller.signal }), f))
+            .rejects.toThrow('local_coding_selection_timeout');
+        if (alreadyStopped) expect(f.ollamaModels).not.toHaveBeenCalled(); else expect(probeSignal?.aborted).toBe(true);
+        expect(f.recommend).not.toHaveBeenCalled(); expect(f.ollamaChoice).not.toHaveBeenCalled();
+    });
     it("matches one hint to local discovery without passing any inventory to Synalux", async () => {
         const f = fixture(); f.recommend.mockResolvedValue("vendor/future-a");
         expect(await selectUnassignedCodingModel(request(), f)).toBe("vendor/future-a");

@@ -28,6 +28,8 @@ import { DisabledTextAdapter } from "../../src/utils/llm/adapters/disabledText.j
 import { SynaluxEmbeddingAdapter } from "../../src/utils/llm/adapters/synalux.js";
 
 const storageState = vi.hoisted(() => ({ activeStorageBackend: "local" }));
+const mockInferText = vi.hoisted(() => vi.fn());
+vi.mock("../../src/tools/prismInferHandler.js", () => ({ inferText: mockInferText }));
 vi.mock("../../src/storage/index.js", () => storageState);
 vi.mock("../../src/utils/llm/adapters/synalux.js", () => ({
   SynaluxEmbeddingAdapter: vi.fn(function (this: any) {
@@ -424,5 +426,60 @@ describe("LLM Provider Factory — Split Architecture", () => {
       getLLMProvider();
       expect(OpenAIAdapter).toHaveBeenCalled();
     });
+  });
+});
+
+describe('local-first release assertions', () => {
+  it('routes a forced local generic provider through Prism without a remote vision adapter', async () => {
+    vi.clearAllMocks();
+    vi.stubEnv('PRISM_FORCE_LOCAL', 'true');
+    mockProviders('gemini');
+    mockInferText.mockResolvedValueOnce('local summary');
+    try {
+      vi.resetModules();
+      const factory = await import('../../src/utils/llm/factory.js');
+      const provider = factory.getLLMProvider();
+      await expect(provider.generateText('synthetic local note', 'system', { maxOutputTokens: 256 })).resolves.toEqual('local summary');
+      expect(mockInferText).toHaveBeenCalledWith('synthetic local note', {
+        system: 'system', maxTokens: 256, localOnly: true,
+      });
+      mockInferText.mockResolvedValueOnce(null);
+      await expect(provider.generateText('synthetic local note')).rejects.toThrow('No local text model produced an answer.');
+      expect(provider.generateImageDescription).toBeUndefined();
+      expect(GeminiAdapter).not.toHaveBeenCalled();
+      expect(OpenAIAdapter).not.toHaveBeenCalled();
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it('does not send local memory to the configured Portal when force local won', async () => {
+    _resetLLMProvider();
+    vi.clearAllMocks();
+    storageState.activeStorageBackend = 'local';
+    vi.stubEnv('PRISM_STORAGE', 'synalux');
+    vi.stubEnv('PRISM_FORCE_LOCAL', 'true');
+    mockProviders('gemini');
+    try {
+      vi.resetModules();
+      const factory = await import('../../src/utils/llm/factory.js');
+      expect(() => factory.getEmbeddingProvider()).toThrow('Forced local memory requires the Local embedding provider');
+      expect(SynaluxEmbeddingAdapter).not.toHaveBeenCalled();
+      expect(GeminiAdapter).not.toHaveBeenCalled();
+      mockProviders('none', 'local');
+      expect(factory.getEmbeddingProvider().generateEmbedding).toBeTypeOf('function');
+      expect(LocalEmbeddingAdapter).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it('resolves embeddings again when a signed-out local backend replaces Portal', async () => {
+    _resetLLMProvider();
+    vi.clearAllMocks();
+    storageState.activeStorageBackend = 'synalux';
+    mockProviders('gemini');
+    const previous = getEmbeddingProvider();
+    await expect(previous.generateEmbedding('synthetic shared note')).resolves.toEqual([1]);
+    storageState.activeStorageBackend = 'local';
+    mockProviders('none', 'local');
+    expect(getEmbeddingProvider()).not.toBe(previous);
+    expect(LocalEmbeddingAdapter).toHaveBeenCalledOnce();
   });
 });

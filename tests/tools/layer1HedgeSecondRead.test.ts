@@ -803,6 +803,25 @@ describe("v6: bounds", () => {
         expect(out).toMatchObject({ verdict: "UNCERTAIN", outcome: "deadline" });
         expect(Date.now() - started).toBeLessThan(2_000);
     });
+    it("reports a timed-out classifier to the owning lease until it settles", async () => {
+        let t = 0;
+        let release!: (v: Verdict) => void;
+        const deferred = new Promise<Verdict>(resolve => { release = resolve; });
+        const tracked: Promise<unknown>[] = [];
+        const l1 = vi.fn(async () => { t = 101; return deferred; });
+        const out = await layer1HedgeSecondRead({
+            ...direct({ l1fn: L1(l1), now: () => t, deadlineMs: 100, track: p => tracked.push(p) }),
+        });
+        expect(out).toMatchObject({ ran: true, verdict: "UNCERTAIN", outcome: "deadline" });
+        expect(tracked.length).toBeGreaterThan(0);
+        let settled = false;
+        const wait = tracked[tracked.length - 1].then(() => { settled = true; });
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        release("OBVIOUS_NOT_RESERVED");
+        await wait;
+        expect(settled).toBe(true);
+    });
     it("the cap counts calls, not cached verdicts: a conversation grown turn by turn keeps its second read", async () => {
         const long = ask({ messages: shelf(20) });
         expect(20 + 1 + 2 * contextWindows(long).filter(w => w.trim()).length).toBeGreaterThan(LAYER1_SECOND_READ_MAX_CALLS);

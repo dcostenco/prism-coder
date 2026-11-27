@@ -12,7 +12,8 @@
  * it is never sent to a web provider or synthesized by a local model with web evidence.
  */
 
-import { PRISM_LOCAL_LLM_URL } from "../config.js";
+import { PRISM_FORCE_LOCAL, PRISM_LOCAL_LLM_URL, PRISM_STRICT_LOCAL_MODE } from "../config.js";
+import { approvedHostTask, consumeHostExecution, hostTaskResponse, hostTasksRequired, prepareHostTask, snapshotHostTask } from "../utils/hostTasks.js";
 import { getDomain } from "tldts";
 import {
     getEntitlements,
@@ -25,6 +26,9 @@ import {
     type Layer1Verdict,
 } from "../utils/layer1.js";
 import { debugLog } from "../utils/logger.js";
+import { localCodingPreference } from "../utils/localCodingPreference.js";
+import { classifyOmlxBoundary } from "../utils/omlxLayer1.js";
+import { getAvailableMemoryBytes } from "../utils/availableMemory.js";
 import { resolveOllamaName } from "../utils/modelPicker.js";
 import { parseNLQuery } from "../utils/nlQuery.js";
 import {
@@ -35,7 +39,9 @@ import { synaluxScrape } from "../utils/synaluxSearch.js";
 import { knowledgeSearchHandler } from "./graphHandlers.js";
 import {
     listOllamaTags,
+    productionInferDeps,
     prismInferHandler,
+    type InferExecutionContext,
     type PrismInferArgs,
 } from "./prismInferHandler.js";
 import {
@@ -118,7 +124,7 @@ export interface QueryMemoryNaturalDeps {
             timeoutMs?: number;
         },
     ) => Promise<string>;
-    infer: (args: PrismInferArgs) => Promise<McpTextResult>;
+    infer: (args: PrismInferArgs, context?: InferExecutionContext) => Promise<McpTextResult>;
     classifyBoundary: (question: string) => Promise<Layer1Verdict>;
     getEntitlements: () => Promise<PrismEntitlements>;
 }
@@ -308,9 +314,20 @@ export function rankExplicitAuthorityResults(
 export async function classifyQueryBoundary(
     question: string,
 ): Promise<Layer1Verdict> {
+    try {
+        // Preference resolution is settings-only. The selected oMLX adapter owns
+        // its policy authority and mandatory intercepts; legacy/Ollama stays below.
+        if ((await localCodingPreference("coder", undefined, false)).effective === "omlx") {
+            const runtime = productionInferDeps().omlx;
+            return runtime ? await classifyOmlxBoundary(question, runtime, getAvailableMemoryBytes) : "ERROR";
+        }
+    } catch {
+        return classifyDeterministicLayer1(question)
+            ?? (keywordBackstop(question) === "OBVIOUS_RESERVED" ? "OBVIOUS_RESERVED" : "ERROR");
+    }
+
     const deterministic = classifyDeterministicLayer1(question);
     if (deterministic) return deterministic;
-
     const installed = await listOllamaTags(PRISM_LOCAL_LLM_URL);
     if (!installed) {
         return keywordBackstop(question) === "OBVIOUS_RESERVED"
@@ -327,7 +344,7 @@ const DEFAULT_DEPS: QueryMemoryNaturalDeps = {
     searchMemory: knowledgeSearchHandler,
     searchWeb: quickWebSearch,
     fetchPage: synaluxScrape,
-    infer: prismInferHandler,
+    infer: (args, context) => prismInferHandler(args, undefined, context),
     classifyBoundary: classifyQueryBoundary,
     getEntitlements,
 };
@@ -461,6 +478,13 @@ async function enrichRankedWebSource(
 
 function parseInferResult(result: McpTextResult) {
     const header = result.content[0]?.text || "";
+    let packet: Record<string, unknown> | undefined;
+    try {
+        const body = JSON.parse(header);
+        if (!result.isError && body?.status === "host_authorization_required" && body.host_task) packet = body;
+    } catch { /* Ordinary inference headers are text. */ }
+    if (packet) return { status: "host_authorization_required", answer: "",
+        inference: { header: "host_authorization_required", is_error: false }, host_task: packet.host_task };
     const answer = result.content[1]?.text || "";
     const refused =
         /\bbackend=refused\b|\bgate=refused(?::|\b)|\bverify=refused(?:_|\b)/i.test(header);
@@ -468,6 +492,7 @@ function parseInferResult(result: McpTextResult) {
     return {
         status: result.isError ? "error" : refused ? "refused" : degraded ? "degraded" : "ok",
         answer,
+        host_task: undefined as unknown,
         inference: {
             header,
             is_error: result.isError === true,
@@ -491,9 +516,11 @@ async function synthesize(
     conversationId: string | undefined,
     sources: QuerySource[],
     deps: QueryMemoryNaturalDeps,
+    controls: Pick<QueryMemoryNaturalArgs, "cloud_fallback" | "verify" | "route_guard">,
+    localOnly = false,
 ) {
     const coding = isCodingQuery(question);
-    return deps.infer({
+    const request: PrismInferArgs = {
         prompt: question,
         system: buildGroundedSystem(sources),
         project,
@@ -501,14 +528,16 @@ async function synthesize(
         mode: coding ? "code" : "chat",
         task_complexity: coding ? CODING_QUERY_COMPLEXITY : ROUTINE_QUERY_COMPLEXITY,
         evidence: toEvidence(sources),
-        verify: true,
+        verify: controls.verify ?? true,
         verifier_timeout_ms: GROUNDED_VERIFIER_TIMEOUT_MS,
         max_tokens: GROUNDED_MAX_OUTPUT_TOKENS,
-        cloud_fallback: true,
+        cloud_fallback: controls.cloud_fallback ?? true,
+        ...(controls.route_guard === undefined ? {} : { route_guard: controls.route_guard }),
         strict_entitlements: true,
         escalation: "report",
         temperature: 0,
-    });
+    };
+    return localOnly ? deps.infer(request, { localOnly: true }) : deps.infer(request);
 }
 
 async function routeReservedOrUncertain(
@@ -522,7 +551,9 @@ async function routeReservedOrUncertain(
         mode: "chat",
         task_complexity: ROUTINE_QUERY_COMPLEXITY,
         evidence: undefined,
-        cloud_fallback: true,
+        cloud_fallback: args.cloud_fallback ?? true,
+        ...(args.verify === undefined ? {} : { verify: args.verify }),
+        ...(args.route_guard === undefined ? {} : { route_guard: args.route_guard }),
         strict_entitlements: true,
         escalation: "report",
         temperature: 0,
@@ -542,15 +573,37 @@ export async function queryMemoryNaturalHandler(
         }, true);
     }
 
+    let request = args;
+    try {
+        if (hostTasksRequired() && (request.synthesize !== false || request.web_fallback !== false)) {
+            request = snapshotHostTask(request);
+            if (!approvedHostTask("query_memory_natural", request)) {
+                return hostTaskResponse(await prepareHostTask("query_memory_natural", request as unknown as Record<string, unknown>,
+                    request as unknown as Record<string, unknown>));
+            }
+            consumeHostExecution("query_memory_natural", request);
+        }
+    } catch (error) {
+        return resultEnvelope({ status: "refused", reason: error instanceof Error ? error.message : "host_authorization_required" }, true);
+    }
     const {
         question,
         project,
         synthesize: shouldSynthesize = true,
         web_fallback: webFallback = true,
         conversation_id: conversationId,
-    } = args;
-    const parsed = parseNLQuery(question, project);
-    const searchQuery = parsed.searchQuery.trim() || question;
+    } = request;
+    const intent = parseNLQuery(question, project);
+    // Intent labels describe the requested operation, not words the stored
+    // evidence must contain. SQLite treats this query as an exact phrase.
+    const searchQuery = intent.extractedKeywords.join(" ").trim() || intent.searchQuery.trim() || question;
+    const parsed = {
+        ...intent,
+        searchQuery,
+        suggestedArgs: intent.suggestedTool === "knowledge_search"
+            ? { ...intent.suggestedArgs, query: searchQuery }
+            : intent.suggestedArgs,
+    };
     const memoryArgs = {
         query: searchQuery,
         ...(project ? { project } : {}),
@@ -579,6 +632,8 @@ export async function queryMemoryNaturalHandler(
                 conversationId,
                 memorySources,
                 deps,
+                request,
+                PRISM_FORCE_LOCAL || PRISM_STRICT_LOCAL_MODE,
             ));
             return resultEnvelope({
                 status: inference.status,
@@ -588,6 +643,7 @@ export async function queryMemoryNaturalHandler(
                 answer: inference.answer,
                 sources: memorySources,
                 inference: inference.inference,
+                ...(inference.host_task ? { host_task: inference.host_task } : {}),
             }, inference.status === "error");
         }
 
@@ -630,7 +686,7 @@ export async function queryMemoryNaturalHandler(
 
         const boundary = await deps.classifyBoundary(question);
         if (boundary === "OBVIOUS_RESERVED" || boundary === "UNCERTAIN") {
-            const inference = await routeReservedOrUncertain(args, deps);
+            const inference = await routeReservedOrUncertain(request, deps);
             return resultEnvelope({
                 status: inference.status,
                 boundary,
@@ -640,6 +696,7 @@ export async function queryMemoryNaturalHandler(
                 answer: inference.answer,
                 sources: [],
                 inference: inference.inference,
+                ...(inference.host_task ? { host_task: inference.host_task } : {}),
             }, inference.status === "error");
         }
         if (boundary === "ERROR") {
@@ -697,6 +754,7 @@ export async function queryMemoryNaturalHandler(
             conversationId,
             synthesisSources,
             deps,
+            request,
         ));
         return resultEnvelope({
             status: inference.status,
@@ -706,6 +764,7 @@ export async function queryMemoryNaturalHandler(
             answer: inference.answer,
             sources: synthesisSources,
             inference: inference.inference,
+            ...(inference.host_task ? { host_task: inference.host_task } : {}),
         }, inference.status === "error");
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

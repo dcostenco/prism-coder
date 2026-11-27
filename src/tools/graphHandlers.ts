@@ -21,7 +21,7 @@ import { formatRulesBlock, applySentinelBlock, SENTINEL_START, SENTINEL_END, RED
 import { debugLog } from "../utils/logger.js";
 import { recordCognitiveRoute } from "../observability/graphMetrics.js";
 import { getStorage } from "../storage/index.js";
-import { embeddingSupportOf } from "../storage/interface.js";
+import { embeddingSupportOf, type StorageBackend } from "../storage/interface.js";
 import { toKeywordArray } from "../utils/keywordExtractor.js";
 import { getEmbeddingProvider, getLLMProvider } from "../utils/llm/factory.js";
 import { getCurrentGitState, getGitDrift } from "../utils/git.js";
@@ -1529,43 +1529,51 @@ export async function sessionSynthesizeEdgesHandler(args: unknown) {
 
 // ─── Step 4: LLM Context Assembly (Test Me) ──────────────────────────
 
-export async function assembleTestMeContext(nodeId: string, project: string, storage: any) {
-  // 1. Gather outbound graph links (top 5)
-  const outboundLinks = await storage.getLinksFrom(nodeId, PRISM_USER_ID, 0.0, 5);
+const LEDGER_NODE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-  // 2. Gather semantic neighbors (top 5) via true search
-  const semanticResult = await storage.searchKnowledge({
-    project,
-    keywords: [nodeId],
-    limit: 5,
-    userId: PRISM_USER_ID
-  });
-
-  // 3. Deduplicate and compactly format the results
+export async function assembleTestMeContext(nodeId: string, project: string, storage: Pick<StorageBackend,
+  "getLinkedLedgerSummaries" | "getLinksFrom" | "getLedgerEntries" | "searchKnowledge">,
+  requestedGroup?: "memory" | "keyword" | "category") {
+  const nodeGroup = requestedGroup ?? (LEDGER_NODE_ID.test(nodeId) ? "memory" : undefined);
   const contextMap = new Map<string, string>();
-
-  for (const link of outboundLinks) {
-    // If the target is an entry, fetch its summary to provide context
-    try {
-      if (link.target_id && link.target_id.length === 36) { // naive UUID check
-        const entries = await storage.getLedgerEntries({ id: `eq.${link.target_id}` });
-        if (entries && entries.length > 0) {
-          contextMap.set(link.target_id, entries[0].summary.substring(0, 300));
-        }
+  if (storage.getLinkedLedgerSummaries) {
+    if (nodeGroup === "memory") {
+      const summaries = await storage.getLinkedLedgerSummaries(nodeId, 5);
+      for (const entry of summaries) contextMap.set(entry.id, entry.summary.slice(0, 300));
+    }
+  } else {
+    const outboundLinks = await storage.getLinksFrom(nodeId, PRISM_USER_ID, 0.0, 5);
+    for (const link of outboundLinks) {
+      if (link.target_id?.length !== 36) continue;
+      try {
+        const [entry] = await storage.getLedgerEntries({ id: `eq.${link.target_id}` }) as Array<{ summary?: string }>;
+        if (entry?.summary) contextMap.set(link.target_id, entry.summary.slice(0, 300));
+      } catch {
+        // An individual legacy target may no longer be available.
       }
-    } catch {}
+    }
   }
 
-  const semanticEntries = semanticResult?.results || [];
-  for (const entry of semanticEntries as any[]) {
-    if (entry.id && !contextMap.has(entry.id) && entry.summary) {
-      contextMap.set(entry.id, entry.summary.substring(0, 300));
+  if (nodeGroup !== "memory") {
+    const semanticResult = await storage.searchKnowledge({
+      project,
+      keywords: [nodeId],
+      limit: 5,
+      userId: PRISM_USER_ID
+    });
+    for (const entry of semanticResult?.results || []) {
+      if (!entry || typeof entry !== "object") continue;
+      const { id, summary } = entry as Record<string, unknown>;
+      if (typeof id === "string" && id && !contextMap.has(id) && typeof summary === "string" && summary) {
+        contextMap.set(id, summary.slice(0, 300));
+      }
     }
   }
 
   return {
     nodeId,
     project,
+    nodeGroup,
     contextItems: Array.from(contextMap.values())
   };
 }

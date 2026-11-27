@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { inspectOmlxImageModels } from '../../src/utils/omlxProvider.js';
+import { inspectOmlxCodingModels, inspectOmlxImageModels } from '../../src/utils/omlxProvider.js';
 import { inspectOllamaImageModels } from '../../src/utils/ollamaCodingModels.js';
 
 afterEach(() => vi.useRealTimers());
@@ -11,14 +11,14 @@ const id = 'arbitrary/future:version';
 function ollama(show: unknown = { capabilities: ['vision'] }) {
     const fetcher = vi.fn(async (url: any, _init?: RequestInit) => new Response(JSON.stringify(
         String(url).endsWith('/api/tags') ? { models: [{ name: id, size: 100 }, { name: 'text:tag' }] } :
-        String(url).endsWith('/api/ps') ? { models: [{ name: id, size_vram: 120 }] } : show)));
+        String(url).endsWith('/api/ps') ? { models: [{ name: id, size: 180, size_vram: 120 }] } : show)));
     return fetcher;
 }
 describe('read-only exact image-model discovery', () => {
     it('lazily probes only an installed exact ID; never pulls, generates or guesses a suffix', async () => {
         const fetcher = ollama();
         const first = await inspectOllamaImageModels(undefined, 'http://local', fetcher);
-        expect(first[0]).toEqual({ id, loaded: true, weightBytes: 100, loadedBytes: 120, capability: { vision: 'unknown', source: 'metadata_unavailable' } });
+        expect(first[0]).toEqual({ id, loaded: true, weightBytes: 100, loadedBytes: 180, loadedVramBytes: 120, capability: { vision: 'unknown', source: 'metadata_unavailable' } });
         expect(fetcher).toHaveBeenCalledTimes(2);
         const selected = await inspectOllamaImageModels(id, 'http://local', fetcher);
         expect(selected[0].capability.vision).toBe('yes');
@@ -70,5 +70,10 @@ describe('read-only exact image-model discovery', () => {
         expect(String(fetchImpl.mock.calls[0][0])).toBe('http://127.0.0.1:8000/v1/models/status');
         expect(JSON.stringify(result)).not.toMatch(/private|qualified|enabled|peak/);
         expect(JSON.stringify(result)).not.toContain(fixtureCredential);
+
+        const coding = await inspectOmlxCodingModels({ home, env: {}, fetchImpl });
+        expect(coding.find(model => model.id === 'future/vlm')).toEqual({
+            id: 'future/vlm', loaded: false, weightBytes: 100, residentEstimateBytes: 80,
+        });
     });
 });

@@ -25,6 +25,8 @@ vi.mock("../../src/server.js", () => ({ notifyResourceUpdate: vi.fn() }));
 
 import { SynaluxStorage } from "../../src/storage/synalux.js";
 import { backfillEmbeddingsHandler, embeddingRepairLimit } from "../../src/tools/hygieneHandlers.js";
+import { compactLedgerHandler } from "../../src/tools/compactionHandler.js";
+import { DEFAULT_SCHEDULER_CONFIG, runSchedulerSweep } from "../../src/backgroundScheduler.js";
 import {
   _resetLLMProvider,
 } from "../../src/utils/llm/factory.js";
@@ -142,6 +144,51 @@ describe("Synalux embedding client", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
     await expect(new SynaluxEmbeddingAdapter().generateEmbedding("pos")).rejects.toThrow("not deployed");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{}, { project: "prism" }])(
+    "refuses unsupported Synalux compaction before discovery or a ledger write (%j)",
+    async (args) => {
+      vi.stubEnv("PRISM_SYNALUX_BASE_URL", "https://portal.test");
+      vi.stubEnv("PRISM_SYNALUX_API_KEY", ["synalux", "sk", "fixture0000000000"].join("_"));
+      const storage = new SynaluxStorage();
+      const list = vi.fn().mockResolvedValue([]);
+      const discover = vi.fn().mockResolvedValue([]);
+      Object.assign(storage, { getLedgerEntries: list, getCompactionCandidates: discover });
+      mocks.getStorage.mockResolvedValue(storage);
+
+      const result = await compactLedgerHandler(args);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Synalux cloud ledger compaction is unavailable");
+      expect(list).not.toHaveBeenCalled();
+      expect(discover).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("skips unsupported Synalux compaction before scheduled discovery", async () => {
+    vi.stubEnv("PRISM_SYNALUX_BASE_URL", "https://portal.test");
+    vi.stubEnv("PRISM_SYNALUX_API_KEY", ["synalux", "sk", "fixture0000000000"].join("_"));
+    vi.stubEnv("PRISM_STORAGE_BACKEND", "local");
+    const storage = new SynaluxStorage();
+    const discover = vi.fn().mockResolvedValue([{ project: "prism", total_entries: 60, to_compact: 50 }]);
+    Object.assign(storage, {
+      getCompactionCandidates: discover,
+      getSetting: vi.fn().mockResolvedValue(null),
+      setSetting: vi.fn().mockResolvedValue(undefined),
+      decayLinks: vi.fn().mockResolvedValue(0),
+      listProjects: vi.fn().mockResolvedValue([]),
+    });
+    mocks.getStorage.mockResolvedValue(storage);
+
+    const sweep = await runSchedulerSweep({ ...DEFAULT_SCHEDULER_CONFIG,
+      enableTTLSweep: false, enableDecay: false, enableDeepPurge: false, enableSdmFlush: false,
+      enableEdgeSynthesis: false, enableGraphPruning: false, enableAccessLogPrune: false });
+
+    expect(discover).not.toHaveBeenCalled();
+    expect(sweep.tasks.compaction).toEqual({ ran: false, projectsCompacted: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("truncates text above 8,000 characters at a word boundary", async () => {

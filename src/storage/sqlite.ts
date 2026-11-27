@@ -24,12 +24,14 @@ import { randomUUID } from "crypto";
 import { AccessLogBuffer } from "../utils/accessLogBuffer.js";
 import { PRISM_ACTR_BUFFER_FLUSH_MS } from "../config.js";
 import { getSetting as cfgGet, setSetting as cfgSet, getAllSettings as cfgGetAll } from "./configStorage.js";
+import { contextRestoreRequested } from "./interface.js";
 
 import type {
   StorageBackend,
   LedgerEntry,
   HandoffEntry,
   SaveHandoffResult,
+  SaveHandoffOptions,
   ContextResult,
   KnowledgeSearchResult,
   SemanticSearchResult,
@@ -1228,8 +1230,10 @@ export class SqliteStorage implements StorageBackend {
 
   async saveHandoff(
     handoff: HandoffEntry,
-    expectedVersion?: number | null
+    expectedVersion?: number | null,
+    options?: SaveHandoffOptions
   ): Promise<SaveHandoffResult> {
+    const restoreContext = contextRestoreRequested(handoff, expectedVersion, options);
     const role = handoff.role || "global"; // v3.0: default to 'global'
 
     // CASE 1: No expectedVersion → UPSERT (create or force-update)
@@ -1324,7 +1328,10 @@ export class SqliteStorage implements StorageBackend {
         };
       }
 
-      // Doesn't exist — create it
+      // A restore cannot recreate a partition removed after its OCC read.
+      if (restoreContext) return { status: "conflict", current_version: 0 };
+
+      // Doesn't exist — create it for an ordinary save.
       return this.saveHandoff(handoff, null);
     }
 
@@ -1965,21 +1972,32 @@ export class SqliteStorage implements StorageBackend {
 
   async saveHistorySnapshot(handoff: HandoffEntry, branch: string = "main"): Promise<void> {
     const id = randomUUID();
-    const snapshotStr = JSON.stringify(handoff);
-
-    await this.db.execute({
+    if (!Number.isSafeInteger(handoff.version) || !handoff.version || handoff.version < 1) {
+      throw new Error("A committed handoff version is required for history");
+    }
+    const result = await this.db.execute({
       sql: `INSERT INTO session_handoffs_history
             (id, project, user_id, version, snapshot, branch)
-            VALUES (?, ?, ?, ?, ?, ?)`,
+            SELECT ?, project, user_id, version,
+              json_object('project',project,'user_id',user_id,'role',role,'version',version,
+                'last_summary',last_summary,'pending_todo',json(pending_todo),
+                'active_decisions',json(active_decisions),'keywords',json(keywords),
+                'key_context',key_context,'active_branch',active_branch,'metadata',json(metadata)), ?
+            FROM session_handoffs
+            WHERE project = ? AND user_id = ? AND role = ? AND version = ?
+            RETURNING id`,
       args: [
         id,
+        branch,
         handoff.project,
         handoff.user_id,
-        handoff.version ?? 1,
-        snapshotStr,
-        branch,
+        handoff.role || "global",
+        handoff.version,
       ],
     });
+    if (result.rows.length !== 1) {
+      throw new Error("Current handoff version could not be verified for history snapshot");
+    }
 
     console.error(
       `[SqliteStorage] History snapshot saved: project=${handoff.project}, ` +
@@ -2026,16 +2044,19 @@ export class SqliteStorage implements StorageBackend {
   async getHandoffAtVersion(
     project: string,
     version: number,
-    userId: string = "default"
+    userId: string = "default",
+    role: string = "global"
   ): Promise<Record<string, unknown> | null> {
     const result = await this.db.execute({
       sql: `SELECT snapshot FROM session_handoffs_history
             WHERE project = ? AND user_id = ? AND version = ?
-            LIMIT 1`,
-      args: [project, userId, version],
+              AND COALESCE(json_extract(snapshot, '$.role'), 'global') = ?
+            LIMIT 2`,
+      args: [project, userId, version, role],
     });
 
     if (result.rows.length === 0 || !result.rows[0].snapshot) return null;
+    if (result.rows.length !== 1) throw new Error("Ambiguous handoff history identity");
 
     try {
       const snapshot = result.rows[0].snapshot;

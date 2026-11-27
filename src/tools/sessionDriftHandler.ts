@@ -58,8 +58,11 @@ export async function sessionDetectDriftHandler(
       Object.keys(extra).length > 0 ? extra : undefined,
     );
 
+    // The lane block is already at character 0 of this result (cleaned, capped): the raw copies would repeat it
+    // with the characters the cleaning removes, and lane_paths is for the client's own cache, not for the model.
+    const { lane_block: _block, lane_status: _status, lane_paths: _paths, ...answer } = (result ?? {}) as Record<string, unknown>;
     return {
-      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      content: [{ type: "text", text: JSON.stringify(answer, null, 2) }],
     };
   } catch (err) {
     debugLog(`[session_detect_drift] Failed: ${err instanceof Error ? err.message : String(err)}`);

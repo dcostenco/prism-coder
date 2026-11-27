@@ -2,8 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
-## 20.22.5 — 2026-10-27
+## 20.22.5 — 2026-11-25
 
+- Show the account's program and lane status at the very start of the results of
+  `session_load_context`, `session_bootstrap`, `session_save_ledger`,
+  `session_save_handoff` and `session_detect_drift`, when the portal returns it:
+  the lane status of a program comes first, before summaries and notes.
+  Nothing changes for an older portal, or for a project without programs while
+  the portal can read the register (if it cannot, results start with "Lane
+  register unavailable").
+- Add `session_set_program_register` to create or edit a program's lanes
+  (Standard plan or higher).
+- `session_load_context` and `session_bootstrap` accept `program` to bind the
+  conversation to a program. Lane requests carry the conversation id untrimmed
+  and the MCP client's name as `host` (`prism-mcp` when the name is not a plain
+  label of up to 40 characters). An id over 255 characters is left off loads,
+  handoffs and drift checks; `session_save_ledger` sends the id it is given, as
+  before. `session_bootstrap` sends the trimmed id it prints.
+- `session_detect_drift` now sends the conversation id, so the check can be
+  scoped to one conversation. Without the merge-fact reader, which is not in
+  this release, active lanes read "unknown (no merge data)".
+- Add exact coder and reviewer execution-role assignments for local oMLX,
+  Ollama, Synalux cloud and trusted host profiles. Non-code inference keeps its
+  existing routing. Explicit task choices still win; a conflicting environment
+  backend and saved exact model now refuse with
+  `execution_assignment_override_conflict` instead of silently substituting.
+- Add owner-reviewed host-task packets for local execution. Packets bind the
+  request, selected runtime/model and environment, expire after use, and cannot
+  bypass the bridge's oMLX-only contract.
+- Keep direct-Supabase merge history compatible with legacy schemas while
+  preserving exact project, author, role and legacy-workspace isolation.
+- Cloud memory embeddings are truthful and bounded (#286).
 - Add an independent Image model section with discovered oMLX and Ollama
   inventory. Image preferences remain separate from coder/reviewer roles;
   saving a choice does not install or load a model.
@@ -18,6 +47,15 @@ All notable changes to this project will be documented in this file.
   active and pinned models and refusing when safe reclamation is unavailable.
 - Correct the macOS available-memory estimate to count free and file-backed
   pages once. This remains an estimate, not a guarantee that a model will fit.
+- Report `output_origin` in the structured `prism_infer` result: `replaced` when
+  the input-safety intercept answered, or the final text differs from the draft
+  given to the output-safety, route-contract and verifier steps; otherwise
+  `repaired` when a deterministic code repair reported a change or the draft is
+  the answer to a repair prompt; otherwise `model`. The backend's answer, before
+  these steps, is as its adapter returned it (Ollama's trimmed, oMLX's after its
+  first `</think>`, local `<think>` blocks removed, cloud text as returned). It
+  is absent when the output is empty. `attempts` does not record every one of
+  these, so a caller that must not grade Prism's text reads this field.
 - Share idle Factory discovery across host processes to reduce duplicate polls.
 - Fix device-key filesystem races and strengthen cancellation handling.
   Update vulnerable dependencies and resolve the reported CodeQL findings.

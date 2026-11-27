@@ -74,6 +74,7 @@ step "npm ci parity (linux)"     npm_ci_linux
 step "Audit Dependencies"        npm audit --audit-level=high
 step "Private repo leak guard"   leak_guard
 step "Build TypeScript"          npm run build
+step "Standalone Prism agent configuration tests" node --test scripts/__tests__/backend-selection.test.mjs scripts/__tests__/memory-selection.test.mjs
 step "Raw-inference chokepoint"  node scripts/no-raw-inference.mjs
 step "Run Unit Tests"            npx vitest run --exclude tests/verification/cli-integration.test.ts
 step "Process-Level CLI Tests"   npx vitest run tests/verification/cli-integration.test.ts
