@@ -19,11 +19,12 @@ const GiB = 1024 ** 3;
 
 function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, backendOverride, malformedOmlxSettings,
   planCeiling, ceiling, availableBytes = 16 * GiB, ollamaParams = 9e9, ollamaWeight = 2 * GiB,
-  ollamaUrl = "http://127.0.0.1:19992/", prompt = "Read the fixture.", exerciseCodeQuality = false }) {
+  ollamaUrl = "http://127.0.0.1:19992/", prompt = "Read the fixture.", exerciseCodeQuality = false,
+  facts = "synthetic-tool-result" }) {
   const dir = mkdtempSync(join(tmpdir(), "prism-agent-test-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const tracePath = join(dir, "trace.jsonl");
-  writeFileSync(join(dir, "facts.txt"), "synthetic-tool-result");
+  writeFileSync(join(dir, "facts.txt"), facts);
   writeFileSync(tracePath, "");
   if (malformedOmlxSettings) {
     mkdirSync(join(dir, ".omlx"));
@@ -36,7 +37,8 @@ function fixture(t, { config, assignment, replies, rounds = 2, model, timeout, b
     const replies = ${JSON.stringify(replies)};
     export async function prismInferHandler(args, deps, context) {
       const log = value => appendFileSync(${JSON.stringify(tracePath)}, JSON.stringify(value) + "\\n");
-      log({ transport: "omlx", args, localOnly: context.localOnly, required: context.requiredLocalBackend });
+      log({ transport: "omlx", args, localOnly: context.localOnly, required: context.requiredLocalBackend,
+        codingToolEvidence: context.codingToolEvidence });
       const reply = replies.shift();
       if (reply.waitForAbort) {
         try { await setTimeout(5_000, undefined, { signal: context.signal }); }
@@ -140,20 +142,22 @@ test("saved oMLX backend and coder model drive the CLI tool loop", t => {
     assert.equal(localOnly, true);
     assert.equal(required, "omlx");
   }
-  assert.match(run.trace[1].args.prompt, /synthetic-tool-result/);
+  assert.match(run.trace[1].codingToolEvidence, /synthetic-tool-result/);
   assert.match(run.trace[1].args.system, /Tools are unavailable/);
 });
 
 const strictPrompt = "Return only source code. Implement function readFacts from facts.txt.";
 const strictAnswer = 'function readFacts() { return "synthetic-tool-result"; }';
 
-test("a source-only oMLX request can read evidence before its final code check", t => {
+test("oMLX final code uses file evidence without treating old notes as a second task", t => {
   const run = fixture(t, { config: omlx, prompt: strictPrompt, exerciseCodeQuality: true,
+    facts: "synthetic-tool-result. An older milestone said implement function saveDraft.",
     replies: [{ output: request }, { output: strictAnswer }] });
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stdout.trim(), strictAnswer);
   assert.deepEqual(run.trace.map(event => event.args.mode), ["chat", "code"]);
-  assert.match(run.trace[1].args.prompt, /synthetic-tool-result/);
+  assert.equal(run.trace[1].args.prompt, strictPrompt);
+  assert.match(run.trace[1].codingToolEvidence, /synthetic-tool-result.*implement function saveDraft/);
 });
 
 test("ordinary oMLX text that fails the code check is withheld for one final code round", t => {
@@ -223,6 +227,13 @@ test("an unknown plan tier cannot raise the caller's ceiling on a saved Ollama m
   assert.equal(run.status, 1, run.stderr);
   assert.match(run.stderr, /ollama_model_ceiling/);
   assert.deepEqual(run.trace.map(call => new URL(call.url).pathname), ["/api/tags", "/api/ps", "/api/show"]);
+});
+
+test("saved oMLX respects a lower caller ceiling even when the plan tier is unrecognized", t => {
+  const run = fixture(t, { config: omlx, planCeiling: "unknown", ceiling: "4b", replies: [] });
+  assert.equal(run.status, 1, run.stderr);
+  assert.match(run.stderr, /omlx_model_ceiling/);
+  assert.deepEqual(run.trace, []);
 });
 
 test("an unknown plan tier cannot make Auto probe oMLX above the caller's ceiling", t => {

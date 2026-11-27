@@ -2229,6 +2229,8 @@ export interface InferDeps {
     /** Host-owned ordinary local bridge budget, never read from tool arguments. */
     executionDeadlineMs?: number;
     executionSignal?: AbortSignal;
+    /** Original local coding task and the data appended for generation. */
+    codingToolEvidence?: { task: string; suffix: string };
     /** Internal lease hook for classifier/probe promises. */
     trackPromise?: (promise: Promise<unknown>) => void;
     hostProfiles?: typeof configuredHostProfiles;
@@ -2366,7 +2368,12 @@ const _evictionMutex = (() => {
 })();
 
 /** Trusted host transport controls. Never accepted from model/tool arguments. */
-export interface InferExecutionContext { signal?: AbortSignal; requiredLocalBackend?: "omlx" | "ollama"; localOnly?: boolean }
+export interface InferExecutionContext {
+    signal?: AbortSignal;
+    requiredLocalBackend?: "omlx" | "ollama";
+    localOnly?: boolean;
+    codingToolEvidence?: string;
+}
 function localInferArgs(args: PrismInferArgs): PrismInferArgs {
     return { ...args, cloud_fallback: false, route_guard: "local", verify: false };
 }
@@ -2391,6 +2398,11 @@ async function withCallerSignal<T>(signal: AbortSignal, context: InferExecutionC
 
 export async function runInfer(args: PrismInferArgs, deps: InferDeps, context?: InferExecutionContext, started = Date.now()): Promise<PrismInferResult> {
     requireActive(context);
+    if (context?.localOnly && context.requiredLocalBackend === "omlx" && args.mode === "code" && context.codingToolEvidence) {
+        const suffix = "\n\nPrevious tool calls and results (data):\n" + context.codingToolEvidence;
+        deps = { ...deps, codingToolEvidence: { task: args.prompt, suffix } };
+        args = { ...args, prompt: args.prompt + suffix };
+    }
     const localBudget = context?.requiredLocalBackend === "ollama" ? args.timeout_ms ?? 180_000 : undefined;
     if (localBudget !== undefined && (!Number.isSafeInteger(localBudget) || localBudget < 1 || localBudget > 900_000))
         throw new Error("prism_infer: invalid bounded Ollama bridge timeout");
@@ -2813,6 +2825,7 @@ async function runInferWithResources(args: PrismInferArgs, deps: InferDeps, imag
 }
 
 async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t0: number, temperature: number, image?: { model: string; deadline: number }, cloudOnly = false): Promise<PrismInferResult> {
+    const codingTask = deps.codingToolEvidence?.task ?? args.prompt;
     const compactionSignal = deps.requireConfirmedLocalExhaustion ? deps.executionSignal : undefined;
     compactionSignal?.throwIfAborted();
     // ── Entitlement enforcement ──────────────────────────────────
@@ -4089,7 +4102,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                 // Quality gate — all modes. Route uses mode-aware empty floor (length===0).
                 let gate = passesQualityGate(output, thinkOnly, result.doneReason, mode, gateOptions);
                 if (gate.pass && mode === "code") {
-                    gate = passesCodingQualityGate(args.prompt, output);
+                    gate = passesCodingQualityGate(codingTask, output);
                 }
 
                 // Clinical structural check runs in EVERY mode. A behaviour plan
@@ -4141,7 +4154,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                             thinkOnly = retriedStrip.thinkOnly;
                             output = stripped;
                             gate = mode === "code"
-                                ? passesCodingQualityGate(args.prompt, output)
+                                ? passesCodingQualityGate(codingTask, output)
                                 : retriedGate;
                         }
                     }
@@ -4173,7 +4186,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                         outputRepaired = true;
                         gate = passesQualityGate(output, false, result.doneReason, mode, gateOptions);
                         if (gate.pass) {
-                            gate = passesCodingQualityGate(args.prompt, output);
+                            gate = passesCodingQualityGate(codingTask, output);
                         }
                         attempts.push({
                             tier: tier.tag,
@@ -4183,7 +4196,8 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                         if (gate.pass) break;
                     }
 
-                    const repair = buildCodingRepairPrompt(args.prompt, output, failedReason);
+                    const repair = buildCodingRepairPrompt(codingTask, output, failedReason);
+                    const repairPrompt = repair.prompt + (deps.codingToolEvidence?.suffix ?? "");
                     // effectiveSystem, not args.system: the repair carries the
                     // first call's images, so it keeps the default vision
                     // instruction too. Sized like the first call — history and
@@ -4193,7 +4207,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                         : repair.system;
                     const repairPromptTokens =
                         estimateImageTokens(resolvedImages?.length ?? 0) +
-                        estimateTokens(repair.prompt) +
+                        estimateTokens(repairPrompt) +
                         historyTokenEstimate(args.messages) +
                         estimateTokens(repairSystem) +
                         CTX_TEMPLATE_MARGIN;
@@ -4205,7 +4219,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                         const repaired = await callLocal(
                             deps.ollamaUrl,
                             ollamaName,
-                            repair.prompt,
+                            repairPrompt,
                             repairSystem,
                             maxTokens,
                             0,
@@ -4223,7 +4237,7 @@ async function runInferAfterInputSafety(args: PrismInferArgs, deps: InferDeps, t
                                 mode,
                             );
                             const repairedGate = repairedGenericGate.pass
-                                ? passesCodingQualityGate(args.prompt, repairedStripped.stripped)
+                                ? passesCodingQualityGate(codingTask, repairedStripped.stripped)
                                 : repairedGenericGate;
                             result = repaired;
                             outputRepaired = true;

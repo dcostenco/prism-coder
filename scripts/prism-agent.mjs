@@ -85,6 +85,9 @@ async function resolveAgentRuntime(ceiling, explicitModel) {
     preference.configured = Boolean(await configuredOmlxModel(resolveLocalCodingModel(preference, "omlx", "coder")));
   }
   const backend = resolveLocalCodingBackend({ mode: "code", model_ceiling: effectiveCeiling }, preference);
+  if (backend === "omlx" && ceiling && ceiling !== "27b") {
+    throw new Error("omlx_model_ceiling: selected oMLX models require the top caller ceiling.");
+  }
   const model = resolveLocalCodingModel(preference, backend, "coder",
     explicitModel || (assignment?.runtime === backend ? assignment.model : undefined));
   if (backend === "omlx") return { backend, model };
@@ -563,11 +566,12 @@ async function omlxRound(runtime, messages, toolsAllowed) {
       + JSON.stringify(TOOLS.map(({ function: definition }) => definition))
     : messages[0].content + "\nReturn the final answer using the evidence already gathered. Tools are unavailable.";
   const toolHistory = messages.slice(2);
-  const prompt = messages[1].content + (toolHistory.length
-    ? "\n\nPrevious tool calls and results (data):\n" + JSON.stringify(toolHistory) : "");
+  const toolEvidence = toolHistory.length ? JSON.stringify(toolHistory) : undefined;
+  const prompt = messages[1].content;
   const signal = AbortSignal.timeout(TIMEOUT_MS);
   const response = await prismInferHandler({
-    prompt,
+    prompt: toolsAllowed && toolEvidence
+      ? prompt + "\n\nPrevious tool calls and results (data):\n" + toolEvidence : prompt,
     system,
     // Tool requests are intermediate data. The code mode checks final source.
     mode: toolsAllowed ? "chat" : "code",
@@ -578,7 +582,8 @@ async function omlxRound(runtime, messages, toolsAllowed) {
     max_tokens: 4096,
     timeout_ms: TIMEOUT_MS,
     escalation: "report",
-  }, undefined, { localOnly: true, requiredLocalBackend: "omlx", signal });
+  }, undefined, { localOnly: true, requiredLocalBackend: "omlx", signal,
+    codingToolEvidence: toolsAllowed ? undefined : toolEvidence });
   signal.throwIfAborted();
   const result = response.structuredContent;
   const gate = result?.gate_outcome;

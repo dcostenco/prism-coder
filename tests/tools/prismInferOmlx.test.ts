@@ -60,6 +60,30 @@ function fixture() {
 }
 
 describe("trusted bridge execution context", () => {
+    it.each([false, true])("keeps standalone tool evidence out of code requirements (repair=%s)", async repair => {
+        const f = fixture();
+        const source = 'function readFacts() { return "synthetic-tool-result"; }';
+        const evidence = 'An older milestone said implement function saveDraft.';
+        const replies = repair ? ['function unrelated() { return null; }', source] : [source];
+        const generate = vi.fn(async (_target: OmlxTarget, _request: OmlxRequest) => ({
+            ok: true as const, text: replies.shift() ?? "", doneReason: "stop",
+        }));
+        f.omlx.generate = generate;
+        const response = await prismInferHandler(ask({
+            prompt: "Return only source code. Implement function readFacts from facts.txt.",
+            local_model: MODEL,
+        }), f.deps, { localOnly: true, requiredLocalBackend: "omlx", codingToolEvidence: evidence });
+
+        expect(response.structuredContent).toMatchObject({
+            output: source, backend: "omlx", used_cloud: false, gate_outcome: { status: "success" },
+        });
+        expect(generate).toHaveBeenCalledTimes(repair ? 2 : 1);
+        for (const [, request] of generate.mock.calls) {
+            expect(request.messages.at(-1)?.content).toContain(evidence);
+        }
+        expect(f.deps.callCloud).not.toHaveBeenCalled();
+    });
+
     it("returns a model-origin evidence request in an explicit local-only oMLX chat round", async () => {
         const f = fixture();
         const request = 'PRISM_TOOL_REQUESTS\n[{"name":"read_file","arguments":{"path":"facts.txt"}}]';
