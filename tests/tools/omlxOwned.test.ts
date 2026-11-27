@@ -308,6 +308,9 @@ describe("owned oMLX generation through the control routes", () => {
 
     it.each(["after registration", "at the final admission check"])("never executes when time expires %s before the timer fires", async phase => {
         const directory = state();
+        // Step the wall clock at the chosen boundary without letting real runner load
+        // expire the monotonic job budget before the synthetic registration.
+        vi.useFakeTimers({ toFake: ["performance", "setTimeout", "clearTimeout"] });
         const start = Date.now();
         const clock = vi.spyOn(Date, "now").mockReturnValue(start);
         const fake = fakeControl({ onRegister: () => {
@@ -317,10 +320,14 @@ describe("owned oMLX generation through the control routes", () => {
         try {
             expect(await ownedOmlxGenerate(target(), { ...REQUEST, deadlineMs: start + 100 }, new AbortController().signal,
                 { fetchImpl: fake.fetchImpl, stateDirectory: directory, drainBudgetMs: 300 })).toEqual({ ok: false, reason: "timeout" });
+            expect(fake.calls.filter(call => call.method === "PUT")).toHaveLength(1);
             expect(fake.calls.some(call => call.path.endsWith("/execute"))).toBe(false);
             expect(fake.cancels()).toBe(1);
             expect(marker(directory).active).toBe(false);
-        } finally { clock.mockRestore(); }
+        } finally {
+            clock.mockRestore();
+            vi.useRealTimers();
+        }
     });
 
     it("ends the read on an event name the coordinator never sends", async () => {
