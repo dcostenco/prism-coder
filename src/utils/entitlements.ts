@@ -155,13 +155,16 @@ export function clampCeiling(
     // free floor. This previously returned `requested`, so while the portal
     // shipped retired tiers ('14b' standard, '32b' advanced/enterprise) the
     // plan gate evaporated and every paid caller chose its own ceiling
-    // (measured 2026-08-14). Fail closed, and say so.
+    // (measured 2026-08-14). The fallback caps the plan, not the caller's
+    // explicit limit, which can be lower.
     if (planIdx === -1) {
+        const fallback = TIER_ORDER.indexOf(FREE_ENTITLEMENTS.model_ceiling);
+        const effectiveCeiling = TIER_ORDER[Math.min(reqIdx, fallback)];
         debugLog(
             `[entitlements] unrecognised plan ceiling "${planCeiling}" — ` +
-            `clamping to the free floor "${FREE_ENTITLEMENTS.model_ceiling}" instead of honouring "${requested}"`,
+            `using free plan cap "${FREE_ENTITLEMENTS.model_ceiling}", effective ceiling "${effectiveCeiling}"`,
         );
-        return FREE_ENTITLEMENTS.model_ceiling;
+        return effectiveCeiling;
     }
     return TIER_ORDER[Math.min(reqIdx, planIdx)];
 }

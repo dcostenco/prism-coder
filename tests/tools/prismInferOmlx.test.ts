@@ -1260,6 +1260,8 @@ describe("explicit oMLX through the centralized prism_infer pipeline", () => {
         const cases: [string, Partial<PrismInferArgs>, PrismEntitlements][] = [
             ["plan ceiling", {}, { ...ENT, model_ceiling: "9b" }],
             ["caller ceiling", { model_ceiling: "2b" }, ENT],
+            ["caller ceiling with an unrecognized plan", { model_ceiling: "4b" },
+                { ...ENT, model_ceiling: "unknown" as PrismEntitlements["model_ceiling"] }],
             // An explicit ceiling still wins over a hint, and a hint cannot lift the plan.
             ["caller ceiling with a high hint", { model_ceiling: "9b", task_complexity: 9 }, ENT],
             ["plan ceiling with a high hint", { task_complexity: 9 }, { ...ENT, model_ceiling: "9b" }],

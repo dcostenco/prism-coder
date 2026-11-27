@@ -29,11 +29,10 @@ describe("clampCeiling — plan tier is the gate", () => {
     expect(clampCeiling("14b", "9b")).toBe("9b");
   });
 
-  it("an unrecognised PLAN ceiling must not grant the request (the leak)", () => {
-    // Old portal values. Previously returned "27b" — the caller's ask.
+  it("an unrecognised plan uses the fallback cap and preserves a lower caller ceiling", () => {
     expect(clampCeiling("27b", "14b")).toBe(FREE_ENTITLEMENTS.model_ceiling);
     expect(clampCeiling("27b", "32b")).toBe(FREE_ENTITLEMENTS.model_ceiling);
-    expect(clampCeiling("9b", "8b")).toBe(FREE_ENTITLEMENTS.model_ceiling);
+    expect(clampCeiling("9b", "8b")).toBe("9b");
   });
 });
 

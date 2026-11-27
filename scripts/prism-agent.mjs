@@ -76,9 +76,7 @@ async function resolveAgentRuntime(ceiling, explicitModel) {
   let effectiveCeiling = ceiling;
   if (preference.effective !== "omlx") {
     const { clampCeiling, getEntitlements } = await import("../dist/utils/entitlements.js");
-    // Resolve the plan fallback before applying an explicit caller ceiling.
-    const planCeiling = clampCeiling("27b", (await getEntitlements()).model_ceiling);
-    effectiveCeiling = clampCeiling(ceiling ?? "27b", planCeiling);
+    effectiveCeiling = clampCeiling(ceiling ?? "27b", (await getEntitlements()).model_ceiling);
   }
   if (preference.effective === "auto" && effectiveCeiling === "27b") {
     const { configuredOmlxModel } = await import("../dist/utils/omlxProvider.js");
